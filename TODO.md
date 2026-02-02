@@ -1,5 +1,15 @@
 # TODO
 
+In progress:
+  - fix(workspace): oj workspace drop for orphaned worktrees (agent working)
+
+Recently landed:
+  - fix(engine): allow $(cmd) in pipeline locals (interpolate_shell_trusted)
+  - fix(cli): oj pipeline wait Ctrl+C handling
+  - chore(runbooks): use local.repo in locals across oddjobs, wok, quench
+  - chore(runbooks): add pipeline name templates to wok and quench
+  - chore(docs): update oddjobs docs for recent features
+
 Backlog (roughly priority-ordered):
 
 Core pipeline
@@ -36,6 +46,7 @@ Key files:
   .oj/runbooks/merge.hcl          — local merge queue
   crates/runbook/src/find.rs      — runbook discovery (recursive scanner)
   crates/runbook/src/queue.rs     — QueueDef, QueueType, RetryConfig
+  crates/runbook/src/template.rs  — interpolation (shell escaping, trusted prefixes)
   crates/engine/src/spawn.rs      — agent spawn, prompt interpolation
   crates/engine/src/workspace.rs  — agent settings injection (Stop, Notification hooks)
   crates/engine/src/monitor.rs    — MonitorState, PromptType, action effects
@@ -91,6 +102,8 @@ Key features landed:
   - Worker concurrency > 1 for parallel dispatch
   - Pipeline locals {}, name templates, on_cancel step, --var syntax throughout
   - WAL materialization for consistent query state across daemon restarts
+  - Trusted-prefix interpolation: $(cmd) in locals works for shell steps
+  - Ctrl+C handling in oj pipeline wait
 
 Patterns that work:
   - oj run {build,fix,chore} → agent → submit → merge queue. Full loop end-to-end.
