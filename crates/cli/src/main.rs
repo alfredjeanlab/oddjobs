@@ -189,7 +189,7 @@ async fn run() -> Result<()> {
         Commands::Queue(args) => {
             use queue::QueueCommand;
             match &args.command {
-                QueueCommand::Push { .. } => {
+                QueueCommand::Push { .. } | QueueCommand::Drop { .. } => {
                     let client = DaemonClient::for_action()?;
                     queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }

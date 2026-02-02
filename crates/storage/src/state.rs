@@ -584,6 +584,17 @@ impl MaterializedState {
                 }
             }
 
+            Event::QueueDropped {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
+                    items.retain(|i| i.id != *item_id);
+                }
+            }
+
             // Events that don't affect persisted state
             // (These are action/signal events handled by the runtime)
             Event::Custom

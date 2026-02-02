@@ -769,6 +769,47 @@ fn queue_failed_marks_failed() {
     assert_eq!(items[0].status, QueueItemStatus::Failed);
 }
 
+fn queue_dropped_event(queue_name: &str, item_id: &str) -> Event {
+    Event::QueueDropped {
+        queue_name: queue_name.to_string(),
+        item_id: item_id.to_string(),
+        namespace: String::new(),
+    }
+}
+
+#[test]
+fn queue_dropped_removes_item() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_pushed_event("bugs", "item-2"));
+    assert_eq!(state.queue_items["bugs"].len(), 2);
+
+    state.apply_event(&queue_dropped_event("bugs", "item-1"));
+
+    let items = &state.queue_items["bugs"];
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].id, "item-2");
+}
+
+#[test]
+fn queue_dropped_nonexistent_item_is_noop() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    assert_eq!(state.queue_items["bugs"].len(), 1);
+
+    // Drop a non-existent item — should be a no-op
+    state.apply_event(&queue_dropped_event("bugs", "item-999"));
+    assert_eq!(state.queue_items["bugs"].len(), 1);
+}
+
+#[test]
+fn queue_dropped_nonexistent_queue_is_noop() {
+    let mut state = MaterializedState::default();
+    // Drop from a queue that doesn't exist — should be a no-op
+    state.apply_event(&queue_dropped_event("nonexistent", "item-1"));
+    assert!(!state.queue_items.contains_key("nonexistent"));
+}
+
 #[test]
 fn queue_pushed_to_nonexistent_queue_creates_it() {
     let mut state = MaterializedState::default();

@@ -199,8 +199,10 @@ where
             }
 
             // Queue state mutations handled by MaterializedState::apply_event
-            Event::QueueTaken { .. } | Event::QueueCompleted { .. } | Event::QueueFailed { .. } => {
-            }
+            Event::QueueTaken { .. }
+            | Event::QueueCompleted { .. }
+            | Event::QueueFailed { .. }
+            | Event::QueueDropped { .. } => {}
 
             // Populate in-process runbook cache so subsequent WorkerStarted
             // events (including WAL replay after restart) can find the runbook.

@@ -13,7 +13,7 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::handle_queue_push;
+use super::{handle_queue_drop, handle_queue_push};
 
 /// Helper: create an EventBus backed by a temp WAL, returning the bus, reader WAL arc, and path.
 fn test_event_bus(dir: &std::path::Path) -> (EventBus, Arc<Mutex<Wal>>, PathBuf) {
@@ -188,4 +188,103 @@ fn push_with_no_workers_succeeds() {
     // Only QueuePushed, no worker events
     assert_eq!(events.len(), 1);
     assert!(matches!(&events[0], Event::QueuePushed { .. }));
+}
+
+#[test]
+fn drop_removes_item_from_queue() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a pushed item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "item-abc123".to_string(),
+        data: [("task".to_string(), "test".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    let result = handle_queue_drop(
+        project.path(),
+        "",
+        "jobs",
+        "item-abc123",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueDropped { ref queue_name, ref item_id }
+            if queue_name == "jobs" && item_id == "item-abc123"
+        ),
+        "expected QueueDropped, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        Event::QueueDropped {
+            queue_name,
+            item_id,
+            ..
+        } if queue_name == "jobs" && item_id == "item-abc123"
+    ));
+}
+
+#[test]
+fn drop_unknown_queue_returns_error() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_queue_drop(
+        project.path(),
+        "",
+        "nonexistent",
+        "item-1",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("nonexistent")),
+        "expected Error, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn drop_nonexistent_item_returns_error() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_queue_drop(
+        project.path(),
+        "",
+        "jobs",
+        "item-missing",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("not found")),
+        "expected Error about item not found, got {:?}",
+        result
+    );
 }

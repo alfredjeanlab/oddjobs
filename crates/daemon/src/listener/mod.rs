@@ -279,6 +279,20 @@ async fn handle_request(
             event_bus,
             state,
         ),
+
+        Request::QueueDrop {
+            project_root,
+            namespace,
+            queue_name,
+            item_id,
+        } => queues::handle_queue_drop(
+            &project_root,
+            &namespace,
+            &queue_name,
+            &item_id,
+            event_bus,
+            state,
+        ),
     }
 }
 

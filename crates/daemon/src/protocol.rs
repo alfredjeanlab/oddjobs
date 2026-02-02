@@ -129,6 +129,15 @@ pub enum Request {
         queue_name: String,
         data: serde_json::Value,
     },
+
+    /// Drop an item from a persisted queue
+    QueueDrop {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        queue_name: String,
+        item_id: String,
+    },
 }
 
 /// Query types for reading daemon state
@@ -271,6 +280,9 @@ pub enum Response {
 
     /// Item pushed to queue
     QueuePushed { queue_name: String, item_id: String },
+
+    /// Item was dropped from queue
+    QueueDropped { queue_name: String, item_id: String },
 
     /// Agent signal query result (for stop hook)
     AgentSignal {

@@ -39,6 +39,16 @@ pub enum QueueCommand {
         #[arg(long)]
         queue: String,
     },
+    /// Remove an item from a persisted queue
+    Drop {
+        /// Queue name
+        queue: String,
+        /// Item ID (or prefix)
+        item_id: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
+    },
 }
 
 /// Parse a key=value string for --var arguments.
@@ -110,6 +120,41 @@ pub async fn handle(
                     item_id,
                 } => {
                     println!("Pushed item '{}' to queue '{}'", item_id, queue_name);
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        QueueCommand::Drop {
+            queue,
+            item_id,
+            project,
+        } => {
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
+            let request = Request::QueueDrop {
+                project_root: project_root.to_path_buf(),
+                namespace: effective_namespace,
+                queue_name: queue.clone(),
+                item_id: item_id.clone(),
+            };
+
+            match client.send(&request).await? {
+                Response::QueueDropped {
+                    queue_name,
+                    item_id,
+                } => {
+                    println!(
+                        "Dropped item {} from queue {}",
+                        &item_id[..8.min(item_id.len())],
+                        queue_name
+                    );
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

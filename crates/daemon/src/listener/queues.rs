@@ -225,6 +225,74 @@ fn wake_attached_workers(
     Ok(())
 }
 
+/// Handle a QueueDrop request.
+pub(super) fn handle_queue_drop(
+    project_root: &Path,
+    namespace: &str,
+    queue_name: &str,
+    item_id: &str,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Load runbook containing the queue
+    let runbook = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => rb,
+        Err(e) => return Ok(Response::Error { message: e }),
+    };
+
+    // Validate queue exists
+    let queue_def = match runbook.get_queue(queue_name) {
+        Some(def) => def,
+        None => {
+            return Ok(Response::Error {
+                message: format!("unknown queue: {}", queue_name),
+            })
+        }
+    };
+
+    // Validate queue is persisted
+    if queue_def.queue_type != QueueType::Persisted {
+        return Ok(Response::Error {
+            message: format!("queue '{}' is not a persisted queue", queue_name),
+        });
+    }
+
+    // Validate item exists in state
+    {
+        let state = state.lock();
+        let key = if namespace.is_empty() {
+            queue_name.to_string()
+        } else {
+            format!("{}/{}", namespace, queue_name)
+        };
+        let item_exists = state
+            .queue_items
+            .get(&key)
+            .map(|items| items.iter().any(|i| i.id == item_id))
+            .unwrap_or(false);
+        if !item_exists {
+            return Ok(Response::Error {
+                message: format!("item '{}' not found in queue '{}'", item_id, queue_name),
+            });
+        }
+    }
+
+    // Emit QueueDropped event
+    let event = Event::QueueDropped {
+        queue_name: queue_name.to_string(),
+        item_id: item_id.to_string(),
+        namespace: namespace.to_string(),
+    };
+    event_bus
+        .send(event)
+        .map_err(|_| ConnectionError::WalError)?;
+
+    Ok(Response::QueueDropped {
+        queue_name: queue_name.to_string(),
+        item_id: item_id.to_string(),
+    })
+}
+
 #[cfg(test)]
 #[path = "queues_tests.rs"]
 mod tests;

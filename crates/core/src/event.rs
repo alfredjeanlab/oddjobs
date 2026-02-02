@@ -302,6 +302,14 @@ pub enum Event {
         namespace: String,
     },
 
+    #[serde(rename = "queue:dropped")]
+    QueueDropped {
+        queue_name: String,
+        item_id: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
     /// Catch-all for unknown event types (extensibility)
     #[serde(other, skip_serializing)]
     Custom,
@@ -385,6 +393,7 @@ impl Event {
             Event::QueueTaken { .. } => "queue:taken",
             Event::QueueCompleted { .. } => "queue:completed",
             Event::QueueFailed { .. } => "queue:failed",
+            Event::QueueDropped { .. } => "queue:dropped",
             Event::Custom => "custom",
         }
     }
@@ -510,6 +519,11 @@ impl Event {
                 ..
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::QueueFailed {
+                queue_name,
+                item_id,
+                ..
+            } => format!("{t} queue={queue_name} item={item_id}"),
+            Event::QueueDropped {
                 queue_name,
                 item_id,
                 ..
