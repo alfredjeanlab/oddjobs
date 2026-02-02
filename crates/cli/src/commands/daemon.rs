@@ -32,6 +32,12 @@ pub enum DaemonCommand {
     },
     /// Check daemon status
     Status,
+    /// Stop and restart the daemon
+    Restart {
+        /// Kill all active sessions (agents, shells) before restarting
+        #[arg(long)]
+        kill: bool,
+    },
     /// View daemon logs
     Logs {
         /// Number of lines to show
@@ -47,6 +53,7 @@ pub async fn daemon(args: DaemonArgs, format: OutputFormat) -> Result<()> {
     match args.command {
         DaemonCommand::Start { foreground } => start(foreground).await,
         DaemonCommand::Stop { kill } => stop(kill).await,
+        DaemonCommand::Restart { kill } => restart(kill).await,
         DaemonCommand::Status => status(format).await,
         DaemonCommand::Logs { lines, follow } => logs(lines, follow, format).await,
     }
@@ -92,6 +99,29 @@ async fn stop(kill: bool) -> Result<()> {
             Ok(())
         }
         Err(e) => Err(anyhow!("Failed to stop daemon: {}", e)),
+    }
+}
+
+async fn restart(kill: bool) -> Result<()> {
+    // Stop the daemon if running (ignore "not running" case)
+    let was_running = daemon_stop(kill)
+        .await
+        .map_err(|e| anyhow!("Failed to stop daemon: {}", e))?;
+
+    if was_running {
+        // Brief wait for the process to fully exit and release the socket.
+        // This is not a synchronization hack — it's a grace period for the OS
+        // to release the Unix socket after the daemon process exits.
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // Start in background
+    match DaemonClient::connect_or_start() {
+        Ok(_client) => {
+            println!("Daemon restarted");
+            Ok(())
+        }
+        Err(e) => Err(anyhow!("{}", e)),
     }
 }
 
