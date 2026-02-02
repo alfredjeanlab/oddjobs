@@ -29,7 +29,7 @@ pipeline "sling" {
   vars      = ["issue", "instructions", "base", "rig"]
   workspace = "ephemeral"
 
-  # Create the work bead and molecule steps in beads
+  # Create work bead, molecule steps, and spawn polecat workspace
   step "provision" {
     run = <<-SHELL
       # If issue looks like an existing bead ID (has a dash), show it;
@@ -46,7 +46,6 @@ pipeline "sling" {
       fi
 
       # Create molecule: instantiate polecat-work steps as child beads
-      # Each step becomes a sub-bead under the issue
       for STEP in "load-context" "implement" "test" "submit"; do
         bd create -t task \
           --title "Step: $STEP" \
@@ -65,18 +64,10 @@ pipeline "sling" {
       echo "$BEAD_ID" > .bead-id
       echo "$POLECAT_NAME" > .polecat-name
       echo "Slung $BEAD_ID to ${var.rig}/polecats/$POLECAT_NAME"
-    SHELL
-    on_done = { step = "spawn" }
-  }
 
-  # Spawn the polecat workspace and start the work agent
-  step "spawn" {
-    run = <<-SHELL
+      # Spawn polecat workspace
       REPO="$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-      BEAD_ID="$(cat .bead-id)"
-      POLECAT_NAME="$(cat .polecat-name)"
       BRANCH="polecat/$POLECAT_NAME"
-
       git -C "$REPO" worktree add -b "$BRANCH" "${workspace.root}/work" origin/${var.base}
     SHELL
     on_done = { step = "execute" }

@@ -4,15 +4,9 @@
 #
 # The Deacon is the town-level orchestrator. Its patrol cycle handles:
 #   - Inbox processing (mail from witnesses, mayor, escalations)
-#   - Gate evaluation (pending molecules/formulas waiting to fire)
 #   - Health scanning (are witnesses and refineries alive?)
-#   - Zombie cleanup (dead sessions that didn't exit cleanly)
-#   - Plugin execution (periodic maintenance tasks)
 #   - Convoy completion checks
-#   - Context check (handoff when context is high)
-#
-# The Deacon runs as wisps (ephemeral patrol molecules) — each patrol cycle
-# creates a wisp, executes, squashes to digest, repeats.
+#   - Ready work discovery
 #
 # "Idle Town Principle": be silent when healthy and idle. Don't flood logs.
 #
@@ -27,9 +21,9 @@ command "gt-deacon-patrol" {
 pipeline "deacon-patrol" {
   workspace = "ephemeral"
 
-  # Process deacon inbox (escalations, witness pings, lifecycle requests)
-  step "inbox" {
+  step "patrol" {
     run = <<-SHELL
+      # --- Inbox: process deacon mail ---
       MSGS=$(bd list -t message --label "to:deacon" --status open --json 2>/dev/null || echo '[]')
       COUNT=$(echo "$MSGS" | jq 'length' 2>/dev/null || echo 0)
 
@@ -39,29 +33,19 @@ pipeline "deacon-patrol" {
           [ -n "$ID" ] && bd close "$ID" --reason "Processed by deacon" 2>/dev/null || true
         done
       fi
-    SHELL
-    on_done = { step = "health-scan" }
-  }
 
-  # Check health of all rig-level agents (witnesses, refineries)
-  step "health-scan" {
-    run = <<-SHELL
+      # --- Health scan: check for unacked escalations ---
       STALE=$(bd list -t task --label escalation --status open --json 2>/dev/null | \
         jq '[.[] | select(.labels | index("acknowledged:false"))] | length' 2>/dev/null || echo 0)
       test "$STALE" -gt 0 && echo "unacked-escalations: $STALE"
 
       oj status 2>/dev/null || true
-    SHELL
-    on_done = { step = "convoy-check" }
-  }
 
-  # Check convoy completion (are all tracked issues closed?)
-  step "convoy-check" {
-    run = <<-SHELL
+      # --- Convoy check: auto-close completed convoys ---
       CONVOYS=$(bd list -t convoy --status open --json 2>/dev/null || echo '[]')
-      COUNT=$(echo "$CONVOYS" | jq 'length' 2>/dev/null || echo 0)
+      CV_COUNT=$(echo "$CONVOYS" | jq 'length' 2>/dev/null || echo 0)
 
-      if [ "$COUNT" -gt 0 ]; then
+      if [ "$CV_COUNT" -gt 0 ]; then
         echo "$CONVOYS" | jq -r '.[].id' 2>/dev/null | while read -r CV_ID; do
           [ -z "$CV_ID" ] && continue
           TRACKED=$(bd dep list "$CV_ID" --type=tracks --json 2>/dev/null || echo '[]')
@@ -72,17 +56,12 @@ pipeline "deacon-patrol" {
           fi
         done
       fi
-    SHELL
-    on_done = { step = "ready-work" }
-  }
 
-  # Check for undispatched ready work
-  step "ready-work" {
-    run = <<-SHELL
+      # --- Ready work: report undispatched items ---
       READY=$(bd ready --json 2>/dev/null || echo '[]')
-      COUNT=$(echo "$READY" | jq 'length' 2>/dev/null || echo 0)
+      READY_COUNT=$(echo "$READY" | jq 'length' 2>/dev/null || echo 0)
 
-      if [ "$COUNT" -gt 0 ]; then
+      if [ "$READY_COUNT" -gt 0 ]; then
         echo "$READY" | jq -r '.[] | "\(.id): \(.title)"' 2>/dev/null
       fi
     SHELL

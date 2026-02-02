@@ -59,12 +59,7 @@ pipeline "witness-patrol" {
 
   # Check health of active polecats
   step "health-scan" {
-    run     = { agent = "witness-agent" }
-    on_done = { step = "report" }
-  }
-
-  step "report" {
-    run = "true"
+    run = { agent = "witness-agent" }
   }
 }
 

@@ -17,7 +17,23 @@
 
 command "gt-start" {
   args = "[--rig <rig>]"
-  run  = { pipeline = "town-start" }
+  run  = <<-SHELL
+    # Check bd is available
+    command -v bd >/dev/null 2>&1 || { echo "Error: bd (beads) not found in PATH"; exit 1; }
+
+    # Ensure custom types are configured (Gas Town types)
+    bd config set types.custom "molecule,gate,convoy,merge-request,slot,agent,role,rig,event,message" 2>/dev/null || true
+
+    # Ensure agent beads exist for core roles
+    for ROLE in mayor deacon witness refinery; do
+      AGENT_ID="hq-$ROLE"
+      bd show "$AGENT_ID" >/dev/null 2>&1 || \
+        bd create -t agent --id "$AGENT_ID" --title "$ROLE agent" --labels "role:$ROLE" 2>/dev/null || true
+    done
+
+    # Start the background workers
+    oj worker start refinery 2>/dev/null || true
+  SHELL
 
   defaults = {
     rig = "default"
@@ -31,55 +47,18 @@ command "gt-status" {
 
 command "gt-stop" {
   args = ""
-  run  = { pipeline = "town-stop" }
-}
+  run  = <<-SHELL
+    echo "Stopping town..."
 
-pipeline "town-start" {
-  vars = ["rig"]
+    # Send shutdown mail to all agents
+    for ROLE in witness refinery deacon; do
+      bd create -t message \
+        --title "LIFECYCLE:Shutdown" \
+        --description "Town shutdown requested" \
+        --labels "from:mayor,to:$ROLE,msg-type:lifecycle" 2>/dev/null || true
+    done
 
-  # Verify beads is available and create agent beads if missing
-  step "preflight" {
-    run = <<-SHELL
-      # Check bd is available
-      command -v bd >/dev/null 2>&1 || { echo "Error: bd (beads) not found in PATH"; exit 1; }
-
-      # Ensure custom types are configured (Gas Town types)
-      bd config set types.custom "molecule,gate,convoy,merge-request,slot,agent,role,rig,event,message" 2>/dev/null || true
-
-      # Ensure agent beads exist for core roles
-      for ROLE in mayor deacon witness refinery; do
-        AGENT_ID="hq-$ROLE"
-        bd show "$AGENT_ID" >/dev/null 2>&1 || \
-          bd create -t agent --id "$AGENT_ID" --title "$ROLE agent" --labels "role:$ROLE" 2>/dev/null || true
-      done
-
-    SHELL
-    on_done = { step = "start-workers" }
-  }
-
-  # Start the background workers
-  step "start-workers" {
-    run = <<-SHELL
-      oj worker start refinery 2>/dev/null || true
-    SHELL
-  }
-}
-
-pipeline "town-stop" {
-  step "stop" {
-    run = <<-SHELL
-      echo "Stopping town..."
-
-      # Send shutdown mail to all agents
-      for ROLE in witness refinery deacon; do
-        bd create -t message \
-          --title "LIFECYCLE:Shutdown" \
-          --description "Town shutdown requested" \
-          --labels "from:mayor,to:$ROLE,msg-type:lifecycle" 2>/dev/null || true
-      done
-
-      echo "Shutdown messages sent."
-      echo "Workers will exit after current work completes."
-    SHELL
-  }
+    echo "Shutdown messages sent."
+    echo "Workers will exit after current work completes."
+  SHELL
 }
