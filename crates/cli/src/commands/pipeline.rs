@@ -4,6 +4,7 @@
 //! `oj pipeline` - Pipeline management commands
 
 use std::collections::HashMap;
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -155,6 +156,93 @@ pub(crate) fn status_group(step: &str, step_status: &str) -> u8 {
     }
 }
 
+pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon::PipelineSummary]) {
+    if pipelines.is_empty() {
+        let _ = writeln!(out, "No pipelines");
+        return;
+    }
+
+    // Show PROJECT column only when multiple namespaces present
+    let namespaces: std::collections::HashSet<&str> =
+        pipelines.iter().map(|p| p.namespace.as_str()).collect();
+    let show_project = namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+
+    // Pre-compute display values and column widths from data
+    let rows: Vec<_> = pipelines
+        .iter()
+        .map(|p| {
+            let id = &p.id[..12.min(p.id.len())];
+            let updated = format_time_ago(p.updated_at_ms);
+            (id, p, updated)
+        })
+        .collect();
+
+    let w_id = rows
+        .iter()
+        .map(|(id, _, _)| id.len())
+        .max()
+        .unwrap_or(0)
+        .max(2);
+    let w_name = rows
+        .iter()
+        .map(|(_, p, _)| p.name.len())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+    let w_kind = rows
+        .iter()
+        .map(|(_, p, _)| p.kind.len())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+    let w_step = rows
+        .iter()
+        .map(|(_, p, _)| p.step.len())
+        .max()
+        .unwrap_or(0)
+        .max(4);
+    let w_updated = rows
+        .iter()
+        .map(|(_, _, u)| u.len())
+        .max()
+        .unwrap_or(0)
+        .max(7);
+
+    if show_project {
+        let w_proj = rows
+            .iter()
+            .map(|(_, p, _)| p.namespace.len())
+            .max()
+            .unwrap_or(0)
+            .max(7);
+        let _ = writeln!(
+            out,
+            "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} STATUS",
+            "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED",
+        );
+        for (id, p, updated) in &rows {
+            let _ = writeln!(
+                out,
+                "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
+                id, p.namespace, p.name, p.kind, p.step, updated, p.step_status,
+            );
+        }
+    } else {
+        let _ = writeln!(
+            out,
+            "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} STATUS",
+            "ID", "NAME", "KIND", "STEP", "UPDATED",
+        );
+        for (id, p, updated) in &rows {
+            let _ = writeln!(
+                out,
+                "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
+                id, p.name, p.kind, p.step, updated, p.step_status,
+            );
+        }
+    }
+}
+
 enum PipelineOutcome {
     Done,
     Failed(String),
@@ -206,52 +294,8 @@ pub async fn handle(
 
             match format {
                 OutputFormat::Text => {
-                    if pipelines.is_empty() {
-                        println!("No pipelines");
-                    } else {
-                        // Show PROJECT column only when multiple namespaces present
-                        let namespaces: std::collections::HashSet<&str> =
-                            pipelines.iter().map(|p| p.namespace.as_str()).collect();
-                        let show_project =
-                            namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
-
-                        if show_project {
-                            println!(
-                                "{:<12} {:<16} {:<16} {:<10} {:<15} {:<10} STATUS",
-                                "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED"
-                            );
-                        } else {
-                            println!(
-                                "{:<12} {:<20} {:<10} {:<15} {:<10} STATUS",
-                                "ID", "NAME", "KIND", "STEP", "UPDATED"
-                            );
-                        }
-                        for p in &pipelines {
-                            let updated_ago = format_time_ago(p.updated_at_ms);
-                            if show_project {
-                                println!(
-                                    "{:<12} {:<16} {:<16} {:<10} {:<15} {:<10} {}",
-                                    &p.id[..12.min(p.id.len())],
-                                    &p.namespace[..16.min(p.namespace.len())],
-                                    &p.name[..16.min(p.name.len())],
-                                    &p.kind[..10.min(p.kind.len())],
-                                    p.step,
-                                    updated_ago,
-                                    p.step_status
-                                );
-                            } else {
-                                println!(
-                                    "{:<12} {:<20} {:<10} {:<15} {:<10} {}",
-                                    &p.id[..12.min(p.id.len())],
-                                    &p.name[..20.min(p.name.len())],
-                                    &p.kind[..10.min(p.kind.len())],
-                                    p.step,
-                                    updated_ago,
-                                    p.step_status
-                                );
-                            }
-                        }
-                    }
+                    let mut out = std::io::stdout();
+                    format_pipeline_list(&mut out, &pipelines);
 
                     if truncated {
                         let remaining = total - effective_limit;

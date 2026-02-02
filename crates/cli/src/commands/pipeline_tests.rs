@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::{parse_duration, print_step_progress, status_group, StepTracker};
+use super::{format_pipeline_list, parse_duration, print_step_progress, status_group, StepTracker};
 use oj_daemon::{PipelineDetail, PipelineSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -348,4 +348,88 @@ fn step_progress_running_then_completed() {
     print_step_progress(&detail2, &mut tracker, false, &mut buf2);
     assert_eq!(output_string(&buf2), "plan completed (2m 44s)\n");
     assert_eq!(tracker.printed_count, 1);
+}
+
+fn make_summary(id: &str, name: &str, kind: &str, step: &str, status: &str) -> PipelineSummary {
+    PipelineSummary {
+        id: id.into(),
+        name: name.into(),
+        kind: kind.into(),
+        step: step.into(),
+        step_status: status.into(),
+        created_at_ms: 0,
+        updated_at_ms: 0,
+        namespace: String::new(),
+    }
+}
+
+#[test]
+fn list_empty() {
+    let mut buf = Vec::new();
+    format_pipeline_list(&mut buf, &[]);
+    assert_eq!(output_string(&buf), "No pipelines\n");
+}
+
+#[test]
+fn list_columns_fit_data() {
+    let pipelines = vec![
+        make_summary("abcdef123456", "my-build", "build", "plan", "Running"),
+        make_summary("999999999999", "x", "fix", "implement", "Running"),
+    ];
+    let mut buf = Vec::new();
+    format_pipeline_list(&mut buf, &pipelines);
+    let out = output_string(&buf);
+    let lines: Vec<&str> = out.lines().collect();
+
+    // Header + 2 data rows
+    assert_eq!(lines.len(), 3);
+
+    // Columns should be tight to the widest value, not fixed
+    // "my-build" (8) is wider than "NAME" (4), so NAME column = 8
+    // "implement" (9) is wider than "STEP" (4), so STEP column = 9
+    let header = lines[0];
+    assert!(header.starts_with("ID"));
+    assert!(header.contains("NAME"));
+    assert!(header.contains("STATUS"));
+
+    // Verify no excessive padding: "my-build" should be followed by minimal spacing
+    // The row for "x" should have the name padded to match "my-build" width
+    let row2 = lines[2];
+    assert!(row2.contains("x       ")); // "x" padded to 8 chars (width of "my-build")
+}
+
+#[test]
+fn list_with_project_column() {
+    let mut p1 = make_summary("abcdef123456", "api-server", "build", "test", "Running");
+    p1.namespace = "myproject".into();
+    let mut p2 = make_summary("999999999999", "worker", "fix", "done", "Completed");
+    p2.namespace = "other".into();
+    let pipelines = vec![p1, p2];
+
+    let mut buf = Vec::new();
+    format_pipeline_list(&mut buf, &pipelines);
+    let out = output_string(&buf);
+    let lines: Vec<&str> = out.lines().collect();
+
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].contains("PROJECT"));
+    // "myproject" (9) > "PROJECT" (7), so project column = 9
+    assert!(lines[1].contains("myproject"));
+    // "other" padded to 9 chars
+    assert!(lines[2].contains("other    "));
+}
+
+#[test]
+fn list_no_project_when_all_empty_namespace() {
+    let pipelines = vec![make_summary(
+        "abcdef123456",
+        "build-a",
+        "build",
+        "plan",
+        "Running",
+    )];
+    let mut buf = Vec::new();
+    format_pipeline_list(&mut buf, &pipelines);
+    let out = output_string(&buf);
+    assert!(!out.contains("PROJECT"));
 }
