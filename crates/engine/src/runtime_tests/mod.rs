@@ -46,6 +46,7 @@ fn command_event(
         project_root: project_root.to_path_buf(),
         invoke_dir: project_root.to_path_buf(),
         command: command.to_string(),
+        namespace: String::new(),
         args,
     }
 }

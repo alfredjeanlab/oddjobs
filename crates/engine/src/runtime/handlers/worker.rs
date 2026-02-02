@@ -25,6 +25,8 @@ pub(crate) struct WorkerState {
     pub queue_type: QueueType,
     /// Maps pipeline_id -> item_id for persisted queue item completion tracking
     pub item_pipeline_map: HashMap<PipelineId, String>,
+    /// Project namespace
+    pub namespace: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +46,7 @@ where
         worker_name: &str,
         project_root: &Path,
         runbook_hash: &str,
+        namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Load runbook to get worker definition
         let runbook = self.cached_runbook(runbook_hash)?;
@@ -97,6 +100,7 @@ where
             status: WorkerStatus::Running,
             queue_type,
             item_pipeline_map: persisted_item_map,
+            namespace: namespace.to_string(),
         };
 
         {
@@ -238,6 +242,7 @@ where
             pipeline_kind,
             runbook_hash,
             queue_name,
+            worker_namespace,
         ) = {
             let mut workers = self.worker_states.lock();
             let state = match workers.get_mut(worker_name) {
@@ -269,6 +274,7 @@ where
                 state.pipeline_kind.clone(),
                 state.runbook_hash.clone(),
                 state.queue_name.clone(),
+                state.namespace.clone(),
             )
         };
 
@@ -327,6 +333,7 @@ where
                                     queue_name: queue_name.clone(),
                                     item_id: item_id.clone(),
                                     worker_name: worker_name.to_string(),
+                                    namespace: worker_namespace.clone(),
                                 },
                             }])
                             .await?,
@@ -376,6 +383,7 @@ where
                     runbook_hash: runbook_hash.clone(),
                     runbook_json: None,
                     runbook,
+                    namespace: worker_namespace.clone(),
                 })
                 .await?,
             );
@@ -398,6 +406,7 @@ where
                 worker_name: worker_name.to_string(),
                 item_id: item_id.clone(),
                 pipeline_id: pipeline_id.clone(),
+                namespace: worker_namespace.clone(),
             };
             result_events.extend(
                 self.executor
@@ -443,6 +452,7 @@ where
                         state.project_root.clone(),
                         state.queue_type,
                         item_id,
+                        state.namespace.clone(),
                     ));
                     break;
                 }
@@ -459,6 +469,7 @@ where
             project_root,
             queue_type,
             item_id,
+            worker_namespace,
         )) = worker_info
         {
             // Refresh runbook from disk so edits after `oj worker start` are picked up
@@ -480,12 +491,14 @@ where
                         Event::QueueCompleted {
                             queue_name: queue_name.clone(),
                             item_id,
+                            namespace: worker_namespace.clone(),
                         }
                     } else {
                         Event::QueueFailed {
                             queue_name: queue_name.clone(),
                             item_id,
                             error: format!("pipeline reached '{}'", terminal_step),
+                            namespace: worker_namespace.clone(),
                         }
                     };
                     result_events.extend(

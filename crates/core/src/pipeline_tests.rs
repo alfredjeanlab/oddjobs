@@ -46,6 +46,7 @@ fn test_config(id: &str) -> PipelineConfig {
         runbook_hash: "testhash".to_string(),
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
+        namespace: String::new(),
     }
 }
 
@@ -60,6 +61,7 @@ fn pipeline_creation() {
         runbook_hash: "testhash".to_string(),
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
+        namespace: String::new(),
     };
     let pipeline = Pipeline::new(config, &clock);
 

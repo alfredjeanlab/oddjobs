@@ -29,6 +29,9 @@ pub enum QueueCommand {
         /// Item variables (can be repeated: --var key=value)
         #[arg(long = "var", value_parser = parse_key_value)]
         var: Vec<(String, String)>,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// List items in a persisted queue
     List {
@@ -77,14 +80,26 @@ pub async fn handle(
     command: QueueCommand,
     client: &DaemonClient,
     project_root: &Path,
+    namespace: &str,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        QueueCommand::Push { queue, data, var } => {
+        QueueCommand::Push {
+            queue,
+            data,
+            var,
+            project,
+        } => {
             let json_data = build_data_map(data, var)?;
+
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::QueuePush {
                 project_root: project_root.to_path_buf(),
+                namespace: effective_namespace,
                 queue_name: queue.clone(),
                 data: json_data,
             };

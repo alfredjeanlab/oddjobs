@@ -18,9 +18,12 @@ use crate::protocol::Response;
 use super::ConnectionError;
 
 /// Handle a RunCommand request.
+// TODO(refactor): group run command parameters into a struct
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_run_command(
     project_root: &Path,
     invoke_dir: &Path,
+    namespace: &str,
     command: &str,
     args: &[String],
     named_args: &HashMap<String, String>,
@@ -70,6 +73,7 @@ pub(super) async fn handle_run_command(
         pipeline_name: pipeline_name.clone(),
         project_root: project_root.to_path_buf(),
         invoke_dir: invoke_dir.to_path_buf(),
+        namespace: namespace.to_string(),
         command: command.to_string(),
         args: parsed_args,
     };

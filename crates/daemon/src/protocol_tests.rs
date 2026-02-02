@@ -17,6 +17,7 @@ fn encode_decode_roundtrip_request() {
             project_root: std::path::PathBuf::from("/test/project"),
             invoke_dir: std::path::PathBuf::from("/test/project"),
             command: "build".to_string(),
+            namespace: String::new(),
             args: HashMap::from([("name".to_string(), "test".to_string())]),
         },
     };
@@ -79,6 +80,7 @@ fn pipeline_summary_serialization() {
         step_status: "Running".to_string(),
         created_at_ms: 1700000000000,
         updated_at_ms: 1700000001000,
+        namespace: String::new(),
     };
 
     let response = Response::Pipelines {
@@ -161,6 +163,7 @@ fn encode_decode_workers_response() {
             status: "running".to_string(),
             active: 2,
             concurrency: 3,
+            namespace: String::new(),
         }],
     };
 

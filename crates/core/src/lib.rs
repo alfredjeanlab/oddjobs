@@ -13,6 +13,7 @@ pub mod clock;
 pub mod effect;
 pub mod event;
 pub mod id;
+pub mod namespace;
 pub mod pipeline;
 pub mod session;
 pub mod timer;

@@ -16,6 +16,7 @@ fn event_serialization_roundtrip() {
             args: [("name".to_string(), "test".to_string())]
                 .into_iter()
                 .collect(),
+            namespace: String::new(),
         },
         Event::AgentWaiting {
             agent_id: AgentId::new("agent-1"),
@@ -136,6 +137,7 @@ fn event_pipeline_created_roundtrip() {
             .collect(),
         initial_step: "init".to_string(),
         created_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "pipeline:created");
@@ -309,6 +311,7 @@ fn event_pipeline_id_returns_id_for_pipeline_events() {
                 invoke_dir: PathBuf::from("/"),
                 command: "build".to_string(),
                 args: HashMap::new(),
+                namespace: String::new(),
             },
             PipelineId::new("p1"),
         ),
@@ -322,6 +325,7 @@ fn event_pipeline_id_returns_id_for_pipeline_events() {
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
                 created_at_epoch_ms: 1_000_000,
+                namespace: String::new(),
             },
             PipelineId::new("p6"),
         ),
@@ -397,6 +401,7 @@ fn event_queue_pushed_roundtrip() {
             .into_iter()
             .collect(),
         pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "queue:pushed");
@@ -415,6 +420,7 @@ fn event_queue_taken_roundtrip() {
         queue_name: "bugs".to_string(),
         item_id: "item-1".to_string(),
         worker_name: "fixer".to_string(),
+        namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "queue:taken");
@@ -429,6 +435,7 @@ fn event_queue_completed_roundtrip() {
     let event = Event::QueueCompleted {
         queue_name: "bugs".to_string(),
         item_id: "item-1".to_string(),
+        namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "queue:completed");
@@ -444,6 +451,7 @@ fn event_queue_failed_roundtrip() {
         queue_name: "bugs".to_string(),
         item_id: "item-1".to_string(),
         error: "pipeline failed".to_string(),
+        namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "queue:failed");
@@ -462,6 +470,7 @@ fn event_queue_name_returns_correct_strings() {
             item_id: "i".to_string(),
             data: HashMap::new(),
             pushed_at_epoch_ms: 0,
+            namespace: String::new(),
         }
         .name(),
         "queue:pushed"
@@ -471,6 +480,7 @@ fn event_queue_name_returns_correct_strings() {
             queue_name: "q".to_string(),
             item_id: "i".to_string(),
             worker_name: "w".to_string(),
+            namespace: String::new(),
         }
         .name(),
         "queue:taken"
@@ -479,6 +489,7 @@ fn event_queue_name_returns_correct_strings() {
         Event::QueueCompleted {
             queue_name: "q".to_string(),
             item_id: "i".to_string(),
+            namespace: String::new(),
         }
         .name(),
         "queue:completed"
@@ -488,6 +499,7 @@ fn event_queue_name_returns_correct_strings() {
             queue_name: "q".to_string(),
             item_id: "i".to_string(),
             error: "e".to_string(),
+            namespace: String::new(),
         }
         .name(),
         "queue:failed"

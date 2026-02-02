@@ -44,6 +44,7 @@ pub(super) fn handle_query(
                         step_status: format!("{:?}", p.step_status),
                         created_at_ms: p.step_history.first().map(|r| r.started_at_ms).unwrap_or(0),
                         updated_at_ms,
+                        namespace: p.namespace.clone(),
                     }
                 })
                 .collect();
@@ -89,6 +90,7 @@ pub(super) fn handle_query(
                     error: p.error.clone(),
                     steps,
                     agents,
+                    namespace: p.namespace.clone(),
                 })
             });
             Response::Pipeline { pipeline }
@@ -276,6 +278,7 @@ pub(super) fn handle_query(
                 .values()
                 .map(|w| WorkerSummary {
                     name: w.name.clone(),
+                    namespace: w.namespace.clone(),
                     queue: w.queue_name.clone(),
                     status: w.status.clone(),
                     active: w.active_pipeline_ids.len(),

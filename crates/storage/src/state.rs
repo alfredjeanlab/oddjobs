@@ -67,6 +67,8 @@ pub struct StoredRunbook {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerRecord {
     pub name: String,
+    #[serde(default)]
+    pub namespace: String,
     pub project_root: PathBuf,
     pub runbook_hash: String,
     /// "running" or "stopped"
@@ -112,6 +114,17 @@ pub struct MaterializedState {
     pub workers: HashMap<String, WorkerRecord>,
     #[serde(default)]
     pub queue_items: HashMap<String, Vec<QueueItem>>,
+}
+
+/// Build a composite key for namespace-scoped lookups.
+///
+/// When namespace is empty (backward compat with old events), returns the bare name.
+fn scoped_key(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", namespace, name)
+    }
 }
 
 impl MaterializedState {
@@ -217,6 +230,7 @@ impl MaterializedState {
                 vars,
                 initial_step,
                 created_at_epoch_ms,
+                namespace,
             } => {
                 let config = PipelineConfig {
                     id: id.to_string(),
@@ -226,6 +240,7 @@ impl MaterializedState {
                     runbook_hash: runbook_hash.clone(),
                     cwd: cwd.clone(),
                     initial_step: initial_step.clone(),
+                    namespace: namespace.clone(),
                 };
                 let pipeline = Pipeline::new_with_epoch_ms(config, *created_at_epoch_ms);
                 self.pipelines.insert(id.to_string(), pipeline);
@@ -454,18 +469,21 @@ impl MaterializedState {
                 runbook_hash,
                 queue_name,
                 concurrency,
+                namespace,
             } => {
+                let key = scoped_key(namespace, worker_name);
                 // Preserve active_pipeline_ids from before restart
                 let existing_pipeline_ids = self
                     .workers
-                    .get(worker_name)
+                    .get(&key)
                     .map(|w| w.active_pipeline_ids.clone())
                     .unwrap_or_default();
 
                 self.workers.insert(
-                    worker_name.clone(),
+                    key,
                     WorkerRecord {
                         name: worker_name.clone(),
+                        namespace: namespace.clone(),
                         project_root: project_root.clone(),
                         runbook_hash: runbook_hash.clone(),
                         status: "running".to_string(),
@@ -479,9 +497,11 @@ impl MaterializedState {
             Event::WorkerItemDispatched {
                 worker_name,
                 pipeline_id,
+                namespace,
                 ..
             } => {
-                if let Some(record) = self.workers.get_mut(worker_name) {
+                let key = scoped_key(namespace, worker_name);
+                if let Some(record) = self.workers.get_mut(&key) {
                     let pid = pipeline_id.to_string();
                     if !record.active_pipeline_ids.contains(&pid) {
                         record.active_pipeline_ids.push(pid);
@@ -489,8 +509,12 @@ impl MaterializedState {
                 }
             }
 
-            Event::WorkerStopped { worker_name } => {
-                if let Some(record) = self.workers.get_mut(worker_name) {
+            Event::WorkerStopped {
+                worker_name,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, worker_name);
+                if let Some(record) = self.workers.get_mut(&key) {
                     record.status = "stopped".to_string();
                 }
             }
@@ -501,8 +525,10 @@ impl MaterializedState {
                 item_id,
                 data,
                 pushed_at_epoch_ms,
+                namespace,
             } => {
-                let items = self.queue_items.entry(queue_name.clone()).or_default();
+                let key = scoped_key(namespace, queue_name);
+                let items = self.queue_items.entry(key).or_default();
                 // Idempotency: skip if item already exists
                 if !items.iter().any(|i| i.id == *item_id) {
                     items.push(QueueItem {
@@ -520,8 +546,10 @@ impl MaterializedState {
                 queue_name,
                 item_id,
                 worker_name,
+                namespace,
             } => {
-                if let Some(items) = self.queue_items.get_mut(queue_name) {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Active;
                         item.worker_name = Some(worker_name.clone());
@@ -532,8 +560,10 @@ impl MaterializedState {
             Event::QueueCompleted {
                 queue_name,
                 item_id,
+                namespace,
             } => {
-                if let Some(items) = self.queue_items.get_mut(queue_name) {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Completed;
                     }
@@ -543,9 +573,11 @@ impl MaterializedState {
             Event::QueueFailed {
                 queue_name,
                 item_id,
+                namespace,
                 ..
             } => {
-                if let Some(items) = self.queue_items.get_mut(queue_name) {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Failed;
                     }

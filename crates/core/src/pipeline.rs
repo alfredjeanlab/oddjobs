@@ -121,6 +121,7 @@ pub struct PipelineConfig {
     pub runbook_hash: String,
     pub cwd: PathBuf,
     pub initial_step: String,
+    pub namespace: String,
 }
 
 /// A pipeline instance
@@ -129,6 +130,9 @@ pub struct Pipeline {
     pub id: String,
     pub name: String,
     pub kind: String,
+    /// Project namespace this pipeline belongs to
+    #[serde(default)]
+    pub namespace: String,
     /// Current step name (from runbook definition)
     pub step: String,
     pub step_status: StepStatus,
@@ -172,6 +176,7 @@ impl Pipeline {
             id: config.id,
             name: config.name,
             kind: config.kind,
+            namespace: config.namespace,
             step: config.initial_step.clone(),
             step_status: StepStatus::Pending,
             vars: config.vars,

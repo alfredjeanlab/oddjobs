@@ -81,6 +81,7 @@ pub async fn handle(
     client: &DaemonClient,
     project_root: &Path,
     invoke_dir: &Path,
+    namespace: &str,
 ) -> Result<()> {
     // Prevalidate locally for fast feedback
     let runbook = prevalidate_command(project_root, &args.command, args.runbook.as_deref())?;
@@ -108,7 +109,14 @@ pub async fn handle(
 
     // Send to daemon
     let (pipeline_id, pipeline_name) = client
-        .run_command(project_root, invoke_dir, &args.command, &positional, &named)
+        .run_command(
+            project_root,
+            invoke_dir,
+            namespace,
+            &args.command,
+            &positional,
+            &named,
+        )
         .await?;
 
     let short_id = &pipeline_id[..12.min(pipeline_id.len())];

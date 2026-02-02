@@ -159,6 +159,11 @@ pub fn build_spawn_effects(
     };
     let mut env = agent_def.build_env(&vars);
 
+    // Pass OJ_NAMESPACE so nested `oj` calls inherit the project namespace
+    if !pipeline.namespace.is_empty() {
+        env.push(("OJ_NAMESPACE".to_string(), pipeline.namespace.clone()));
+    }
+
     // Pass OJ_STATE_DIR so `oj` commands can connect to the right daemon socket
     if let Ok(state_dir) = std::env::var("OJ_STATE_DIR") {
         env.push(("OJ_STATE_DIR".to_string(), state_dir));

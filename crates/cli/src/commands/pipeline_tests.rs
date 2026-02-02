@@ -86,6 +86,7 @@ fn sort_order_active_before_failed_before_done() {
             step_status: "Completed".into(),
             created_at_ms: 1000,
             updated_at_ms: 1000,
+            namespace: String::new(),
         },
         PipelineSummary {
             id: "failed-1".into(),
@@ -95,6 +96,7 @@ fn sort_order_active_before_failed_before_done() {
             step_status: "Failed".into(),
             created_at_ms: 2000,
             updated_at_ms: 2000,
+            namespace: String::new(),
         },
         PipelineSummary {
             id: "active-1".into(),
@@ -104,6 +106,7 @@ fn sort_order_active_before_failed_before_done() {
             step_status: "Running".into(),
             created_at_ms: 3000,
             updated_at_ms: 3000,
+            namespace: String::new(),
         },
     ];
 
@@ -129,6 +132,7 @@ fn sort_order_most_recent_first_within_group() {
             step_status: "Running".into(),
             created_at_ms: 1000,
             updated_at_ms: 1000,
+            namespace: String::new(),
         },
         PipelineSummary {
             id: "new".into(),
@@ -138,6 +142,7 @@ fn sort_order_most_recent_first_within_group() {
             step_status: "Running".into(),
             created_at_ms: 5000,
             updated_at_ms: 5000,
+            namespace: String::new(),
         },
     ];
 

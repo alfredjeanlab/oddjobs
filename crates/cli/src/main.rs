@@ -112,6 +112,7 @@ async fn run() -> Result<()> {
     // Find project root for runbook loading
     let project_root = find_project_root();
     let invoke_dir = std::env::current_dir().unwrap_or_else(|_| project_root.clone());
+    let namespace = oj_core::namespace::resolve_namespace(&project_root);
 
     // Dispatch commands with appropriate client semantics:
     // - Action commands: auto-start daemon, max 1 restart (user-initiated mutations)
@@ -121,7 +122,7 @@ async fn run() -> Result<()> {
         // Action commands - mutate state, user-initiated
         Commands::Run(args) => {
             let client = DaemonClient::for_action()?;
-            run::handle(args, &client, &project_root, &invoke_dir).await?
+            run::handle(args, &client, &project_root, &invoke_dir, &namespace).await?
         }
 
         // Pipeline commands - mixed action/query
@@ -179,11 +180,11 @@ async fn run() -> Result<()> {
             match &args.command {
                 QueueCommand::Push { .. } => {
                     let client = DaemonClient::for_action()?;
-                    queue::handle(args.command, &client, &project_root, format).await?
+                    queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }
                 QueueCommand::List { .. } => {
                     let client = DaemonClient::for_query()?;
-                    queue::handle(args.command, &client, &project_root, format).await?
+                    queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }
             }
         }
@@ -192,11 +193,11 @@ async fn run() -> Result<()> {
         Commands::Worker(args) => match &args.command {
             worker::WorkerCommand::List { .. } => {
                 let client = DaemonClient::for_query()?;
-                worker::handle(args.command, &client, &project_root, format).await?
+                worker::handle(args.command, &client, &project_root, &namespace, format).await?
             }
             _ => {
                 let client = DaemonClient::for_action()?;
-                worker::handle(args.command, &client, &project_root, format).await?
+                worker::handle(args.command, &client, &project_root, &namespace, format).await?
             }
         },
 

@@ -20,6 +20,7 @@ pub(crate) struct CreatePipelineParams {
     pub runbook_hash: String,
     pub runbook_json: Option<serde_json::Value>,
     pub runbook: Runbook,
+    pub namespace: String,
 }
 
 impl<S, A, C> Runtime<S, A, C>
@@ -40,6 +41,7 @@ where
             runbook_hash,
             runbook_json,
             runbook,
+            namespace,
         } = params;
 
         // Look up pipeline definition
@@ -155,6 +157,7 @@ where
                 vars: vars.clone(),
                 initial_step: initial_step.clone(),
                 created_at_epoch_ms: self.clock().epoch_ms(),
+                namespace: namespace.clone(),
             },
         });
 

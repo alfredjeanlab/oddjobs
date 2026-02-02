@@ -536,6 +536,7 @@ impl DaemonClient {
         &self,
         project_root: &Path,
         invoke_dir: &Path,
+        namespace: &str,
         command: &str,
         args: &[String],
         named_args: &HashMap<String, String>,
@@ -543,6 +544,7 @@ impl DaemonClient {
         let request = Request::RunCommand {
             project_root: project_root.to_path_buf(),
             invoke_dir: invoke_dir.to_path_buf(),
+            namespace: namespace.to_string(),
             command: command.to_string(),
             args: args.to_vec(),
             named_args: named_args.clone(),

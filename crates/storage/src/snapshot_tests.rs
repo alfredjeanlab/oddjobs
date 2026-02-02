@@ -18,6 +18,7 @@ fn test_config(id: &str, name: &str) -> PipelineConfig {
         runbook_hash: "testhash".to_string(),
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
+        namespace: String::new(),
     }
 }
 

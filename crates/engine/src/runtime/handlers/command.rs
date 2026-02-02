@@ -19,12 +19,15 @@ where
     A: AgentAdapter,
     C: Clock,
 {
+    // TODO(refactor): group command handler parameters into a struct
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_command(
         &self,
         pipeline_id: &PipelineId,
         pipeline_name: &str,
         project_root: &Path,
         invoke_dir: &Path,
+        namespace: &str,
         command: &str,
         args: &HashMap<String, String>,
     ) -> Result<Vec<Event>, RuntimeError> {
@@ -80,6 +83,7 @@ where
                     runbook_hash,
                     runbook_json: runbook_json_param,
                     runbook,
+                    namespace: namespace.to_string(),
                 })
                 .await
             }
@@ -115,6 +119,7 @@ where
                         vars: args.clone(),
                         initial_step: step_name.to_string(),
                         created_at_epoch_ms: self.clock().epoch_ms(),
+                        namespace: namespace.to_string(),
                     },
                 });
 
@@ -167,7 +172,11 @@ where
                         step: step_name.to_string(),
                         command: interpolated,
                         cwd: execution_path,
-                        env: HashMap::new(),
+                        env: if namespace.is_empty() {
+                            HashMap::new()
+                        } else {
+                            HashMap::from([("OJ_NAMESPACE".to_string(), namespace.to_string())])
+                        },
                     },
                 ];
                 result_events.extend(self.executor.execute_all(shell_effects).await?);

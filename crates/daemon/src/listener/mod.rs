@@ -193,6 +193,7 @@ async fn handle_request(
         Request::RunCommand {
             project_root,
             invoke_dir,
+            namespace,
             command,
             args,
             named_args,
@@ -200,6 +201,7 @@ async fn handle_request(
             commands::handle_run_command(
                 &project_root,
                 &invoke_dir,
+                &namespace,
                 &command,
                 &args,
                 &named_args,
@@ -235,26 +237,44 @@ async fn handle_request(
 
         Request::WorkerStart {
             project_root,
+            namespace,
             worker_name,
-        } => workers::handle_worker_start(&project_root, &worker_name, event_bus),
+        } => workers::handle_worker_start(&project_root, &namespace, &worker_name, event_bus),
 
-        Request::WorkerWake { worker_name } => {
+        Request::WorkerWake {
+            worker_name,
+            namespace,
+        } => {
             // Internal-only: emits WorkerWake event for queue auto-wake.
             // CLI uses WorkerStart (idempotent) instead.
-            let event = Event::WorkerWake { worker_name };
+            let event = Event::WorkerWake {
+                worker_name,
+                namespace,
+            };
             event_bus
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
             Ok(Response::Ok)
         }
 
-        Request::WorkerStop { worker_name } => workers::handle_worker_stop(&worker_name, event_bus),
+        Request::WorkerStop {
+            worker_name,
+            namespace,
+        } => workers::handle_worker_stop(&worker_name, &namespace, event_bus),
 
         Request::QueuePush {
             project_root,
+            namespace,
             queue_name,
             data,
-        } => queues::handle_queue_push(&project_root, &queue_name, data, event_bus, state),
+        } => queues::handle_queue_push(
+            &project_root,
+            &namespace,
+            &queue_name,
+            data,
+            event_bus,
+            state,
+        ),
     }
 }
 

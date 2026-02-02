@@ -32,12 +32,14 @@ pub async fn handle(
     command: WorkerCommand,
     client: &DaemonClient,
     project_root: &std::path::Path,
+    namespace: &str,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
         WorkerCommand::Start { name } => {
             let request = Request::WorkerStart {
                 project_root: project_root.to_path_buf(),
+                namespace: namespace.to_string(),
                 worker_name: name.clone(),
             };
             match client.send(&request).await? {

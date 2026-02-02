@@ -96,7 +96,7 @@ fn push_auto_starts_stopped_worker() {
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
     let data = serde_json::json!({ "task": "test-value" });
-    let result = handle_queue_push(project.path(), "jobs", data, &event_bus, &state).unwrap();
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
 
     assert!(
         matches!(result, Response::QueuePushed { ref queue_name, .. } if queue_name == "jobs"),
@@ -147,12 +147,13 @@ fn push_wakes_running_worker() {
             active_pipeline_ids: vec![],
             queue_name: "jobs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         },
     );
     let state = Arc::new(Mutex::new(initial_state));
 
     let data = serde_json::json!({ "task": "test-value" });
-    let result = handle_queue_push(project.path(), "jobs", data, &event_bus, &state).unwrap();
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
 
     assert!(matches!(result, Response::QueuePushed { .. }));
 
@@ -164,7 +165,7 @@ fn push_wakes_running_worker() {
     assert!(
         matches!(
             &events[1],
-            Event::WorkerWake { worker_name } if worker_name == "processor"
+            Event::WorkerWake { worker_name, .. } if worker_name == "processor"
         ),
         "second event should be WorkerWake, got: {:?}",
         events[1]
@@ -179,7 +180,7 @@ fn push_with_no_workers_succeeds() {
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
     let data = serde_json::json!({ "task": "test-value" });
-    let result = handle_queue_push(project.path(), "jobs", data, &event_bus, &state).unwrap();
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
 
     assert!(matches!(result, Response::QueuePushed { .. }));
 

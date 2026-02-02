@@ -49,6 +49,7 @@ async fn executor_emit_event_effect() {
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
                 created_at_epoch_ms: 1_000_000,
+                namespace: String::new(),
             },
         })
         .await

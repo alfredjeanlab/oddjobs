@@ -47,6 +47,7 @@ run = "echo deploying"
     let result = handle_run_command(
         project.path(),
         project.path(),
+        "",
         "deploy",
         &[],
         &HashMap::new(),
@@ -87,6 +88,7 @@ run = "make"
     let result = handle_run_command(
         project.path(),
         project.path(),
+        "",
         "build",
         &[],
         &HashMap::new(),

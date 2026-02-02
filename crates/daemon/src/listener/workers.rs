@@ -19,6 +19,7 @@ use super::ConnectionError;
 /// serve as a wake (triggering an initial poll).
 pub(super) fn handle_worker_start(
     project_root: &Path,
+    namespace: &str,
     worker_name: &str,
     event_bus: &EventBus,
 ) -> Result<Response, ConnectionError> {
@@ -81,6 +82,7 @@ pub(super) fn handle_worker_start(
         runbook_hash,
         queue_name: worker_def.source.queue.clone(),
         concurrency: worker_def.concurrency,
+        namespace: namespace.to_string(),
     };
 
     event_bus
@@ -95,10 +97,12 @@ pub(super) fn handle_worker_start(
 /// Handle a WorkerStop request.
 pub(super) fn handle_worker_stop(
     worker_name: &str,
+    namespace: &str,
     event_bus: &EventBus,
 ) -> Result<Response, ConnectionError> {
     let event = Event::WorkerStopped {
         worker_name: worker_name.to_string(),
+        namespace: namespace.to_string(),
     };
 
     event_bus

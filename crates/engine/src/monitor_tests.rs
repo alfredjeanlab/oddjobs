@@ -28,6 +28,7 @@ fn test_pipeline() -> Pipeline {
         step_history: Vec::new(),
         action_attempts: HashMap::new(),
         agent_signal: None,
+        namespace: String::new(),
     }
 }
 

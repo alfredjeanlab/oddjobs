@@ -77,12 +77,17 @@ where
                     &format!("shell (cwd: {}): {}", workspace_path.display(), command),
                 );
 
+                let mut shell_env = HashMap::new();
+                if !pipeline.namespace.is_empty() {
+                    shell_env.insert("OJ_NAMESPACE".to_string(), pipeline.namespace.clone());
+                }
+
                 let effects = vec![Effect::Shell {
                     pipeline_id: pipeline_id.clone(),
                     step: step_name.to_string(),
                     command,
                     cwd: workspace_path.to_path_buf(),
-                    env: HashMap::new(),
+                    env: shell_env,
                 }];
 
                 result_events.extend(self.executor.execute_all(effects).await?);

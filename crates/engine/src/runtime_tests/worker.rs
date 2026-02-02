@@ -82,6 +82,7 @@ async fn runbook_loaded_event_populates_cache_for_worker_started() {
             runbook_hash: runbook_hash.clone(),
             queue_name: "bugs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         })
         .await;
 
@@ -128,11 +129,13 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
             runbook_hash: runbook_hash.clone(),
             queue_name: "bugs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         });
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "item-1".to_string(),
             pipeline_id: oj_core::PipelineId::new("pipe-running"),
+            namespace: String::new(),
         });
     });
 
@@ -154,6 +157,7 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
             runbook_hash: runbook_hash.clone(),
             queue_name: "bugs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         })
         .await
         .unwrap();
@@ -207,6 +211,7 @@ async fn worker_picks_up_runbook_edits_on_poll() {
             runbook_hash: original_hash.clone(),
             queue_name: "bugs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         })
         .await
         .unwrap();
@@ -304,6 +309,7 @@ async fn worker_no_refresh_when_runbook_unchanged() {
             runbook_hash: hash.clone(),
             queue_name: "bugs".to_string(),
             concurrency: 1,
+            namespace: String::new(),
         })
         .await
         .unwrap();

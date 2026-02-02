@@ -198,21 +198,47 @@ pub async fn handle(
                     if pipelines.is_empty() {
                         println!("No pipelines");
                     } else {
-                        println!(
-                            "{:<12} {:<20} {:<10} {:<15} {:<10} STATUS",
-                            "ID", "NAME", "KIND", "STEP", "UPDATED"
-                        );
+                        // Show PROJECT column only when multiple namespaces present
+                        let namespaces: std::collections::HashSet<&str> =
+                            pipelines.iter().map(|p| p.namespace.as_str()).collect();
+                        let show_project =
+                            namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+
+                        if show_project {
+                            println!(
+                                "{:<12} {:<16} {:<16} {:<10} {:<15} {:<10} STATUS",
+                                "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED"
+                            );
+                        } else {
+                            println!(
+                                "{:<12} {:<20} {:<10} {:<15} {:<10} STATUS",
+                                "ID", "NAME", "KIND", "STEP", "UPDATED"
+                            );
+                        }
                         for p in &pipelines {
                             let updated_ago = format_time_ago(p.updated_at_ms);
-                            println!(
-                                "{:<12} {:<20} {:<10} {:<15} {:<10} {}",
-                                &p.id[..12.min(p.id.len())],
-                                &p.name[..20.min(p.name.len())],
-                                &p.kind[..10.min(p.kind.len())],
-                                p.step,
-                                updated_ago,
-                                p.step_status
-                            );
+                            if show_project {
+                                println!(
+                                    "{:<12} {:<16} {:<16} {:<10} {:<15} {:<10} {}",
+                                    &p.id[..12.min(p.id.len())],
+                                    &p.namespace[..16.min(p.namespace.len())],
+                                    &p.name[..16.min(p.name.len())],
+                                    &p.kind[..10.min(p.kind.len())],
+                                    p.step,
+                                    updated_ago,
+                                    p.step_status
+                                );
+                            } else {
+                                println!(
+                                    "{:<12} {:<20} {:<10} {:<15} {:<10} {}",
+                                    &p.id[..12.min(p.id.len())],
+                                    &p.name[..20.min(p.name.len())],
+                                    &p.kind[..10.min(p.kind.len())],
+                                    p.step,
+                                    updated_ago,
+                                    p.step_status
+                                );
+                            }
                         }
                     }
 
@@ -237,6 +263,9 @@ pub async fn handle(
                     if let Some(p) = pipeline {
                         println!("Pipeline: {}", p.id);
                         println!("  Name: {}", p.name);
+                        if !p.namespace.is_empty() {
+                            println!("  Project: {}", p.namespace);
+                        }
                         println!("  Kind: {}", p.kind);
                         println!("  Status: {}", p.step_status);
 

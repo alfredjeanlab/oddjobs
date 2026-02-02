@@ -22,6 +22,7 @@ use super::ConnectionError;
 /// Handle a QueuePush request.
 pub(super) fn handle_queue_push(
     project_root: &Path,
+    namespace: &str,
     queue_name: &str,
     data: serde_json::Value,
     event_bus: &EventBus,
@@ -106,13 +107,21 @@ pub(super) fn handle_queue_push(
         item_id: item_id.clone(),
         data: final_data,
         pushed_at_epoch_ms,
+        namespace: namespace.to_string(),
     };
     event_bus
         .send(event)
         .map_err(|_| ConnectionError::WalError)?;
 
     // Wake workers attached to this queue (auto-starting stopped workers)
-    wake_attached_workers(project_root, queue_name, &runbook, event_bus, state)?;
+    wake_attached_workers(
+        project_root,
+        namespace,
+        queue_name,
+        &runbook,
+        event_bus,
+        state,
+    )?;
 
     Ok(Response::QueuePushed {
         queue_name: queue_name.to_string(),
@@ -128,6 +137,7 @@ pub(super) fn handle_queue_push(
 /// the worker on queue push.
 fn wake_attached_workers(
     project_root: &Path,
+    namespace: &str,
     queue_name: &str,
     runbook: &oj_runbook::Runbook,
     event_bus: &EventBus,
@@ -142,11 +152,16 @@ fn wake_attached_workers(
         .collect();
 
     for name in &worker_names {
+        let scoped = if namespace.is_empty() {
+            (*name).to_string()
+        } else {
+            format!("{}/{}", namespace, name)
+        };
         let is_running = {
             let state = state.lock();
             state
                 .workers
-                .get(*name)
+                .get(&scoped)
                 .map(|r| r.status == "running")
                 .unwrap_or(false)
         };
@@ -160,6 +175,7 @@ fn wake_attached_workers(
             );
             let event = Event::WorkerWake {
                 worker_name: (*name).to_string(),
+                namespace: namespace.to_string(),
             };
             event_bus
                 .send(event)
@@ -187,6 +203,7 @@ fn wake_attached_workers(
                     runbook_hash,
                     queue_name: worker_def.source.queue.clone(),
                     concurrency: worker_def.concurrency,
+                    namespace: namespace.to_string(),
                 })
                 .map_err(|_| ConnectionError::WalError)?;
 

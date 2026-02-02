@@ -14,6 +14,7 @@ fn pipeline_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -
         vars: HashMap::new(),
         initial_step: initial_step.to_string(),
         created_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
     }
 }
 
@@ -443,6 +444,7 @@ fn apply_event_worker_started_with_queue_and_concurrency() {
         runbook_hash: "abc123".to_string(),
         queue_name: "bugs".to_string(),
         concurrency: 3,
+        namespace: String::new(),
     });
 
     assert!(state.workers.contains_key("fixer"));
@@ -462,12 +464,14 @@ fn apply_event_worker_stopped_sets_status() {
         runbook_hash: "abc123".to_string(),
         queue_name: "bugs".to_string(),
         concurrency: 1,
+        namespace: String::new(),
     });
 
     assert_eq!(state.workers["fixer"].status, "running");
 
     state.apply_event(&Event::WorkerStopped {
         worker_name: "fixer".to_string(),
+        namespace: String::new(),
     });
 
     assert_eq!(state.workers["fixer"].status, "stopped");
@@ -530,16 +534,19 @@ fn worker_started_preserves_active_pipeline_ids_on_restart() {
         runbook_hash: "hash1".to_string(),
         queue_name: "bugs".to_string(),
         concurrency: 2,
+        namespace: String::new(),
     });
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
         pipeline_id: PipelineId::new("pipe-1"),
+        namespace: String::new(),
     });
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-2".to_string(),
         pipeline_id: PipelineId::new("pipe-2"),
+        namespace: String::new(),
     });
 
     assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 2);
@@ -551,6 +558,7 @@ fn worker_started_preserves_active_pipeline_ids_on_restart() {
         runbook_hash: "hash1".to_string(),
         queue_name: "bugs".to_string(),
         concurrency: 2,
+        namespace: String::new(),
     });
 
     // Active pipeline IDs must be preserved
@@ -636,11 +644,13 @@ fn apply_event_worker_item_dispatched_idempotent() {
         runbook_hash: "abc".to_string(),
         queue_name: "bugs".to_string(),
         concurrency: 2,
+        namespace: String::new(),
     });
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
         pipeline_id: PipelineId::new("pipe-1"),
+        namespace: String::new(),
     });
 
     assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 1);
@@ -650,6 +660,7 @@ fn apply_event_worker_item_dispatched_idempotent() {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
         pipeline_id: PipelineId::new("pipe-1"),
+        namespace: String::new(),
     });
 
     assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 1);
@@ -679,6 +690,7 @@ fn queue_pushed_event(queue_name: &str, item_id: &str) -> Event {
         .into_iter()
         .collect(),
         pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
     }
 }
 
@@ -687,6 +699,7 @@ fn queue_taken_event(queue_name: &str, item_id: &str, worker_name: &str) -> Even
         queue_name: queue_name.to_string(),
         item_id: item_id.to_string(),
         worker_name: worker_name.to_string(),
+        namespace: String::new(),
     }
 }
 
@@ -694,6 +707,7 @@ fn queue_completed_event(queue_name: &str, item_id: &str) -> Event {
     Event::QueueCompleted {
         queue_name: queue_name.to_string(),
         item_id: item_id.to_string(),
+        namespace: String::new(),
     }
 }
 
@@ -702,6 +716,7 @@ fn queue_failed_event(queue_name: &str, item_id: &str, error: &str) -> Event {
         queue_name: queue_name.to_string(),
         item_id: item_id.to_string(),
         error: error.to_string(),
+        namespace: String::new(),
     }
 }
 

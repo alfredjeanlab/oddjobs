@@ -84,6 +84,7 @@ async fn setup_daemon_with_pipeline() -> (DaemonState, PathBuf) {
         runbook_hash: hash.clone(),
         cwd: dir_path.clone(),
         initial_step: "only-step".to_string(),
+        namespace: String::new(),
     };
     let pipeline = oj_core::Pipeline::new(config, &SystemClock);
     state.pipelines.insert("pipe-1".to_string(), pipeline);
@@ -265,6 +266,7 @@ async fn cancelled_pipeline_survives_restart_as_terminal() {
         cwd: PathBuf::from("/tmp/test"),
         vars: HashMap::new(),
         initial_step: "only-step".to_string(),
+        namespace: String::new(),
         created_at_epoch_ms: 1_000_000,
     });
 
@@ -340,6 +342,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             runbook_hash: "hash".to_string(),
             cwd: PathBuf::from("/tmp"),
             initial_step: "step".to_string(),
+            namespace: String::new(),
         },
         &SystemClock,
     );
@@ -356,6 +359,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             runbook_hash: "hash".to_string(),
             cwd: PathBuf::from("/tmp"),
             initial_step: "done".to_string(),
+            namespace: String::new(),
         },
         &SystemClock,
     );
@@ -372,6 +376,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             runbook_hash: "hash".to_string(),
             cwd: PathBuf::from("/tmp"),
             initial_step: "failed".to_string(),
+            namespace: String::new(),
         },
         &SystemClock,
     );

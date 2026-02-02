@@ -74,6 +74,9 @@ pub enum Event {
         /// Directory where the CLI was invoked (cwd), exposed as {invoke.dir}
         #[serde(default)]
         invoke_dir: PathBuf,
+        /// Project namespace
+        #[serde(default)]
+        namespace: String,
         command: String,
         args: HashMap<String, String>,
     },
@@ -91,6 +94,8 @@ pub enum Event {
         initial_step: String,
         #[serde(default)]
         created_at_epoch_ms: u64,
+        #[serde(default)]
+        namespace: String,
     },
 
     #[serde(rename = "pipeline:advanced")]
@@ -223,10 +228,16 @@ pub enum Event {
         queue_name: String,
         #[serde(default)]
         concurrency: u32,
+        #[serde(default)]
+        namespace: String,
     },
 
     #[serde(rename = "worker:wake")]
-    WorkerWake { worker_name: String },
+    WorkerWake {
+        worker_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
 
     #[serde(rename = "worker:poll_complete")]
     WorkerPollComplete {
@@ -239,10 +250,16 @@ pub enum Event {
         worker_name: String,
         item_id: String,
         pipeline_id: PipelineId,
+        #[serde(default)]
+        namespace: String,
     },
 
     #[serde(rename = "worker:stopped")]
-    WorkerStopped { worker_name: String },
+    WorkerStopped {
+        worker_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
 
     // -- queue --
     #[serde(rename = "queue:pushed")]
@@ -251,6 +268,8 @@ pub enum Event {
         item_id: String,
         data: HashMap<String, String>,
         pushed_at_epoch_ms: u64,
+        #[serde(default)]
+        namespace: String,
     },
 
     #[serde(rename = "queue:taken")]
@@ -258,16 +277,25 @@ pub enum Event {
         queue_name: String,
         item_id: String,
         worker_name: String,
+        #[serde(default)]
+        namespace: String,
     },
 
     #[serde(rename = "queue:completed")]
-    QueueCompleted { queue_name: String, item_id: String },
+    QueueCompleted {
+        queue_name: String,
+        item_id: String,
+        #[serde(default)]
+        namespace: String,
+    },
 
     #[serde(rename = "queue:failed")]
     QueueFailed {
         queue_name: String,
         item_id: String,
         error: String,
+        #[serde(default)]
+        namespace: String,
     },
 
     /// Catch-all for unknown event types (extensibility)
@@ -370,10 +398,27 @@ impl Event {
             Event::CommandRun {
                 pipeline_id,
                 command,
+                namespace,
                 ..
-            } => format!("{t} id={pipeline_id} cmd={command}"),
-            Event::PipelineCreated { id, kind, name, .. } => {
-                format!("{t} id={id} kind={kind} name={name}")
+            } => {
+                if namespace.is_empty() {
+                    format!("{t} id={pipeline_id} cmd={command}")
+                } else {
+                    format!("{t} id={pipeline_id} ns={namespace} cmd={command}")
+                }
+            }
+            Event::PipelineCreated {
+                id,
+                kind,
+                name,
+                namespace,
+                ..
+            } => {
+                if namespace.is_empty() {
+                    format!("{t} id={id} kind={kind} name={name}")
+                } else {
+                    format!("{t} id={id} ns={namespace} kind={kind} name={name}")
+                }
             }
             Event::PipelineAdvanced { id, step } => format!("{t} id={id} step={step}"),
             Event::PipelineUpdated { id, .. } => format!("{t} id={id}"),
@@ -432,7 +477,7 @@ impl Event {
             Event::WorkerStarted { worker_name, .. } => {
                 format!("{t} worker={worker_name}")
             }
-            Event::WorkerWake { worker_name } => format!("{t} worker={worker_name}"),
+            Event::WorkerWake { worker_name, .. } => format!("{t} worker={worker_name}"),
             Event::WorkerPollComplete {
                 worker_name, items, ..
             } => format!("{t} worker={worker_name} items={}", items.len()),
@@ -440,8 +485,9 @@ impl Event {
                 worker_name,
                 item_id,
                 pipeline_id,
+                ..
             } => format!("{t} worker={worker_name} item={item_id} pipeline={pipeline_id}"),
-            Event::WorkerStopped { worker_name } => format!("{t} worker={worker_name}"),
+            Event::WorkerStopped { worker_name, .. } => format!("{t} worker={worker_name}"),
             Event::QueuePushed {
                 queue_name,
                 item_id,
@@ -455,6 +501,7 @@ impl Event {
             Event::QueueCompleted {
                 queue_name,
                 item_id,
+                ..
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::QueueFailed {
                 queue_name,
