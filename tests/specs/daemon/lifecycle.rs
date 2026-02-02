@@ -324,6 +324,21 @@ fn running_ojd_while_daemon_running_does_not_kill_it() {
         "ojd should fail when daemon is already running"
     );
 
+    // Verify human-readable error message
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already running"),
+        "stderr should contain 'already running', got: {stderr}"
+    );
+    assert!(
+        stderr.contains("pid:"),
+        "stderr should contain pid, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("version:"),
+        "stderr should contain version, got: {stderr}"
+    );
+
     // The original daemon must still be reachable
     temp.oj()
         .args(&["daemon", "status"])

@@ -93,6 +93,33 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reconcile_ctx,
     } = match lifecycle::startup(&config).await {
         Ok(r) => r,
+        Err(LifecycleError::LockFailed(_)) => {
+            // Another daemon is already running — print a human-readable message
+            // instead of a raw debug error.
+            let pid = std::fs::read_to_string(&config.lock_path)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+            let version = std::fs::read_to_string(&config.version_path)
+                .unwrap_or_default()
+                .trim()
+                .to_string();
+
+            eprintln!("ojd is already running");
+            if !pid.is_empty() {
+                eprintln!("  pid: {pid}");
+            }
+            if !version.is_empty() {
+                let current_version =
+                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"));
+                if version == current_version {
+                    eprintln!("  version: {version}");
+                } else {
+                    eprintln!("  version: {version} (outdated — current: {current_version})");
+                }
+            }
+            std::process::exit(1);
+        }
         Err(e) => {
             // Write error synchronously (tracing is non-blocking and may not flush in time)
             write_startup_error(&config, &e);
