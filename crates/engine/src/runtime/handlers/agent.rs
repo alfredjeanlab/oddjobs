@@ -6,14 +6,15 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
-use oj_adapters::{AgentAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{AgentId, AgentState, Clock, Effect, Event, PipelineId, SessionId, TimerId};
 use std::collections::HashMap;
 
-impl<S, A, C> Runtime<S, A, C>
+impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     pub(crate) async fn handle_agent_state_changed(

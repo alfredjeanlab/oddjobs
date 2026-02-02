@@ -6,6 +6,7 @@
 mod directives;
 mod errors;
 mod monitoring;
+mod notify;
 mod on_dead;
 mod resume;
 mod sessions;
@@ -14,14 +15,14 @@ mod worker;
 
 use super::*;
 use crate::{RuntimeConfig, RuntimeDeps};
-use oj_adapters::{FakeAgentAdapter, FakeSessionAdapter};
+use oj_adapters::{FakeAgentAdapter, FakeNotifyAdapter, FakeSessionAdapter};
 use oj_core::{AgentId, FakeClock, PipelineId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 use tokio::sync::mpsc;
 
-type TestRuntime = Runtime<FakeSessionAdapter, FakeAgentAdapter, FakeClock>;
+type TestRuntime = Runtime<FakeSessionAdapter, FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
 
 /// Test context holding the runtime and project path
 struct TestContext {
@@ -31,6 +32,7 @@ struct TestContext {
     event_rx: mpsc::Receiver<Event>,
     sessions: FakeSessionAdapter,
     agents: FakeAgentAdapter,
+    notifier: FakeNotifyAdapter,
 }
 
 fn command_event(
@@ -119,12 +121,14 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
 
     let sessions = FakeSessionAdapter::new();
     let agents = FakeAgentAdapter::new();
+    let notifier = FakeNotifyAdapter::new();
     let clock = FakeClock::new();
     let (event_tx, event_rx) = mpsc::channel(100);
     let runtime = Runtime::new(
         RuntimeDeps {
             sessions: sessions.clone(),
             agents: agents.clone(),
+            notifier: notifier.clone(),
             state: Arc::new(Mutex::new(MaterializedState::default())),
         },
         clock.clone(),
@@ -142,6 +146,7 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
         event_rx,
         sessions,
         agents,
+        notifier,
     }
 }
 

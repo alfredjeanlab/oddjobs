@@ -8,16 +8,17 @@ use crate::error::RuntimeError;
 use crate::monitor::{self, ActionEffects, MonitorState};
 use oj_adapters::agent::find_session_log;
 use oj_adapters::AgentReconnectConfig;
-use oj_adapters::{AgentAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
     AgentId, AgentSignalKind, Clock, Effect, Event, Pipeline, PipelineId, SessionId, TimerId,
 };
 use std::collections::HashMap;
 
-impl<S, A, C> Runtime<S, A, C>
+impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     /// Reconnect monitoring for an agent that survived a daemon restart.

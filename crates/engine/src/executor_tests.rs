@@ -3,25 +3,28 @@
 
 use super::*;
 use crate::RuntimeDeps;
-use oj_adapters::{FakeAgentAdapter, FakeSessionAdapter};
+use oj_adapters::{FakeAgentAdapter, FakeNotifyAdapter, FakeSessionAdapter};
 use oj_core::{FakeClock, PipelineId, SessionId, TimerId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-type TestExecutor = Executor<FakeSessionAdapter, FakeAgentAdapter, FakeClock>;
+type TestExecutor = Executor<FakeSessionAdapter, FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
 
 struct TestHarness {
     executor: TestExecutor,
     event_rx: mpsc::Receiver<Event>,
+    notifier: FakeNotifyAdapter,
 }
 
 async fn setup() -> TestHarness {
     let (event_tx, event_rx) = mpsc::channel(100);
+    let notifier = FakeNotifyAdapter::new();
 
     let executor = Executor::new(
         RuntimeDeps {
             sessions: FakeSessionAdapter::new(),
             agents: FakeAgentAdapter::new(),
+            notifier: notifier.clone(),
             state: Arc::new(Mutex::new(MaterializedState::default())),
         },
         Arc::new(Mutex::new(Scheduler::new())),
@@ -29,7 +32,11 @@ async fn setup() -> TestHarness {
         event_tx,
     );
 
-    TestHarness { executor, event_rx }
+    TestHarness {
+        executor,
+        event_rx,
+        notifier,
+    }
 }
 
 #[tokio::test]
@@ -233,7 +240,7 @@ async fn execute_all_shell_effects_are_async() {
 }
 
 #[tokio::test]
-async fn notify_effect() {
+async fn notify_effect_delegates_to_adapter() {
     let harness = setup().await;
 
     let result = harness
@@ -244,9 +251,40 @@ async fn notify_effect() {
         })
         .await;
 
-    // Notify should succeed (may fail silently if notifier not installed)
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
+
+    let calls = harness.notifier.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].title, "Test Title");
+    assert_eq!(calls[0].message, "Test message");
+}
+
+#[tokio::test]
+async fn multiple_notify_effects_recorded() {
+    let harness = setup().await;
+
+    harness
+        .executor
+        .execute(Effect::Notify {
+            title: "First".to_string(),
+            message: "msg1".to_string(),
+        })
+        .await
+        .unwrap();
+    harness
+        .executor
+        .execute(Effect::Notify {
+            title: "Second".to_string(),
+            message: "msg2".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let calls = harness.notifier.calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].title, "First");
+    assert_eq!(calls[1].title, "Second");
 }
 
 #[tokio::test]

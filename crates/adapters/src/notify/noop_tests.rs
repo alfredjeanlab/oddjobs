@@ -6,7 +6,7 @@ use super::*;
 #[tokio::test]
 async fn noop_notify_returns_ok() {
     let adapter = NoOpNotifyAdapter::new();
-    let result = adapter.send("channel", "message").await;
+    let result = adapter.notify("title", "message").await;
     assert!(result.is_ok());
 }
 

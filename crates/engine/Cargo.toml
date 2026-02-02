@@ -22,7 +22,6 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing = "0.1"
 uuid.workspace = true
-notify-rust.workspace = true
 
 [dev-dependencies]
 oj-adapters = { path = "../adapters", version = "0.1.0", features = ["test-support"] }

@@ -12,7 +12,7 @@ use std::sync::Arc;
 /// Recorded notification
 #[derive(Debug, Clone)]
 pub struct NotifyCall {
-    pub channel: String,
+    pub title: String,
     pub message: String,
 }
 
@@ -47,9 +47,9 @@ impl FakeNotifyAdapter {
 
 #[async_trait]
 impl NotifyAdapter for FakeNotifyAdapter {
-    async fn send(&self, channel: &str, message: &str) -> Result<(), NotifyError> {
+    async fn notify(&self, title: &str, message: &str) -> Result<(), NotifyError> {
         self.inner.lock().calls.push(NotifyCall {
-            channel: channel.to_string(),
+            title: title.to_string(),
             message: message.to_string(),
         });
         Ok(())

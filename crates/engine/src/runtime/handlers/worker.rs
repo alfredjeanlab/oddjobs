@@ -6,7 +6,7 @@
 use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
-use oj_adapters::{AgentAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
@@ -36,10 +36,11 @@ pub(crate) enum WorkerStatus {
     Stopped,
 }
 
-impl<S, A, C> Runtime<S, A, C>
+impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     pub(crate) async fn handle_worker_started(

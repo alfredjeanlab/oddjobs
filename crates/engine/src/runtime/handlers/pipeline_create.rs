@@ -5,7 +5,7 @@
 
 use super::super::Runtime;
 use crate::error::RuntimeError;
-use oj_adapters::{AgentAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{Clock, Effect, Event, PipelineId, WorkspaceId};
 use oj_runbook::{NotifyConfig, Runbook, WorkspaceMode};
 use std::collections::HashMap;
@@ -23,10 +23,11 @@ pub(crate) struct CreatePipelineParams {
     pub namespace: String,
 }
 
-impl<S, A, C> Runtime<S, A, C>
+impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     pub(crate) async fn create_and_start_pipeline(

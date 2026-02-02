@@ -20,7 +20,7 @@ impl NoOpNotifyAdapter {
 
 #[async_trait]
 impl NotifyAdapter for NoOpNotifyAdapter {
-    async fn send(&self, _channel: &str, _message: &str) -> Result<(), NotifyError> {
+    async fn notify(&self, _title: &str, _message: &str) -> Result<(), NotifyError> {
         Ok(())
     }
 }

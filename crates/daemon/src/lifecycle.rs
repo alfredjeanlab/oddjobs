@@ -11,7 +11,10 @@ use parking_lot::Mutex;
 use std::time::Instant;
 
 use fs2::FileExt;
-use oj_adapters::{ClaudeAgentAdapter, SessionAdapter, TmuxAdapter, TracedAgent, TracedSession};
+use oj_adapters::{
+    ClaudeAgentAdapter, DesktopNotifyAdapter, SessionAdapter, TmuxAdapter, TracedAgent,
+    TracedSession,
+};
 use oj_core::{AgentId, Event, PipelineId, StepStatus, SystemClock};
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, Scheduler};
 use oj_storage::{MaterializedState, Snapshot, Wal};
@@ -26,6 +29,7 @@ use crate::event_bus::{EventBus, EventReader};
 pub type DaemonRuntime = Runtime<
     TracedSession<TmuxAdapter>,
     TracedAgent<ClaudeAgentAdapter<TracedSession<TmuxAdapter>>>,
+    DesktopNotifyAdapter,
     SystemClock,
 >;
 
@@ -350,6 +354,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         RuntimeDeps {
             sessions: session_adapter.clone(),
             agents: agent_adapter,
+            notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
         },
         SystemClock,

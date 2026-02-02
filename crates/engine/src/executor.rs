@@ -4,7 +4,9 @@
 //! Effect executor
 
 use crate::{RuntimeDeps, Scheduler};
-use oj_adapters::{AgentAdapter, AgentReconnectConfig, AgentSpawnConfig, SessionAdapter};
+use oj_adapters::{
+    AgentAdapter, AgentReconnectConfig, AgentSpawnConfig, NotifyAdapter, SessionAdapter,
+};
 use oj_core::{Clock, Effect, Event, TracedEffect};
 use oj_storage::MaterializedState;
 use std::sync::Arc;
@@ -29,9 +31,10 @@ pub enum ExecuteError {
 }
 
 /// Executes effects using the configured adapters
-pub struct Executor<S, A, C: Clock> {
+pub struct Executor<S, A, N, C: Clock> {
     sessions: S,
     agents: A,
+    notifier: N,
     state: Arc<Mutex<MaterializedState>>,
     scheduler: Arc<Mutex<Scheduler>>,
     clock: C,
@@ -39,15 +42,16 @@ pub struct Executor<S, A, C: Clock> {
     event_tx: mpsc::Sender<Event>,
 }
 
-impl<S, A, C> Executor<S, A, C>
+impl<S, A, N, C> Executor<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     /// Create a new executor
     pub fn new(
-        deps: RuntimeDeps<S, A>,
+        deps: RuntimeDeps<S, A, N>,
         scheduler: Arc<Mutex<Scheduler>>,
         clock: C,
         event_tx: mpsc::Sender<Event>,
@@ -55,6 +59,7 @@ where
         Self {
             sessions: deps.sessions,
             agents: deps.agents,
+            notifier: deps.notifier,
             state: deps.state,
             scheduler,
             clock,
@@ -474,23 +479,9 @@ where
 
             // === Notification effects ===
             Effect::Notify { title, message } => {
-                // notify_rust::Notification::show() is synchronous on macOS and may
-                // block indefinitely in headless environments. Fire-and-forget in a
-                // background thread to avoid blocking the executor.
-                std::thread::spawn(move || {
-                    match notify_rust::Notification::new()
-                        .summary(&title)
-                        .body(&message)
-                        .show()
-                    {
-                        Ok(_) => {
-                            tracing::info!(title, message, "desktop notification sent");
-                        }
-                        Err(e) => {
-                            tracing::warn!(title, message, error = %e, "desktop notification failed");
-                        }
-                    }
-                });
+                if let Err(e) = self.notifier.notify(&title, &message).await {
+                    tracing::warn!(%title, error = %e, "notification send failed");
+                }
                 Ok(None)
             }
         }

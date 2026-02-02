@@ -19,7 +19,7 @@ pub use agent::{
     extract_process_name, AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig,
     AgentSpawnConfig, ClaudeAgentAdapter,
 };
-pub use notify::{NoOpNotifyAdapter, NotifyAdapter};
+pub use notify::{DesktopNotifyAdapter, NoOpNotifyAdapter, NotifyAdapter};
 pub use session::{NoOpSessionAdapter, SessionAdapter, TmuxAdapter};
 pub use traced::{TracedAgent, TracedSession};
 

@@ -4,7 +4,9 @@
 use super::*;
 
 use crate::event_bus::EventBus;
-use oj_adapters::{ClaudeAgentAdapter, TmuxAdapter, TracedAgent, TracedSession};
+use oj_adapters::{
+    ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
+};
 use oj_core::{Event, PipelineConfig, PipelineId, StepStatus, SystemClock};
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps, Scheduler};
 use oj_runbook::{PipelineDef, RunDirective, Runbook, StepDef};
@@ -109,6 +111,7 @@ async fn setup_daemon_with_pipeline() -> (DaemonState, PathBuf) {
         RuntimeDeps {
             sessions: session_adapter,
             agents: agent_adapter,
+            notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
         },
         SystemClock,

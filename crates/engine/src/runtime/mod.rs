@@ -9,7 +9,7 @@ mod pipeline;
 
 use crate::{error::RuntimeError, pipeline_logger::PipelineLogger, Executor, Scheduler};
 use handlers::worker::WorkerState;
-use oj_adapters::{AgentAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{AgentId, Clock, Pipeline};
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
@@ -33,15 +33,16 @@ pub struct RuntimeConfig {
 }
 
 /// Runtime adapter dependencies
-pub struct RuntimeDeps<S, A> {
+pub struct RuntimeDeps<S, A, N> {
     pub sessions: S,
     pub agents: A,
+    pub notifier: N,
     pub state: Arc<Mutex<MaterializedState>>,
 }
 
 /// Runtime that coordinates the system
-pub struct Runtime<S, A, C: Clock> {
-    pub(crate) executor: Executor<S, A, C>,
+pub struct Runtime<S, A, N, C: Clock> {
+    pub(crate) executor: Executor<S, A, N, C>,
     pub(crate) _workspaces_root: PathBuf,
     pub(crate) logger: PipelineLogger,
     pub(crate) agent_pipelines: Mutex<HashMap<AgentId, String>>,
@@ -49,15 +50,16 @@ pub struct Runtime<S, A, C: Clock> {
     pub(crate) worker_states: Mutex<HashMap<String, WorkerState>>,
 }
 
-impl<S, A, C> Runtime<S, A, C>
+impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
     A: AgentAdapter,
+    N: NotifyAdapter,
     C: Clock,
 {
     /// Create a new runtime
     pub fn new(
-        deps: RuntimeDeps<S, A>,
+        deps: RuntimeDeps<S, A, N>,
         clock: C,
         config: RuntimeConfig,
         event_tx: mpsc::Sender<oj_core::Event>,

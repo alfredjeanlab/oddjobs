@@ -3,8 +3,10 @@
 
 //! Notification adapters
 
+mod desktop;
 mod noop;
 
+pub use desktop::DesktopNotifyAdapter;
 pub use noop::NoOpNotifyAdapter;
 
 // Test support - only compiled for tests or when explicitly requested
@@ -26,6 +28,6 @@ pub enum NotifyError {
 /// Adapter for sending notifications
 #[async_trait]
 pub trait NotifyAdapter: Clone + Send + Sync + 'static {
-    /// Send a notification message
-    async fn send(&self, channel: &str, message: &str) -> Result<(), NotifyError>;
+    /// Send a notification with a title and message body
+    async fn notify(&self, title: &str, message: &str) -> Result<(), NotifyError>;
 }
