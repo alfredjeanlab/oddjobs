@@ -50,6 +50,20 @@ where
             .get_pipeline(&pipeline_kind)
             .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline_kind.clone()))?;
 
+        // Resolve pipeline display name from template (if set)
+        let pipeline_name = if let Some(name_template) = &pipeline_def.name {
+            let pipeline_id_str = pipeline_id.as_str();
+            let nonce = &pipeline_id_str[..8.min(pipeline_id_str.len())];
+            let lookup: HashMap<String, String> = vars
+                .iter()
+                .flat_map(|(k, v)| vec![(k.clone(), v.clone()), (format!("var.{}", k), v.clone())])
+                .collect();
+            let raw = oj_runbook::interpolate(name_template, &lookup);
+            oj_runbook::pipeline_display_name(&raw, nonce)
+        } else {
+            pipeline_name
+        };
+
         // Capture notify config before runbook is moved into cache
         let notify_config = pipeline_def.notify.clone();
 

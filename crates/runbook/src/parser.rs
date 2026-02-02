@@ -307,7 +307,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         cmd.name = name.clone();
     }
     for (name, pipeline) in &mut runbook.pipelines {
-        pipeline.name = name.clone();
+        pipeline.kind = name.clone();
     }
     for (name, agent) in &mut runbook.agents {
         agent.name = name.clone();

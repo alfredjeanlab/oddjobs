@@ -26,7 +26,8 @@ fn test_runbook() -> Runbook {
     pipelines.insert(
         "test".to_string(),
         PipelineDef {
-            name: "test".to_string(),
+            kind: "test".to_string(),
+            name: None,
             vars: vec![],
             defaults: HashMap::new(),
             locals: HashMap::new(),

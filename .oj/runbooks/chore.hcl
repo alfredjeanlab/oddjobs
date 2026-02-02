@@ -27,6 +27,7 @@ worker "chore" {
 }
 
 pipeline "chore" {
+  name      = "${var.task.title}"
   vars      = ["task"]
   workspace = "ephemeral"
 

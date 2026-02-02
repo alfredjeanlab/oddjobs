@@ -16,7 +16,8 @@ command "build" {
 }
 
 pipeline "build" {
-  vars = ["name", "instructions", "base", "rebase", "new"]
+  name      = "${var.name}"
+  vars      = ["name", "instructions", "base", "rebase", "new"]
   workspace = "ephemeral"
 
   locals {

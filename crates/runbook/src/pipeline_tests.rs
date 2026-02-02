@@ -6,7 +6,8 @@ use crate::parser::{parse_runbook, parse_runbook_with_format, Format};
 
 fn sample_pipeline() -> PipelineDef {
     PipelineDef {
-        name: "build".to_string(),
+        kind: "build".to_string(),
+        name: None,
         vars: vec!["name".to_string(), "prompt".to_string()],
         defaults: HashMap::new(),
         locals: HashMap::new(),
@@ -480,4 +481,56 @@ run = "echo init"
     assert!(pipeline.on_cancel.is_none());
     let init = pipeline.get_step("init").unwrap();
     assert!(init.on_cancel.is_none());
+}
+
+#[test]
+fn parse_hcl_pipeline_name_template() {
+    let hcl = r#"
+pipeline "fix" {
+    name = "${var.bug.title}"
+    vars = ["bug"]
+
+    step "init" {
+        run = "echo init"
+    }
+}
+"#;
+    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+    let pipeline = runbook.get_pipeline("fix").unwrap();
+    assert_eq!(pipeline.kind, "fix");
+    assert_eq!(pipeline.name.as_deref(), Some("${var.bug.title}"));
+}
+
+#[test]
+fn parse_pipeline_without_name_template() {
+    let hcl = r#"
+pipeline "build" {
+    vars = ["name"]
+
+    step "init" {
+        run = "echo init"
+    }
+}
+"#;
+    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+    let pipeline = runbook.get_pipeline("build").unwrap();
+    assert_eq!(pipeline.kind, "build");
+    assert!(pipeline.name.is_none());
+}
+
+#[test]
+fn parse_toml_pipeline_name_template() {
+    let toml = r#"
+[pipeline.deploy]
+name = "${var.env}"
+vars = ["env"]
+
+[[pipeline.deploy.step]]
+name = "init"
+run = "echo init"
+"#;
+    let runbook = parse_runbook(toml).unwrap();
+    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    assert_eq!(pipeline.kind, "deploy");
+    assert_eq!(pipeline.name.as_deref(), Some("${var.env}"));
 }

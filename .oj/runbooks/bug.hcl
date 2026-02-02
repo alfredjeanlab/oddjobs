@@ -27,6 +27,7 @@ worker "fix" {
 }
 
 pipeline "fix" {
+  name      = "${var.bug.title}"
   vars      = ["bug"]
   workspace = "ephemeral"
 

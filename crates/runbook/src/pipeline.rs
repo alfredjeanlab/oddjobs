@@ -154,9 +154,14 @@ impl StepDef {
 /// A pipeline definition from the runbook
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineDef {
-    /// Pipeline name
+    /// Pipeline kind (injected from HCL block label, e.g. `pipeline "build"` → kind = "build")
     #[serde(default)]
-    pub name: String,
+    pub kind: String,
+    /// Optional name template for human-readable pipeline names.
+    /// Supports `${var.*}` interpolation. The result is slugified and
+    /// suffixed with a nonce derived from the pipeline UUID.
+    #[serde(default)]
+    pub name: Option<String>,
     /// Required variables
     #[serde(default, alias = "input")]
     pub vars: Vec<String>,
