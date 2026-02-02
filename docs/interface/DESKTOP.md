@@ -11,6 +11,9 @@ The daemon sends desktop notifications for escalation events. Notifications are 
 | Pipeline escalated (`on_idle`/`on_dead` escalate) | "Pipeline needs attention: {name}" | trigger (e.g. "on_idle") |
 | Gate failed (gate command exits non-zero) | "Pipeline needs attention: {name}" | "gate_failed" |
 | Agent signal escalate | "{pipeline_name}" | Agent's escalation message |
+| Agent `on_start` | Agent name | Rendered `on_start` template |
+| Agent `on_done` | Agent name | Rendered `on_done` template |
+| Agent `on_fail` | Agent name | Rendered `on_fail` template |
 
 Notifications use the [notify-rust](https://github.com/hoodie/notify-rust) crate for cross-platform support:
 
@@ -19,6 +22,32 @@ Notifications use the [notify-rust](https://github.com/hoodie/notify-rust) crate
 | Linux/BSD | D-Bus (XDG notification spec) |
 | macOS | NSUserNotification / UNUserNotificationCenter |
 | Windows | WinRT Toast notifications |
+
+### Agent Notifications
+
+Agents support the same `notify {}` block as pipelines to emit desktop notifications on lifecycle events:
+
+    agent "worker" {
+      run    = "claude"
+      prompt = "Implement the feature."
+
+      notify {
+        on_start = "Agent ${agent} started on ${name}"
+        on_done  = "Agent ${agent} completed"
+        on_fail  = "Agent ${agent} failed: ${error}"
+      }
+    }
+
+Available template variables:
+
+| Variable | Description |
+|----------|-------------|
+| `${var.*}` | Pipeline variables (e.g. `${var.env}`) |
+| `${pipeline_id}` | Pipeline ID |
+| `${name}` | Pipeline name |
+| `${agent}` | Agent name |
+| `${step}` | Current step name |
+| `${error}` | Error message (available in `on_fail`) |
 
 ### Notification Settings
 

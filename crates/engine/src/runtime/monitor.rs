@@ -152,7 +152,20 @@ where
                 .append_agent_pointer(pipeline_id.as_str(), &pipeline.step, aid.as_str());
         }
 
-        Ok(self.executor.execute_all(effects).await?)
+        let mut result_events = self.executor.execute_all(effects).await?;
+
+        // Emit agent on_start notification if configured
+        if let Some(effect) = monitor::build_agent_notify_effect(
+            &pipeline,
+            agent_def,
+            agent_def.notify.on_start.as_ref(),
+        ) {
+            if let Some(event) = self.executor.execute(effect).await? {
+                result_events.push(event);
+            }
+        }
+
+        Ok(result_events)
     }
 
     pub(crate) async fn handle_monitor_state(
@@ -256,6 +269,7 @@ where
             return self
                 .execute_action_effects(
                     pipeline,
+                    agent_def,
                     monitor::build_action_effects(
                         pipeline,
                         agent_def,
@@ -309,6 +323,7 @@ where
         // Execute the action
         self.execute_action_effects(
             pipeline,
+            agent_def,
             monitor::build_action_effects(
                 pipeline,
                 agent_def,
@@ -388,6 +403,7 @@ where
     pub(crate) async fn execute_action_effects(
         &self,
         pipeline: &Pipeline,
+        agent_def: &oj_runbook::AgentDef,
         effects: ActionEffects,
     ) -> Result<Vec<Event>, RuntimeError> {
         match effects {
@@ -396,8 +412,32 @@ where
                     .append(&pipeline.id, &pipeline.step, "nudge sent");
                 Ok(self.executor.execute_all(effects).await?)
             }
-            ActionEffects::AdvancePipeline => self.advance_pipeline(pipeline).await,
-            ActionEffects::FailPipeline { error } => self.fail_pipeline(pipeline, &error).await,
+            ActionEffects::AdvancePipeline => {
+                // Emit agent on_done notification before advancing
+                if let Some(effect) = monitor::build_agent_notify_effect(
+                    pipeline,
+                    agent_def,
+                    agent_def.notify.on_done.as_ref(),
+                ) {
+                    self.executor.execute(effect).await?;
+                }
+                self.advance_pipeline(pipeline).await
+            }
+            ActionEffects::FailPipeline { error } => {
+                // Emit agent on_fail notification before failing
+                // Use the error from the FailPipeline variant since pipeline.error
+                // may not be set yet at this point
+                let mut fail_pipeline = pipeline.clone();
+                fail_pipeline.error = Some(error.clone());
+                if let Some(effect) = monitor::build_agent_notify_effect(
+                    &fail_pipeline,
+                    agent_def,
+                    agent_def.notify.on_fail.as_ref(),
+                ) {
+                    self.executor.execute(effect).await?;
+                }
+                self.fail_pipeline(pipeline, &error).await
+            }
             ActionEffects::Recover {
                 kill_session,
                 agent_name,
@@ -440,6 +480,14 @@ where
                     Ok(()) => {
                         self.logger
                             .append(&pipeline.id, &pipeline.step, "gate passed, advancing");
+                        // Emit agent on_done notification on gate pass
+                        if let Some(effect) = monitor::build_agent_notify_effect(
+                            pipeline,
+                            agent_def,
+                            agent_def.notify.on_done.as_ref(),
+                        ) {
+                            self.executor.execute(effect).await?;
+                        }
                         self.advance_pipeline(pipeline).await
                     }
                     Err(gate_error) => {
@@ -591,6 +639,20 @@ where
                 tracing::info!(pipeline_id = %pipeline.id, "agent:signal complete");
                 self.logger
                     .append(&pipeline.id, &pipeline.step, "agent:signal complete");
+
+                // Emit agent on_done notification
+                if let Ok(runbook) = self.cached_runbook(&pipeline.runbook_hash) {
+                    if let Ok(agent_def) = crate::monitor::get_agent_def(&runbook, &pipeline) {
+                        if let Some(effect) = monitor::build_agent_notify_effect(
+                            &pipeline,
+                            agent_def,
+                            agent_def.notify.on_done.as_ref(),
+                        ) {
+                            self.executor.execute(effect).await?;
+                        }
+                    }
+                }
+
                 self.advance_pipeline(&pipeline).await
             }
             AgentSignalKind::Escalate => {

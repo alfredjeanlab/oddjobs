@@ -390,5 +390,98 @@ fn parse_duration_invalid_number() {
 }
 
 // =============================================================================
+// Agent Notification Tests
+// =============================================================================
+
+#[test]
+fn agent_on_start_notify_renders_template() {
+    let pipeline = test_pipeline();
+    let mut agent = test_agent_def();
+    agent.notify.on_start = Some("Agent ${agent} started for ${name}".to_string());
+
+    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    assert!(effect.is_some());
+    match effect.unwrap() {
+        Effect::Notify { title, message } => {
+            assert_eq!(title, "worker");
+            assert_eq!(message, "Agent worker started for test-feature");
+        }
+        _ => panic!("expected Notify effect"),
+    }
+}
+
+#[test]
+fn agent_on_done_notify_renders_template() {
+    let pipeline = test_pipeline();
+    let mut agent = test_agent_def();
+    agent.notify.on_done = Some("Agent ${agent} completed".to_string());
+
+    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_done.as_ref());
+    match effect.unwrap() {
+        Effect::Notify { title, message } => {
+            assert_eq!(title, "worker");
+            assert_eq!(message, "Agent worker completed");
+        }
+        _ => panic!("expected Notify effect"),
+    }
+}
+
+#[test]
+fn agent_on_fail_notify_includes_error() {
+    let mut pipeline = test_pipeline();
+    pipeline.error = Some("task failed".to_string());
+    let mut agent = test_agent_def();
+    agent.notify.on_fail = Some("Agent ${agent} failed: ${error}".to_string());
+
+    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_fail.as_ref());
+    match effect.unwrap() {
+        Effect::Notify { title, message } => {
+            assert_eq!(title, "worker");
+            assert_eq!(message, "Agent worker failed: task failed");
+        }
+        _ => panic!("expected Notify effect"),
+    }
+}
+
+#[test]
+fn agent_notify_none_when_no_template() {
+    let pipeline = test_pipeline();
+    let agent = test_agent_def();
+    let effect = build_agent_notify_effect(&pipeline, &agent, None);
+    assert!(effect.is_none());
+}
+
+#[test]
+fn agent_notify_interpolates_pipeline_vars() {
+    let mut pipeline = test_pipeline();
+    pipeline.vars.insert("env".to_string(), "prod".to_string());
+    let mut agent = test_agent_def();
+    agent.notify.on_start = Some("Deploying ${var.env}".to_string());
+
+    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    match effect.unwrap() {
+        Effect::Notify { message, .. } => {
+            assert_eq!(message, "Deploying prod");
+        }
+        _ => panic!("expected Notify effect"),
+    }
+}
+
+#[test]
+fn agent_notify_includes_step_variable() {
+    let pipeline = test_pipeline();
+    let mut agent = test_agent_def();
+    agent.notify.on_start = Some("Step: ${step}".to_string());
+
+    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    match effect.unwrap() {
+        Effect::Notify { message, .. } => {
+            assert_eq!(message, "Step: execute");
+        }
+        _ => panic!("expected Notify effect"),
+    }
+}
+
+// =============================================================================
 // Cooldown Timer ID Tests
 // =============================================================================

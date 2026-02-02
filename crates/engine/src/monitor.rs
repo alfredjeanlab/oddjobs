@@ -227,6 +227,33 @@ pub fn build_action_effects(
     }
 }
 
+/// Build an agent notification effect if a message template is configured.
+pub fn build_agent_notify_effect(
+    pipeline: &Pipeline,
+    agent_def: &AgentDef,
+    message_template: Option<&String>,
+) -> Option<Effect> {
+    let template = message_template?;
+    let mut vars: HashMap<String, String> = pipeline
+        .vars
+        .iter()
+        .map(|(k, v)| (format!("var.{}", k), v.clone()))
+        .collect();
+    vars.insert("pipeline_id".to_string(), pipeline.id.clone());
+    vars.insert("name".to_string(), pipeline.name.clone());
+    vars.insert("agent".to_string(), agent_def.name.clone());
+    vars.insert("step".to_string(), pipeline.step.clone());
+    if let Some(err) = &pipeline.error {
+        vars.insert("error".to_string(), err.clone());
+    }
+
+    let message = oj_runbook::NotifyConfig::render(template, &vars);
+    Some(Effect::Notify {
+        title: agent_def.name.clone(),
+        message,
+    })
+}
+
 /// Results from building action effects
 #[derive(Debug)]
 pub enum ActionEffects {
