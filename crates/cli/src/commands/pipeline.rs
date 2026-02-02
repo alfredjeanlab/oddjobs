@@ -464,6 +464,8 @@ pub async fn handle(
 
             let mut finished: HashMap<String, PipelineOutcome> = HashMap::new();
             let mut canonical_ids: HashMap<String, String> = HashMap::new();
+            let mut step_trackers: HashMap<String, StepTracker> = HashMap::new();
+            let show_prefix = ids.len() > 1;
 
             loop {
                 for input_id in &ids {
@@ -483,6 +485,17 @@ pub async fn handle(
                             canonical_ids
                                 .entry(input_id.clone())
                                 .or_insert_with(|| p.id.clone());
+
+                            let tracker =
+                                step_trackers
+                                    .entry(input_id.clone())
+                                    .or_insert(StepTracker {
+                                        printed_count: 0,
+                                        printed_started: false,
+                                    });
+                            let mut stdout = std::io::stdout();
+                            print_step_progress(&p, tracker, show_prefix, &mut stdout);
+
                             let outcome = match p.step.as_str() {
                                 "done" => Some(PipelineOutcome::Done),
                                 "failed" => Some(PipelineOutcome::Failed(
@@ -553,6 +566,72 @@ pub async fn handle(
     }
 
     Ok(())
+}
+
+/// Tracks step progress for a single pipeline during wait polling.
+struct StepTracker {
+    /// Number of steps we've already printed final transitions for.
+    printed_count: usize,
+    /// Whether we've printed a "started" line for the current (not-yet-final) step.
+    printed_started: bool,
+}
+
+/// Print step transitions that occurred since the last poll.
+fn print_step_progress(
+    detail: &oj_daemon::PipelineDetail,
+    tracker: &mut StepTracker,
+    show_pipeline_prefix: bool,
+    out: &mut impl std::io::Write,
+) {
+    let prefix = if show_pipeline_prefix {
+        format!("[{}] ", detail.name)
+    } else {
+        String::new()
+    };
+
+    for (i, step) in detail.steps.iter().enumerate() {
+        if i < tracker.printed_count {
+            continue;
+        }
+
+        let is_terminal = matches!(step.outcome.as_str(), "completed" | "failed");
+
+        if is_terminal {
+            // Print "started" for steps we haven't announced yet (skipped running state)
+            if i == tracker.printed_count && !tracker.printed_started {
+                // Step completed between polls without us seeing "running" — don't print started
+                // for instant steps, just print the final outcome directly.
+            }
+
+            let elapsed = format_duration(step.started_at_ms, step.finished_at_ms);
+            match step.outcome.as_str() {
+                "completed" => {
+                    let _ = writeln!(out, "{}{} completed ({})", prefix, step.name, elapsed);
+                }
+                "failed" => {
+                    let suffix = match &step.detail {
+                        Some(d) if !d.is_empty() => format!(" - {}", d),
+                        _ => String::new(),
+                    };
+                    let _ = writeln!(
+                        out,
+                        "{}{} failed ({}){}",
+                        prefix, step.name, elapsed, suffix
+                    );
+                }
+                _ => unreachable!(),
+            }
+            tracker.printed_count = i + 1;
+            tracker.printed_started = false;
+        } else if step.outcome == "running" && !tracker.printed_started {
+            let _ = writeln!(out, "{}{} started", prefix, step.name);
+            tracker.printed_started = true;
+        } else if step.outcome == "waiting" && !tracker.printed_started {
+            let reason = step.detail.as_deref().unwrap_or("waiting");
+            let _ = writeln!(out, "{}{} waiting ({})", prefix, step.name, reason);
+            tracker.printed_started = true;
+        }
+    }
 }
 
 /// Print follow-up commands for a pipeline.

@@ -156,11 +156,15 @@ fn wait_multiple_ids_all_mode() {
         .env("OJ_WAIT_POLL_MS", "10")
         .passes();
 
-    // Both should be mentioned in output
+    // Both should be mentioned in output (match final "Pipeline ... completed" lines,
+    // not step progress lines like "execute completed (0s)")
     let stdout = result.stdout();
+    let pipeline_completed_count = stdout
+        .lines()
+        .filter(|l| l.starts_with("Pipeline") && l.contains("completed"))
+        .count();
     assert_eq!(
-        stdout.matches("completed").count(),
-        2,
+        pipeline_completed_count, 2,
         "should report both pipelines as completed, got: {}",
         stdout
     );

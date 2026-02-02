@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::{parse_duration, status_group};
-use oj_daemon::PipelineSummary;
+use super::{parse_duration, print_step_progress, status_group, StepTracker};
+use oj_daemon::{PipelineDetail, PipelineSummary, StepRecordDetail};
+use std::collections::HashMap;
 use std::time::Duration;
 
 #[test]
@@ -154,4 +155,197 @@ fn sort_order_most_recent_first_within_group() {
 
     assert_eq!(pipelines[0].id, "new");
     assert_eq!(pipelines[1].id, "old");
+}
+
+fn make_detail(name: &str, steps: Vec<StepRecordDetail>) -> PipelineDetail {
+    PipelineDetail {
+        id: "abc12345".into(),
+        name: name.into(),
+        kind: "pipeline".into(),
+        step: "build".into(),
+        step_status: "Running".into(),
+        vars: HashMap::new(),
+        workspace_path: None,
+        session_id: None,
+        error: None,
+        steps,
+        agents: vec![],
+        namespace: String::new(),
+    }
+}
+
+fn make_step(name: &str, outcome: &str, started: u64, finished: Option<u64>) -> StepRecordDetail {
+    StepRecordDetail {
+        name: name.into(),
+        started_at_ms: started,
+        finished_at_ms: finished,
+        outcome: outcome.into(),
+        detail: None,
+        agent_id: None,
+    }
+}
+
+fn output_string(buf: &[u8]) -> String {
+    String::from_utf8_lossy(buf).to_string()
+}
+
+#[test]
+fn step_progress_no_steps() {
+    let detail = make_detail("test", vec![]);
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    assert_eq!(output_string(&buf), "");
+    assert_eq!(tracker.printed_count, 0);
+}
+
+#[test]
+fn step_progress_single_running() {
+    let detail = make_detail("test", vec![make_step("plan", "running", 1000, None)]);
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    assert_eq!(output_string(&buf), "plan started\n");
+    assert!(tracker.printed_started);
+    assert_eq!(tracker.printed_count, 0);
+}
+
+#[test]
+fn step_progress_single_completed() {
+    let detail = make_detail(
+        "test",
+        vec![make_step("init", "completed", 1000, Some(1000))],
+    );
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    assert_eq!(output_string(&buf), "init completed (0s)\n");
+    assert_eq!(tracker.printed_count, 1);
+}
+
+#[test]
+fn step_progress_skipped_running() {
+    // Step goes directly from not-present to completed (fast step)
+    let detail = make_detail(
+        "test",
+        vec![make_step("push", "completed", 5000, Some(5500))],
+    );
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    // Should print only "completed", not "started" then "completed"
+    assert_eq!(output_string(&buf), "push completed (0s)\n");
+    assert_eq!(tracker.printed_count, 1);
+}
+
+#[test]
+fn step_progress_multiple_steps_one_poll() {
+    let detail = make_detail(
+        "test",
+        vec![
+            make_step("init", "completed", 1000, Some(1000)),
+            make_step("plan", "completed", 1000, Some(165000)),
+        ],
+    );
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    let out = output_string(&buf);
+    assert!(out.contains("init completed (0s)\n"));
+    assert!(out.contains("plan completed (2m 44s)\n"));
+    assert_eq!(tracker.printed_count, 2);
+}
+
+#[test]
+fn step_progress_failed_with_detail() {
+    let mut step = make_step("implement", "failed", 1000, Some(453000));
+    step.detail = Some("shell exit code: 2".into());
+    let detail = make_detail("test", vec![step]);
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    assert_eq!(
+        output_string(&buf),
+        "implement failed (7m 32s) - shell exit code: 2\n"
+    );
+}
+
+#[test]
+fn step_progress_multi_pipeline_prefix() {
+    let detail = make_detail(
+        "auto-start-worker",
+        vec![make_step("init", "completed", 1000, Some(1000))],
+    );
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, true, &mut buf);
+    assert_eq!(
+        output_string(&buf),
+        "[auto-start-worker] init completed (0s)\n"
+    );
+}
+
+#[test]
+fn step_progress_idempotent_repolling() {
+    let detail = make_detail(
+        "test",
+        vec![make_step("init", "completed", 1000, Some(1000))],
+    );
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+
+    let mut buf = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf);
+    assert_eq!(output_string(&buf), "init completed (0s)\n");
+
+    // Second poll with same state should produce no output
+    let mut buf2 = Vec::new();
+    print_step_progress(&detail, &mut tracker, false, &mut buf2);
+    assert_eq!(output_string(&buf2), "");
+}
+
+#[test]
+fn step_progress_running_then_completed() {
+    // First poll: step is running
+    let detail1 = make_detail("test", vec![make_step("plan", "running", 1000, None)]);
+    let mut tracker = StepTracker {
+        printed_count: 0,
+        printed_started: false,
+    };
+    let mut buf = Vec::new();
+    print_step_progress(&detail1, &mut tracker, false, &mut buf);
+    assert_eq!(output_string(&buf), "plan started\n");
+
+    // Second poll: step completed
+    let detail2 = make_detail(
+        "test",
+        vec![make_step("plan", "completed", 1000, Some(165000))],
+    );
+    let mut buf2 = Vec::new();
+    print_step_progress(&detail2, &mut tracker, false, &mut buf2);
+    assert_eq!(output_string(&buf2), "plan completed (2m 44s)\n");
+    assert_eq!(tracker.printed_count, 1);
 }
