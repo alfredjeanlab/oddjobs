@@ -16,6 +16,17 @@ command "deploy" {
 }
 "#;
 
+const CMD_RUNBOOK_B: &str = r#"
+command "build" {
+  args = "<name> <instructions>"
+  run  = "echo build"
+}
+
+command "test" {
+  run  = "echo test"
+}
+"#;
+
 const WORKER_RUNBOOK: &str = r#"
 queue "jobs" {
   type = "external"
@@ -162,4 +173,39 @@ fn multiple_invalid_runbooks_lists_all_paths() {
     assert!(msg.contains("2 runbook(s) skipped"), "got: {msg}");
     assert!(msg.contains("bad1.hcl"), "got: {msg}");
     assert!(msg.contains("bad2.hcl"), "got: {msg}");
+}
+
+#[test]
+fn collect_all_commands_multiple_files() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "deploy.hcl", CMD_RUNBOOK);
+    write_hcl(tmp.path(), "build.hcl", CMD_RUNBOOK_B);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    let names: Vec<&str> = commands.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["build", "deploy", "test"]);
+}
+
+#[test]
+fn collect_all_commands_empty_dir() {
+    let tmp = TempDir::new().unwrap();
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert!(commands.is_empty());
+}
+
+#[test]
+fn collect_all_commands_missing_dir() {
+    let commands = collect_all_commands(Path::new("/nonexistent")).unwrap();
+    assert!(commands.is_empty());
+}
+
+#[test]
+fn collect_all_commands_skips_invalid() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "bad.hcl", "this is not valid HCL {{{}}}");
+    write_hcl(tmp.path(), "deploy.hcl", CMD_RUNBOOK);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "deploy");
 }

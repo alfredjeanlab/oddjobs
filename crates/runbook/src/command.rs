@@ -337,6 +337,36 @@ fn parse_flag_names(flag_part: &str) -> Result<(Option<char>, String), ArgSpecEr
 }
 
 impl ArgSpec {
+    /// Format as a usage string, e.g. "<name> <instructions> [--base <branch>]"
+    pub fn usage_line(&self) -> String {
+        let mut parts = Vec::new();
+        for arg in &self.positional {
+            if arg.required {
+                parts.push(format!("<{}>", arg.name));
+            } else {
+                parts.push(format!("[{}]", arg.name));
+            }
+        }
+        if let Some(v) = &self.variadic {
+            if v.required {
+                parts.push(format!("<{}...>", v.name));
+            } else {
+                parts.push(format!("[{}...]", v.name));
+            }
+        }
+        for opt in &self.options {
+            if opt.required {
+                parts.push(format!("--{} <{}>", opt.name, opt.name));
+            } else {
+                parts.push(format!("[--{} <{}>]", opt.name, opt.name));
+            }
+        }
+        for flag in &self.flags {
+            parts.push(format!("[--{}]", flag.name));
+        }
+        parts.join(" ")
+    }
+
     /// Get all positional argument names in order
     pub fn positional_names(&self) -> Vec<&str> {
         self.positional.iter().map(|a| a.name.as_str()).collect()
@@ -467,6 +497,9 @@ pub struct CommandDef {
     /// Command name (e.g., "build", "test")
     #[serde(default)]
     pub name: String,
+    /// Short description for help text (e.g., "Run a build pipeline")
+    #[serde(default)]
+    pub description: Option<String>,
     /// Argument specification
     #[serde(default)]
     pub args: ArgSpec,

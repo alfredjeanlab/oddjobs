@@ -14,7 +14,7 @@ use crate::client::DaemonClient;
 #[derive(Args)]
 pub struct RunArgs {
     /// Command to run (e.g., "build")
-    pub command: String,
+    pub command: Option<String>,
 
     /// Positional arguments for the command
     #[arg(trailing_var_arg = true)]
@@ -76,6 +76,35 @@ pub fn prevalidate_command(
     Ok(runbook)
 }
 
+fn print_available_commands(project_root: &Path) -> Result<()> {
+    let runbook_dir = project_root.join(".oj/runbooks");
+    let commands = oj_runbook::collect_all_commands(&runbook_dir).unwrap_or_default();
+
+    eprintln!("Usage: oj run <COMMAND> [ARGS]...");
+    eprintln!();
+
+    if !commands.is_empty() {
+        eprintln!("Available Commands:");
+        for (name, cmd) in &commands {
+            let args_str = cmd.args.usage_line();
+            let line = if args_str.is_empty() {
+                name.to_string()
+            } else {
+                format!("{name} {args_str}")
+            };
+            if let Some(desc) = &cmd.description {
+                eprintln!("  {line:<40} {desc}");
+            } else {
+                eprintln!("  {line}");
+            }
+        }
+        eprintln!();
+    }
+
+    eprintln!("For more information, try '--help'.");
+    std::process::exit(2);
+}
+
 pub async fn handle(
     args: RunArgs,
     client: &DaemonClient,
@@ -83,11 +112,15 @@ pub async fn handle(
     invoke_dir: &Path,
     namespace: &str,
 ) -> Result<()> {
+    let Some(ref command) = args.command else {
+        return print_available_commands(project_root);
+    };
+
     // Prevalidate locally for fast feedback
-    let runbook = prevalidate_command(project_root, &args.command, args.runbook.as_deref())?;
+    let runbook = prevalidate_command(project_root, command, args.runbook.as_deref())?;
     // Safe: prevalidate_command already verified the command exists
-    let Some(cmd_def) = runbook.get_command(&args.command) else {
-        bail!("command not found: {}", args.command);
+    let Some(cmd_def) = runbook.get_command(command) else {
+        bail!("command not found: {}", command);
     };
 
     // Pre-extract any -a/--arg entries from trailing args (clap's trailing_var_arg
@@ -113,14 +146,14 @@ pub async fn handle(
             project_root,
             invoke_dir,
             namespace,
-            &args.command,
+            command,
             &positional,
             &named,
         )
         .await?;
 
     let short_id = &pipeline_id[..12.min(pipeline_id.len())];
-    println!("Command {} invoked.", args.command);
+    println!("Command {} invoked.", command);
     println!("Waiting for pipeline to start... (Ctrl+C to skip)");
     println!();
 

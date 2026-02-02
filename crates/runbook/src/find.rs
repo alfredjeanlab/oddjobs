@@ -44,6 +44,40 @@ pub fn find_runbook_by_queue(runbook_dir: &Path, name: &str) -> Result<Option<Ru
     find_runbook(runbook_dir, name, |rb| rb.get_queue(name).is_some())
 }
 
+/// Scan `.oj/runbooks/` and collect all command definitions.
+/// Returns a sorted vec of (command_name, CommandDef) pairs.
+/// Skips runbooks that fail to parse (logs warnings).
+pub fn collect_all_commands(
+    runbook_dir: &Path,
+) -> Result<Vec<(String, crate::CommandDef)>, FindError> {
+    if !runbook_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let files = collect_runbook_files(runbook_dir)?;
+    let mut commands = Vec::new();
+    for (path, format) in files {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
+                continue;
+            }
+        };
+        let runbook = match parse_runbook_with_format(&content, format) {
+            Ok(rb) => rb,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
+                continue;
+            }
+        };
+        for (name, cmd) in runbook.commands {
+            commands.push((name, cmd));
+        }
+    }
+    commands.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(commands)
+}
+
 fn find_runbook(
     runbook_dir: &Path,
     name: &str,
