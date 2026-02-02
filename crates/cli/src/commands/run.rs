@@ -120,6 +120,7 @@ pub async fn handle(
         .await?;
 
     let short_id = &pipeline_id[..12.min(pipeline_id.len())];
+    println!("Project: {namespace}");
     println!("Command {} invoked.", args.command);
     println!("Waiting for pipeline to start... (Ctrl+C to skip)");
     println!();
