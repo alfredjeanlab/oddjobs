@@ -78,7 +78,12 @@ where
                 // Create workspace directory
                 let pipeline_id_str = pipeline_id.as_str();
                 let nonce = &pipeline_id_str[..8.min(pipeline_id_str.len())];
-                let workspace_id = format!("ws-{}-{}", pipeline_name, nonce);
+                let ws_name = pipeline_name.strip_prefix("oj-").unwrap_or(&pipeline_name);
+                let workspace_id = if ws_name.ends_with(nonce) {
+                    format!("ws-{}", ws_name)
+                } else {
+                    format!("ws-{}-{}", ws_name, nonce)
+                };
 
                 // Compute workspace path from OJ_STATE_DIR
                 let state_dir = std::env::var("OJ_STATE_DIR").unwrap_or_else(|_| {
