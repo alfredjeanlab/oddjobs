@@ -68,7 +68,10 @@ async fn main() {
         let code = e
             .downcast_ref::<exit_error::ExitError>()
             .map_or(1, |c| c.code);
-        eprintln!("Error: {}", format_error(&e));
+        let msg = format_error(&e);
+        if !msg.is_empty() {
+            eprintln!("Error: {}", msg);
+        }
         std::process::exit(code);
     }
 }
