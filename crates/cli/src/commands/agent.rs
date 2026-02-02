@@ -25,6 +25,24 @@ pub struct AgentArgs {
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
+    /// List agents across all pipelines
+    List {
+        /// Filter by pipeline ID (or prefix)
+        #[arg(long)]
+        pipeline: Option<String>,
+
+        /// Filter by status (e.g. "running", "completed", "failed", "waiting")
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Maximum number of agents to show (default: 20)
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+
+        /// Show all agents (no limit)
+        #[arg(long, conflicts_with = "limit")]
+        no_limit: bool,
+    },
     /// Send a message to a running agent
     Send {
         /// Agent ID or pipeline ID (or prefix)
@@ -91,6 +109,55 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
+        AgentCommand::List {
+            pipeline,
+            status,
+            limit,
+            no_limit,
+        } => {
+            let agents = client
+                .list_agents(pipeline.as_deref(), status.as_deref())
+                .await?;
+
+            let total = agents.len();
+            let display_limit = if no_limit { total } else { limit };
+            let agents: Vec<_> = agents.into_iter().take(display_limit).collect();
+            let remaining = total.saturating_sub(display_limit);
+
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&agents)?);
+                }
+                OutputFormat::Text => {
+                    if agents.is_empty() {
+                        println!("No agents found");
+                    } else {
+                        println!(
+                            "{:<12} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                            "AGENT_ID", "PIPELINE", "STEP", "STATUS", "READ", "WRITE", "CMDS"
+                        );
+                        for a in &agents {
+                            println!(
+                                "{:<12} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                                truncate(&a.agent_id, 12),
+                                truncate(&a.pipeline_id, 12),
+                                truncate(&a.step_name, 16),
+                                truncate(&a.status, 10),
+                                a.files_read,
+                                a.files_written,
+                                a.commands_run,
+                            );
+                        }
+                    }
+                    if remaining > 0 {
+                        println!(
+                            "\n... {} more not shown. Use --no-limit or -n N to see more.",
+                            remaining
+                        );
+                    }
+                }
+            }
+        }
         AgentCommand::Send { agent_id, message } => {
             client.agent_send(&agent_id, &message).await?;
             println!("Sent to agent {}", agent_id);
@@ -116,6 +183,15 @@ pub async fn handle(
     }
 
     Ok(())
+}
+
+/// Truncate a string to at most `max` characters for columnar display.
+fn truncate(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        s
+    } else {
+        &s[..max]
+    }
 }
 
 /// Resolve the OJ state directory from environment or default.

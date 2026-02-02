@@ -76,7 +76,7 @@ pub(super) fn handle_query(
                     .collect();
 
                 // Compute agent summaries from log files
-                let agents = compute_agent_summaries(&steps, logs_path);
+                let agents = compute_agent_summaries(&p.id, &steps, logs_path);
 
                 Box::new(PipelineDetail {
                     id: p.id.clone(),
@@ -282,6 +282,62 @@ pub(super) fn handle_query(
             )
         }
 
+        Query::ListAgents {
+            pipeline_id,
+            status,
+        } => {
+            let mut agents: Vec<AgentSummary> = Vec::new();
+
+            for p in state.pipelines.values() {
+                if let Some(ref prefix) = pipeline_id {
+                    if !p.id.starts_with(prefix.as_str()) {
+                        continue;
+                    }
+                }
+
+                let steps: Vec<StepRecordDetail> = p
+                    .step_history
+                    .iter()
+                    .map(|r| StepRecordDetail {
+                        name: r.name.clone(),
+                        started_at_ms: r.started_at_ms,
+                        finished_at_ms: r.finished_at_ms,
+                        outcome: match &r.outcome {
+                            StepOutcome::Running => "running".to_string(),
+                            StepOutcome::Completed => "completed".to_string(),
+                            StepOutcome::Failed(_) => "failed".to_string(),
+                            StepOutcome::Waiting(_) => "waiting".to_string(),
+                        },
+                        detail: match &r.outcome {
+                            StepOutcome::Failed(e) => Some(e.clone()),
+                            StepOutcome::Waiting(r) => Some(r.clone()),
+                            _ => None,
+                        },
+                        agent_id: r.agent_id.clone(),
+                    })
+                    .collect();
+
+                let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path);
+
+                if let Some(ref s) = status {
+                    summaries.retain(|a| a.status == *s);
+                }
+
+                agents.extend(summaries);
+            }
+
+            // Sort: running agents first, then by pipeline_id (most recent first)
+            agents.sort_by(|a, b| {
+                let a_running = a.status == "running";
+                let b_running = b.status == "running";
+                b_running
+                    .cmp(&a_running)
+                    .then_with(|| b.pipeline_id.cmp(&a.pipeline_id))
+            });
+
+            Response::Agents { agents }
+        }
+
         Query::ListWorkers => {
             let workers = state
                 .workers
@@ -301,7 +357,11 @@ pub(super) fn handle_query(
 }
 
 /// Compute agent summaries from step records by scanning agent log files.
-fn compute_agent_summaries(steps: &[StepRecordDetail], logs_path: &Path) -> Vec<AgentSummary> {
+fn compute_agent_summaries(
+    pipeline_id: &str,
+    steps: &[StepRecordDetail],
+    logs_path: &Path,
+) -> Vec<AgentSummary> {
     use oj_engine::log_paths::agent_log_path;
 
     steps
@@ -354,6 +414,7 @@ fn compute_agent_summaries(steps: &[StepRecordDetail], logs_path: &Path) -> Vec<
             };
 
             Some(AgentSummary {
+                pipeline_id: pipeline_id.to_string(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
                 status: step.outcome.clone(),

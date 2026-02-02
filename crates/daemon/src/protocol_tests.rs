@@ -174,6 +174,76 @@ fn encode_decode_workers_response() {
 }
 
 #[test]
+fn encode_decode_list_agents_query() {
+    let request = Request::Query {
+        query: Query::ListAgents {
+            pipeline_id: Some("pipe-".to_string()),
+            status: Some("running".to_string()),
+        },
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn encode_decode_list_agents_query_no_filters() {
+    let request = Request::Query {
+        query: Query::ListAgents {
+            pipeline_id: None,
+            status: None,
+        },
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn encode_decode_agents_response() {
+    let response = Response::Agents {
+        agents: vec![AgentSummary {
+            pipeline_id: "pipe-abc".to_string(),
+            step_name: "build".to_string(),
+            agent_id: "agent-123".to_string(),
+            status: "running".to_string(),
+            files_read: 10,
+            files_written: 3,
+            commands_run: 5,
+            exit_reason: None,
+        }],
+    };
+
+    let encoded = encode(&response).expect("encode failed");
+    let decoded: Response = decode(&encoded).expect("decode failed");
+
+    assert_eq!(response, decoded);
+}
+
+#[test]
+fn encode_decode_agents_response_empty() {
+    let response = Response::Agents { agents: vec![] };
+
+    let encoded = encode(&response).expect("encode failed");
+    let decoded: Response = decode(&encoded).expect("decode failed");
+
+    assert_eq!(response, decoded);
+}
+
+#[test]
+fn agent_summary_pipeline_id_default() {
+    // Verify serde default works for pipeline_id (backward compat)
+    let json = r#"{"step_name":"build","agent_id":"a1","status":"running","files_read":0,"files_written":0,"commands_run":0,"exit_reason":null}"#;
+    let summary: AgentSummary = serde_json::from_str(json).expect("deserialize failed");
+    assert_eq!(summary.pipeline_id, "");
+    assert_eq!(summary.step_name, "build");
+}
+
+#[test]
 fn encode_decode_roundtrip_agent_send() {
     let request = Request::AgentSend {
         agent_id: "abc-123".to_string(),

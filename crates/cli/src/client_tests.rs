@@ -3,9 +3,9 @@
 
 //! Tests for daemon client behavior.
 
-use super::{
-    cleanup_stale_socket, daemon_dir, log_connection_error, probe_socket, ClientError, DaemonClient,
-};
+use super::{ClientError, DaemonClient};
+use crate::client_lifecycle::log_connection_error;
+use crate::daemon_process::{cleanup_stale_socket, daemon_dir, probe_socket};
 use serial_test::serial;
 use std::fs;
 use tempfile::tempdir;

@@ -4,6 +4,7 @@
 //! oj - Odd Jobs CLI
 
 mod client;
+mod client_lifecycle;
 mod commands;
 mod daemon_process;
 mod exit_error;

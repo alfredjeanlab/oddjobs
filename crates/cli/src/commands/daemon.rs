@@ -3,7 +3,8 @@
 
 //! `oj daemon` - Daemon management commands
 
-use crate::client::{daemon_stop, DaemonClient};
+use crate::client::DaemonClient;
+use crate::client_lifecycle::daemon_stop;
 use crate::output::{display_log, OutputFormat};
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};

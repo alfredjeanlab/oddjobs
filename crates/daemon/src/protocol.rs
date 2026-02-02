@@ -186,6 +186,15 @@ pub enum Query {
         #[serde(default)]
         namespace: String,
     },
+    /// List agents across all pipelines
+    ListAgents {
+        /// Filter by pipeline ID prefix
+        #[serde(default)]
+        pipeline_id: Option<String>,
+        /// Filter by status (e.g. "running", "completed", "failed", "waiting")
+        #[serde(default)]
+        status: Option<String>,
+    },
     /// List all workers and their status
     ListWorkers,
 }
@@ -216,6 +225,9 @@ pub enum Response {
     Pipeline {
         pipeline: Option<Box<PipelineDetail>>,
     },
+
+    /// List of agents
+    Agents { agents: Vec<AgentSummary> },
 
     /// List of sessions
     Sessions { sessions: Vec<SessionSummary> },
@@ -367,6 +379,9 @@ pub struct StepRecordDetail {
 /// Summary of agent activity for a pipeline step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentSummary {
+    /// Pipeline that owns this agent
+    #[serde(default)]
+    pub pipeline_id: String,
     /// Step name that spawned this agent
     pub step_name: String,
     /// Agent instance ID
