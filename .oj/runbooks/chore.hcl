@@ -23,7 +23,7 @@ queue "chores" {
 worker "chore" {
   source      = { queue = "chores" }
   handler     = { pipeline = "chore" }
-  concurrency = 1
+  concurrency = 3
 }
 
 pipeline "chore" {

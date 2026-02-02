@@ -26,7 +26,7 @@ queue "bugs" {
 worker "fix" {
   source      = { queue = "bugs" }
   handler     = { pipeline = "fix" }
-  concurrency = 1
+  concurrency = 3
 }
 
 pipeline "fix" {
