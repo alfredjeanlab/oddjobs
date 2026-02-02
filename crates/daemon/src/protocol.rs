@@ -417,6 +417,8 @@ pub struct WorkspaceSummary {
     pub status: String,
     #[serde(default)]
     pub created_at_ms: u64,
+    #[serde(default)]
+    pub namespace: String,
 }
 
 /// Detailed workspace information

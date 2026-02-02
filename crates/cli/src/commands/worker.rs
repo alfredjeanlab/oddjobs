@@ -69,19 +69,75 @@ pub async fn handle(
                             if workers.is_empty() {
                                 println!("No workers found");
                             } else {
-                                println!(
-                                    "{:<20} {:<15} {:<10} {:<8} CONCURRENCY",
-                                    "NAME", "QUEUE", "STATUS", "ACTIVE"
-                                );
-                                for w in &workers {
+                                // Determine whether to show PROJECT column
+                                let namespaces: std::collections::HashSet<&str> =
+                                    workers.iter().map(|w| w.namespace.as_str()).collect();
+                                let show_project = namespaces.len() > 1
+                                    || namespaces.iter().any(|n| !n.is_empty());
+
+                                // Compute dynamic column widths from data
+                                let name_w = workers
+                                    .iter()
+                                    .map(|w| w.name.len())
+                                    .max()
+                                    .unwrap_or(4)
+                                    .max(4);
+                                let proj_w = if show_project {
+                                    workers
+                                        .iter()
+                                        .map(|w| w.namespace.len())
+                                        .max()
+                                        .unwrap_or(7)
+                                        .max(7)
+                                } else {
+                                    0
+                                };
+                                let queue_w = workers
+                                    .iter()
+                                    .map(|w| w.queue.len())
+                                    .max()
+                                    .unwrap_or(5)
+                                    .max(5);
+                                let status_w = workers
+                                    .iter()
+                                    .map(|w| w.status.len())
+                                    .max()
+                                    .unwrap_or(6)
+                                    .max(6);
+                                let active_w = 6; // "ACTIVE"
+
+                                if show_project {
                                     println!(
-                                        "{:<20} {:<15} {:<10} {:<8} {}",
-                                        &w.name[..w.name.len().min(20)],
-                                        &w.queue[..w.queue.len().min(15)],
-                                        &w.status,
-                                        w.active,
-                                        w.concurrency,
+                                        "{:<name_w$} {:<proj_w$} {:<queue_w$} {:<status_w$} {:<active_w$} CONCURRENCY",
+                                        "NAME", "PROJECT", "QUEUE", "STATUS", "ACTIVE",
                                     );
+                                } else {
+                                    println!(
+                                        "{:<name_w$} {:<queue_w$} {:<status_w$} {:<active_w$} CONCURRENCY",
+                                        "NAME", "QUEUE", "STATUS", "ACTIVE",
+                                    );
+                                }
+                                for w in &workers {
+                                    if show_project {
+                                        println!(
+                                            "{:<name_w$} {:<proj_w$} {:<queue_w$} {:<status_w$} {:<active_w$} {}",
+                                            &w.name[..w.name.len().min(name_w)],
+                                            &w.namespace[..w.namespace.len().min(proj_w)],
+                                            &w.queue[..w.queue.len().min(queue_w)],
+                                            &w.status,
+                                            w.active,
+                                            w.concurrency,
+                                        );
+                                    } else {
+                                        println!(
+                                            "{:<name_w$} {:<queue_w$} {:<status_w$} {:<active_w$} {}",
+                                            &w.name[..w.name.len().min(name_w)],
+                                            &w.queue[..w.queue.len().min(queue_w)],
+                                            &w.status,
+                                            w.active,
+                                            w.concurrency,
+                                        );
+                                    }
                                 }
                             }
                         }

@@ -125,12 +125,27 @@ pub(super) fn handle_query(
             let workspaces = state
                 .workspaces
                 .values()
-                .map(|w| WorkspaceSummary {
-                    id: w.id.clone(),
-                    path: w.path.clone(),
-                    branch: w.branch.clone(),
-                    status: w.status.to_string(),
-                    created_at_ms: w.created_at_ms,
+                .map(|w| {
+                    let namespace = w
+                        .owner
+                        .as_deref()
+                        .and_then(|owner| {
+                            // Try pipeline first, then worker
+                            state
+                                .pipelines
+                                .get(owner)
+                                .map(|p| p.namespace.clone())
+                                .or_else(|| state.workers.get(owner).map(|wr| wr.namespace.clone()))
+                        })
+                        .unwrap_or_default();
+                    WorkspaceSummary {
+                        id: w.id.clone(),
+                        path: w.path.clone(),
+                        branch: w.branch.clone(),
+                        status: w.status.to_string(),
+                        created_at_ms: w.created_at_ms,
+                        namespace,
+                    }
                 })
                 .collect();
             Response::Workspaces { workspaces }

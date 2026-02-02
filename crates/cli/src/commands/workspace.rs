@@ -81,20 +81,75 @@ pub async fn handle(
                     if workspaces.is_empty() {
                         println!("No workspaces");
                     } else {
-                        println!("{:<12} {:<40} {:<20} STATUS", "ID", "PATH", "BRANCH");
-                        for w in &workspaces {
+                        // Determine whether to show PROJECT column
+                        let namespaces: std::collections::HashSet<&str> =
+                            workspaces.iter().map(|w| w.namespace.as_str()).collect();
+                        let show_project =
+                            namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+
+                        // Compute dynamic column widths from data
+                        let id_w = workspaces
+                            .iter()
+                            .map(|w| w.id.len().min(12))
+                            .max()
+                            .unwrap_or(2)
+                            .max(2);
+                        let proj_w = if show_project {
+                            workspaces
+                                .iter()
+                                .map(|w| w.namespace.len())
+                                .max()
+                                .unwrap_or(7)
+                                .max(7)
+                        } else {
+                            0
+                        };
+                        let path_w = workspaces
+                            .iter()
+                            .map(|w| w.path.display().to_string().len())
+                            .max()
+                            .unwrap_or(4)
+                            .clamp(4, 60);
+                        let branch_w = workspaces
+                            .iter()
+                            .map(|w| w.branch.as_deref().unwrap_or("-").len())
+                            .max()
+                            .unwrap_or(6)
+                            .max(6);
+
+                        if show_project {
                             println!(
-                                "{:<12} {:<40} {:<20} {}",
-                                &w.id[..12.min(w.id.len())],
-                                w.path
-                                    .display()
-                                    .to_string()
-                                    .chars()
-                                    .take(40)
-                                    .collect::<String>(),
-                                w.branch.as_deref().unwrap_or("-"),
-                                w.status
+                                "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} STATUS",
+                                "ID", "PROJECT", "PATH", "BRANCH",
                             );
+                        } else {
+                            println!(
+                                "{:<id_w$} {:<path_w$} {:<branch_w$} STATUS",
+                                "ID", "PATH", "BRANCH",
+                            );
+                        }
+                        for w in &workspaces {
+                            let path_str: String =
+                                w.path.display().to_string().chars().take(path_w).collect();
+                            let branch = w.branch.as_deref().unwrap_or("-");
+                            if show_project {
+                                println!(
+                                    "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
+                                    &w.id[..id_w.min(w.id.len())],
+                                    &w.namespace[..proj_w.min(w.namespace.len())],
+                                    path_str,
+                                    branch,
+                                    w.status
+                                );
+                            } else {
+                                println!(
+                                    "{:<id_w$} {:<path_w$} {:<branch_w$} {}",
+                                    &w.id[..id_w.min(w.id.len())],
+                                    path_str,
+                                    branch,
+                                    w.status
+                                );
+                            }
                         }
                     }
 
