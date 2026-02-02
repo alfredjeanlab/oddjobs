@@ -267,3 +267,48 @@ fn prepare_agent_settings_without_prime_no_session_start() {
 
     std::env::remove_var("OJ_STATE_DIR");
 }
+
+#[test]
+fn prepare_agent_settings_injects_notification_hooks() {
+    let state_dir = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    std::env::set_var("OJ_STATE_DIR", state_dir.path());
+
+    let agent_id = "test-notif-hooks";
+    let settings_path = prepare_agent_settings(agent_id, workspace.path(), None).unwrap();
+
+    let content = fs::read_to_string(&settings_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    // Notification hooks are present
+    assert!(parsed["hooks"]["Notification"].is_array());
+    let notif_hooks = parsed["hooks"]["Notification"].as_array().unwrap();
+    assert_eq!(notif_hooks.len(), 2);
+
+    // First hook: idle_prompt matcher
+    assert_eq!(notif_hooks[0]["matcher"], "idle_prompt");
+    let idle_hooks = notif_hooks[0]["hooks"].as_array().unwrap();
+    assert_eq!(idle_hooks.len(), 1);
+    assert_eq!(idle_hooks[0]["type"], "command");
+    let idle_cmd = idle_hooks[0]["command"].as_str().unwrap();
+    assert_eq!(idle_cmd, format!("oj emit agent:idle --agent {}", agent_id));
+
+    // Second hook: permission_prompt matcher
+    assert_eq!(notif_hooks[1]["matcher"], "permission_prompt");
+    let perm_hooks = notif_hooks[1]["hooks"].as_array().unwrap();
+    assert_eq!(perm_hooks.len(), 1);
+    assert_eq!(perm_hooks[0]["type"], "command");
+    let perm_cmd = perm_hooks[0]["command"].as_str().unwrap();
+    assert_eq!(
+        perm_cmd,
+        format!(
+            "oj emit agent:prompt --agent {} --type permission",
+            agent_id
+        )
+    );
+
+    // Stop hook is still present
+    assert!(parsed["hooks"]["Stop"].is_array());
+
+    std::env::remove_var("OJ_STATE_DIR");
+}

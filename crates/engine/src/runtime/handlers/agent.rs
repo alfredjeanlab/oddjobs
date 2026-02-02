@@ -7,7 +7,9 @@ use super::super::Runtime;
 use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentState, Clock, Effect, Event, PipelineId, SessionId, TimerId};
+use oj_core::{
+    AgentId, AgentState, Clock, Effect, Event, PipelineId, PromptType, SessionId, TimerId,
+};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -62,6 +64,89 @@ where
         };
         self.handle_monitor_state(&pipeline, &agent_def, MonitorState::from_agent_state(state))
             .await
+    }
+
+    /// Handle agent:idle from Notification hook
+    pub(crate) async fn handle_agent_idle_hook(
+        &self,
+        agent_id: &AgentId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let Some(pipeline_id) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+            tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
+            return Ok(vec![]);
+        };
+
+        let pipeline = self.require_pipeline(&pipeline_id)?;
+
+        // If pipeline already advanced or has a signal, ignore
+        if pipeline.is_terminal() || pipeline.agent_signal.is_some() {
+            return Ok(vec![]);
+        }
+
+        // Stale agent check
+        let current_agent_id = pipeline
+            .step_history
+            .iter()
+            .rfind(|r| r.name == pipeline.step)
+            .and_then(|r| r.agent_id.as_deref());
+        if current_agent_id != Some(agent_id.as_str()) {
+            tracing::debug!(
+                agent_id = %agent_id,
+                pipeline_id = %pipeline.id,
+                "dropping stale agent:idle (agent_id mismatch)"
+            );
+            return Ok(vec![]);
+        }
+
+        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
+        let agent_def = monitor::get_agent_def(&runbook, &pipeline)?.clone();
+        self.handle_monitor_state(&pipeline, &agent_def, MonitorState::WaitingForInput)
+            .await
+    }
+
+    /// Handle agent:prompt from Notification hook
+    pub(crate) async fn handle_agent_prompt_hook(
+        &self,
+        agent_id: &AgentId,
+        prompt_type: &PromptType,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let Some(pipeline_id) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+            tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
+            return Ok(vec![]);
+        };
+
+        let pipeline = self.require_pipeline(&pipeline_id)?;
+
+        // If pipeline already advanced or has a signal, ignore
+        if pipeline.is_terminal() || pipeline.agent_signal.is_some() {
+            return Ok(vec![]);
+        }
+
+        // Stale agent check
+        let current_agent_id = pipeline
+            .step_history
+            .iter()
+            .rfind(|r| r.name == pipeline.step)
+            .and_then(|r| r.agent_id.as_deref());
+        if current_agent_id != Some(agent_id.as_str()) {
+            tracing::debug!(
+                agent_id = %agent_id,
+                pipeline_id = %pipeline.id,
+                "dropping stale agent:prompt (agent_id mismatch)"
+            );
+            return Ok(vec![]);
+        }
+
+        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
+        let agent_def = monitor::get_agent_def(&runbook, &pipeline)?.clone();
+        self.handle_monitor_state(
+            &pipeline,
+            &agent_def,
+            MonitorState::Prompting {
+                prompt_type: prompt_type.clone(),
+            },
+        )
+        .await
     }
 
     /// Handle resume for agent step: nudge if alive, recover if dead

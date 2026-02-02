@@ -485,6 +485,19 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             });
         }
 
+        // Validate on_prompt action
+        let prompt_action = agent.on_prompt.action();
+        if !prompt_action.is_valid_for_trigger(ActionTrigger::OnPrompt) {
+            return Err(ParseError::InvalidFormat {
+                location: format!("agent.{}.on_prompt", agent_name),
+                message: format!(
+                    "action '{}' is not valid for on_prompt: {}",
+                    prompt_action.as_str(),
+                    prompt_action.invalid_reason(ActionTrigger::OnPrompt)
+                ),
+            });
+        }
+
         // Validate on_error action(s)
         for error_action in agent.on_error.all_actions() {
             if !error_action.is_valid_for_trigger(ActionTrigger::OnError) {

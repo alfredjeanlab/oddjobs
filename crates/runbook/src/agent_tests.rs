@@ -97,6 +97,7 @@ fn agent_build_command_with_prompt_field() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -120,6 +121,7 @@ fn agent_build_command_with_inline_prompt() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -143,6 +145,7 @@ fn agent_build_command_print_mode() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -170,6 +173,7 @@ fn agent_build_env() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -198,6 +202,7 @@ fn agent_get_prompt_from_field() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -225,6 +230,7 @@ fn agent_get_prompt_empty_when_unset() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -252,6 +258,7 @@ fn agent_get_prompt_from_file() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -279,6 +286,7 @@ fn agent_get_prompt_file_not_found() {
         prime: None,
         on_idle: ActionConfig::default(),
         on_dead: default_on_dead(),
+        on_prompt: default_on_prompt(),
         on_error: default_on_error(),
         notify: Default::default(),
     };
@@ -640,4 +648,60 @@ fn agent_notify_partial() {
     assert!(agent.notify.on_start.is_none());
     assert!(agent.notify.on_done.is_none());
     assert_eq!(agent.notify.on_fail.as_deref(), Some("Worker failed!"));
+}
+
+// =============================================================================
+// on_prompt Tests
+// =============================================================================
+
+#[test]
+fn on_prompt_defaults_to_escalate() {
+    let agent = AgentDef::default();
+    assert_eq!(agent.on_prompt.action(), &AgentAction::Escalate);
+}
+
+#[test]
+fn on_prompt_parses_simple() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+        on_prompt = "done"
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    assert_eq!(agent.on_prompt.action(), &AgentAction::Done);
+}
+
+#[test]
+fn on_prompt_parses_with_options() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+        on_prompt = { action = "gate", run = "check-permissions.sh" }
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    assert_eq!(agent.on_prompt.action(), &AgentAction::Gate);
+    assert_eq!(agent.on_prompt.run(), Some("check-permissions.sh"));
+}
+
+#[test]
+fn on_prompt_missing_defaults_to_escalate() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    assert_eq!(agent.on_prompt.action(), &AgentAction::Escalate);
+}
+
+#[test]
+fn on_prompt_trigger_validation() {
+    // Valid actions for OnPrompt
+    assert!(AgentAction::Escalate.is_valid_for_trigger(ActionTrigger::OnPrompt));
+    assert!(AgentAction::Done.is_valid_for_trigger(ActionTrigger::OnPrompt));
+    assert!(AgentAction::Fail.is_valid_for_trigger(ActionTrigger::OnPrompt));
+    assert!(AgentAction::Gate.is_valid_for_trigger(ActionTrigger::OnPrompt));
+
+    // Invalid actions for OnPrompt
+    assert!(!AgentAction::Nudge.is_valid_for_trigger(ActionTrigger::OnPrompt));
+    assert!(!AgentAction::Recover.is_valid_for_trigger(ActionTrigger::OnPrompt));
 }

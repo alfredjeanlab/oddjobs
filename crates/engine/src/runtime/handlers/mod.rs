@@ -84,6 +84,17 @@ where
                 );
             }
 
+            Event::AgentIdle { agent_id } => {
+                result_events.extend(self.handle_agent_idle_hook(agent_id).await?);
+            }
+
+            Event::AgentPrompt {
+                agent_id,
+                prompt_type,
+            } => {
+                result_events.extend(self.handle_agent_prompt_hook(agent_id, prompt_type).await?);
+            }
+
             Event::ShellExited {
                 pipeline_id,
                 step,

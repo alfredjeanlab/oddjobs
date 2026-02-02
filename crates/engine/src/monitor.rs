@@ -7,7 +7,9 @@
 //! appropriate actions (nudge, recover, escalate, etc.).
 
 use crate::RuntimeError;
-use oj_core::{AgentError, AgentState, Effect, Event, Pipeline, PipelineId, SessionId, TimerId};
+use oj_core::{
+    AgentError, AgentState, Effect, Event, Pipeline, PipelineId, PromptType, SessionId, TimerId,
+};
 use oj_runbook::{ActionConfig, AgentAction, AgentDef, ErrorType, RunDirective, Runbook};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -52,6 +54,8 @@ pub enum MonitorState {
     Working,
     /// Agent is idle, waiting for input
     WaitingForInput,
+    /// Agent is showing a prompt (permission, plan approval, etc.)
+    Prompting { prompt_type: PromptType },
     /// Agent encountered an error
     Failed {
         message: String,

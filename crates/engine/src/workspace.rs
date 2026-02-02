@@ -138,6 +138,28 @@ fn inject_hooks(settings: &mut Value, agent_id: &str, prime_path: Option<&Path>)
     // Always set the Stop hook (we control this settings file)
     hooks_obj.insert("Stop".to_string(), json!([stop_hook_entry]));
 
+    // Inject Notification hooks for instant state detection
+    let idle_hook_entry = json!({
+        "matcher": "idle_prompt",
+        "hooks": [{
+            "type": "command",
+            "command": format!("oj emit agent:idle --agent {}", agent_id)
+        }]
+    });
+
+    let permission_hook_entry = json!({
+        "matcher": "permission_prompt",
+        "hooks": [{
+            "type": "command",
+            "command": format!("oj emit agent:prompt --agent {} --type permission", agent_id)
+        }]
+    });
+
+    hooks_obj.insert(
+        "Notification".to_string(),
+        json!([idle_hook_entry, permission_hook_entry]),
+    );
+
     // Inject SessionStart hook if prime path is provided
     if let Some(path) = prime_path {
         let session_start_entry = json!({

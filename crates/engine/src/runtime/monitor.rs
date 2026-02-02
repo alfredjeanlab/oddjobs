@@ -183,6 +183,19 @@ where
                     .append(&pipeline.id, &pipeline.step, "agent idle");
                 (&agent_def.on_idle, "idle")
             }
+            MonitorState::Prompting { ref prompt_type } => {
+                tracing::info!(
+                    pipeline_id = %pipeline.id,
+                    prompt_type = ?prompt_type,
+                    "agent prompting (on_prompt)"
+                );
+                self.logger.append(
+                    &pipeline.id,
+                    &pipeline.step,
+                    &format!("agent prompt: {:?}", prompt_type),
+                );
+                (&agent_def.on_prompt, "prompt")
+            }
             MonitorState::Failed {
                 ref message,
                 ref error_type,

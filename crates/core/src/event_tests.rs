@@ -557,3 +557,88 @@ fn event_queue_item_dead_roundtrip() {
     let parsed: Event = serde_json::from_str(&json_str).expect("deserialize");
     assert_eq!(event, parsed);
 }
+
+// =============================================================================
+// AgentIdle / AgentPrompt Event Tests
+// =============================================================================
+
+#[test]
+fn event_agent_idle_roundtrip() {
+    let event = Event::AgentIdle {
+        agent_id: AgentId::new("hook-agent-1"),
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "agent:idle");
+    assert_eq!(json["agent_id"], "hook-agent-1");
+
+    let json_str = serde_json::to_string(&event).unwrap();
+    let parsed: Event = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(event, parsed);
+}
+
+#[test]
+fn event_agent_prompt_roundtrip() {
+    use super::PromptType;
+    let event = Event::AgentPrompt {
+        agent_id: AgentId::new("hook-agent-2"),
+        prompt_type: PromptType::Permission,
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "agent:prompt");
+    assert_eq!(json["agent_id"], "hook-agent-2");
+    assert_eq!(json["prompt_type"], "permission");
+
+    let json_str = serde_json::to_string(&event).unwrap();
+    let parsed: Event = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(event, parsed);
+}
+
+#[test]
+fn event_agent_prompt_all_types_roundtrip() {
+    use super::PromptType;
+    let types = vec![
+        PromptType::Permission,
+        PromptType::Idle,
+        PromptType::PlanApproval,
+        PromptType::Question,
+        PromptType::Other,
+    ];
+    for pt in types {
+        let event = Event::AgentPrompt {
+            agent_id: AgentId::new("a1"),
+            prompt_type: pt,
+        };
+        let json_str = serde_json::to_string(&event).unwrap();
+        let parsed: Event = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(event, parsed);
+    }
+}
+
+#[test]
+fn event_agent_prompt_default_type() {
+    // When prompt_type is missing, should default to Other
+    let json = r#"{"type":"agent:prompt","agent_id":"a1"}"#;
+    let parsed: Event = serde_json::from_str(json).unwrap();
+    if let Event::AgentPrompt { prompt_type, .. } = &parsed {
+        assert_eq!(prompt_type, &super::PromptType::Other);
+    } else {
+        panic!("expected AgentPrompt");
+    }
+}
+
+#[test]
+fn event_agent_idle_name() {
+    let event = Event::AgentIdle {
+        agent_id: AgentId::new("a1"),
+    };
+    assert_eq!(event.name(), "agent:idle");
+}
+
+#[test]
+fn event_agent_prompt_name() {
+    let event = Event::AgentPrompt {
+        agent_id: AgentId::new("a1"),
+        prompt_type: super::PromptType::Permission,
+    };
+    assert_eq!(event.name(), "agent:prompt");
+}

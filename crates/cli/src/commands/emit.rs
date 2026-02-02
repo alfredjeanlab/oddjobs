@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
-use oj_core::{AgentId, AgentSignalKind, Event};
+use oj_core::{AgentId, AgentSignalKind, Event, PromptType};
 use serde::Deserialize;
 use std::io::Read;
 
@@ -19,6 +19,8 @@ pub struct EmitArgs {
 }
 
 #[derive(Subcommand)]
+// Variant names match CLI subcommand names (agent:signal, agent:idle, agent:prompt)
+#[allow(clippy::enum_variant_names)]
 pub enum EmitCommand {
     /// Signal agent completion to the daemon
     #[command(name = "agent:signal")]
@@ -32,6 +34,22 @@ pub enum EmitCommand {
         #[arg(value_name = "JSON")]
         payload: Option<String>,
     },
+
+    /// Report agent idle (from Notification hook)
+    #[command(name = "agent:idle")]
+    AgentIdle {
+        #[arg(long = "agent")]
+        agent_id: String,
+    },
+
+    /// Report agent prompt (from Notification hook)
+    #[command(name = "agent:prompt")]
+    AgentPrompt {
+        #[arg(long = "agent")]
+        agent_id: String,
+        #[arg(long = "type", default_value = "other")]
+        prompt_type: String,
+    },
 }
 
 /// JSON payload structure for agent:signal command
@@ -41,6 +59,17 @@ struct AgentDonePayload {
     kind: AgentSignalKind,
     #[serde(default)]
     message: Option<String>,
+}
+
+/// Parse a prompt type string to PromptType enum
+fn parse_prompt_type(s: &str) -> PromptType {
+    match s {
+        "permission" => PromptType::Permission,
+        "idle" => PromptType::Idle,
+        "plan_approval" => PromptType::PlanApproval,
+        "question" => PromptType::Question,
+        _ => PromptType::Other,
+    }
 }
 
 pub async fn handle(
@@ -73,6 +102,24 @@ pub async fn handle(
                 message: payload.message,
             };
 
+            client.emit_event(event).await?;
+            Ok(())
+        }
+        EmitCommand::AgentIdle { agent_id } => {
+            let event = Event::AgentIdle {
+                agent_id: AgentId::new(agent_id),
+            };
+            client.emit_event(event).await?;
+            Ok(())
+        }
+        EmitCommand::AgentPrompt {
+            agent_id,
+            prompt_type,
+        } => {
+            let event = Event::AgentPrompt {
+                agent_id: AgentId::new(agent_id),
+                prompt_type: parse_prompt_type(&prompt_type),
+            };
             client.emit_event(event).await?;
             Ok(())
         }

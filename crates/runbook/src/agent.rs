@@ -144,6 +144,10 @@ pub struct AgentDef {
     #[serde(default = "default_on_dead", alias = "on_exit")]
     pub on_dead: ActionConfig,
 
+    /// What to do when agent shows a permission/approval prompt
+    #[serde(default = "default_on_prompt")]
+    pub on_prompt: ActionConfig,
+
     /// What to do on API errors (unauthorized, credits, network)
     #[serde(default = "default_on_error")]
     pub on_error: ErrorActionConfig,
@@ -259,9 +263,10 @@ impl ActionConfig {
 /// Trigger contexts for agent actions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActionTrigger {
-    OnIdle,  // Agent waiting for input (still running)
-    OnDead,  // Agent process exited
-    OnError, // API error occurred
+    OnIdle,   // Agent waiting for input (still running)
+    OnDead,   // Agent process exited
+    OnError,  // API error occurred
+    OnPrompt, // Agent showing a permission/approval prompt
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -315,6 +320,11 @@ impl AgentAction {
                 self,
                 AgentAction::Fail | AgentAction::Escalate | AgentAction::Gate
             ),
+            // on_prompt: agent at a prompt, can't nudge or recover
+            ActionTrigger::OnPrompt => matches!(
+                self,
+                AgentAction::Done | AgentAction::Escalate | AgentAction::Fail | AgentAction::Gate
+            ),
         }
     }
 
@@ -335,6 +345,12 @@ impl AgentAction {
             }
             (AgentAction::Done, ActionTrigger::OnError) => {
                 "done marks success; API errors are not success states"
+            }
+            (AgentAction::Nudge, ActionTrigger::OnPrompt) => {
+                "nudge sends a message; agent is at a prompt, not idle"
+            }
+            (AgentAction::Recover, ActionTrigger::OnPrompt) => {
+                "recover is for re-spawning after exit; agent is still running"
             }
             _ => "action not allowed for this trigger",
         }
@@ -411,6 +427,10 @@ fn default_on_dead() -> ActionConfig {
     ActionConfig::Simple(AgentAction::Escalate)
 }
 
+fn default_on_prompt() -> ActionConfig {
+    ActionConfig::Simple(AgentAction::Escalate)
+}
+
 fn default_on_error() -> ErrorActionConfig {
     ErrorActionConfig::default()
 }
@@ -427,6 +447,7 @@ impl Default for AgentDef {
             prime: None,
             on_idle: ActionConfig::default(),
             on_dead: default_on_dead(),
+            on_prompt: default_on_prompt(),
             on_error: default_on_error(),
             notify: Default::default(),
         }

@@ -22,6 +22,21 @@ pub enum AgentSignalKind {
     Escalate,
 }
 
+/// Type of prompt the agent is showing
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptType {
+    Permission,
+    Idle,
+    PlanApproval,
+    Question,
+    Other,
+}
+
+fn default_prompt_type() -> PromptType {
+    PromptType::Other
+}
+
 fn is_empty_map<K, V>(map: &HashMap<K, V>) -> bool {
     map.is_empty()
 }
@@ -67,6 +82,18 @@ pub enum Event {
         /// Optional message explaining the signal
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+
+    /// Agent is idle (from Notification hook)
+    #[serde(rename = "agent:idle")]
+    AgentIdle { agent_id: AgentId },
+
+    /// Agent is showing a prompt (from Notification hook)
+    #[serde(rename = "agent:prompt")]
+    AgentPrompt {
+        agent_id: AgentId,
+        #[serde(default = "default_prompt_type")]
+        prompt_type: PromptType,
     },
 
     // -- command --
@@ -380,6 +407,8 @@ impl Event {
             Event::AgentGone { .. } => "agent:gone",
             Event::AgentInput { .. } => "agent:input",
             Event::AgentSignal { .. } => "agent:signal",
+            Event::AgentIdle { .. } => "agent:idle",
+            Event::AgentPrompt { .. } => "agent:prompt",
             Event::CommandRun { .. } => "command:run",
             Event::PipelineCreated { .. } => "pipeline:created",
             Event::PipelineAdvanced { .. } => "pipeline:advanced",
@@ -432,6 +461,11 @@ impl Event {
             Event::AgentSignal { agent_id, kind, .. } => {
                 format!("{t} id={agent_id} kind={kind:?}")
             }
+            Event::AgentIdle { agent_id } => format!("{t} agent={agent_id}"),
+            Event::AgentPrompt {
+                agent_id,
+                prompt_type,
+            } => format!("{t} agent={agent_id} prompt_type={prompt_type:?}"),
             Event::CommandRun {
                 pipeline_id,
                 command,

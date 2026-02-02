@@ -24,7 +24,7 @@ pub mod workspace;
 pub use agent::{AgentError, AgentId, AgentState};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use effect::Effect;
-pub use event::{AgentSignalKind, Event};
+pub use event::{AgentSignalKind, Event, PromptType};
 pub use id::{IdGen, SequentialIdGen, UuidIdGen};
 pub use pipeline::{Pipeline, PipelineConfig, PipelineId, StepOutcome, StepRecord, StepStatus};
 pub use session::SessionId;
