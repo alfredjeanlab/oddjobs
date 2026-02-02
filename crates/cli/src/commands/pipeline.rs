@@ -42,6 +42,10 @@ pub enum PipelineCommand {
     Show {
         /// Pipeline ID or name
         id: String,
+
+        /// Show full variable values without truncation
+        #[arg(long, short = 'v')]
+        verbose: bool,
     },
     /// Resume monitoring for an escalated pipeline
     Resume {
@@ -266,7 +270,7 @@ pub async fn handle(
                 }
             }
         }
-        PipelineCommand::Show { id } => {
+        PipelineCommand::Show { id, verbose } => {
             let pipeline = client.get_pipeline(&id).await?;
 
             match format {
@@ -339,8 +343,21 @@ pub async fn handle(
                         }
                         if !p.vars.is_empty() {
                             println!("  Vars:");
-                            for (k, v) in &p.vars {
-                                println!("    {}: {}", k, v);
+                            if verbose {
+                                for (k, v) in &p.vars {
+                                    if v.contains('\n') {
+                                        println!("    {}:", k);
+                                        for line in v.lines() {
+                                            println!("      {}", line);
+                                        }
+                                    } else {
+                                        println!("    {}: {}", k, v);
+                                    }
+                                }
+                            } else {
+                                for (k, v) in &p.vars {
+                                    println!("    {}: {}", k, format_var_value(v, 80));
+                                }
                             }
                         }
                     } else {
@@ -694,6 +711,16 @@ fn truncate(s: &str, max: usize) -> &str {
         s
     } else {
         &s[..max]
+    }
+}
+
+fn format_var_value(value: &str, max_len: usize) -> String {
+    let escaped = value.replace('\n', "\\n");
+    if escaped.chars().count() <= max_len {
+        escaped
+    } else {
+        let truncated: String = escaped.chars().take(max_len).collect();
+        format!("{}...", truncated)
     }
 }
 

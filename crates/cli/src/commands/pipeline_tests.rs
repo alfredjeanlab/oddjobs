@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::{parse_duration, print_step_progress, status_group, StepTracker};
+use super::{format_var_value, parse_duration, print_step_progress, status_group, StepTracker};
 use oj_daemon::{PipelineDetail, PipelineSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -348,4 +348,36 @@ fn step_progress_running_then_completed() {
     print_step_progress(&detail2, &mut tracker, false, &mut buf2);
     assert_eq!(output_string(&buf2), "plan completed (2m 44s)\n");
     assert_eq!(tracker.printed_count, 1);
+}
+
+#[test]
+fn format_var_short_value_unchanged() {
+    let value = "hello world";
+    assert_eq!(format_var_value(value, 80), "hello world");
+}
+
+#[test]
+fn format_var_long_value_truncated() {
+    let value = "a".repeat(100);
+    let result = format_var_value(&value, 80);
+    assert_eq!(result.len(), 83); // 80 + "..."
+    assert!(result.ends_with("..."));
+    assert!(result.starts_with("aaaa"));
+}
+
+#[test]
+fn format_var_newlines_escaped() {
+    let value = "line1\nline2\nline3";
+    assert_eq!(format_var_value(value, 80), "line1\\nline2\\nline3");
+}
+
+#[test]
+fn format_var_newlines_and_truncation() {
+    // Create a value with newlines that when escaped exceeds 80 chars
+    // Each \n becomes \\n (2 chars), so 40 'a' + 41 newlines = 40 + 82 = 122 escaped chars
+    let value = "a\n".repeat(40);
+    let result = format_var_value(&value, 80);
+    assert!(result.ends_with("..."));
+    // The truncated part should be exactly 80 chars
+    assert_eq!(result.chars().count(), 83); // 80 + "..."
 }
