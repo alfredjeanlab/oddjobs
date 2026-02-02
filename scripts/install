@@ -1,0 +1,27 @@
+#!/bin/bash
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+INSTALL_DIR="$HOME/.local/bin"
+
+# Ensure install directory exists
+mkdir -p "$INSTALL_DIR"
+
+# Build oj CLI and ojd daemon
+echo "Building oj and ojd..."
+cd "$ROOT_DIR"
+cargo build --release -p oj -p oj-daemon
+
+# Install to ~/.local/bin/
+echo "Installing to $INSTALL_DIR..."
+/bin/cp "$ROOT_DIR/target/release/oj" "$INSTALL_DIR/oj"
+/bin/cp "$ROOT_DIR/target/release/ojd" "$INSTALL_DIR/ojd"
+
+# Re-sign the binaries after copying (required on macOS for adhoc-signed binaries)
+if [[ "$(uname)" == "Darwin" ]]; then
+    codesign --force --sign - "$INSTALL_DIR/oj"
+    codesign --force --sign - "$INSTALL_DIR/ojd"
+fi
+
+echo "Done."

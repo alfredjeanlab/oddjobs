@@ -1,0 +1,260 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+//! Listener task for handling socket I/O.
+//!
+//! The Listener runs in a spawned task, accepting connections and
+//! handling them without blocking the engine loop. Events are emitted
+//! onto the EventBus for processing by the engine.
+
+mod commands;
+mod mutations;
+mod query;
+mod queues;
+mod tmux;
+mod workers;
+
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use std::time::Instant;
+
+use oj_core::Event;
+use oj_storage::MaterializedState;
+use thiserror::Error;
+use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::Notify;
+use tracing::{debug, error, warn};
+
+use crate::event_bus::EventBus;
+
+use crate::protocol::{self, Request, Response, DEFAULT_TIMEOUT, PROTOCOL_VERSION};
+
+/// Listener task for accepting socket connections.
+pub struct Listener {
+    socket: UnixListener,
+    event_bus: EventBus,
+    state: Arc<Mutex<MaterializedState>>,
+    logs_path: std::path::PathBuf,
+    start_time: Instant,
+    shutdown: Arc<Notify>,
+}
+
+/// Errors from connection handling.
+#[derive(Debug, Error)]
+pub enum ConnectionError {
+    #[error("Protocol error: {0}")]
+    Protocol(#[from] protocol::ProtocolError),
+
+    #[error("WAL error")]
+    WalError,
+}
+
+impl Listener {
+    /// Create a new listener.
+    pub fn new(
+        socket: UnixListener,
+        event_bus: EventBus,
+        state: Arc<Mutex<MaterializedState>>,
+        logs_path: std::path::PathBuf,
+        start_time: Instant,
+        shutdown: Arc<Notify>,
+    ) -> Self {
+        Self {
+            socket,
+            event_bus,
+            state,
+            logs_path,
+            start_time,
+            shutdown,
+        }
+    }
+
+    /// Run the listener loop until shutdown, spawning tasks for each connection.
+    pub async fn run(self) {
+        loop {
+            match self.socket.accept().await {
+                Ok((stream, _)) => {
+                    let event_bus = self.event_bus.clone();
+                    let state = Arc::clone(&self.state);
+                    let logs_path = self.logs_path.clone();
+                    let start_time = self.start_time;
+                    let shutdown = Arc::clone(&self.shutdown);
+
+                    tokio::spawn(async move {
+                        if let Err(e) = handle_connection(
+                            stream, event_bus, state, logs_path, start_time, shutdown,
+                        )
+                        .await
+                        {
+                            match e {
+                                ConnectionError::Protocol(
+                                    protocol::ProtocolError::ConnectionClosed,
+                                ) => debug!("Client disconnected"),
+                                ConnectionError::Protocol(protocol::ProtocolError::Timeout) => {
+                                    warn!("Connection timeout")
+                                }
+                                _ => error!("Connection error: {}", e),
+                            }
+                        }
+                    });
+                }
+                Err(e) => {
+                    error!("Accept error: {}", e);
+                }
+            }
+        }
+    }
+}
+
+/// Handle a single client connection.
+async fn handle_connection(
+    stream: UnixStream,
+    event_bus: EventBus,
+    state: Arc<Mutex<MaterializedState>>,
+    logs_path: std::path::PathBuf,
+    start_time: Instant,
+    shutdown: Arc<Notify>,
+) -> Result<(), ConnectionError> {
+    let (mut reader, mut writer) = stream.into_split();
+
+    // Read request with timeout
+    let request = protocol::read_request(&mut reader, DEFAULT_TIMEOUT).await?;
+
+    // Log queries at debug level (frequent polling), other requests at info
+    if matches!(request, Request::Query { .. }) {
+        debug!(request = ?request, "received query");
+    } else {
+        tracing::info!(request = ?request, "received request");
+    }
+
+    // Handle request
+    let response = handle_request(
+        request, &event_bus, &state, &logs_path, start_time, &shutdown,
+    )
+    .await?;
+
+    debug!("Sending response: {:?}", response);
+
+    // Write response with timeout
+    protocol::write_response(&mut writer, &response, DEFAULT_TIMEOUT).await?;
+
+    Ok(())
+}
+
+/// Handle a single request and return a response.
+async fn handle_request(
+    request: Request,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+    logs_path: &std::path::Path,
+    start_time: Instant,
+    shutdown: &Notify,
+) -> Result<Response, ConnectionError> {
+    match request {
+        Request::Ping => Ok(Response::Pong),
+
+        Request::Hello { version: _ } => Ok(Response::Hello {
+            version: PROTOCOL_VERSION.to_string(),
+        }),
+
+        Request::Event { event } => {
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
+            Ok(Response::Ok)
+        }
+
+        Request::Query { query } => Ok(query::handle_query(query, state, logs_path)),
+
+        Request::Shutdown { kill } => {
+            if kill {
+                tmux::kill_state_sessions(state).await;
+            }
+            shutdown.notify_one();
+            Ok(Response::ShuttingDown)
+        }
+
+        Request::Status => Ok(mutations::handle_status(state, start_time)),
+
+        Request::SessionSend { id, input } => {
+            mutations::handle_session_send(state, event_bus, id, input)
+        }
+
+        Request::PipelineResume { id, message, vars } => {
+            mutations::handle_pipeline_resume(event_bus, id, message, vars)
+        }
+
+        Request::PipelineCancel { ids } => mutations::handle_pipeline_cancel(state, event_bus, ids),
+
+        Request::RunCommand {
+            project_root,
+            invoke_dir,
+            command,
+            args,
+            named_args,
+        } => {
+            commands::handle_run_command(
+                &project_root,
+                &invoke_dir,
+                &command,
+                &args,
+                &named_args,
+                event_bus,
+                state,
+            )
+            .await
+        }
+
+        Request::PeekSession {
+            session_id,
+            with_color,
+        } => match tmux::capture_tmux_pane(&session_id, with_color).await {
+            Ok(output) => Ok(Response::SessionPeek { output }),
+            Err(message) => Ok(Response::Error { message }),
+        },
+
+        Request::WorkspaceDrop { id } => {
+            mutations::handle_workspace_drop(state, event_bus, Some(&id), false, false).await
+        }
+
+        Request::WorkspaceDropFailed => {
+            mutations::handle_workspace_drop(state, event_bus, None, true, false).await
+        }
+
+        Request::WorkspaceDropAll => {
+            mutations::handle_workspace_drop(state, event_bus, None, false, true).await
+        }
+
+        Request::WorkspacePrune { all, dry_run } => {
+            mutations::handle_workspace_prune(all, dry_run).await
+        }
+
+        Request::WorkerStart {
+            project_root,
+            worker_name,
+        } => workers::handle_worker_start(&project_root, &worker_name, event_bus),
+
+        Request::WorkerWake { worker_name } => {
+            // Internal-only: emits WorkerWake event for queue auto-wake.
+            // CLI uses WorkerStart (idempotent) instead.
+            let event = Event::WorkerWake { worker_name };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
+            Ok(Response::Ok)
+        }
+
+        Request::WorkerStop { worker_name } => workers::handle_worker_stop(&worker_name, event_bus),
+
+        Request::QueuePush {
+            project_root,
+            queue_name,
+            data,
+        } => queues::handle_queue_push(&project_root, &queue_name, data, event_bus, state),
+    }
+}
+
+#[cfg(test)]
+#[path = "../listener_tests.rs"]
+mod tests;

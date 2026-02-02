@@ -1,0 +1,48 @@
+[graph]
+# Only check dependencies for platforms we support (excludes Windows)
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+version = 2
+
+[licenses]
+version = 2
+unused-allowed-license = "allow"
+
+# ┌─────────────────────────────────────────────────────────────────────────────┐
+# │ WARNING: AI AGENTS MAY NOT MODIFY THIS LIST                                 │
+# │                                                                             │
+# │ Adding licenses requires human review and legal consideration.              │
+# │ If a dependency fails the license check, report it to a human maintainer.  │
+# │ DO NOT add new licenses to work around CI failures.                         │
+# └─────────────────────────────────────────────────────────────────────────────┘
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",  # OSI approved, FSF Free/Libre - used by foldhash (ratatui transitive dep)
+    "CDLA-Permissive-2.0",  # Linux Foundation data license - used by webpki-roots (CA cert data)
+]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+
+# Allow duplicate versions for crates where upstream ecosystem hasn't converged
+skip = [
+    # as needed
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

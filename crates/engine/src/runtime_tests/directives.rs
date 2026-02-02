@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+//! Run directive tests
+
+use super::*;
+
+/// Runbook with a command that uses shell run directive
+const RUNBOOK_SHELL_COMMAND: &str = r#"
+[command.shell_cmd]
+args = "<name>"
+run = "echo hello"
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+"#;
+
+#[tokio::test]
+async fn command_with_shell_directive_creates_pipeline() {
+    let ctx = setup_with_runbook(RUNBOOK_SHELL_COMMAND).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "shell_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    // Pipeline should be created with kind = command name
+    let pipeline = ctx.runtime.get_pipeline("pipe-1").unwrap();
+    assert_eq!(pipeline.kind, "shell_cmd");
+    assert_eq!(pipeline.step, "run");
+}
+
+#[tokio::test]
+async fn command_with_shell_directive_completes_on_exit() {
+    let mut ctx = setup_with_runbook(RUNBOOK_SHELL_COMMAND).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "shell_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    // Shell runs async - wait for ShellExited event
+    let event = ctx.event_rx.recv().await.unwrap();
+    assert!(matches!(event, Event::ShellExited { exit_code: 0, .. }));
+
+    // Process the ShellExited event - pipeline should auto-complete (no next step)
+    ctx.runtime.handle_event(event).await.unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline("pipe-1").unwrap();
+    assert_eq!(pipeline.step, "done");
+    assert!(pipeline.is_terminal());
+}
+
+/// Runbook with a command that uses args.* namespace interpolation in shell directive
+const RUNBOOK_SHELL_ARGS_NAMESPACE: &str = r#"
+[command.file_bug]
+args = "<description>"
+run = "test '${args.description}' = 'button broken'"
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+"#;
+
+#[tokio::test]
+async fn command_shell_directive_interpolates_args_namespace() {
+    let mut ctx = setup_with_runbook(RUNBOOK_SHELL_ARGS_NAMESPACE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "file_bug",
+            [("description".to_string(), "button broken".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    // The shell command `test '${args.description}' = 'button broken'` should succeed
+    // (exit 0) only if args.description was interpolated to "button broken".
+    // If interpolation fails, the literal text won't match and exit code will be non-zero.
+    let event = ctx.event_rx.recv().await.unwrap();
+    assert!(
+        matches!(event, Event::ShellExited { exit_code: 0, .. }),
+        "expected exit_code 0 (args.* interpolated), got: {event:?}"
+    );
+}
+
+/// Runbook with a command that uses input.* namespace (should NOT interpolate for commands)
+const RUNBOOK_SHELL_INPUTS_NAMESPACE: &str = r#"
+[command.file_bug]
+args = "<description>"
+run = "test '${input.description}' = 'button broken'"
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+"#;
+
+#[tokio::test]
+async fn command_shell_directive_does_not_interpolate_inputs_namespace() {
+    let mut ctx = setup_with_runbook(RUNBOOK_SHELL_INPUTS_NAMESPACE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "file_bug",
+            [("description".to_string(), "button broken".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    // The shell command uses ${input.description} which should NOT be interpolated
+    // for command args (only ${args.*} is valid). The literal `${input.description}`
+    // won't match `button broken`, so the test command exits non-zero.
+    let event = ctx.event_rx.recv().await.unwrap();
+    assert!(
+        matches!(event, Event::ShellExited { exit_code, .. } if exit_code != 0),
+        "expected non-zero exit (input.* should not interpolate), got: {event:?}"
+    );
+}
+
+/// Runbook with a command that uses agent run directive
+const RUNBOOK_AGENT_COMMAND: &str = r#"
+[command.agent_cmd]
+args = "<name>"
+run = { agent = "worker" }
+
+[agent.worker]
+run = 'claude'
+prompt = "Hello"
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+"#;
+
+#[tokio::test]
+async fn command_with_agent_directive_errors() {
+    let ctx = setup_with_runbook(RUNBOOK_AGENT_COMMAND).await;
+
+    let result = ctx
+        .runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("agent"));
+}
+
+/// Runbook with a step that uses pipeline run directive
+const RUNBOOK_PIPELINE_STEP: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = { pipeline = "nested" }
+
+[pipeline.nested]
+input  = []
+
+[[pipeline.nested.step]]
+name = "init"
+run = "echo nested"
+"#;
+
+#[tokio::test]
+async fn step_with_pipeline_directive_errors() {
+    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_STEP).await;
+
+    // This will error when it tries to start the init step
+    let result = ctx
+        .runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("nested pipeline"));
+}

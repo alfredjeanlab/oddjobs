@@ -1,0 +1,19 @@
+version = 1
+
+[rust]
+cfg_test_split = "require"
+
+[check.cloc]
+advice_test = """
+Can tests be parameterized using `yare` to be more concise?
+If not, split large test files into a {module}_tests/ folder.
+"""
+exclude = [
+    # ONLY for intentionally large fixture/test data
+    # NEVER for tests or source files
+]
+
+[check.license]
+check = "error"
+license = "BUSL-1.1"
+copyright = "Alfred Jean LLC"

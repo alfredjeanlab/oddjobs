@@ -1,0 +1,55 @@
+Business Source License 1.1
+
+Licensor: Alfred Jean LLC
+Licensed Software: Odd Jobs (oj)
+Change Date: 2029-01-01
+Change License: Apache License, Version 2.0
+
+-------------------------------------------------------------------------------
+GRANT OF RIGHTS
+
+Subject to the terms of this License, the Licensor grants you a non-exclusive,
+royalty-free right to use, copy, modify, and run the Licensed Software.
+
+-------------------------------------------------------------------------------
+RESTRICTIONS
+
+You may not use the Licensed Software for Commercial Use to:
+1. provide the software or its functionality to third parties as a hosted,
+   managed, or on-demand service; or
+2. embed or distribute the software as a material component of a product or
+   service made available to third parties.
+
+-------------------------------------------------------------------------------
+PERMITTED USE
+
+Notwithstanding the above, you may use the Licensed Software:
+1. for internal business purposes, including commercial software development,
+   testing, CI, tooling, and internal production use;
+2. for non-commercial purposes, including academic research, teaching, and
+   non-profit use;
+3. by consultants or software development agencies to perform professional
+   services for a client, provided the software is used only as an internal
+   tool and is not delivered, hosted, or made accessible to the client; and
+4. by employees, contractors, or agents acting on your behalf for the above
+   purposes.
+
+-------------------------------------------------------------------------------
+CHANGE LICENSE
+
+On the Change Date, this software will be made available under the Change License.
+
+-------------------------------------------------------------------------------
+DEFINITIONS
+
+Commercial Use: use primarily to generate revenue.
+Third Party: anyone other than you and your agents.
+Material Component: a component providing essential functionality.
+
+-------------------------------------------------------------------------------
+DISCLAIMER
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, OR NONINFRINGEMENT.
+

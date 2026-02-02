@@ -1,0 +1,29 @@
+[package]
+name = "oj-adapters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+test-support = []  # Enables FakeAdapter exports for other crates' tests
+
+[dependencies]
+oj-core = { path = "../core", version = "0.1.0" }
+async-trait.workspace = true
+dirs = "5.0"
+parking_lot.workspace = true
+notify = "6.1"
+rand = "0.9"
+serde_json = "1.0"
+thiserror.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+
+[dev-dependencies]
+serial_test = "3"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tempfile = "3"

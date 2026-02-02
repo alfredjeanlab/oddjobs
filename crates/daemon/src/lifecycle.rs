@@ -1,0 +1,557 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+//! Daemon lifecycle management: startup, shutdown, recovery.
+
+use std::fs::File;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+use std::time::Instant;
+
+use fs2::FileExt;
+use oj_adapters::{ClaudeAgentAdapter, SessionAdapter, TmuxAdapter, TracedAgent, TracedSession};
+use oj_core::{AgentId, Event, PipelineId, StepStatus, SystemClock};
+use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, Scheduler};
+use oj_storage::{MaterializedState, Snapshot, Wal};
+use thiserror::Error;
+use tokio::net::UnixListener;
+use tokio::sync::mpsc;
+use tracing::{info, warn};
+
+use crate::event_bus::{EventBus, EventReader};
+
+/// Daemon runtime with concrete adapter types (wrapped with tracing)
+pub type DaemonRuntime = Runtime<
+    TracedSession<TmuxAdapter>,
+    TracedAgent<ClaudeAgentAdapter<TracedSession<TmuxAdapter>>>,
+    SystemClock,
+>;
+
+/// Daemon configuration
+#[derive(Debug, Clone)]
+pub struct Config {
+    /// Path to Unix socket
+    pub socket_path: PathBuf,
+    /// Path to lock/PID file
+    pub lock_path: PathBuf,
+    /// Path to version file
+    pub version_path: PathBuf,
+    /// Path to daemon log file
+    pub log_path: PathBuf,
+    /// Path to WAL file
+    pub wal_path: PathBuf,
+    /// Path to snapshot file
+    pub snapshot_path: PathBuf,
+    /// Path to workspaces directory
+    pub workspaces_path: PathBuf,
+    /// Path to per-pipeline log files
+    pub logs_path: PathBuf,
+}
+
+impl Config {
+    /// Load configuration for the user-level daemon.
+    ///
+    /// Uses fixed paths under `~/.local/state/oj/` (or `$XDG_STATE_HOME/oj/`).
+    /// One daemon serves all projects for a user.
+    pub fn load() -> Result<Self, LifecycleError> {
+        let state_dir = state_dir()?;
+
+        Ok(Self {
+            socket_path: state_dir.join("daemon.sock"),
+            lock_path: state_dir.join("daemon.pid"),
+            version_path: state_dir.join("daemon.version"),
+            log_path: state_dir.join("daemon.log"),
+            wal_path: state_dir.join("wal").join("events.wal"),
+            snapshot_path: state_dir.join("snapshot.json"),
+            workspaces_path: state_dir.join("workspaces"),
+            logs_path: state_dir.join("logs"),
+        })
+    }
+}
+
+/// Daemon state during operation.
+///
+/// The listener is returned separately from startup to be spawned as a Listener task.
+pub struct DaemonState {
+    /// Configuration
+    pub config: Config,
+    // NOTE(lifetime): Held to maintain exclusive file lock; released on drop
+    #[allow(dead_code)]
+    lock_file: File,
+    /// Materialized state (shared with runtime and listener)
+    pub state: Arc<Mutex<MaterializedState>>,
+    /// Runtime for event processing (Arc for sharing with background reconciliation)
+    pub runtime: Arc<DaemonRuntime>,
+    /// Scheduler for timers (shared with runtime)
+    pub scheduler: Arc<Mutex<Scheduler>>,
+    /// Event bus for crash recovery
+    pub event_bus: EventBus,
+    /// When daemon started
+    pub start_time: Instant,
+}
+
+/// Result of daemon startup - includes both the daemon state and the listener.
+pub struct StartupResult {
+    /// The daemon state for event processing
+    pub daemon: DaemonState,
+    /// The Unix socket listener to spawn as a task
+    pub listener: UnixListener,
+    /// Event reader for the engine loop
+    pub event_reader: EventReader,
+    /// Context for running reconciliation as a background task
+    pub reconcile_ctx: ReconcileContext,
+}
+
+/// Data needed to run reconciliation as a background task.
+///
+/// Reconciliation is deferred until after READY is printed so the daemon
+/// is immediately responsive to CLI commands.
+pub struct ReconcileContext {
+    /// Runtime for agent recovery operations
+    pub runtime: Arc<DaemonRuntime>,
+    /// Snapshot of state at startup (avoids holding mutex during reconciliation)
+    pub state_snapshot: MaterializedState,
+    /// Session adapter for checking tmux liveness
+    pub session_adapter: TracedSession<TmuxAdapter>,
+    /// Channel for emitting events discovered during reconciliation
+    pub event_tx: mpsc::Sender<Event>,
+    /// Number of non-terminal pipelines to reconcile
+    pub pipeline_count: usize,
+}
+
+impl DaemonState {
+    /// Process an event through the runtime.
+    ///
+    /// Any events produced by the runtime (e.g., ShellExited) are fed back
+    /// into the event loop iteratively.
+    pub async fn process_event(&mut self, event: Event) -> Result<(), LifecycleError> {
+        // Apply the incoming event to materialized state so queries see it.
+        // (Effect::Emit events are also applied in the executor for immediate
+        // visibility; apply_event is idempotent so the second apply when those
+        // events return from the WAL is harmless.)
+        {
+            let mut state = self.state.lock();
+            state.apply_event(&event);
+        }
+
+        let mut pending_events = vec![event];
+
+        while let Some(event) = pending_events.pop() {
+            let result_events = self
+                .runtime
+                .handle_event(event)
+                .await
+                .map_err(|e| LifecycleError::Runtime(e.to_string()))?;
+
+            // Persist result events to WAL for crash recovery, then queue locally
+            for result_event in result_events {
+                if let Err(e) = self.event_bus.send(result_event.clone()) {
+                    warn!("Failed to persist runtime result event to WAL: {}", e);
+                }
+                pending_events.push(result_event);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Shutdown the daemon gracefully.
+    ///
+    /// Sessions (tmux) are intentionally preserved across daemon restarts so that
+    /// long-running agents continue processing. On next startup, `reconcile_state`
+    /// reconnects to surviving sessions. Use `Request::Shutdown { kill: true }` to
+    /// terminate all sessions before stopping (handled in the listener before
+    /// the shutdown signal is sent, so that kills complete before the CLI starts
+    /// its exit timer).
+    pub fn shutdown(&mut self) -> Result<(), LifecycleError> {
+        info!("Shutting down daemon...");
+
+        // 1. Remove socket file (listener task stops when tokio runtime exits)
+        if self.config.socket_path.exists() {
+            if let Err(e) = std::fs::remove_file(&self.config.socket_path) {
+                warn!("Failed to remove socket file: {}", e);
+            }
+        }
+
+        // 2. Remove PID file
+        if self.config.lock_path.exists() {
+            if let Err(e) = std::fs::remove_file(&self.config.lock_path) {
+                warn!("Failed to remove PID file: {}", e);
+            }
+        }
+
+        // 3. Remove version file
+        if self.config.version_path.exists() {
+            if let Err(e) = std::fs::remove_file(&self.config.version_path) {
+                warn!("Failed to remove version file: {}", e);
+            }
+        }
+
+        // 4. Lock file is released automatically when self.lock_file is dropped
+
+        info!("Daemon shutdown complete");
+        Ok(())
+    }
+}
+
+/// Lifecycle errors
+#[derive(Debug, Error)]
+pub enum LifecycleError {
+    #[error("Could not determine state directory")]
+    NoStateDir,
+
+    #[error("Failed to acquire lock: daemon already running?")]
+    LockFailed(#[source] std::io::Error),
+
+    #[error("Failed to bind socket at {0}: {1}")]
+    BindFailed(PathBuf, std::io::Error),
+
+    #[error("WAL error: {0}")]
+    Wal(#[from] oj_storage::WalError),
+
+    #[error("Snapshot error: {0}")]
+    Snapshot(#[from] oj_storage::SnapshotError),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Runtime error: {0}")]
+    Runtime(String),
+}
+
+/// Start the daemon
+pub async fn startup(config: &Config) -> Result<StartupResult, LifecycleError> {
+    match startup_inner(config).await {
+        Ok(result) => Ok(result),
+        Err(e) => {
+            // Clean up any resources created before failure
+            cleanup_on_failure(config);
+            Err(e)
+        }
+    }
+}
+
+/// Inner startup logic - cleanup_on_failure called if this fails
+async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError> {
+    // 1. Create state directory (needed for socket, lock, etc.)
+    if let Some(parent) = config.socket_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // 2. Acquire lock file FIRST - prevents races
+    let lock_file = File::create(&config.lock_path)?;
+    lock_file
+        .try_lock_exclusive()
+        .map_err(LifecycleError::LockFailed)?;
+
+    // Write PID to lock file
+    use std::io::Write;
+    let mut lock_file = lock_file;
+    writeln!(lock_file, "{}", std::process::id())?;
+    let lock_file = lock_file; // Drop mutability
+
+    // 3. Create directories
+    if let Some(parent) = config.socket_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    if let Some(parent) = config.wal_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::create_dir_all(&config.workspaces_path)?;
+
+    // Write version file
+    std::fs::write(
+        &config.version_path,
+        concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH")),
+    )?;
+
+    // 4. Load state from snapshot (if exists) and replay Wal
+    let (mut state, processed_seq) = match Snapshot::load(&config.snapshot_path)? {
+        Some(snapshot) => {
+            info!(
+                "Loaded snapshot at seq {}: {} pipelines, {} sessions, {} workspaces",
+                snapshot.seq,
+                snapshot.state.pipelines.len(),
+                snapshot.state.sessions.len(),
+                snapshot.state.workspaces.len()
+            );
+            (snapshot.state, snapshot.seq)
+        }
+        None => {
+            info!("No snapshot found, starting with empty state");
+            (MaterializedState::default(), 0)
+        }
+    };
+
+    // Open Wal and create EventBus
+    let event_wal = Wal::open(&config.wal_path, processed_seq)?;
+    let events_to_replay = event_wal.entries_after(processed_seq)?;
+    let (event_bus, event_reader) = EventBus::new(event_wal);
+    let replay_count = events_to_replay.len();
+    for entry in events_to_replay {
+        state.apply_event(&entry.event);
+    }
+
+    if replay_count > 0 {
+        info!(
+            "Replayed {} events from WAL after seq {}",
+            replay_count, processed_seq
+        );
+    }
+
+    info!(
+        "Recovered state: {} pipelines, {} sessions, {} workspaces",
+        state.pipelines.len(),
+        state.sessions.len(),
+        state.workspaces.len()
+    );
+
+    // 5. Set up adapters (wrapped with tracing for observability)
+    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    // Set up agent log extraction channel
+    let (log_entry_tx, log_entry_rx) = mpsc::channel(256);
+    let agent_adapter = TracedAgent::new(
+        ClaudeAgentAdapter::new(session_adapter.clone()).with_log_entry_tx(log_entry_tx),
+    );
+
+    // Spawn background task to write agent log entries
+    AgentLogger::spawn_writer(config.logs_path.clone(), log_entry_rx);
+
+    // 6. Create internal channel for runtime to emit events
+    // Events from this channel will be forwarded to the EventBus
+    let (internal_tx, internal_rx) = mpsc::channel::<Event>(100);
+    spawn_runtime_event_forwarder(internal_rx, event_bus.clone());
+
+    // 7. Remove stale socket and bind (LAST - only after all validation passes)
+    if config.socket_path.exists() {
+        std::fs::remove_file(&config.socket_path)?;
+    }
+    let listener = UnixListener::bind(&config.socket_path)
+        .map_err(|e| LifecycleError::BindFailed(config.socket_path.clone(), e))?;
+
+    // 8. Wrap state in Arc<Mutex>
+    let state = Arc::new(Mutex::new(state));
+    let scheduler = Arc::new(Mutex::new(Scheduler::new()));
+
+    // 9. Create runtime (runbook loaded on-demand per project)
+    let runtime = Arc::new(Runtime::new(
+        RuntimeDeps {
+            sessions: session_adapter.clone(),
+            agents: agent_adapter,
+            state: Arc::clone(&state),
+        },
+        SystemClock,
+        RuntimeConfig {
+            workspaces_root: config.workspaces_path.clone(),
+            log_dir: config.logs_path.clone(),
+        },
+        internal_tx.clone(),
+    ));
+
+    // 10. Prepare reconciliation context (will run as background task after READY)
+    //
+    // Clone state to avoid holding the mutex during async reconciliation,
+    // which also locks state internally (lock_state_mut) — holding the lock here
+    // would deadlock.
+    let state_snapshot = {
+        let state_guard = state.lock();
+        state_guard.clone()
+    };
+    let pipeline_count = state_snapshot
+        .pipelines
+        .values()
+        .filter(|p| !p.is_terminal())
+        .count();
+
+    info!("Daemon started");
+
+    Ok(StartupResult {
+        daemon: DaemonState {
+            config: config.clone(),
+            lock_file,
+            state,
+            runtime: Arc::clone(&runtime),
+            scheduler,
+            event_bus,
+            start_time: Instant::now(),
+        },
+        listener,
+        event_reader,
+        reconcile_ctx: ReconcileContext {
+            runtime,
+            state_snapshot,
+            session_adapter,
+            event_tx: internal_tx,
+            pipeline_count,
+        },
+    })
+}
+
+/// Spawn task to forward runtime events to the event bus.
+///
+/// The runtime uses an mpsc channel internally. This task reads from that
+/// channel and forwards events to the EventBus for durability.
+///
+/// After draining each batch of events, flushes the WAL to ensure durability.
+/// This eliminates the 10ms group-commit window for engine-produced events,
+/// making crash recovery reliable.
+fn spawn_runtime_event_forwarder(mut rx: mpsc::Receiver<Event>, event_bus: EventBus) {
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            if event_bus.send(event).is_err() {
+                tracing::warn!("Failed to forward runtime event to WAL");
+                continue;
+            }
+
+            // Drain any additional buffered events before flushing
+            while let Ok(event) = rx.try_recv() {
+                if event_bus.send(event).is_err() {
+                    tracing::warn!("Failed to forward runtime event to WAL");
+                }
+            }
+
+            // Flush the batch to disk
+            if let Err(e) = event_bus.flush() {
+                tracing::error!("Failed to flush runtime events: {}", e);
+            }
+        }
+    });
+}
+
+/// Clean up resources on startup failure
+fn cleanup_on_failure(config: &Config) {
+    // Remove socket if we created it
+    if config.socket_path.exists() {
+        let _ = std::fs::remove_file(&config.socket_path);
+    }
+
+    // Remove version file
+    if config.version_path.exists() {
+        let _ = std::fs::remove_file(&config.version_path);
+    }
+
+    // Remove PID/lock file
+    if config.lock_path.exists() {
+        let _ = std::fs::remove_file(&config.lock_path);
+    }
+}
+
+/// Reconcile persisted state with actual world state after daemon restart.
+///
+/// For each non-terminal pipeline, checks whether its tmux session and agent
+/// process are still alive, then either reconnects monitoring or triggers
+/// appropriate exit handling through the event channel.
+pub(crate) async fn reconcile_state(
+    runtime: &DaemonRuntime,
+    state: &MaterializedState,
+    sessions: &TracedSession<TmuxAdapter>,
+    event_tx: &mpsc::Sender<Event>,
+) {
+    let non_terminal: Vec<_> = state
+        .pipelines
+        .values()
+        .filter(|p| !p.is_terminal())
+        .collect();
+
+    if non_terminal.is_empty() {
+        return;
+    }
+
+    info!("Reconciling {} non-terminal pipelines", non_terminal.len());
+
+    for pipeline in &non_terminal {
+        // Skip pipelines in Waiting status — already escalated to human
+        if pipeline.step_status == StepStatus::Waiting {
+            info!(
+                pipeline_id = %pipeline.id,
+                "skipping Waiting pipeline (already escalated)"
+            );
+            continue;
+        }
+
+        // Determine the tmux session ID
+        let Some(session_id) = &pipeline.session_id else {
+            warn!(pipeline_id = %pipeline.id, "no session_id, skipping");
+            continue;
+        };
+
+        // Check tmux session liveness
+        let is_alive = sessions.is_alive(session_id).await.unwrap_or(false);
+
+        if is_alive {
+            let is_running = sessions
+                .is_process_running(session_id, "claude")
+                .await
+                .unwrap_or(false);
+
+            if is_running {
+                // Case 1: tmux alive + agent running → reconnect watcher
+                info!(
+                    pipeline_id = %pipeline.id,
+                    session_id,
+                    "recovering: agent still running, reconnecting watcher"
+                );
+                if let Err(e) = runtime.recover_agent(pipeline).await {
+                    warn!(
+                        pipeline_id = %pipeline.id,
+                        error = %e,
+                        "failed to recover agent, triggering exit"
+                    );
+                    let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+                    let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+                }
+            } else {
+                // Case 2: tmux alive, agent dead → trigger on_dead
+                info!(
+                    pipeline_id = %pipeline.id,
+                    session_id,
+                    "recovering: agent exited while daemon was down"
+                );
+                let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+                // Register mapping so handle_agent_state_changed can find it
+                runtime.register_agent_pipeline(
+                    agent_id.clone(),
+                    PipelineId::new(pipeline.id.to_string()),
+                );
+                let _ = event_tx
+                    .send(Event::AgentExited {
+                        agent_id,
+                        exit_code: None,
+                    })
+                    .await;
+            }
+        } else {
+            // Case 3: tmux dead → trigger session gone
+            info!(
+                pipeline_id = %pipeline.id,
+                session_id,
+                "recovering: tmux session died while daemon was down"
+            );
+            let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+            runtime.register_agent_pipeline(agent_id.clone(), PipelineId::new(pipeline.id.clone()));
+            let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+        }
+    }
+}
+
+/// Get the state directory for oj
+fn state_dir() -> Result<PathBuf, LifecycleError> {
+    // OJ_STATE_DIR takes priority (used by tests for isolation)
+    if let Ok(dir) = std::env::var("OJ_STATE_DIR") {
+        return Ok(PathBuf::from(dir));
+    }
+
+    // Fall back to XDG_STATE_HOME/oj or ~/.local/state/oj
+    if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
+        return Ok(PathBuf::from(xdg).join("oj"));
+    }
+
+    let home = std::env::var("HOME").map_err(|_| LifecycleError::NoStateDir)?;
+    Ok(PathBuf::from(home).join(".local/state/oj"))
+}
+
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod tests;

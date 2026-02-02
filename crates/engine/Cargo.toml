@@ -1,0 +1,29 @@
+[package]
+name = "oj-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+oj-core = { path = "../core", version = "0.1.0" }
+oj-runbook = { path = "../runbook", version = "0.1.0" }
+oj-storage = { path = "../storage", version = "0.1.0" }
+oj-adapters = { path = "../adapters", version = "0.1.0" }
+async-trait.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
+dirs.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing = "0.1"
+uuid.workspace = true
+notify-rust.workspace = true
+
+[dev-dependencies]
+oj-adapters = { path = "../adapters", version = "0.1.0", features = ["test-support"] }
+tempfile.workspace = true

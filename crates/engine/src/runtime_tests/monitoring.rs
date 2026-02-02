@@ -1,0 +1,628 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+//! Agent monitoring timer and event handler tests
+
+use super::*;
+use oj_core::{AgentSignalKind, PipelineId, TimerId};
+
+/// Helper: create a pipeline and advance it to the "plan" agent step.
+///
+/// Returns (pipeline_id, session_id, agent_id).
+async fn setup_pipeline_at_agent_step(ctx: &TestContext) -> (String, String, AgentId) {
+    let pipeline_id = create_pipeline(ctx).await;
+
+    // Advance past init (shell) to plan (agent)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let session_id = pipeline.session_id.clone().unwrap();
+    let agent_id = get_agent_id(ctx, &pipeline_id).unwrap();
+
+    (pipeline_id, session_id, agent_id)
+}
+
+// =============================================================================
+// Liveness timer happy paths
+// =============================================================================
+
+#[tokio::test]
+async fn liveness_timer_reschedules_when_session_alive() {
+    let ctx = setup().await;
+    let (pipeline_id, session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+
+    // Register the session as alive in the fake adapter
+    ctx.sessions.add_session(&session_id, true);
+
+    // Fire the liveness timer
+    let result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    // Liveness check when alive produces no events (just reschedules the timer)
+    assert!(result.is_empty());
+
+    // Verify the liveness timer was rescheduled (not an exit-deferred timer)
+    let scheduler = ctx.runtime.executor.scheduler();
+    let mut sched = scheduler.lock();
+    assert!(sched.has_timers());
+    ctx.clock.advance(std::time::Duration::from_secs(3600));
+    let fired = sched.fired_timers(ctx.clock.now());
+    let timer_ids: Vec<&str> = fired
+        .iter()
+        .filter_map(|e| match e {
+            Event::TimerStart { id } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(timer_ids.contains(&TimerId::liveness(&PipelineId::new(pipeline_id.clone())).as_str()));
+    assert!(!timer_ids.iter().any(|id| id.starts_with("exit-deferred:")));
+}
+
+#[tokio::test]
+async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
+    let ctx = setup().await;
+    let (pipeline_id, _session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+
+    // Don't add the session to FakeSessionAdapter — is_alive returns false for unknown sessions
+
+    // Fire the liveness timer
+    let result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    // Dead session produces no direct events (schedules deferred exit timer)
+    assert!(result.is_empty());
+
+    // Verify a deferred exit timer was scheduled
+    let scheduler = ctx.runtime.executor.scheduler();
+    let mut sched = scheduler.lock();
+    assert!(sched.has_timers());
+    ctx.clock.advance(std::time::Duration::from_secs(3600));
+    let fired = sched.fired_timers(ctx.clock.now());
+    let timer_ids: Vec<&str> = fired
+        .iter()
+        .filter_map(|e| match e {
+            Event::TimerStart { id } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        timer_ids.contains(&TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())).as_str())
+    );
+}
+
+// =============================================================================
+// Deferred exit timer happy paths
+// =============================================================================
+
+#[tokio::test]
+async fn exit_deferred_timer_noop_when_pipeline_terminal() {
+    let ctx = setup().await;
+    let (pipeline_id, _session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+
+    // Fail the pipeline to make it terminal
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "plan".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.is_terminal());
+
+    // Deferred exit on a terminal pipeline should be a no-op
+    let result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty());
+}
+
+/// Runbook with agent on_idle = done, on_dead = done, on_error = "fail"
+const RUNBOOK_MONITORING: &str = r#"
+[command.build]
+args = "<name> <prompt>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input  = ["name", "prompt"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+on_done = "plan"
+
+[[pipeline.build.step]]
+name = "plan"
+run = { agent = "planner" }
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[agent.planner]
+run = "claude --print"
+on_idle = "done"
+on_dead = "done"
+on_error = "fail"
+"#;
+
+#[tokio::test]
+async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
+    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance to agent step
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Set agent state to WaitingForInput
+    ctx.agents
+        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+
+    // Fire the deferred exit timer
+    let _result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    // With on_idle = done, pipeline should advance past the agent step
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+}
+
+#[tokio::test]
+async fn exit_deferred_timer_on_error_when_agent_failed() {
+    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance to agent step
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Set agent state to Failed
+    ctx.agents.set_agent_state(
+        &agent_id,
+        oj_core::AgentState::Failed(oj_core::AgentError::Other("test error".to_string())),
+    );
+
+    // Fire the deferred exit timer
+    let _result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    // With on_error = fail, pipeline should be failed
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "failed");
+}
+
+#[tokio::test]
+async fn exit_deferred_timer_on_dead_for_exited_state() {
+    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance to agent step
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Set agent state to Exited (maps to on_dead fallback)
+    ctx.agents.set_agent_state(
+        &agent_id,
+        oj_core::AgentState::Exited { exit_code: Some(0) },
+    );
+
+    // Fire the deferred exit timer
+    let _result = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+        })
+        .await
+        .unwrap();
+
+    // With on_dead = done, pipeline should advance
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+}
+
+// =============================================================================
+// Agent state event handling
+// =============================================================================
+
+#[tokio::test]
+async fn agent_state_changed_unknown_agent_is_noop() {
+    let ctx = setup().await;
+
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: AgentId::new("unknown-agent".to_string()),
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty());
+}
+
+#[tokio::test]
+async fn agent_state_changed_terminal_pipeline_is_noop() {
+    let ctx = setup().await;
+    let (pipeline_id, _session_id, agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+
+    // Fail the pipeline to make it terminal
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "plan".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.is_terminal());
+
+    // AgentWaiting for terminal pipeline should be a no-op
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentWaiting { agent_id })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty());
+}
+
+#[tokio::test]
+async fn agent_state_changed_routes_through_agent_pipelines() {
+    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance to agent step (which calls spawn_agent, populating agent_pipelines)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Emit AgentWaiting (on_idle = done → advance)
+    let _result = ctx
+        .runtime
+        .handle_event(Event::AgentWaiting { agent_id })
+        .await
+        .unwrap();
+
+    // on_idle = done should advance the pipeline
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+}
+
+// =============================================================================
+// on_idle gate + agent:signal complete interaction
+// =============================================================================
+
+/// Runbook with on_idle = gate (failing command)
+const RUNBOOK_GATE_IDLE_FAIL: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = { agent = "worker" }
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[agent.worker]
+run = 'claude'
+prompt = "Test"
+on_idle = { action = "gate", run = "false" }
+"#;
+
+#[tokio::test]
+async fn gate_idle_escalates_when_command_fails() {
+    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Agent goes idle, on_idle gate runs "false" which fails → escalate
+    ctx.agents
+        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    // Gate failed → escalate → Waiting status (pipeline does NOT advance)
+    assert_eq!(pipeline.step, "work");
+    assert_eq!(pipeline.step_status, StepStatus::Waiting);
+}
+
+#[tokio::test]
+async fn agent_signal_complete_overrides_gate_escalation() {
+    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Agent goes idle → on_idle gate "false" fails → pipeline escalated to Waiting
+    ctx.agents
+        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+    assert_eq!(pipeline.step_status, StepStatus::Waiting);
+
+    // Agent signals complete — this should override the gate escalation
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Complete,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    // Signal should produce events (pipeline advances)
+    assert!(!result.is_empty());
+
+    // Pipeline should have advanced past "work" to "done"
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+}
+
+#[tokio::test]
+async fn agent_signal_complete_advances_pipeline() {
+    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Pipeline is at "work" step, agent is running (no idle yet)
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+    assert_eq!(pipeline.step_status, StepStatus::Running);
+
+    // Agent signals complete before going idle — pipeline advances immediately
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Complete,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(!result.is_empty());
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+}
+
+// =============================================================================
+// Stale agent event filtering
+// =============================================================================
+
+#[tokio::test]
+async fn stale_agent_event_dropped_after_pipeline_advances() {
+    // Use the default TEST_RUNBOOK which has: init (shell) → plan (agent) → execute (agent)
+    let ctx = setup().await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance past init (shell) to plan (agent)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    // Capture the old agent_id from the "plan" step
+    let old_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Advance from plan to execute (another agent step)
+    ctx.runtime.advance_pipeline(&pipeline).await.unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "execute");
+
+    let new_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    assert_ne!(old_agent_id.as_str(), new_agent_id.as_str());
+
+    // Send a stale AgentWaiting event from the OLD agent — should be a no-op
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: old_agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty());
+
+    // Pipeline should still be at "execute", not affected by the stale event
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "execute");
+}
+
+#[tokio::test]
+async fn stale_agent_signal_dropped_after_pipeline_advances() {
+    let ctx = setup().await;
+    let pipeline_id = create_pipeline(&ctx).await;
+
+    // Advance past init (shell) to plan (agent)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "plan");
+
+    let old_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // Advance from plan to execute
+    ctx.runtime.advance_pipeline(&pipeline).await.unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "execute");
+
+    // Send a stale AgentSignal::Complete from the OLD agent — should be a no-op
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: old_agent_id.clone(),
+            kind: AgentSignalKind::Complete,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty());
+
+    // Pipeline should still be at "execute"
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "execute");
+}

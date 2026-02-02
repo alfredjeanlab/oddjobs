@@ -1,0 +1,368 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+use super::*;
+use crate::session::{FakeSessionAdapter, SessionCall};
+use oj_core::AgentId;
+use std::path::PathBuf;
+use tempfile::TempDir;
+use tokio::sync::mpsc;
+
+#[tokio::test]
+async fn spawn_rejects_nonexistent_cwd() {
+    let sessions = FakeSessionAdapter::default();
+    let adapter = ClaudeAgentAdapter::new(sessions);
+    let (tx, _rx) = mpsc::channel(10);
+
+    let project_dir = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+
+    let config = AgentSpawnConfig {
+        agent_id: AgentId::new("test-agent-1"),
+        agent_name: "claude".to_string(),
+        command: "claude code".to_string(),
+        env: vec![],
+        workspace_path: workspace_dir.path().to_path_buf(),
+        cwd: Some(PathBuf::from("/nonexistent/path")),
+        prompt: "Test prompt".to_string(),
+        pipeline_name: "test-pipeline".to_string(),
+        pipeline_id: "pipe-1".to_string(),
+        project_root: project_dir.path().to_path_buf(),
+    };
+
+    let result = adapter.spawn(config, tx).await;
+
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("working directory does not exist"),
+        "Expected error about working directory, got: {}",
+        err
+    );
+}
+
+#[test]
+fn test_prepare_workspace() {
+    let project_dir = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+
+    prepare_workspace(workspace_dir.path(), project_dir.path()).unwrap();
+
+    // Workspace directory should exist
+    assert!(workspace_dir.path().exists());
+
+    // Should NOT write a CLAUDE.md (prompt is passed via CLI arg)
+    let claude_md = workspace_dir.path().join("CLAUDE.md");
+    assert!(!claude_md.exists());
+}
+
+#[test]
+fn test_prepare_workspace_copies_settings() {
+    let project_dir = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+
+    // Create project settings
+    let settings_dir = project_dir.path().join(".claude");
+    fs::create_dir_all(&settings_dir).unwrap();
+    fs::write(settings_dir.join("settings.json"), r#"{"key": "value"}"#).unwrap();
+
+    prepare_workspace(workspace_dir.path(), project_dir.path()).unwrap();
+
+    let copied_settings = workspace_dir.path().join(".claude/settings.local.json");
+    assert!(copied_settings.exists());
+}
+
+#[test]
+fn test_augment_command_adds_allow_flag() {
+    let cmd = "claude --dangerously-skip-permissions";
+    let result = augment_command_for_skip_permissions(cmd);
+    assert_eq!(
+        result,
+        "claude --dangerously-skip-permissions --allow-dangerously-skip-permissions"
+    );
+}
+
+#[test]
+fn test_augment_command_no_change_when_allow_present() {
+    let cmd = "claude --dangerously-skip-permissions --allow-dangerously-skip-permissions";
+    let result = augment_command_for_skip_permissions(cmd);
+    assert_eq!(result, cmd);
+}
+
+#[test]
+fn test_augment_command_no_change_without_skip_flag() {
+    let cmd = "claude --print";
+    let result = augment_command_for_skip_permissions(cmd);
+    assert_eq!(result, cmd);
+}
+
+#[tokio::test]
+async fn test_handle_bypass_permissions_prompt_accepts() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    // Simulate the bypass permissions prompt output
+    sessions.set_output(
+        "test-session",
+        vec![
+            "WARNING: Claude Code running in Bypass Permissions mode".to_string(),
+            "".to_string(),
+            "❯ 1. No, exit".to_string(),
+            "  2. Yes, I accept".to_string(),
+        ],
+    );
+
+    let result = handle_bypass_permissions_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, BypassPromptResult::Accepted);
+
+    // Verify "2" was sent to accept
+    let calls = sessions.calls();
+    let send_calls: Vec<_> = calls
+        .iter()
+        .filter_map(|c| match c {
+            SessionCall::Send { id, input } => Some((id.clone(), input.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(send_calls.len(), 1);
+    assert_eq!(send_calls[0], ("test-session".to_string(), "2".to_string()));
+}
+
+#[tokio::test]
+async fn test_handle_bypass_permissions_prompt_not_present() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    // Simulate normal Claude startup (no prompt)
+    sessions.set_output("test-session", vec!["Claude Code is ready.".to_string()]);
+
+    let result = handle_bypass_permissions_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, BypassPromptResult::NotPresent);
+
+    // Verify no send was called
+    let calls = sessions.calls();
+    let send_calls: Vec<_> = calls
+        .iter()
+        .filter(|c| matches!(c, SessionCall::Send { .. }))
+        .collect();
+    assert!(send_calls.is_empty());
+}
+
+#[tokio::test]
+async fn test_handle_workspace_trust_prompt_accepts() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    // Simulate the workspace trust prompt output
+    sessions.set_output(
+        "test-session",
+        vec![
+            "Accessing workspace:".to_string(),
+            "/Users/test/project".to_string(),
+            "".to_string(),
+            "❯ 1. Yes, I trust this folder".to_string(),
+            "  2. No, exit".to_string(),
+        ],
+    );
+
+    let result = handle_workspace_trust_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, WorkspaceTrustResult::Accepted);
+
+    // Verify "1" was sent to trust
+    let calls = sessions.calls();
+    let send_calls: Vec<_> = calls
+        .iter()
+        .filter_map(|c| match c {
+            SessionCall::Send { id, input } => Some((id.clone(), input.clone())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(send_calls.len(), 1);
+    assert_eq!(send_calls[0], ("test-session".to_string(), "1".to_string()));
+}
+
+#[tokio::test]
+async fn test_handle_workspace_trust_prompt_not_present() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    // Simulate normal Claude startup (no prompt)
+    sessions.set_output("test-session", vec!["Claude Code is ready.".to_string()]);
+
+    let result = handle_workspace_trust_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, WorkspaceTrustResult::NotPresent);
+
+    // Verify no send was called
+    let calls = sessions.calls();
+    let send_calls: Vec<_> = calls
+        .iter()
+        .filter(|c| matches!(c, SessionCall::Send { .. }))
+        .collect();
+    assert!(send_calls.is_empty());
+}
+
+// Session name generation tests
+
+#[test]
+fn sanitize_removes_invalid_chars() {
+    assert_eq!(sanitize_for_tmux("foo:bar.baz", 20), "foo-bar-baz");
+}
+
+#[test]
+fn sanitize_preserves_valid_chars() {
+    assert_eq!(sanitize_for_tmux("my-pipeline_123", 20), "my-pipeline_123");
+}
+
+#[test]
+fn sanitize_replaces_spaces() {
+    assert_eq!(
+        sanitize_for_tmux("Pipeline With Spaces", 25),
+        "Pipeline-With-Spaces"
+    );
+}
+
+#[test]
+fn sanitize_truncates_long_names() {
+    assert_eq!(sanitize_for_tmux("very-long-name-here", 10), "very-long");
+}
+
+#[test]
+fn sanitize_collapses_multiple_hyphens() {
+    assert_eq!(sanitize_for_tmux("foo---bar", 20), "foo-bar");
+    assert_eq!(sanitize_for_tmux("a::b..c", 20), "a-b-c");
+}
+
+#[test]
+fn sanitize_handles_empty_string() {
+    assert_eq!(sanitize_for_tmux("", 10), "");
+}
+
+#[test]
+fn sanitize_trims_trailing_hyphen_on_truncate() {
+    // "test-long-" at 10 chars would end with hyphen, should trim it
+    assert_eq!(sanitize_for_tmux("test-long-name", 10), "test-long");
+}
+
+#[test]
+fn session_name_has_expected_format() {
+    let name = generate_session_name("my-pipeline", "claude");
+    assert!(
+        name.starts_with("my-pipeline-claude-"),
+        "Expected name to start with 'my-pipeline-claude-', got: {}",
+        name
+    );
+    // Should have 4 hex chars at the end
+    let suffix = &name["my-pipeline-claude-".len()..];
+    assert_eq!(suffix.len(), 4, "Expected 4-char suffix, got: {}", suffix);
+    assert!(
+        suffix.chars().all(|c| c.is_ascii_hexdigit()),
+        "Expected hex suffix, got: {}",
+        suffix
+    );
+}
+
+#[test]
+fn session_name_sanitizes_pipeline_name() {
+    let name = generate_session_name("my.dotted.name", "agent-1");
+    assert!(
+        name.starts_with("my-dotted-name-agent-1-"),
+        "Expected sanitized pipeline name, got: {}",
+        name
+    );
+}
+
+#[test]
+fn session_name_truncates_long_names() {
+    let name = generate_session_name("very-long-pipeline-name-here", "implementation-step");
+    // Pipeline truncated to 20, step to 15, plus 4 random + 2 hyphens
+    // Should be reasonable length
+    assert!(name.len() <= 45, "Name too long: {} ({})", name, name.len());
+}
+
+#[test]
+fn generate_short_random_produces_correct_length() {
+    let random = generate_short_random(4);
+    assert_eq!(random.len(), 4);
+
+    let random8 = generate_short_random(8);
+    assert_eq!(random8.len(), 8);
+}
+
+#[test]
+fn generate_short_random_produces_hex_chars() {
+    let random = generate_short_random(10);
+    assert!(
+        random.chars().all(|c| c.is_ascii_hexdigit()),
+        "Expected all hex chars, got: {}",
+        random
+    );
+}
+
+#[tokio::test]
+async fn test_handle_login_prompt_detected_select_login() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    sessions.set_output(
+        "test-session",
+        vec![
+            "Welcome to Claude Code!".to_string(),
+            "".to_string(),
+            "Select login method".to_string(),
+            "1. Anthropic".to_string(),
+            "2. Google".to_string(),
+        ],
+    );
+
+    let result = handle_login_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, LoginPromptResult::Detected);
+}
+
+#[tokio::test]
+async fn test_handle_login_prompt_detected_text_style() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    sessions.set_output(
+        "test-session",
+        vec![
+            "Welcome to Claude Code!".to_string(),
+            "Choose the text style".to_string(),
+        ],
+    );
+
+    let result = handle_login_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, LoginPromptResult::Detected);
+}
+
+#[tokio::test]
+async fn test_handle_login_prompt_not_present() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+
+    sessions.set_output("test-session", vec!["Claude Code is ready.".to_string()]);
+
+    let result = handle_login_prompt(&sessions, "test-session")
+        .await
+        .unwrap();
+
+    assert_eq!(result, LoginPromptResult::NotPresent);
+}

@@ -1,0 +1,57 @@
+#!/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+
+OUTPUT_FORMAT="html"
+PACKAGE=""
+
+usage() {
+    echo "Usage: $0 [-o html|json] [-p package]" >&2
+    echo "  -o  Output format: html (default) or json" >&2
+    echo "  -p  Package to test (e.g., oj-shell). Default: all packages" >&2
+    exit 1
+}
+
+while getopts "o:p:h" opt; do
+    case $opt in
+        o) OUTPUT_FORMAT="$OPTARG" ;;
+        p) PACKAGE="$OPTARG" ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+
+cd "$ROOT_DIR"
+
+# Use nightly for accurate coverage (respects #[coverage(off)] attributes)
+CARGO="rustup run nightly cargo"
+
+# Build package args
+if [ -n "$PACKAGE" ]; then
+    PKG_ARGS="--package $PACKAGE"
+else
+    PKG_ARGS="--workspace"
+fi
+
+# Clean stale coverage data
+$CARGO llvm-cov clean --workspace
+
+# Generate coverage report including integration tests
+# Note: "N functions have mismatched data" warning is cosmetic (generic/inline functions)
+if [ "$OUTPUT_FORMAT" = "json" ]; then
+    $CARGO llvm-cov test \
+        $PKG_ARGS \
+        --all-features \
+        --json \
+        --output-path coverage/coverage.json
+    echo "Coverage report: coverage/coverage.json"
+else
+    $CARGO llvm-cov test \
+        $PKG_ARGS \
+        --all-features \
+        --html \
+        --output-dir coverage/
+    echo "Coverage report: coverage/html/index.html"
+fi

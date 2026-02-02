@@ -1,0 +1,368 @@
+//! Agent spawn and execution tests using claudeless simulator.
+//!
+//! Tests the Effect::Spawn -> TmuxAdapter::spawn() path triggered by
+//! `run = { agent = "..." }` directives.
+
+use crate::prelude::*;
+
+/// Generate a scenario with configurable trust setting
+fn scenario(trusted: bool) -> String {
+    format!(
+        r#"
+name = "spawn-test"
+trusted = {trusted}
+
+[[responses]]
+pattern = {{ type = "any" }}
+
+[responses.response]
+text = "Task complete."
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#,
+    )
+}
+
+/// Runbook using -p (print/non-interactive) mode. Agent exits after one response.
+fn agent_runbook_print(scenario_path: &std::path::Path) -> String {
+    format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ pipeline = "build" }}
+
+[pipeline.build]
+vars  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = {{ agent = "worker" }}
+
+[agent.worker]
+run = "claudeless --scenario {} -p"
+prompt = "Complete the task."
+on_dead = "done"
+env = {{ OJ_STEP = "work" }}
+"#,
+        scenario_path.display()
+    )
+}
+
+/// Runbook using interactive mode (no -p). Agent stays alive and idles.
+fn agent_runbook_interactive(scenario_path: &std::path::Path) -> String {
+    format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ pipeline = "build" }}
+
+[pipeline.build]
+vars  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = {{ agent = "worker" }}
+
+[agent.worker]
+run = "claudeless --scenario {}"
+prompt = "Complete the task."
+on_idle = "done"
+env = {{ OJ_STEP = "work" }}
+"#,
+        scenario_path.display()
+    )
+}
+
+/// Verifies the agent spawn flow with -p (print) mode:
+/// - Pipeline starts and reaches agent step
+/// - Effect::Spawn creates tmux session via TmuxAdapter
+/// - Workspace is prepared with CLAUDE.md
+/// - Agent (claudeless -p) runs and exits after one response
+/// - on_dead = "done" advances the pipeline
+#[test]
+fn agent_spawn_creates_session_and_completes() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/spawn.toml", &scenario(true));
+
+    let scenario_path = temp.path().join(".oj/scenarios/spawn.toml");
+    let runbook = agent_runbook_print(&scenario_path);
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "spawn-test"]).passes();
+
+    // claudeless -p exits immediately. Detection requires liveness poll + deferred timer.
+    let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(done, "pipeline should complete via agent spawn path");
+
+    temp.oj()
+        .args(&["pipeline", "list"])
+        .passes()
+        .stdout_has("Completed");
+}
+
+/// Verifies the agent spawn flow with interactive mode (no -p):
+/// - Agent stays alive and idles after responding
+/// - on_idle = "done" advances the pipeline
+#[test]
+#[ignore = "BLOCKED BY: claudeless TUI does not write session JSONL (less-181e7117)"]
+fn agent_spawn_interactive_idle_completes() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/spawn.toml", &scenario(true));
+
+    let scenario_path = temp.path().join(".oj/scenarios/spawn.toml");
+    let runbook = agent_runbook_interactive(&scenario_path);
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "spawn-test"]).passes();
+
+    let done = wait_for(SPEC_WAIT_MAX_MS, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(done, "pipeline should complete via on_idle = done");
+}
+
+/// Tests multi-step pipeline: shell init → agent plan (gate) → agent implement (gate) → done.
+///
+/// Each agent uses on_dead = gate with a shell check command. The gate verifies
+/// the agent's work (file creation) before advancing to the next step.
+#[test]
+fn multi_step_pipeline_with_gates_completes() {
+    let temp = Project::empty();
+    temp.git_init();
+
+    // Plan agent: creates output/plan.txt via tool call
+    let plan_scenario = r#"
+name = "plan-step"
+trusted = true
+
+[[responses]]
+pattern = { type = "any" }
+
+[responses.response]
+text = "Creating the plan document."
+
+[[responses.response.tool_calls]]
+tool = "Bash"
+input = { command = "mkdir -p output && echo '# Test Plan' > output/plan.txt" }
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#;
+
+    // Implement agent: creates output/impl.txt via tool call
+    let impl_scenario = r#"
+name = "impl-step"
+trusted = true
+
+[[responses]]
+pattern = { type = "any" }
+
+[responses.response]
+text = "Implementation complete."
+
+[[responses.response.tool_calls]]
+tool = "Bash"
+input = { command = "echo '# Implementation' > output/impl.txt" }
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#;
+
+    temp.file(".oj/scenarios/plan.toml", plan_scenario);
+    temp.file(".oj/scenarios/impl.toml", impl_scenario);
+
+    let plan_path = temp.path().join(".oj/scenarios/plan.toml");
+    let impl_path = temp.path().join(".oj/scenarios/impl.toml");
+
+    let runbook = format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ pipeline = "build" }}
+
+[pipeline.build]
+vars  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "mkdir -p output"
+
+[[pipeline.build.step]]
+name = "plan"
+run = {{ agent = "planner" }}
+
+[[pipeline.build.step]]
+name = "implement"
+run = {{ agent = "implementer" }}
+
+[agent.planner]
+run = "claudeless --scenario {plan} -p"
+prompt = "Create a plan."
+on_dead = {{ action = "gate", run = "test -f output/plan.txt" }}
+
+[agent.implementer]
+run = "claudeless --scenario {impl} -p"
+prompt = "Implement the plan."
+on_dead = {{ action = "gate", run = "test -f output/impl.txt" }}
+"#,
+        plan = plan_path.display(),
+        impl = impl_path.display()
+    );
+
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "e2e-test"]).passes();
+
+    let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(done, "multi-step pipeline should complete via gates");
+}
+
+/// Tests that trusted scenario completes without the trust prompt handler blocking.
+///
+/// With `OJ_PROMPT_POLL_MS` set low and `trusted = true`, the spawn-time prompt
+/// handler exits quickly and the agent proceeds without delay.
+#[test]
+fn agent_spawn_graceful_when_no_trust_prompt() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/spawn.toml", &scenario(true));
+
+    let scenario_path = temp.path().join(".oj/scenarios/spawn.toml");
+    let runbook = agent_runbook_print(&scenario_path);
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "trust-test"]).passes();
+
+    let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(
+        done,
+        "pipeline should complete - no trust prompt shown for trusted scenario"
+    );
+}
+
+/// Tests that the bypass permissions prompt is auto-accepted.
+///
+/// When Claude Code runs with --dangerously-skip-permissions, it shows:
+/// ```text
+/// WARNING: Claude Code running in Bypass Permissions mode
+/// ...
+/// ❯ 1. No, exit
+///   2. Yes, I accept
+/// ```
+///
+/// The adapter should detect this and send "2" to accept.
+#[test]
+#[ignore = "BLOCKED BY: claudeless does not show bypass permissions TUI prompt"]
+fn agent_spawn_auto_accepts_bypass_permissions_prompt() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/spawn.toml", &scenario(true));
+
+    let scenario_path = temp.path().join(".oj/scenarios/spawn.toml");
+    let runbook = format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ pipeline = "build" }}
+
+[pipeline.build]
+vars  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = {{ agent = "worker" }}
+
+[agent.worker]
+run = "claudeless --scenario {} --dangerously-skip-permissions"
+prompt = "Complete the task."
+on_idle = "done"
+"#,
+        scenario_path.display()
+    );
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "bypass-test"]).passes();
+
+    let done = wait_for(SPEC_WAIT_MAX_MS, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(
+        done,
+        "pipeline should complete - bypass permissions prompt was auto-accepted"
+    );
+}
+
+/// Tests that untrusted scenario completes via auto-accept of the trust prompt.
+///
+/// Claudeless shows a trust dialog when `trusted = false`. The watcher's
+/// `check_and_accept_trust_prompt` detects "Do you trust" and sends "y".
+/// Uses `-p` mode so the agent exits after one response and `on_dead = "done"`.
+#[test]
+#[ignore = "BLOCKED BY: claudeless trust prompt + watcher accept interaction needs validation (less-trust-e2e)"]
+fn agent_spawn_auto_accepts_trust_prompt() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/spawn.toml", &scenario(false));
+
+    let scenario_path = temp.path().join(".oj/scenarios/spawn.toml");
+    let runbook = agent_runbook_print(&scenario_path);
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "trust-test"]).passes();
+
+    let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["pipeline", "list"])
+            .passes()
+            .stdout()
+            .contains("Completed")
+    });
+    assert!(
+        done,
+        "pipeline should complete - trust prompt was auto-acknowledged"
+    );
+}
