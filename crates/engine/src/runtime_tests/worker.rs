@@ -279,6 +279,391 @@ async fn worker_picks_up_runbook_edits_on_poll() {
     }
 }
 
+// -- Concurrency > 1 tests --
+
+/// Runbook with a persisted queue and concurrency = 2
+const CONCURRENT_WORKER_RUNBOOK: &str = r#"
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[queue.bugs]
+type = "persisted"
+vars = ["title"]
+
+[worker.fixer]
+source = { queue = "bugs" }
+handler = { pipeline = "build" }
+concurrency = 2
+"#;
+
+/// Helper: parse a runbook, load it into cache, and return its hash.
+fn load_runbook_hash(ctx: &TestContext, content: &str) -> String {
+    let runbook = oj_runbook::parse_runbook(content).unwrap();
+    let runbook_json = serde_json::to_value(&runbook).unwrap();
+    let hash = {
+        use sha2::{Digest, Sha256};
+        let canonical = serde_json::to_string(&runbook_json).unwrap();
+        let digest = Sha256::digest(canonical.as_bytes());
+        format!("{:x}", digest)
+    };
+    {
+        let mut cache = ctx.runtime.runbook_cache.lock();
+        cache.insert(hash.clone(), runbook);
+    }
+    ctx.runtime.lock_state_mut(|state| {
+        state.apply_event(&Event::RunbookLoaded {
+            hash: hash.clone(),
+            version: 1,
+            runbook: runbook_json,
+        });
+    });
+    hash
+}
+
+/// Helper: push N items to a persisted queue via MaterializedState events.
+fn push_persisted_items(ctx: &TestContext, queue: &str, count: usize) {
+    ctx.runtime.lock_state_mut(|state| {
+        for i in 1..=count {
+            state.apply_event(&Event::QueuePushed {
+                queue_name: queue.to_string(),
+                item_id: format!("item-{}", i),
+                data: {
+                    let mut m = HashMap::new();
+                    m.insert("title".to_string(), format!("bug {}", i));
+                    m
+                },
+                pushed_at_epoch_ms: 1000 + i as u64,
+                namespace: String::new(),
+            });
+        }
+    });
+}
+
+/// Count WorkerItemDispatched events in a list.
+fn count_dispatched(events: &[Event]) -> usize {
+    events
+        .iter()
+        .filter(|e| matches!(e, Event::WorkerItemDispatched { .. }))
+        .count()
+}
+
+/// Collect pipeline IDs from WorkerItemDispatched events.
+fn dispatched_pipeline_ids(events: &[Event]) -> Vec<PipelineId> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::WorkerItemDispatched { pipeline_id, .. } => Some(pipeline_id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Helper: start worker and process the initial poll, returning all events.
+async fn start_worker_and_poll(
+    ctx: &TestContext,
+    runbook_content: &str,
+    worker_name: &str,
+    concurrency: u32,
+) -> Vec<Event> {
+    let hash = load_runbook_hash(ctx, runbook_content);
+
+    let start_events = ctx
+        .runtime
+        .handle_event(Event::WorkerStarted {
+            worker_name: worker_name.to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: hash,
+            queue_name: "bugs".to_string(),
+            concurrency,
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    let mut all_events = Vec::new();
+    for event in start_events {
+        let result = ctx.runtime.handle_event(event).await.unwrap();
+        all_events.extend(result);
+    }
+    all_events
+}
+
+/// With concurrency=2 and 3 queued items, only 2 should be dispatched immediately.
+#[tokio::test]
+async fn concurrency_2_dispatches_two_items_simultaneously() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    push_persisted_items(&ctx, "bugs", 3);
+
+    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+
+    assert_eq!(
+        count_dispatched(&events),
+        2,
+        "concurrency=2 should dispatch exactly 2 items"
+    );
+
+    {
+        let workers = ctx.runtime.worker_states.lock();
+        let state = workers.get("fixer").unwrap();
+        assert_eq!(state.active_pipelines.len(), 2);
+    }
+
+    let pending_count = ctx.runtime.lock_state(|state| {
+        state
+            .queue_items
+            .get("bugs")
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|i| i.status == oj_storage::QueueItemStatus::Pending)
+                    .count()
+            })
+            .unwrap_or(0)
+    });
+    assert_eq!(pending_count, 1, "1 item should remain Pending");
+}
+
+/// Regression guard: concurrency=1 still dispatches only 1 item.
+#[tokio::test]
+async fn concurrency_1_still_dispatches_one_item() {
+    let runbook_c1 = CONCURRENT_WORKER_RUNBOOK.replace("concurrency = 2", "concurrency = 1");
+    let ctx = setup_with_runbook(&runbook_c1).await;
+
+    push_persisted_items(&ctx, "bugs", 3);
+
+    let events = start_worker_and_poll(&ctx, &runbook_c1, "fixer", 1).await;
+
+    assert_eq!(
+        count_dispatched(&events),
+        1,
+        "concurrency=1 should dispatch exactly 1 item"
+    );
+
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").unwrap();
+    assert_eq!(state.active_pipelines.len(), 1);
+}
+
+/// When one of two active pipelines completes, the worker re-polls and fills the free slot.
+#[tokio::test]
+async fn pipeline_completion_triggers_repoll_and_fills_slot() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    push_persisted_items(&ctx, "bugs", 3);
+
+    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    assert_eq!(count_dispatched(&events), 2);
+
+    let dispatched = dispatched_pipeline_ids(&events);
+    let completed_id = &dispatched[0];
+
+    let completion_events = ctx
+        .runtime
+        .handle_event(Event::PipelineAdvanced {
+            id: completed_id.clone(),
+            step: "done".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let mut all_events = completion_events.clone();
+    for event in &completion_events {
+        if matches!(event, Event::WorkerPollComplete { .. }) {
+            let result = ctx.runtime.handle_event(event.clone()).await.unwrap();
+            all_events.extend(result);
+        }
+    }
+
+    assert_eq!(
+        count_dispatched(&all_events),
+        1,
+        "re-poll should dispatch the 3rd item"
+    );
+
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").unwrap();
+    assert_eq!(
+        state.active_pipelines.len(),
+        2,
+        "worker should have 2 active pipelines again"
+    );
+}
+
+/// Stopping a worker with active pipelines should cancel all of them.
+#[tokio::test]
+async fn worker_stop_cancels_all_active_pipelines() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    push_persisted_items(&ctx, "bugs", 2);
+
+    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    assert_eq!(count_dispatched(&events), 2);
+
+    let dispatched = dispatched_pipeline_ids(&events);
+
+    let stop_events = ctx
+        .runtime
+        .handle_event(Event::WorkerStopped {
+            worker_name: "fixer".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    let cancelled_ids: Vec<&PipelineId> = stop_events
+        .iter()
+        .filter_map(|e| match e {
+            Event::PipelineAdvanced { id, step } if step == "cancelled" => Some(id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        cancelled_ids.len(),
+        2,
+        "both active pipelines should be cancelled"
+    );
+    for pid in &dispatched {
+        assert!(
+            cancelled_ids.contains(&pid),
+            "pipeline {} should be cancelled",
+            pid
+        );
+    }
+
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").unwrap();
+    assert!(
+        state.active_pipelines.is_empty(),
+        "active_pipelines should be drained after stop"
+    );
+}
+
+/// A worker at capacity should not dispatch new items even when woken.
+#[tokio::test]
+async fn worker_at_capacity_does_not_dispatch() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    push_persisted_items(&ctx, "bugs", 2);
+
+    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    assert_eq!(count_dispatched(&events), 2);
+
+    ctx.runtime.lock_state_mut(|state| {
+        state.apply_event(&Event::QueuePushed {
+            queue_name: "bugs".to_string(),
+            item_id: "item-extra".to_string(),
+            data: {
+                let mut m = HashMap::new();
+                m.insert("title".to_string(), "extra bug".to_string());
+                m
+            },
+            pushed_at_epoch_ms: 2000,
+            namespace: String::new(),
+        });
+    });
+
+    let wake_events = ctx
+        .runtime
+        .handle_event(Event::WorkerWake {
+            worker_name: "fixer".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    let mut all_events = Vec::new();
+    for event in wake_events {
+        let result = ctx.runtime.handle_event(event).await.unwrap();
+        all_events.extend(result);
+    }
+
+    assert_eq!(
+        count_dispatched(&all_events),
+        0,
+        "worker at capacity should not dispatch new items"
+    );
+
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").unwrap();
+    assert_eq!(state.active_pipelines.len(), 2);
+}
+
+/// After daemon restart, a worker with concurrency=2 and 2 active pipelines
+/// should restore both and not dispatch new items.
+#[tokio::test]
+async fn worker_restart_restores_multiple_active_pipelines() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let hash = load_runbook_hash(&ctx, CONCURRENT_WORKER_RUNBOOK);
+
+    ctx.runtime.lock_state_mut(|state| {
+        state.apply_event(&Event::WorkerStarted {
+            worker_name: "fixer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: hash.clone(),
+            queue_name: "bugs".to_string(),
+            concurrency: 2,
+            namespace: String::new(),
+        });
+        state.apply_event(&Event::WorkerItemDispatched {
+            worker_name: "fixer".to_string(),
+            item_id: "item-1".to_string(),
+            pipeline_id: PipelineId::new("pipe-a"),
+            namespace: String::new(),
+        });
+        state.apply_event(&Event::WorkerItemDispatched {
+            worker_name: "fixer".to_string(),
+            item_id: "item-2".to_string(),
+            pipeline_id: PipelineId::new("pipe-b"),
+            namespace: String::new(),
+        });
+    });
+
+    push_persisted_items(&ctx, "bugs", 1);
+
+    let start_events = ctx
+        .runtime
+        .handle_event(Event::WorkerStarted {
+            worker_name: "fixer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: hash,
+            queue_name: "bugs".to_string(),
+            concurrency: 2,
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    {
+        let workers = ctx.runtime.worker_states.lock();
+        let state = workers.get("fixer").unwrap();
+        assert_eq!(
+            state.active_pipelines.len(),
+            2,
+            "should restore 2 active pipelines from persisted state"
+        );
+        assert!(state.active_pipelines.contains(&PipelineId::new("pipe-a")));
+        assert!(state.active_pipelines.contains(&PipelineId::new("pipe-b")));
+    }
+
+    let mut all_events = Vec::new();
+    for event in start_events {
+        let result = ctx.runtime.handle_event(event).await.unwrap();
+        all_events.extend(result);
+    }
+
+    assert_eq!(
+        count_dispatched(&all_events),
+        0,
+        "at capacity after restart, should not dispatch new items"
+    );
+}
+
 /// When the runbook has not changed on disk, no RunbookLoaded event should be emitted.
 #[tokio::test]
 async fn worker_no_refresh_when_runbook_unchanged() {
