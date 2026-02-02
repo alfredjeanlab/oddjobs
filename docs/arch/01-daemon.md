@@ -353,10 +353,12 @@ flowchart LR
    - CLI uses this to find relevant errors on startup failure
 
 2. **Acquire lock**
+   - Open PID file without truncating (preserves running daemon's PID)
    - Non-blocking `try_lock_exclusive()` on PID file
    - Fails immediately if another daemon holds lock (no waiting)
+   - Only after lock is acquired: truncate and write current PID
    - OS releases lock automatically when process dies
-   - PID is written to the lock file for stale process detection
+   - On `LockFailed`, skip cleanup—existing files belong to the running daemon
 
 3. **Create directories**
    - `create_dir_all()` for: socket parent, WAL parent, workspaces
@@ -388,6 +390,7 @@ flowchart LR
    - Remove stale socket file (safe—lock already acquired)
    - Bind to socket path
    - On failure, cleanup partial state (socket, PID, version files)
+   - Cleanup only runs for post-lock failures; lock contention skips cleanup entirely
 
 8. **Print READY**
    - Signal that daemon is accepting connections
