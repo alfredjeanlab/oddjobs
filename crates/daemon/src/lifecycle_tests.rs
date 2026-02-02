@@ -10,7 +10,7 @@ use oj_adapters::{
 use oj_core::{Event, PipelineConfig, PipelineId, StepStatus, SystemClock};
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps, Scheduler};
 use oj_runbook::{PipelineDef, RunDirective, Runbook, StepDef};
-use oj_storage::{MaterializedState, Wal};
+use oj_storage::{MaterializedState, Wal, WorkerRecord};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -528,4 +528,146 @@ fn cleanup_on_failure_removes_created_files() {
         !config.lock_path.exists(),
         "lock file should be cleaned up on non-lock failure"
     );
+}
+
+#[tokio::test]
+async fn reconcile_state_resumes_running_workers() {
+    // Workers with status "running" should be re-emitted as WorkerStarted
+    // events during reconciliation so the runtime recreates their in-memory
+    // state and triggers an initial queue poll.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+
+    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
+    let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
+
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let runtime = Arc::new(Runtime::new(
+        RuntimeDeps {
+            sessions: session_adapter.clone(),
+            agents: agent_adapter,
+            notifier: DesktopNotifyAdapter::new(),
+            state: Arc::clone(&state),
+        },
+        SystemClock,
+        RuntimeConfig {
+            workspaces_root: dir_path.clone(),
+            log_dir: dir_path.join("logs"),
+        },
+        internal_tx,
+    ));
+
+    // Build state with a running worker and a stopped worker
+    let mut test_state = MaterializedState::default();
+    test_state.workers.insert(
+        "myns/running-worker".to_string(),
+        WorkerRecord {
+            name: "running-worker".to_string(),
+            namespace: "myns".to_string(),
+            project_root: dir_path.clone(),
+            runbook_hash: "abc123".to_string(),
+            status: "running".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "tasks".to_string(),
+            concurrency: 2,
+        },
+    );
+    test_state.workers.insert(
+        "myns/stopped-worker".to_string(),
+        WorkerRecord {
+            name: "stopped-worker".to_string(),
+            namespace: "myns".to_string(),
+            project_root: dir_path.clone(),
+            runbook_hash: "def456".to_string(),
+            status: "stopped".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "other".to_string(),
+            concurrency: 1,
+        },
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    // Collect all emitted events
+    drop(event_tx); // Close sender so recv() terminates
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    // Should have emitted exactly one WorkerStarted for the running worker
+    let worker_started_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::WorkerStarted { .. }))
+        .collect();
+    assert_eq!(
+        worker_started_events.len(),
+        1,
+        "should emit WorkerStarted for the one running worker, got: {:?}",
+        worker_started_events
+    );
+
+    // Verify the event has the right fields
+    match &worker_started_events[0] {
+        Event::WorkerStarted {
+            worker_name,
+            project_root,
+            runbook_hash,
+            queue_name,
+            concurrency,
+            namespace,
+        } => {
+            assert_eq!(worker_name, "running-worker");
+            assert_eq!(*project_root, dir_path);
+            assert_eq!(runbook_hash, "abc123");
+            assert_eq!(queue_name, "tasks");
+            assert_eq!(*concurrency, 2);
+            assert_eq!(namespace, "myns");
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn reconcile_context_counts_running_workers() {
+    let mut state = MaterializedState::default();
+
+    state.workers.insert(
+        "ns/w1".to_string(),
+        WorkerRecord {
+            name: "w1".to_string(),
+            namespace: "ns".to_string(),
+            project_root: PathBuf::from("/tmp"),
+            runbook_hash: "hash".to_string(),
+            status: "running".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "q".to_string(),
+            concurrency: 1,
+        },
+    );
+    state.workers.insert(
+        "ns/w2".to_string(),
+        WorkerRecord {
+            name: "w2".to_string(),
+            namespace: "ns".to_string(),
+            project_root: PathBuf::from("/tmp"),
+            runbook_hash: "hash".to_string(),
+            status: "stopped".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "q".to_string(),
+            concurrency: 1,
+        },
+    );
+
+    // Same logic as startup_inner
+    let worker_count = state
+        .workers
+        .values()
+        .filter(|w| w.status == "running")
+        .count();
+
+    assert_eq!(worker_count, 1, "only running workers should be counted");
 }

@@ -123,6 +123,8 @@ pub struct ReconcileContext {
     pub event_tx: mpsc::Sender<Event>,
     /// Number of non-terminal pipelines to reconcile
     pub pipeline_count: usize,
+    /// Number of workers with status "running" to reconcile
+    pub worker_count: usize,
 }
 
 impl DaemonState {
@@ -379,6 +381,11 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         .values()
         .filter(|p| !p.is_terminal())
         .count();
+    let worker_count = state_snapshot
+        .workers
+        .values()
+        .filter(|w| w.status == "running")
+        .count();
 
     info!("Daemon started");
 
@@ -400,6 +407,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             session_adapter,
             event_tx: internal_tx,
             pipeline_count,
+            worker_count,
         },
     })
 }
@@ -464,6 +472,37 @@ pub(crate) async fn reconcile_state(
     sessions: &TracedSession<TmuxAdapter>,
     event_tx: &mpsc::Sender<Event>,
 ) {
+    // Resume workers that were running before the daemon restarted.
+    // Re-emitting WorkerStarted recreates the in-memory WorkerState and
+    // triggers an initial queue poll so the worker picks up where it left off.
+    let running_workers: Vec<_> = state
+        .workers
+        .values()
+        .filter(|w| w.status == "running")
+        .collect();
+
+    if !running_workers.is_empty() {
+        info!("Resuming {} running workers", running_workers.len());
+    }
+
+    for worker in &running_workers {
+        info!(
+            worker = %worker.name,
+            namespace = %worker.namespace,
+            "resuming worker after daemon restart"
+        );
+        let _ = event_tx
+            .send(Event::WorkerStarted {
+                worker_name: worker.name.clone(),
+                project_root: worker.project_root.clone(),
+                runbook_hash: worker.runbook_hash.clone(),
+                queue_name: worker.queue_name.clone(),
+                concurrency: worker.concurrency,
+                namespace: worker.namespace.clone(),
+            })
+            .await;
+    }
+
     let non_terminal: Vec<_> = state
         .pipelines
         .values()
