@@ -28,6 +28,9 @@ where
         if let Some(rest) = id_str.strip_prefix("cooldown:") {
             return self.handle_cooldown_timer(rest).await;
         }
+        if let Some(rest) = id_str.strip_prefix("queue-retry:") {
+            return self.handle_queue_retry_timer(rest).await;
+        }
         // Unknown timer — no-op
         tracing::debug!(timer_id = %id, "ignoring unknown timer");
         Ok(vec![])
@@ -86,6 +89,78 @@ where
 
         self.execute_action_with_attempts(&pipeline, &agent_def, &action_config, trigger, chain_pos)
             .await
+    }
+
+    /// Handle queue retry timer expiry — move item back to Pending and wake workers.
+    async fn handle_queue_retry_timer(&self, rest: &str) -> Result<Vec<Event>, RuntimeError> {
+        // Parse timer ID: "scoped_queue_name:item_id"
+        // The scoped_queue_name may contain '/' (namespace/queue), so split from the right
+        let (scoped_queue, item_id) = match rest.rsplit_once(':') {
+            Some(pair) => pair,
+            None => {
+                tracing::warn!(timer_rest = rest, "malformed queue-retry timer ID");
+                return Ok(vec![]);
+            }
+        };
+
+        // Extract namespace and queue_name from the scoped key
+        let (namespace, queue_name) = match scoped_queue.split_once('/') {
+            Some((ns, q)) => (ns.to_string(), q.to_string()),
+            None => (String::new(), scoped_queue.to_string()),
+        };
+
+        tracing::info!(
+            queue = %queue_name,
+            item = item_id,
+            namespace = %namespace,
+            "queue retry timer fired, resurrecting item"
+        );
+
+        // Emit QueueItemRetry event
+        let mut result_events = self
+            .executor
+            .execute_all(vec![Effect::Emit {
+                event: Event::QueueItemRetry {
+                    queue_name: queue_name.clone(),
+                    item_id: item_id.to_string(),
+                    namespace: namespace.clone(),
+                },
+            }])
+            .await?;
+
+        // Wake workers attached to this queue
+        let worker_names: Vec<String> = {
+            let workers = self.worker_states.lock();
+            workers
+                .iter()
+                .filter(|(_, state)| state.queue_name == queue_name && state.namespace == namespace)
+                .map(|(name, _)| name.clone())
+                .collect()
+        };
+
+        for worker_name in worker_names {
+            // Strip namespace prefix from worker_name for the event
+            let bare_name = if namespace.is_empty() {
+                worker_name.clone()
+            } else {
+                worker_name
+                    .strip_prefix(&format!("{}/", namespace))
+                    .unwrap_or(&worker_name)
+                    .to_string()
+            };
+            result_events.extend(
+                self.executor
+                    .execute_all(vec![Effect::Emit {
+                        event: Event::WorkerWake {
+                            worker_name: bare_name,
+                            namespace: namespace.clone(),
+                        },
+                    }])
+                    .await?,
+            );
+        }
+
+        Ok(result_events)
     }
 
     /// Periodic liveness check (30s). Checks if tmux session + claude process are alive.

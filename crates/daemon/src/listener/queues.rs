@@ -293,6 +293,96 @@ pub(super) fn handle_queue_drop(
     })
 }
 
+/// Handle a QueueRetry request.
+pub(super) fn handle_queue_retry(
+    project_root: &Path,
+    namespace: &str,
+    queue_name: &str,
+    item_id: &str,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Load runbook containing the queue
+    let runbook = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => rb,
+        Err(e) => return Ok(Response::Error { message: e }),
+    };
+
+    // Validate queue exists
+    let queue_def = match runbook.get_queue(queue_name) {
+        Some(def) => def,
+        None => {
+            return Ok(Response::Error {
+                message: format!("unknown queue: {}", queue_name),
+            })
+        }
+    };
+
+    // Validate queue is persisted
+    if queue_def.queue_type != QueueType::Persisted {
+        return Ok(Response::Error {
+            message: format!("queue '{}' is not a persisted queue", queue_name),
+        });
+    }
+
+    // Validate item exists and is in Dead or Failed status
+    {
+        let state = state.lock();
+        let key = if namespace.is_empty() {
+            queue_name.to_string()
+        } else {
+            format!("{}/{}", namespace, queue_name)
+        };
+        let item = state
+            .queue_items
+            .get(&key)
+            .and_then(|items| items.iter().find(|i| i.id == item_id));
+        match item {
+            None => {
+                return Ok(Response::Error {
+                    message: format!("item '{}' not found in queue '{}'", item_id, queue_name),
+                });
+            }
+            Some(item) => {
+                use oj_storage::QueueItemStatus;
+                if item.status != QueueItemStatus::Dead && item.status != QueueItemStatus::Failed {
+                    return Ok(Response::Error {
+                        message: format!(
+                            "item '{}' is {:?}, only dead or failed items can be retried",
+                            item_id, item.status
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Emit QueueItemRetry event
+    let event = Event::QueueItemRetry {
+        queue_name: queue_name.to_string(),
+        item_id: item_id.to_string(),
+        namespace: namespace.to_string(),
+    };
+    event_bus
+        .send(event)
+        .map_err(|_| ConnectionError::WalError)?;
+
+    // Wake workers attached to this queue
+    wake_attached_workers(
+        project_root,
+        namespace,
+        queue_name,
+        &runbook,
+        event_bus,
+        state,
+    )?;
+
+    Ok(Response::QueueRetried {
+        queue_name: queue_name.to_string(),
+        item_id: item_id.to_string(),
+    })
+}
+
 #[cfg(test)]
 #[path = "queues_tests.rs"]
 mod tests;

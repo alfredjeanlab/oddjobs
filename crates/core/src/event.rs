@@ -310,6 +310,22 @@ pub enum Event {
         namespace: String,
     },
 
+    #[serde(rename = "queue:item_retry")]
+    QueueItemRetry {
+        queue_name: String,
+        item_id: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
+    #[serde(rename = "queue:item_dead")]
+    QueueItemDead {
+        queue_name: String,
+        item_id: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
     /// Catch-all for unknown event types (extensibility)
     #[serde(other, skip_serializing)]
     Custom,
@@ -394,6 +410,8 @@ impl Event {
             Event::QueueCompleted { .. } => "queue:completed",
             Event::QueueFailed { .. } => "queue:failed",
             Event::QueueDropped { .. } => "queue:dropped",
+            Event::QueueItemRetry { .. } => "queue:item_retry",
+            Event::QueueItemDead { .. } => "queue:item_dead",
             Event::Custom => "custom",
         }
     }
@@ -524,6 +542,16 @@ impl Event {
                 ..
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::QueueDropped {
+                queue_name,
+                item_id,
+                ..
+            } => format!("{t} queue={queue_name} item={item_id}"),
+            Event::QueueItemRetry {
+                queue_name,
+                item_id,
+                ..
+            } => format!("{t} queue={queue_name} item={item_id}"),
+            Event::QueueItemDead {
                 queue_name,
                 item_id,
                 ..

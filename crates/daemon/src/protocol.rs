@@ -138,6 +138,15 @@ pub enum Request {
         queue_name: String,
         item_id: String,
     },
+
+    /// Retry a dead or failed queue item
+    QueueRetry {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        queue_name: String,
+        item_id: String,
+    },
 }
 
 /// Query types for reading daemon state
@@ -284,6 +293,9 @@ pub enum Response {
     /// Item was dropped from queue
     QueueDropped { queue_name: String, item_id: String },
 
+    /// Item was retried (moved back to pending)
+    QueueRetried { queue_name: String, item_id: String },
+
     /// Agent signal query result (for stop hook)
     AgentSignal {
         signaled: bool,
@@ -418,6 +430,8 @@ pub struct QueueItemSummary {
     pub data: HashMap<String, String>,
     pub worker_name: Option<String>,
     pub pushed_at_epoch_ms: u64,
+    #[serde(default)]
+    pub failure_count: u32,
 }
 
 /// Summary of a worker for listing

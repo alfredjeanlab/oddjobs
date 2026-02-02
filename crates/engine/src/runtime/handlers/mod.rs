@@ -232,7 +232,9 @@ where
             | Event::WorkspaceFailed { .. }
             | Event::WorkspaceDeleted { .. }
             | Event::PipelineUpdated { .. }
-            | Event::WorkerItemDispatched { .. } => {}
+            | Event::WorkerItemDispatched { .. }
+            | Event::QueueItemRetry { .. }
+            | Event::QueueItemDead { .. } => {}
         }
 
         Ok(result_events)

@@ -820,3 +820,146 @@ fn queue_pushed_to_nonexistent_queue_creates_it() {
     assert!(state.queue_items.contains_key("new-queue"));
     assert_eq!(state.queue_items["new-queue"].len(), 1);
 }
+
+// === Dead letter / retry tests ===
+
+#[test]
+fn queue_failed_increments_failure_count() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+
+    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
+
+    // Simulate retry (back to active, then fail again)
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+    state.apply_event(&queue_failed_event(
+        "bugs",
+        "item-1",
+        "pipeline failed again",
+    ));
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 2);
+}
+
+#[test]
+fn queue_item_retry_resets_to_pending() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
+    assert_eq!(
+        state.queue_items["bugs"][0].worker_name.as_deref(),
+        Some("fixer")
+    );
+
+    state.apply_event(&Event::QueueItemRetry {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    assert_eq!(
+        state.queue_items["bugs"][0].status,
+        QueueItemStatus::Pending
+    );
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+    assert!(state.queue_items["bugs"][0].worker_name.is_none());
+}
+
+#[test]
+fn queue_item_dead_sets_dead_status() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+
+    state.apply_event(&Event::QueueItemDead {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Dead);
+}
+
+#[test]
+fn dead_status_serde_roundtrip() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "err"));
+    state.apply_event(&Event::QueueItemDead {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    let json = serde_json::to_string(&state).expect("serialize");
+    let restored: MaterializedState = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(
+        restored.queue_items["bugs"][0].status,
+        QueueItemStatus::Dead
+    );
+    assert_eq!(restored.queue_items["bugs"][0].failure_count, 1);
+}
+
+#[test]
+fn queue_item_retry_on_dead_item_resets_to_pending() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "err"));
+    state.apply_event(&Event::QueueItemDead {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Dead);
+
+    // Retry should reset Dead -> Pending
+    state.apply_event(&Event::QueueItemRetry {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    assert_eq!(
+        state.queue_items["bugs"][0].status,
+        QueueItemStatus::Pending
+    );
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+    assert!(state.queue_items["bugs"][0].worker_name.is_none());
+}
+
+#[test]
+fn failure_count_backward_compat_defaults_to_zero() {
+    // Simulate an old snapshot without failure_count field
+    let json = r#"{
+        "pipelines": {},
+        "sessions": {},
+        "workspaces": {},
+        "workers": {},
+        "runbooks": {},
+        "queue_items": {
+            "bugs": [{
+                "id": "item-old",
+                "queue_name": "bugs",
+                "data": {"title": "old bug"},
+                "status": "failed",
+                "worker_name": null,
+                "pushed_at_epoch_ms": 1000000
+            }]
+        }
+    }"#;
+
+    let state: MaterializedState = serde_json::from_str(json).expect("deserialize");
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+}

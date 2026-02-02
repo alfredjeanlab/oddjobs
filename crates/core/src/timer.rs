@@ -62,6 +62,16 @@ impl TimerId {
         self.0.starts_with("cooldown:")
     }
 
+    /// Timer ID for queue item retry cooldown.
+    pub fn queue_retry(queue_name: &str, item_id: &str) -> Self {
+        Self::new(format!("queue-retry:{}:{}", queue_name, item_id))
+    }
+
+    /// Returns true if this is a queue retry timer.
+    pub fn is_queue_retry(&self) -> bool {
+        self.0.starts_with("queue-retry:")
+    }
+
     /// Extracts the pipeline ID portion if this is a pipeline-related timer.
     ///
     /// Returns `Some(&str)` for liveness, exit-deferred, and cooldown timers.

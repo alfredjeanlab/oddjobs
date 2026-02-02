@@ -245,6 +245,7 @@ pub(super) fn handle_query(
                             data: item.data.clone(),
                             worker_name: item.worker_name.clone(),
                             pushed_at_epoch_ms: item.pushed_at_epoch_ms,
+                            failure_count: item.failure_count,
                         })
                         .collect()
                 })

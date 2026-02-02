@@ -7,11 +7,12 @@ use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, IdGen, PipelineId, UuidIdGen};
+use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 /// In-memory state for a running worker
 pub(crate) struct WorkerState {
@@ -486,17 +487,17 @@ where
 
             // For persisted queues, emit queue completion/failure event
             if queue_type == QueueType::Persisted {
-                if let Some(item_id) = item_id {
+                if let Some(ref item_id) = item_id {
                     let queue_event = if terminal_step == "done" {
                         Event::QueueCompleted {
                             queue_name: queue_name.clone(),
-                            item_id,
+                            item_id: item_id.clone(),
                             namespace: worker_namespace.clone(),
                         }
                     } else {
                         Event::QueueFailed {
                             queue_name: queue_name.clone(),
-                            item_id,
+                            item_id: item_id.clone(),
                             error: format!("pipeline reached '{}'", terminal_step),
                             namespace: worker_namespace.clone(),
                         }
@@ -506,6 +507,65 @@ where
                             .execute_all(vec![Effect::Emit { event: queue_event }])
                             .await?,
                     );
+
+                    // Retry-or-dead logic: after QueueFailed is applied, check retry config
+                    if terminal_step != "done" {
+                        let scoped_queue = if worker_namespace.is_empty() {
+                            queue_name.clone()
+                        } else {
+                            format!("{}/{}", worker_namespace, queue_name)
+                        };
+
+                        // Read failure_count from state (QueueFailed already incremented it)
+                        let failure_count = self.lock_state(|state| {
+                            state
+                                .queue_items
+                                .get(&scoped_queue)
+                                .and_then(|items| {
+                                    items
+                                        .iter()
+                                        .find(|i| i.id == *item_id)
+                                        .map(|i| i.failure_count)
+                                })
+                                .unwrap_or(0)
+                        });
+
+                        // Look up retry config from the runbook
+                        let runbook = self.cached_runbook(&runbook_hash)?;
+                        let retry_config = runbook
+                            .get_queue(&queue_name)
+                            .and_then(|q| q.retry.as_ref());
+
+                        let max_attempts = retry_config.map(|r| r.attempts).unwrap_or(0);
+
+                        if max_attempts > 0 && failure_count < max_attempts {
+                            // Schedule retry after cooldown
+                            let cooldown_str =
+                                retry_config.map(|r| r.cooldown.as_str()).unwrap_or("0s");
+                            let duration = crate::monitor::parse_duration(cooldown_str)
+                                .unwrap_or(Duration::ZERO);
+                            let timer_id = TimerId::queue_retry(&scoped_queue, item_id);
+                            self.executor
+                                .execute(Effect::SetTimer {
+                                    id: timer_id,
+                                    duration,
+                                })
+                                .await?;
+                        } else {
+                            // Mark as dead
+                            result_events.extend(
+                                self.executor
+                                    .execute_all(vec![Effect::Emit {
+                                        event: Event::QueueItemDead {
+                                            queue_name: queue_name.clone(),
+                                            item_id: item_id.clone(),
+                                            namespace: worker_namespace.clone(),
+                                        },
+                                    }])
+                                    .await?,
+                            );
+                        }
+                    }
                 }
             }
 

@@ -120,3 +120,27 @@ fn pipeline_id_str_unknown_timer() {
     let id = TimerId::new("other-timer");
     assert_eq!(id.pipeline_id_str(), None);
 }
+
+#[test]
+fn queue_retry_timer_id_format() {
+    let id = TimerId::queue_retry("bugs", "item-123");
+    assert_eq!(id.as_str(), "queue-retry:bugs:item-123");
+}
+
+#[test]
+fn queue_retry_timer_id_with_namespace() {
+    let id = TimerId::queue_retry("myns/bugs", "item-456");
+    assert_eq!(id.as_str(), "queue-retry:myns/bugs:item-456");
+}
+
+#[test]
+fn is_queue_retry() {
+    let id = TimerId::queue_retry("bugs", "item-1");
+    assert!(id.is_queue_retry());
+
+    let id = TimerId::new("liveness:pipe-123");
+    assert!(!id.is_queue_retry());
+
+    let id = TimerId::new("cooldown:pipe-123:idle:0");
+    assert!(!id.is_queue_retry());
+}

@@ -504,4 +504,56 @@ fn event_queue_name_returns_correct_strings() {
         .name(),
         "queue:failed"
     );
+    assert_eq!(
+        Event::QueueItemRetry {
+            queue_name: "q".to_string(),
+            item_id: "i".to_string(),
+            namespace: String::new(),
+        }
+        .name(),
+        "queue:item_retry"
+    );
+    assert_eq!(
+        Event::QueueItemDead {
+            queue_name: "q".to_string(),
+            item_id: "i".to_string(),
+            namespace: String::new(),
+        }
+        .name(),
+        "queue:item_dead"
+    );
+}
+
+#[test]
+fn event_queue_item_retry_roundtrip() {
+    let event = Event::QueueItemRetry {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: "myns".to_string(),
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).expect("serialize");
+    assert_eq!(json["type"], "queue:item_retry");
+    assert_eq!(json["queue_name"], "bugs");
+    assert_eq!(json["item_id"], "item-1");
+    assert_eq!(json["namespace"], "myns");
+
+    let json_str = serde_json::to_string(&event).expect("serialize");
+    let parsed: Event = serde_json::from_str(&json_str).expect("deserialize");
+    assert_eq!(event, parsed);
+}
+
+#[test]
+fn event_queue_item_dead_roundtrip() {
+    let event = Event::QueueItemDead {
+        queue_name: "bugs".to_string(),
+        item_id: "item-1".to_string(),
+        namespace: String::new(),
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).expect("serialize");
+    assert_eq!(json["type"], "queue:item_dead");
+    assert_eq!(json["queue_name"], "bugs");
+
+    let json_str = serde_json::to_string(&event).expect("serialize");
+    let parsed: Event = serde_json::from_str(&json_str).expect("deserialize");
+    assert_eq!(event, parsed);
 }

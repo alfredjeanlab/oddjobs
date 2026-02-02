@@ -182,6 +182,30 @@ fn validate_shell_command(command: &str, location: &str) -> Result<(), ParseErro
     Ok(())
 }
 
+/// Validate a duration string like "30s", "5m", "1h", "0s".
+fn validate_duration_str(s: &str) -> Result<(), String> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Err("empty duration string".to_string());
+    }
+
+    let (num_str, suffix) = s
+        .char_indices()
+        .find(|(_, c)| !c.is_ascii_digit())
+        .map(|(i, _)| (&s[..i], &s[i..]))
+        .unwrap_or((s, ""));
+
+    let _num: u64 = num_str
+        .parse()
+        .map_err(|_| format!("invalid number in duration: {}", s))?;
+
+    match suffix.trim() {
+        "" | "s" | "sec" | "secs" | "second" | "seconds" | "m" | "min" | "mins" | "minute"
+        | "minutes" | "h" | "hr" | "hrs" | "hour" | "hours" | "d" | "day" | "days" => Ok(()),
+        other => Err(format!("unknown duration suffix: {}", other)),
+    }
+}
+
 /// Validate that an agent's run command uses a recognized agent command.
 ///
 /// Parses the shell AST and extracts the first command name (taking basename
@@ -361,6 +385,12 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                     })?;
                 validate_shell_command(list, &format!("queue.{}.list", name))?;
                 validate_shell_command(take, &format!("queue.{}.take", name))?;
+                if queue.retry.is_some() {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("queue.{}", name),
+                        message: "external queue must not have 'retry' field".to_string(),
+                    });
+                }
             }
             QueueType::Persisted => {
                 if queue.vars.is_empty() {
@@ -380,6 +410,14 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                         location: format!("queue.{}", name),
                         message: "persisted queue must not have 'take' field".to_string(),
                     });
+                }
+                if let Some(ref retry) = queue.retry {
+                    if let Err(e) = validate_duration_str(&retry.cooldown) {
+                        return Err(ParseError::InvalidFormat {
+                            location: format!("queue.{}.retry.cooldown", name),
+                            message: e,
+                        });
+                    }
                 }
             }
         }

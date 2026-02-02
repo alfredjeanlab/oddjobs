@@ -89,6 +89,7 @@ pub enum QueueItemStatus {
     Active,
     Completed,
     Failed,
+    Dead,
 }
 
 /// A single item in a persisted queue
@@ -100,6 +101,9 @@ pub struct QueueItem {
     pub status: QueueItemStatus,
     pub worker_name: Option<String>,
     pub pushed_at_epoch_ms: u64,
+    /// Number of times this item has failed (for retry tracking)
+    #[serde(default)]
+    pub failure_count: u32,
 }
 
 /// Materialized state built from WAL operations
@@ -538,6 +542,7 @@ impl MaterializedState {
                         status: QueueItemStatus::Pending,
                         worker_name: None,
                         pushed_at_epoch_ms: *pushed_at_epoch_ms,
+                        failure_count: 0,
                     });
                 }
             }
@@ -580,6 +585,7 @@ impl MaterializedState {
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Failed;
+                        item.failure_count += 1;
                     }
                 }
             }
@@ -592,6 +598,34 @@ impl MaterializedState {
                 let key = scoped_key(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     items.retain(|i| i.id != *item_id);
+                }
+            }
+
+            Event::QueueItemRetry {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
+                    if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
+                        item.status = QueueItemStatus::Pending;
+                        item.failure_count = 0;
+                        item.worker_name = None;
+                    }
+                }
+            }
+
+            Event::QueueItemDead {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, queue_name);
+                if let Some(items) = self.queue_items.get_mut(&key) {
+                    if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
+                        item.status = QueueItemStatus::Dead;
+                    }
                 }
             }
 
