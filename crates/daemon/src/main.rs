@@ -37,6 +37,43 @@ use crate::listener::Listener;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Handle info flags before any config/lock acquisition
+    if let Some(arg) = std::env::args().nth(1) {
+        match arg.as_str() {
+            "--version" | "-V" | "-v" => {
+                println!(
+                    "ojd {}",
+                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"))
+                );
+                return Ok(());
+            }
+            "--help" | "-h" | "help" => {
+                println!(
+                    "ojd {}",
+                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"))
+                );
+                println!("Odd Jobs Daemon - background process that owns the event loop and dispatches work");
+                println!();
+                println!("USAGE:");
+                println!("    ojd");
+                println!();
+                println!("The daemon is typically started by the `oj` CLI and should not");
+                println!("be invoked directly. It listens on a Unix socket for commands");
+                println!("from `oj`.");
+                println!();
+                println!("OPTIONS:");
+                println!("    -h, --help       Print help information");
+                println!("    -v, --version    Print version information");
+                return Ok(());
+            }
+            _ => {
+                eprintln!("error: unexpected argument '{arg}'");
+                eprintln!("Usage: ojd [--help | --version]");
+                std::process::exit(1);
+            }
+        }
+    }
+
     // Load configuration (user-level daemon, no project root)
     let config = Config::load()?;
 

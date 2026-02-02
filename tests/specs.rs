@@ -19,6 +19,8 @@ mod cli_help;
 mod project_setup;
 
 // daemon/
+#[path = "specs/daemon/help.rs"]
+mod daemon_help;
 #[path = "specs/daemon/lifecycle.rs"]
 mod daemon_lifecycle;
 #[path = "specs/daemon/logs.rs"]

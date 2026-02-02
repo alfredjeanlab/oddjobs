@@ -66,7 +66,7 @@ fn oj_binary() -> PathBuf {
 }
 
 /// Returns the path to the ojd daemon binary.
-fn ojd_binary() -> PathBuf {
+pub fn ojd_binary() -> PathBuf {
     binary_path("ojd")
 }
 
