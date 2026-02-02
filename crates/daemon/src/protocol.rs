@@ -174,6 +174,8 @@ pub enum Query {
     /// List items in a persisted queue
     ListQueueItems {
         queue_name: String,
+        #[serde(default)]
+        namespace: String,
     },
     /// List all workers and their status
     ListWorkers,

@@ -122,7 +122,7 @@ where
                     .await?)
             }
             QueueType::Persisted => {
-                self.poll_persisted_queue(worker_name, &worker_def.source.queue)
+                self.poll_persisted_queue(worker_name, &worker_def.source.queue, namespace)
             }
         }
     }
@@ -139,7 +139,7 @@ where
             result_events.push(loaded_event);
         }
 
-        let (queue_type, queue_name, runbook_hash, project_root) = {
+        let (queue_type, queue_name, runbook_hash, project_root, worker_namespace) = {
             let workers = self.worker_states.lock();
             let state = match workers.get(worker_name) {
                 Some(s) if s.status != WorkerStatus::Stopped => s,
@@ -153,6 +153,7 @@ where
                 state.queue_name.clone(),
                 state.runbook_hash.clone(),
                 state.project_root.clone(),
+                state.namespace.clone(),
             )
         };
 
@@ -171,7 +172,11 @@ where
                 result_events.extend(self.executor.execute_all(vec![poll_effect]).await?);
             }
             QueueType::Persisted => {
-                result_events.extend(self.poll_persisted_queue(worker_name, &queue_name)?);
+                result_events.extend(self.poll_persisted_queue(
+                    worker_name,
+                    &queue_name,
+                    &worker_namespace,
+                )?);
             }
         }
 
@@ -183,10 +188,17 @@ where
         &self,
         worker_name: &str,
         queue_name: &str,
+        namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        // Use scoped key: namespace/queue_name (matching storage::state::scoped_key)
+        let key = if namespace.is_empty() {
+            queue_name.to_string()
+        } else {
+            format!("{}/{}", namespace, queue_name)
+        };
         let (total, items): (usize, Vec<serde_json::Value>) = self.lock_state(|state| match state
             .queue_items
-            .get(queue_name)
+            .get(&key)
         {
             Some(queue_items) => {
                 let total = queue_items.len();
@@ -538,7 +550,11 @@ where
                         }
                     }
                     QueueType::Persisted => {
-                        result_events.extend(self.poll_persisted_queue(&worker_name, &queue_name)?);
+                        result_events.extend(self.poll_persisted_queue(
+                            &worker_name,
+                            &queue_name,
+                            &worker_namespace,
+                        )?);
                     }
                 }
             }

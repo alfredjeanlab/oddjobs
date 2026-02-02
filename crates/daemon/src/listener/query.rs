@@ -232,10 +232,19 @@ pub(super) fn handle_query(
             Response::PipelineLogs { log_path, content }
         }
 
-        Query::ListQueueItems { queue_name } => {
+        Query::ListQueueItems {
+            queue_name,
+            namespace,
+        } => {
+            // Use scoped key: namespace/queue_name (matching storage::state::scoped_key)
+            let key = if namespace.is_empty() {
+                queue_name.clone()
+            } else {
+                format!("{}/{}", namespace, queue_name)
+            };
             let items = state
                 .queue_items
-                .get(&queue_name)
+                .get(&key)
                 .map(|queue_items| {
                     queue_items
                         .iter()

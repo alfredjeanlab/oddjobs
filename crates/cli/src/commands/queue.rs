@@ -38,6 +38,9 @@ pub enum QueueCommand {
         /// Queue name
         #[arg(long)]
         queue: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// Remove an item from a persisted queue
     Drop {
@@ -164,10 +167,14 @@ pub async fn handle(
                 }
             }
         }
-        QueueCommand::List { queue } => {
+        QueueCommand::List { queue, project } => {
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
             let request = Request::Query {
                 query: Query::ListQueueItems {
                     queue_name: queue.clone(),
+                    namespace: effective_namespace,
                 },
             };
             match client.send(&request).await? {

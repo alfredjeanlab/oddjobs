@@ -68,12 +68,8 @@ git checkout main
 export OJ_STATE_DIR="$TEST_DIR/.oj/state"
 oj daemon start
 
-# TODO: `oj queue push` for persisted queues is not yet implemented.
-# When implemented, this should accept a JSON payload with the queue variables.
 oj queue push merges '{"branch": "test-feature", "title": "test: add world"}'
 
-# TODO: `oj worker start` for persisted queues is not yet implemented.
-# When implemented, the worker should dequeue items and dispatch to the pipeline.
 oj worker start merge
 
 # --- Poll for completion ---
@@ -81,7 +77,6 @@ oj worker start merge
 TIMEOUT=30
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-  # TODO: `oj pipeline list` output format may change; adjust grep pattern
   if oj pipeline list 2>/dev/null | grep -q "Completed"; then
     break
   fi
