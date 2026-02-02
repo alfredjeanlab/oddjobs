@@ -279,6 +279,28 @@ oj queue push merges '{"branch": "fix-123", "title": "fix: button color"}'
 
 The `vars` field declares required fields. `defaults` provides fallback values. Items are validated against the schema on push.
 
+### Retry and Dead Letter
+
+Persisted queues support automatic retry with dead letter semantics. When a pipeline fails after processing a queue item, the item can be retried automatically before being moved to a terminal `Dead` status.
+
+```hcl
+queue "bugs" {
+  type = "persisted"
+  vars = ["id", "title"]
+  retry = {
+    attempts = 3       # Number of auto-retry attempts (0 = no retry, default)
+    cooldown = "30s"   # Delay between retries (default: "0s")
+  }
+}
+```
+
+- **attempts**: How many times to retry before marking dead (default: 0 — failed items go directly to dead)
+- **cooldown**: Delay between retry attempts (e.g., `"30s"`, `"5m"`)
+
+With no retry configuration (the default), failed items go directly to `Dead` status. Dead or failed items can be manually retried with `oj queue retry <queue> <item-id>`.
+
+The `retry` block is only valid on persisted queues; external queues reject it at parse time.
+
 ### External Queue
 
 Backed by an external system, polled via shell commands.

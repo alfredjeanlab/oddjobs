@@ -29,16 +29,9 @@ Timer ──────────────► Cron ──────► P
 
 Use cases range from simple shell-step cleanup (janitor) to agent-driven periodic analysis (security auditor, reliability engineer). See `docs/future/10-runbooks/` for examples.
 
-## Dead Letter Queue
+## ~~Dead Letter Queue~~ (Implemented)
 
-When a pipeline fails after taking a queue item, the item moves to the dead letter queue rather than being lost. Dead letter items can be inspected and retried:
-
-```bash
-oj queue list <name> --dead      # List dead letter items
-oj queue retry <name> <id>       # Retry a dead letter item
-```
-
-This applies to both persisted and external queues.
+Dead letter semantics with configurable retry are now implemented. See [Runbook Concepts — Queue](../concepts/RUNBOOKS.md#retry-and-dead-letter) and [CLI — oj queue](../interface/CLI.md#oj-queue).
 
 ## Nested Pipeline Vars
 

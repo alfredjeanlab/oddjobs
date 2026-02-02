@@ -108,7 +108,7 @@ enum Request {
     Event { event }                     // Deliver event to event loop
     Query { query }                     // Read state
     Shutdown { kill }                    // Graceful shutdown (kill: terminate sessions)
-    RunCommand { project_root, invoke_dir, command, args, named_args }
+    RunCommand { project_root, invoke_dir, namespace, command, args, named_args }
     SessionSend { id, input }           // Send input to a session
     PeekSession { session_id, with_color }  // Capture tmux pane output
     PipelineResume { id, message, vars }  // Resume escalated pipeline
@@ -117,9 +117,10 @@ enum Request {
     WorkspaceDropFailed                 // Delete failed workspaces
     WorkspaceDropAll                    // Delete all workspaces
     WorkspacePrune { all, dry_run }          // Prune old workspaces
-    WorkerStart { project_root, worker_name }  // Start a worker
+    WorkerStart { project_root, namespace, worker_name }  // Start a worker
     WorkerWake { worker_name }             // Wake worker to poll queue
-    QueuePush { project_root, queue_name, data }  // Push to persisted queue
+    QueuePush { project_root, namespace, queue_name, data }  // Push to persisted queue
+    QueueRetry { project_root, namespace, queue_name, item_id }  // Retry dead/failed item
 }
 
 enum Query {
@@ -157,6 +158,7 @@ enum Response {
     AgentSignal { signaled, kind, message }
     WorkerStarted { worker_name }
     QueuePushed { queue_name, item_id }
+    QueueRetried { queue_name, item_id }
     QueueItems { items }               // Vec<QueueItemSummary>
     Workers { workers }                // Vec<WorkerSummary>
     ShuttingDown
@@ -471,6 +473,7 @@ This provides seamless UX - users don't need to think about daemon lifecycle for
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OJ_STATE_DIR` | `~/.local/state/oj` | Base directory for all daemon state (socket, PID, WAL, workspaces, logs). Falls back to `$XDG_STATE_HOME/oj`. Useful for test isolation. |
+| `OJ_NAMESPACE` | Auto-detected | Project namespace for resource isolation. Auto-detected from `.oj/config.toml [project].name` or directory basename. Propagated to agents and shell steps so nested `oj` calls inherit the parent project's namespace. |
 | `OJ_DAEMON_BINARY` | Auto-detected | Path to the `ojd` binary. Auto-detected from the current executable's location. |
 | `OJ_TIMEOUT_IPC_MS` | `5000` | Timeout for IPC requests between CLI and daemon. |
 | `OJ_TIMEOUT_CONNECT_MS` | `5000` | Timeout for waiting for daemon to start when auto-starting. |

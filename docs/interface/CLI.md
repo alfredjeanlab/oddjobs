@@ -65,7 +65,7 @@ oj pipeline list build               # Filter by runbook name
 oj pipeline list --status running    # Filter by status
 oj pipeline list -n 50               # Limit results (default: 20)
 oj pipeline list --no-limit          # Show all results
-oj pipeline show <id>
+oj pipeline show <id>                # Shows Project: field when namespace is set
 oj pipeline resume <id>
 oj pipeline resume <id> -m "message" --var key=value
 oj pipeline cancel <id> [id...]
@@ -128,9 +128,13 @@ Manage queues defined in runbooks.
 oj queue push <queue> '<json>'       # Push item to persisted queue
 oj queue list --queue <queue>        # List items in a queue
 oj queue list --queue <queue> -o json  # JSON output
+oj queue drop <queue> <item-id>      # Remove item from queue
+oj queue retry <queue> <item-id>     # Retry a dead or failed item
 ```
 
 Push validates the JSON data against the queue's `vars` and applies `defaults` before writing to the WAL. Pushing to a persisted queue automatically wakes any attached workers.
+
+`oj queue retry` resets a dead or failed item back to pending status, clearing its failure count. The item ID can be a prefix match. The `--project` flag overrides namespace resolution.
 
 ### oj worker
 
@@ -159,6 +163,17 @@ oj emit agent:signal --agent <id> '{"kind": "escalate", "message": "..."}'
 ```
 
 The `kind` field also accepts the alias `action`. The JSON payload can also be passed via stdin.
+
+## Namespace Isolation
+
+A single daemon serves all projects. Resources (pipelines, workers, queues) are scoped by a project namespace to prevent collisions. The namespace is resolved in priority order:
+
+1. `--project <name>` flag (on commands that support it)
+2. `OJ_NAMESPACE` environment variable (set automatically for nested `oj` calls from agents)
+3. `.oj/config.toml` `[project].name` field
+4. Directory basename of the project root
+
+When multiple namespaces are present, `oj pipeline list` shows a `PROJECT` column. `oj pipeline show` includes a `Project:` line when the namespace is set.
 
 ## JSON Output
 

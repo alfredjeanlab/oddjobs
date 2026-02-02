@@ -19,12 +19,9 @@ oj cron run <name>               # Run once now (ignores interval)
 oj worker stop <name>            # Stop a running worker
 ```
 
-## oj queue (dead letter)
+## ~~oj queue (dead letter)~~ (Implemented)
 
-```bash
-oj queue list <name> --dead      # List dead letter items
-oj queue requeue <name> <id>       # Retry a dead letter item
-```
+See [CLI — oj queue](../interface/CLI.md#oj-queue). The implemented command is `oj queue retry` (not `requeue`). A `--dead` filter for `oj queue list` is not yet implemented.
 
 ## oj session prune
 

@@ -10,6 +10,8 @@ Agents are interactive entities defined in runbooks. Each agent has its own conf
 
 Agent lifecycle is managed by per-agent file watchers that monitor Claude's JSONL session log for state changes (working/idle/failed/exited). Agents run in isolated git worktrees (`workspace = "ephemeral"`) and their lifecycle is handled by configurable actions: `on_idle` (when agent is waiting for input) supports `nudge`, `done`, `fail`, `escalate`, and `gate`; `on_dead` (when agent exits) supports `done`, `fail`, `recover`, `escalate`, and `gate`. The `gate` action runs a shell command — exit 0 advances the pipeline, non-zero escalates. Both pipelines and agents support `notify {}` blocks with `on_start`, `on_done`, and `on_fail` message templates that emit desktop notifications on lifecycle events.
 
+A single daemon serves all projects for a user. Per-project namespace isolation prevents resource collisions: pipelines, workers, and queues are scoped by a namespace derived from `.oj/config.toml [project].name` (falling back to the directory basename). Namespaces propagate through events, IPC requests, and the `OJ_NAMESPACE` environment variable so that nested `oj` calls from agents inherit the parent project's context. Queues support dead letter semantics with configurable retry — failed items are automatically retried with cooldown, and items that exhaust retries move to `Dead` status. Dead items can be resurrected with `oj queue retry`.
+
 ### Why Agents Run in tmux (Not Print Mode)
 
 Agents are long-lived and interactive by design.

@@ -41,7 +41,7 @@ State mutations use typed `Event` variants emitted via `Effect::Emit`. These eve
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `pipeline:created` | PipelineCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms | Insert pipeline |
+| `pipeline:created` | PipelineCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace | Insert pipeline |
 | `pipeline:advanced` | PipelineAdvanced | id, step | Finalize current step, advance pipeline |
 | `pipeline:deleted` | PipelineDeleted | id | Remove pipeline |
 | `pipeline:updated` | PipelineUpdated | id, vars | Merge new vars into pipeline |
@@ -73,13 +73,15 @@ Agent signal and lifecycle events also update pipeline status during replay:
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `worker:started` | WorkerStarted | worker_name, project_root, runbook_hash, queue_name, concurrency | Insert or update worker record |
+| `worker:started` | WorkerStarted | worker_name, project_root, runbook_hash, queue_name, concurrency, namespace | Insert or update worker record |
 | `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, pipeline_id | Track dispatched item on worker |
 | `worker:stopped` | WorkerStopped | worker_name | Remove worker record |
-| `queue:pushed` | QueuePushed | queue_name, item_id, data, pushed_at_epoch_ms | Insert queue item (status=Pending) |
-| `queue:taken` | QueueTaken | queue_name, item_id, worker_name | Set queue item status to Taken |
-| `queue:completed` | QueueCompleted | queue_name, item_id | Remove queue item |
-| `queue:failed` | QueueFailed | queue_name, item_id, error | Set queue item status to Failed |
+| `queue:pushed` | QueuePushed | queue_name, item_id, data, pushed_at_epoch_ms, namespace | Insert queue item (status=Pending) |
+| `queue:taken` | QueueTaken | queue_name, item_id, worker_name, namespace | Set queue item status to Taken |
+| `queue:completed` | QueueCompleted | queue_name, item_id, namespace | Remove queue item |
+| `queue:failed` | QueueFailed | queue_name, item_id, error, namespace | Set queue item status to Failed, increment failure_count |
+| `queue:item_retry` | QueueItemRetry | queue_name, item_id, namespace | Reset item to Pending, clear failure_count |
+| `queue:item_dead` | QueueItemDead | queue_name, item_id, namespace | Set queue item status to Dead (terminal) |
 
 Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `PipelineResume`, `PipelineCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake` and `WorkerPollComplete` are also signals that do not mutate state.
 
@@ -99,6 +101,8 @@ pub struct MaterializedState {
 ```
 
 Each event type has logic in `apply_event()` that updates state deterministically.
+
+Workers and queues use namespace-scoped composite keys (`namespace/name`) so that multiple projects can define identically-named resources without collision. When the namespace is empty (single-project setups), the bare name is used for backward compatibility.
 
 ## Snapshots
 

@@ -41,7 +41,7 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 | Type tag | Variant | Fields |
 |----------|---------|--------|
 | `runbook:loaded` | RunbookLoaded | `hash`, `version`, `runbook` |
-| `pipeline:created` | PipelineCreated | `id`, `kind`, `name`, `runbook_hash`, `cwd`, `vars`, `initial_step`, `created_at_epoch_ms` |
+| `pipeline:created` | PipelineCreated | `id`, `kind`, `name`, `runbook_hash`, `cwd`, `vars`, `initial_step`, `created_at_epoch_ms`, `namespace` |
 | `pipeline:advanced` | PipelineAdvanced | `id`, `step` |
 | `pipeline:updated` | PipelineUpdated | `id`, `vars` |
 | `pipeline:deleted` | PipelineDeleted | `id` |
@@ -80,7 +80,7 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `worker:started` | WorkerStarted | `worker_name`, `project_root`, `runbook_hash`, `queue_name`, `concurrency` |
+| `worker:started` | WorkerStarted | `worker_name`, `project_root`, `runbook_hash`, `queue_name`, `concurrency`, `namespace` |
 | `worker:wake` | WorkerWake | `worker_name` |
 | `worker:poll_complete` | WorkerPollComplete | `worker_name`, `items` |
 | `worker:item_dispatched` | WorkerItemDispatched | `worker_name`, `item_id`, `pipeline_id` |
@@ -92,12 +92,14 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `queue:pushed` | QueuePushed | `queue_name`, `item_id`, `data`, `pushed_at_epoch_ms` |
-| `queue:taken` | QueueTaken | `queue_name`, `item_id`, `worker_name` |
-| `queue:completed` | QueueCompleted | `queue_name`, `item_id` |
-| `queue:failed` | QueueFailed | `queue_name`, `item_id`, `error` |
+| `queue:pushed` | QueuePushed | `queue_name`, `item_id`, `data`, `pushed_at_epoch_ms`, `namespace` |
+| `queue:taken` | QueueTaken | `queue_name`, `item_id`, `worker_name`, `namespace` |
+| `queue:completed` | QueueCompleted | `queue_name`, `item_id`, `namespace` |
+| `queue:failed` | QueueFailed | `queue_name`, `item_id`, `error`, `namespace` |
+| `queue:item_retry` | QueueItemRetry | `queue_name`, `item_id`, `namespace` |
+| `queue:item_dead` | QueueItemDead | `queue_name`, `item_id`, `namespace` |
 
-Queue events track the lifecycle of items in persisted queues. `queue:pushed` triggers a `worker:wake` for any worker watching the queue. The full item lifecycle is event-sourced: pushed → taken → completed/failed.
+Queue events track the lifecycle of items in persisted queues. `queue:pushed` triggers a `worker:wake` for any worker watching the queue. The full item lifecycle is event-sourced: pushed → taken → completed/failed/dead. When a queue has retry configuration, failed items are automatically retried after a cooldown period. Items that exhaust their retry attempts transition to `dead` via `queue:item_dead`. Dead or failed items can be manually resurrected via `queue:item_retry`.
 
 ## Action Events
 

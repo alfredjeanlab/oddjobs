@@ -20,7 +20,7 @@ docs/
 │   └── 06-adapter-claude.md  # How Claude Code runs in sessions
 │
 └── future/                   # Planned additions (not yet implemented)
-    ├── RUNBOOKS.md           # Adds: cron entrypoint, dead letter queues
-    ├── CLI.md                # Adds: oj cron, worker stop, queue dead letter, session prune
+    ├── RUNBOOKS.md           # Adds: cron entrypoint, nested pipeline vars
+    ├── CLI.md                # Adds: oj cron, worker stop, session prune
     └── runbooks/             # Example HCL runbooks (crons)
 ```
