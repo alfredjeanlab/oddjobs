@@ -83,10 +83,15 @@ pub enum PipelineCommand {
         /// Pipeline ID (supports prefix matching)
         id: String,
     },
-    /// Block until a pipeline reaches a terminal state
+    /// Block until pipeline(s) reach a terminal state
     Wait {
-        /// Pipeline ID or name (prefix match)
-        id: String,
+        /// Pipeline IDs or names (prefix match)
+        #[arg(required = true)]
+        ids: Vec<String>,
+
+        /// Wait for ALL pipelines to complete (default: wait for ANY)
+        #[arg(long)]
+        all: bool,
 
         /// Timeout duration (e.g. "5m", "30s", "1h")
         #[arg(long)]
@@ -148,6 +153,12 @@ pub(crate) fn status_group(step: &str, step_status: &str) -> u8 {
             _ => 2,
         },
     }
+}
+
+enum PipelineOutcome {
+    Done,
+    Failed(String),
+    Cancelled,
 }
 
 pub async fn handle(
@@ -413,7 +424,7 @@ pub async fn handle(
             let (log_path, content) = client.get_pipeline_logs(&id, limit).await?;
             display_log(&log_path, &content, follow, format, "pipeline", &id).await?;
         }
-        PipelineCommand::Wait { id, timeout } => {
+        PipelineCommand::Wait { ids, all, timeout } => {
             let timeout_dur = timeout.map(|s| parse_duration(&s)).transpose()?;
             let poll_ms = std::env::var("OJ_WAIT_POLL_MS")
                 .ok()
@@ -422,44 +433,92 @@ pub async fn handle(
             let poll_interval = Duration::from_millis(poll_ms);
             let start = Instant::now();
 
+            let mut finished: HashMap<String, PipelineOutcome> = HashMap::new();
+            let mut canonical_ids: HashMap<String, String> = HashMap::new();
+
             loop {
-                let detail = client.get_pipeline(&id).await?;
-                match detail {
-                    None => {
-                        return Err(ExitError::new(3, format!("Pipeline not found: {}", id)).into());
+                for input_id in &ids {
+                    if finished.contains_key(input_id) {
+                        continue;
                     }
-                    Some(p) => {
-                        if p.step == "done" {
-                            println!("Pipeline {} completed", p.name);
-                            break;
-                        }
-                        if p.step == "failed" {
-                            let msg = p.error.as_deref().unwrap_or("unknown error");
+                    let detail = client.get_pipeline(input_id).await?;
+                    match detail {
+                        None => {
                             return Err(ExitError::new(
-                                1,
-                                format!("Pipeline {} failed: {}", p.name, msg),
+                                3,
+                                format!("Pipeline not found: {}", input_id),
                             )
                             .into());
                         }
-                        if p.step == "cancelled" {
-                            return Err(ExitError::new(
-                                4,
-                                format!("Pipeline {} was cancelled", p.name),
-                            )
-                            .into());
+                        Some(p) => {
+                            canonical_ids
+                                .entry(input_id.clone())
+                                .or_insert_with(|| p.id.clone());
+                            let outcome = match p.step.as_str() {
+                                "done" => Some(PipelineOutcome::Done),
+                                "failed" => Some(PipelineOutcome::Failed(
+                                    p.error.clone().unwrap_or_else(|| "unknown error".into()),
+                                )),
+                                "cancelled" => Some(PipelineOutcome::Cancelled),
+                                _ => None,
+                            };
+                            if let Some(outcome) = outcome {
+                                let short_id = &canonical_ids[input_id][..8];
+                                match &outcome {
+                                    PipelineOutcome::Done => {
+                                        println!("Pipeline {} ({}) completed", p.name, short_id);
+                                    }
+                                    PipelineOutcome::Failed(msg) => {
+                                        eprintln!(
+                                            "Pipeline {} ({}) failed: {}",
+                                            p.name, short_id, msg
+                                        );
+                                    }
+                                    PipelineOutcome::Cancelled => {
+                                        eprintln!(
+                                            "Pipeline {} ({}) was cancelled",
+                                            p.name, short_id
+                                        );
+                                    }
+                                }
+                                finished.insert(input_id.clone(), outcome);
+                            }
                         }
                     }
                 }
+
+                if all {
+                    if finished.len() == ids.len() {
+                        break;
+                    }
+                } else if !finished.is_empty() {
+                    break;
+                }
+
                 if let Some(t) = timeout_dur {
                     if start.elapsed() >= t {
                         return Err(ExitError::new(
                             2,
-                            format!("Timeout waiting for pipeline {}", id),
+                            "Timeout waiting for pipeline(s)".to_string(),
                         )
                         .into());
                     }
                 }
+
                 tokio::time::sleep(poll_interval).await;
+            }
+
+            let any_failed = finished
+                .values()
+                .any(|o| matches!(o, PipelineOutcome::Failed(_)));
+            let any_cancelled = finished
+                .values()
+                .any(|o| matches!(o, PipelineOutcome::Cancelled));
+            if any_failed {
+                return Err(ExitError::new(1, String::new()).into());
+            }
+            if any_cancelled {
+                return Err(ExitError::new(4, String::new()).into());
             }
         }
     }

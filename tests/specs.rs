@@ -33,6 +33,8 @@ mod daemon_timers;
 mod pipeline_execution;
 #[path = "specs/pipeline/show.rs"]
 mod pipeline_show;
+#[path = "specs/pipeline/wait.rs"]
+mod pipeline_wait;
 
 // agent/
 #[path = "specs/agent/config.rs"]
