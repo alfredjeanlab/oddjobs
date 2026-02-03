@@ -58,7 +58,7 @@ pipeline "fix" {
   }
 
   step "fix" {
-    run     = { agent = "bugfixer" }
+    run     = { agent = "bugs" }
     on_done = { step = "submit" }
   }
 
@@ -77,7 +77,7 @@ pipeline "fix" {
   }
 }
 
-agent "bugfixer" {
+agent "bugs" {
   run      = "claude --model opus --dangerously-skip-permissions"
   on_idle  = { action = "nudge", message = "Keep working. Fix the bug, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }

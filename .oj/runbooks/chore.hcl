@@ -55,7 +55,7 @@ pipeline "chore" {
   }
 
   step "work" {
-    run     = { agent = "choreworker" }
+    run     = { agent = "chores" }
     on_done = { step = "submit" }
   }
 
@@ -74,7 +74,7 @@ pipeline "chore" {
   }
 }
 
-agent "choreworker" {
+agent "chores" {
   run      = "claude --model opus --dangerously-skip-permissions"
   on_idle  = { action = "nudge", message = "Keep working. Complete the task, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
