@@ -192,6 +192,17 @@ where
                     .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.clone()))?
                     .clone();
 
+                // Check max_concurrency before spawning
+                if let Some(max) = agent_def.max_concurrency {
+                    let running = self.count_running_agents(&agent_name, namespace);
+                    if running >= max as usize {
+                        return Err(RuntimeError::InvalidRequest(format!(
+                            "agent '{}' at max concurrency ({}/{})",
+                            agent_name, running, max
+                        )));
+                    }
+                }
+
                 // Use the pipeline_id as the agent_run_id (daemon generated it)
                 let agent_run_id = AgentRunId::new(pipeline_id.to_string());
 

@@ -117,7 +117,11 @@ pub struct CronRecord {
     /// "running" or "stopped"
     pub status: String,
     pub interval: String,
+    /// Deprecated: use run_target. Kept for backward compat.
     pub pipeline_name: String,
+    /// What this cron runs: "pipeline:name" or "agent:name"
+    #[serde(default)]
+    pub run_target: String,
     /// Epoch ms when the cron was started (timer began)
     #[serde(default)]
     pub started_at_ms: u64,
@@ -708,6 +712,7 @@ impl MaterializedState {
                 runbook_hash,
                 interval,
                 pipeline_name,
+                run_target,
                 namespace,
             } => {
                 let key = scoped_key(namespace, cron_name);
@@ -717,6 +722,12 @@ impl MaterializedState {
                     .as_millis() as u64;
                 // Preserve last_fired_at_ms across restarts (re-emitted CronStarted)
                 let last_fired_at_ms = self.crons.get(&key).and_then(|r| r.last_fired_at_ms);
+                // Use run_target if present, fall back to pipeline_name for backward compat
+                let effective_target = if run_target.is_empty() {
+                    format!("pipeline:{}", pipeline_name)
+                } else {
+                    run_target.clone()
+                };
                 self.crons.insert(
                     key,
                     CronRecord {
@@ -727,6 +738,7 @@ impl MaterializedState {
                         status: "running".to_string(),
                         interval: interval.clone(),
                         pipeline_name: pipeline_name.clone(),
+                        run_target: effective_target,
                         started_at_ms: now_ms,
                         last_fired_at_ms,
                     },

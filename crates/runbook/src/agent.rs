@@ -193,6 +193,10 @@ pub struct AgentDef {
     #[serde(default = "default_on_error")]
     pub on_error: ErrorActionConfig,
 
+    /// Maximum concurrent instances of this agent. None = unlimited.
+    #[serde(default)]
+    pub max_concurrency: Option<u32>,
+
     /// Notification messages for agent lifecycle events
     #[serde(default)]
     pub notify: crate::pipeline::NotifyConfig,
@@ -490,6 +494,7 @@ impl Default for AgentDef {
             on_dead: default_on_dead(),
             on_prompt: default_on_prompt(),
             on_error: default_on_error(),
+            max_concurrency: None,
             notify: Default::default(),
         }
     }

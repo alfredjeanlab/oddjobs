@@ -267,7 +267,12 @@ pub enum Event {
         project_root: PathBuf,
         runbook_hash: String,
         interval: String,
+        /// Deprecated: use run_target. Kept for WAL backward compat.
+        #[serde(default)]
         pipeline_name: String,
+        /// What this cron runs: "pipeline:name" or "agent:name"
+        #[serde(default)]
+        run_target: String,
         #[serde(default)]
         namespace: String,
     },
@@ -282,11 +287,23 @@ pub enum Event {
     #[serde(rename = "cron:once")]
     CronOnce {
         cron_name: String,
+        /// Set for pipeline targets
+        #[serde(default)]
         pipeline_id: PipelineId,
+        #[serde(default)]
         pipeline_name: String,
+        #[serde(default)]
         pipeline_kind: String,
+        /// Set for agent targets
+        #[serde(default)]
+        agent_run_id: Option<String>,
+        #[serde(default)]
+        agent_name: Option<String>,
         project_root: PathBuf,
         runbook_hash: String,
+        /// What this cron runs: "pipeline:name" or "agent:name"
+        #[serde(default)]
+        run_target: String,
         #[serde(default)]
         namespace: String,
     },
@@ -294,7 +311,10 @@ pub enum Event {
     #[serde(rename = "cron:fired")]
     CronFired {
         cron_name: String,
+        #[serde(default)]
         pipeline_id: PipelineId,
+        #[serde(default)]
+        agent_run_id: Option<String>,
         #[serde(default)]
         namespace: String,
     },
@@ -684,13 +704,27 @@ impl Event {
             Event::CronOnce {
                 cron_name,
                 pipeline_id,
+                agent_name,
                 ..
-            } => format!("{t} cron={cron_name} pipeline={pipeline_id}"),
+            } => {
+                if let Some(agent) = agent_name {
+                    format!("{t} cron={cron_name} agent={agent}")
+                } else {
+                    format!("{t} cron={cron_name} pipeline={pipeline_id}")
+                }
+            }
             Event::CronFired {
                 cron_name,
                 pipeline_id,
+                agent_run_id,
                 ..
-            } => format!("{t} cron={cron_name} pipeline={pipeline_id}"),
+            } => {
+                if let Some(ar_id) = agent_run_id {
+                    format!("{t} cron={cron_name} agent_run={ar_id}")
+                } else {
+                    format!("{t} cron={cron_name} pipeline={pipeline_id}")
+                }
+            }
             Event::CronDeleted {
                 cron_name,
                 namespace,
@@ -816,8 +850,27 @@ impl Event {
             | Event::PipelineCancel { id, .. }
             | Event::PipelineDeleted { id, .. } => Some(id),
             Event::WorkerItemDispatched { pipeline_id, .. } => Some(pipeline_id),
-            Event::CronOnce { pipeline_id, .. } | Event::CronFired { pipeline_id, .. } => {
-                Some(pipeline_id)
+            Event::CronOnce {
+                pipeline_id,
+                agent_name,
+                ..
+            } => {
+                if agent_name.is_some() {
+                    None
+                } else {
+                    Some(pipeline_id)
+                }
+            }
+            Event::CronFired {
+                pipeline_id,
+                agent_run_id,
+                ..
+            } => {
+                if agent_run_id.is_some() {
+                    None
+                } else {
+                    Some(pipeline_id)
+                }
             }
             Event::DecisionCreated { pipeline_id, .. } => Some(pipeline_id),
             _ => None,

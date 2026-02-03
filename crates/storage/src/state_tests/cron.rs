@@ -13,6 +13,7 @@ fn cron_started_creates_record() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
 
@@ -35,6 +36,7 @@ fn cron_stopped_updates_status() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -59,6 +61,7 @@ fn cron_started_is_idempotent() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -69,6 +72,7 @@ fn cron_started_is_idempotent() {
         runbook_hash: "def456".to_string(),
         interval: "1h".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -86,6 +90,7 @@ fn cron_deleted_removes_record() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
 
@@ -113,6 +118,7 @@ fn cron_deleted_empty_namespace() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -141,6 +147,7 @@ fn cron_fired_is_noop_for_state() {
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
         pipeline_id: PipelineId::new("pipe-123"),
+        agent_run_id: None,
         namespace: String::new(),
     });
     // CronFired should not create a record if the cron doesn't exist
@@ -156,6 +163,7 @@ fn cron_fired_updates_last_fired_at() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -164,6 +172,7 @@ fn cron_fired_updates_last_fired_at() {
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
         pipeline_id: PipelineId::new("pipe-123"),
+        agent_run_id: None,
         namespace: String::new(),
     });
 
@@ -179,6 +188,7 @@ fn cron_started_sets_started_at_ms() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -194,12 +204,14 @@ fn cron_restart_preserves_last_fired_at() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
         pipeline_id: PipelineId::new("pipe-123"),
+        agent_run_id: None,
         namespace: String::new(),
     });
 
@@ -213,6 +225,7 @@ fn cron_restart_preserves_last_fired_at() {
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         namespace: String::new(),
     });
 

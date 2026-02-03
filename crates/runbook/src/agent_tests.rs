@@ -99,6 +99,7 @@ fn agent_build_command_with_prompt_field() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -123,6 +124,7 @@ fn agent_build_command_with_inline_prompt() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -147,6 +149,7 @@ fn agent_build_command_print_mode() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -175,6 +178,7 @@ fn agent_build_env() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -204,6 +208,7 @@ fn agent_get_prompt_from_field() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -232,6 +237,7 @@ fn agent_get_prompt_empty_when_unset() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -260,6 +266,7 @@ fn agent_get_prompt_from_file() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 
@@ -288,6 +295,7 @@ fn agent_get_prompt_file_not_found() {
         on_dead: default_on_dead(),
         on_prompt: default_on_prompt(),
         on_error: default_on_error(),
+        max_concurrency: None,
         notify: Default::default(),
     };
 

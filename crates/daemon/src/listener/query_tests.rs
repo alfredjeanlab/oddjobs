@@ -588,6 +588,7 @@ fn make_cron(name: &str, namespace: &str, project_root: &str) -> CronRecord {
         status: "running".to_string(),
         interval: "5m".to_string(),
         pipeline_name: "check".to_string(),
+        run_target: "pipeline:check".to_string(),
         started_at_ms: 0,
         last_fired_at_ms: None,
     }

@@ -36,7 +36,10 @@ fn version_uppercase_v_hidden_in_help() {
     let mut buf = Vec::new();
     cli_command().write_help(&mut buf).unwrap();
     let help = String::from_utf8(buf).unwrap();
-    assert!(help.contains("-v, --version"), "help should show -v, --version");
+    assert!(
+        help.contains("-v, --version"),
+        "help should show -v, --version"
+    );
     assert!(
         !help.contains("-V,"),
         "help should not show -V as a visible flag"

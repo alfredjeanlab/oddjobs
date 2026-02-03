@@ -346,25 +346,50 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 message: e,
             });
         }
-        // Validate run is a pipeline reference
-        let pipeline_name = match cron.run.pipeline_name() {
-            Some(p) => p,
-            None => {
+        // Validate run is a pipeline or agent reference
+        match &cron.run {
+            RunDirective::Pipeline { pipeline } => {
+                if !runbook.pipelines.contains_key(pipeline.as_str()) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("cron.{}.run", name),
+                        message: format!(
+                            "references unknown pipeline '{}'; available pipelines: {}",
+                            pipeline,
+                            sorted_keys(&runbook.pipelines),
+                        ),
+                    });
+                }
+            }
+            RunDirective::Agent { agent } => {
+                if !runbook.agents.contains_key(agent.as_str()) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("cron.{}.run", name),
+                        message: format!(
+                            "references unknown agent '{}'; available agents: {}",
+                            agent,
+                            sorted_keys(&runbook.agents),
+                        ),
+                    });
+                }
+            }
+            RunDirective::Shell(_) => {
                 return Err(ParseError::InvalidFormat {
                     location: format!("cron.{}.run", name),
-                    message: "cron run must reference a pipeline".to_string(),
+                    message: "cron run must reference a pipeline or agent".to_string(),
                 });
             }
-        };
-        if !runbook.pipelines.contains_key(pipeline_name) {
-            return Err(ParseError::InvalidFormat {
-                location: format!("cron.{}.run", name),
-                message: format!(
-                    "references unknown pipeline '{}'; available pipelines: {}",
-                    pipeline_name,
-                    sorted_keys(&runbook.pipelines),
-                ),
-            });
+        }
+    }
+
+    // 6.6. Validate agent max_concurrency
+    for (name, agent) in &runbook.agents {
+        if let Some(max) = agent.max_concurrency {
+            if max == 0 {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("agent.{}.max_concurrency", name),
+                    message: "max_concurrency must be >= 1".to_string(),
+                });
+            }
         }
     }
 

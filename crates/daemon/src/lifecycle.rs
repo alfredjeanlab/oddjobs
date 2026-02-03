@@ -624,6 +624,7 @@ pub(crate) async fn reconcile_state(
                 runbook_hash: cron.runbook_hash.clone(),
                 interval: cron.interval.clone(),
                 pipeline_name: cron.pipeline_name.clone(),
+                run_target: cron.run_target.clone(),
                 namespace: cron.namespace.clone(),
             })
             .await;

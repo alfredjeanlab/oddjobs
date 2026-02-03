@@ -17,7 +17,7 @@ use std::time::Instant;
 ///
 /// Each pipeline run gets a unique ID that can be used to track its state,
 /// query its status, and reference it in logs and events.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PipelineId(pub String);
 
 impl PipelineId {
