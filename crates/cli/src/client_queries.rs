@@ -134,6 +134,12 @@ impl DaemonClient {
         self.send_simple(&request).await
     }
 
+    /// Kill a session
+    pub async fn session_kill(&self, id: &str) -> Result<(), ClientError> {
+        let request = Request::SessionKill { id: id.to_string() };
+        self.send_simple(&request).await
+    }
+
     /// Send input to a session
     pub async fn session_send(&self, id: &str, input: &str) -> Result<(), ClientError> {
         let request = Request::SessionSend {

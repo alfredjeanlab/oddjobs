@@ -257,8 +257,19 @@ async fn run() -> Result<()> {
             }
         }
         Commands::Session(args) => {
-            let client = DaemonClient::for_query()?;
-            session::handle(args.command, &client, format).await?
+            use session::SessionCommand;
+            match &args.command {
+                // Actions: mutate session state
+                SessionCommand::Send { .. } | SessionCommand::Kill { .. } => {
+                    let client = DaemonClient::for_action()?;
+                    session::handle(args.command, &client, format).await?
+                }
+                // Query: reads session state
+                _ => {
+                    let client = DaemonClient::for_query()?;
+                    session::handle(args.command, &client, format).await?
+                }
+            }
         }
 
         // Queue commands - mixed action/query

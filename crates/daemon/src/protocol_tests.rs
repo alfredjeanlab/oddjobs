@@ -102,6 +102,18 @@ fn pipeline_summary_serialization() {
 }
 
 #[test]
+fn encode_decode_roundtrip_session_kill() {
+    let request = Request::SessionKill {
+        id: "oj-ses-abc123".to_string(),
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
 fn encode_decode_roundtrip_peek_session() {
     let request = Request::PeekSession {
         session_id: "ses-abc123".to_string(),

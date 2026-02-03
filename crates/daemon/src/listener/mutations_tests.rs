@@ -15,7 +15,7 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::handle_pipeline_resume;
+use super::{handle_pipeline_resume, handle_session_kill};
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
     let wal_path = dir.join("test.wal");
@@ -258,4 +258,49 @@ fn resume_orphan_by_prefix() {
 
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
     assert!(orphans.lock().is_empty());
+}
+
+#[tokio::test]
+async fn session_kill_nonexistent_returns_error() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let result = handle_session_kill(&state, &event_bus, "nonexistent-session").await;
+
+    match result {
+        Ok(Response::Error { message }) => {
+            assert!(
+                message.contains("not found"),
+                "expected 'not found' in message, got: {}",
+                message
+            );
+        }
+        other => panic!("expected Response::Error, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn session_kill_existing_returns_ok() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Insert a session into state
+    {
+        let mut s = state.lock();
+        s.sessions.insert(
+            "oj-test-session".to_string(),
+            oj_storage::Session {
+                id: "oj-test-session".to_string(),
+                pipeline_id: "pipe-1".to_string(),
+            },
+        );
+    }
+
+    let result = handle_session_kill(&state, &event_bus, "oj-test-session").await;
+
+    // Should succeed (tmux kill-session will fail since no real tmux session,
+    // but that's fine - we still emit the event)
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }

@@ -81,6 +81,47 @@ pub(super) fn handle_session_send(
     }
 }
 
+/// Handle a session kill request.
+///
+/// Validates that the session exists, kills the tmux session, and emits
+/// a SessionDeleted event to clean up state.
+pub(super) async fn handle_session_kill(
+    state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
+    id: &str,
+) -> Result<Response, ConnectionError> {
+    let session_id = {
+        let state_guard = state.lock();
+        if state_guard.sessions.contains_key(id) {
+            Some(id.to_string())
+        } else {
+            None
+        }
+    };
+
+    match session_id {
+        Some(sid) => {
+            // Kill the tmux session
+            let _ = tokio::process::Command::new("tmux")
+                .args(["kill-session", "-t", &sid])
+                .output()
+                .await;
+
+            // Emit SessionDeleted to clean up state
+            let event = Event::SessionDeleted {
+                id: SessionId::new(sid),
+            };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
+            Ok(Response::Ok)
+        }
+        None => Ok(Response::Error {
+            message: format!("Session not found: {}", id),
+        }),
+    }
+}
+
 /// Handle a pipeline resume request.
 ///
 /// Validates that the pipeline exists in state or the orphan registry before

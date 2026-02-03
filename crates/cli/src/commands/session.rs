@@ -39,6 +39,11 @@ pub enum SessionCommand {
         /// Session ID
         id: String,
     },
+    /// Kill a session
+    Kill {
+        /// Session ID
+        id: String,
+    },
     /// Attach to a session (opens tmux)
     Attach {
         /// Session ID
@@ -102,6 +107,10 @@ pub async fn handle(
         SessionCommand::Send { id, input } => {
             client.session_send(&id, &input).await?;
             println!("Sent to session {}", id);
+        }
+        SessionCommand::Kill { id } => {
+            client.session_kill(&id).await?;
+            println!("Killed session {}", id);
         }
         SessionCommand::Attach { id } => {
             attach(&id)?;

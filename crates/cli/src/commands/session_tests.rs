@@ -162,3 +162,21 @@ fn attach_fails_for_nonexistent_session() {
     let result = super::attach("nonexistent-session-xyz-12345");
     assert!(result.is_err());
 }
+
+#[test]
+fn kill_subcommand_parses() {
+    use clap::Parser;
+
+    // Verify the Kill subcommand is recognized by the CLI parser
+    #[derive(Parser)]
+    struct Cli {
+        #[command(subcommand)]
+        command: super::SessionCommand,
+    }
+
+    let cli = Cli::parse_from(["session", "kill", "my-session"]);
+    match cli.command {
+        super::SessionCommand::Kill { id } => assert_eq!(id, "my-session"),
+        _ => panic!("expected Kill variant"),
+    }
+}

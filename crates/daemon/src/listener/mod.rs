@@ -196,6 +196,8 @@ async fn handle_request(
             mutations::handle_session_send(state, event_bus, id, input)
         }
 
+        Request::SessionKill { id } => mutations::handle_session_kill(state, event_bus, &id).await,
+
         Request::AgentSend { agent_id, message } => {
             mutations::handle_agent_send(state, event_bus, agent_id, message)
         }

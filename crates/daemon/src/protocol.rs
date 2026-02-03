@@ -91,6 +91,9 @@ pub enum Request {
     /// Delete all workspaces
     WorkspaceDropAll,
 
+    /// Kill a session
+    SessionKill { id: String },
+
     /// Capture tmux pane output for a session
     PeekSession {
         session_id: String,
