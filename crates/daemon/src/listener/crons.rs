@@ -104,8 +104,16 @@ pub(super) fn handle_cron_start(
     };
 
     event_bus
-        .send(event)
+        .send(event.clone())
         .map_err(|_| ConnectionError::WalError)?;
+
+    // Apply to materialized state before responding so queries see it
+    // immediately. apply_event is idempotent so the second apply when the
+    // main loop processes this event from the WAL is harmless.
+    {
+        let mut state = state.lock();
+        state.apply_event(&event);
+    }
 
     Ok(Response::CronStarted {
         cron_name: cron_name.to_string(),
@@ -143,8 +151,15 @@ pub(super) fn handle_cron_stop(
     };
 
     event_bus
-        .send(event)
+        .send(event.clone())
         .map_err(|_| ConnectionError::WalError)?;
+
+    // Apply to materialized state before responding so queries see it
+    // immediately. apply_event is idempotent.
+    {
+        let mut state = state.lock();
+        state.apply_event(&event);
+    }
 
     Ok(Response::Ok)
 }
