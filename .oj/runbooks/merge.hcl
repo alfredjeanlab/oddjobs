@@ -81,13 +81,13 @@ pipeline "merge" {
       git -C "${local.repo}" push origin ${local.branch}:${var.mr.base}
       git -C "${local.repo}" push origin --delete ${var.mr.branch}
     SHELL
-    on_fail = { step = "check" }
+    on_fail = { step = "check", attempts = 2 }
   }
 }
 
 agent "resolver" {
   run      = "claude --model opus --dangerously-skip-permissions"
-  on_idle  = { action = "gate", run = "make check", attempts = 5 }
+  on_idle  = { action = "gate", run = "make check", attempts = 2 }
   on_dead  = { action = "escalate" }
 
   prompt = <<-PROMPT

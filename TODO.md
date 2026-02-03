@@ -1,18 +1,14 @@
 # TODO
 
-In progress (merging):
-  - feat(engine): eager locals — evaluate $() in locals at creation, remove trusted prefixes
-  - feat(engine): PreToolUse hook for ExitPlanMode/AskUserQuestion → Prompting state
-  - feat(runbook): validate name references and step reachability at parse time
-  - fix(runbook): validate template references (var/args/local) at parse time
-
-In progress (agents working):
-  - feat(engine): step on_fail attempts support
-
 Drafts:
   - draft(cli): inline commands — execute shell command.run locally, not via daemon
 
 Recently landed:
+  - feat(engine): eager locals — evaluate $() in locals at creation, remove trusted prefixes
+  - feat(engine): PreToolUse hook for ExitPlanMode/AskUserQuestion → Prompting state
+  - feat(runbook): validate name references and step reachability at parse time
+  - fix(runbook): validate template references (var/args/local) at parse time
+  - feat(engine): step on_fail attempts support
   - feat(cli): auto-generate --help for runbook commands (oj run <cmd> --help)
   - feat(engine): pipeline breadcrumb files for orphan detection
   - feat(cli): oj status command (dashboard overview)
@@ -146,6 +142,8 @@ Key features landed:
   - Runbook validation: name references, step reachability, template references
   - Draft runbook: exploratory work pushed to draft/ branches, not merged
   - `oj run merge` convenience command across all projects
+  - PreToolUse hook: detect plan/question tools before agent gets stuck
+  - Step on_fail attempts: bounded retry for push→check loops
 
 Patterns that work:
   - oj run {build,fix,chore,draft} → agent → submit/push. Full loop end-to-end.
@@ -163,7 +161,7 @@ Patterns that work:
 Issues discovered:
   - ExitPlanMode/AskUserQuestion tools block agents at TUI dialogs with no hook signal.
     Claude Code only fires idle_prompt after 60s, and the agent is mid-tool-call, not idle.
-    Workaround: --disallowed-tools. Proper fix: PreToolUse hook (in progress).
+    Workaround: --disallowed-tools. Fixed: PreToolUse hook detects plan/question tools.
   - Pipeline state can be lost on daemon restart (WAL durability gap). Breadcrumb files
     now written for orphan detection.
   - Runbook parser treated multi-value options (--disallowed-tools A B) as positional args.
@@ -171,7 +169,7 @@ Issues discovered:
   - Shell escaping bug: var.* values flowing through locals bypass escaping.
     Fixed: eager locals evaluate $() at creation, all interpolation escaped uniformly.
   - Merge push→check loop: on_fail cycle with no max attempts causes infinite retries.
-    Needs: step on_fail attempts support (in progress).
+    Fixed: step on_fail attempts support landed.
   - Submit step fails when local.title contains special chars (quotes, $, backticks).
     Root cause: locals launder untrusted var.* content into trusted namespace.
     Fixed by eager locals (above). Workaround: manually push + queue merge.
