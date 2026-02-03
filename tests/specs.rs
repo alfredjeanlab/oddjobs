@@ -33,6 +33,8 @@ mod daemon_lifecycle;
 mod daemon_logs;
 #[path = "specs/daemon/pipeline_queue.rs"]
 mod daemon_pipeline_queue;
+#[path = "specs/daemon/restart_queue.rs"]
+mod daemon_restart_queue;
 #[path = "specs/daemon/timers.rs"]
 mod daemon_timers;
 
