@@ -54,6 +54,16 @@ pipeline "merge" {
     on_done = { step = "merge" }
   }
 
+  step "reinit" {
+    run = <<-SHELL
+      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+      git -C "${local.repo}" fetch origin ${var.mr.base} ${var.mr.branch}
+      git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
+    SHELL
+    on_done = { step = "merge" }
+  }
+
   step "merge" {
     run     = "git merge origin/${var.mr.branch} --no-edit"
     on_done = { step = "check" }
@@ -75,14 +85,13 @@ pipeline "merge" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit --amend --no-edit
-      git rebase --abort 2>/dev/null || true
       git -C "${local.repo}" fetch origin ${var.mr.base}
       git rebase origin/${var.mr.base}
       git -C "${local.repo}" push origin ${local.branch}:${var.mr.base}
       git -C "${local.repo}" push origin --delete ${var.mr.branch} || true
     SHELL
     on_done = { step = "cleanup" }
-    on_fail = { step = "check", attempts = 2 }
+    on_fail = { step = "reinit", attempts = 3 }
   }
 
   step "cleanup" {
