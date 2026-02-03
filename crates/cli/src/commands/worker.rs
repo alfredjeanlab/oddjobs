@@ -23,11 +23,17 @@ pub enum WorkerCommand {
     Start {
         /// Worker name from runbook
         name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// Stop a worker (active pipelines continue, no new items dispatched)
     Stop {
         /// Worker name from runbook
         name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// List all workers and their status
     List {},
@@ -51,10 +57,15 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        WorkerCommand::Start { name } => {
+        WorkerCommand::Start { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
             let request = Request::WorkerStart {
                 project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
+                namespace: effective_namespace,
                 worker_name: name.clone(),
             };
             match client.send(&request).await? {
@@ -69,10 +80,15 @@ pub async fn handle(
                 }
             }
         }
-        WorkerCommand::Stop { name } => {
+        WorkerCommand::Stop { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
             let request = Request::WorkerStop {
                 worker_name: name.clone(),
-                namespace: namespace.to_string(),
+                namespace: effective_namespace,
             };
             match client.send(&request).await? {
                 Response::Ok => {
