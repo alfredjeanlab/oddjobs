@@ -29,22 +29,42 @@ pub(super) fn handle_worker_start(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook to validate worker exists
-    let runbook = match load_runbook_for_worker(project_root, worker_name) {
-        Ok(rb) => rb,
+    // Load runbook to validate worker exists.
+    // If the provided project_root doesn't contain the worker, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, effective_root) = match load_runbook_for_worker(project_root, worker_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint = suggest_for_worker(
-                Some(project_root),
-                worker_name,
-                namespace,
-                "oj worker start",
-                state,
-            );
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_worker(alt, worker_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_worker(
+                        Some(project_root),
+                        worker_name,
+                        namespace,
+                        "oj worker start",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
+    let project_root = &effective_root;
 
     // Validate worker definition exists
     let worker_def = match runbook.get_worker(worker_name) {

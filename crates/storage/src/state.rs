@@ -204,6 +204,23 @@ impl MaterializedState {
         }
     }
 
+    /// Look up the known project root for a namespace from workers and crons.
+    ///
+    /// Returns None if no entity with this namespace has been registered yet.
+    pub fn project_root_for_namespace(&self, namespace: &str) -> Option<std::path::PathBuf> {
+        for w in self.workers.values() {
+            if w.namespace == namespace {
+                return Some(w.project_root.clone());
+            }
+        }
+        for c in self.crons.values() {
+            if c.namespace == namespace {
+                return Some(c.project_root.clone());
+            }
+        }
+        None
+    }
+
     /// Apply an event to derive state changes.
     ///
     /// This is the event-sourcing approach where state is derived from events.
