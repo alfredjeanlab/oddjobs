@@ -13,7 +13,7 @@ cron "janitor" {
 }
 ```
 
-Lifecycle: `oj cron enable janitor`, `oj cron disable janitor`, `oj cron run janitor`
+Lifecycle: `oj cron start janitor`, `oj cron stop janitor`, `oj cron once janitor`
 
 Cron fields:
 - **interval**: How often to run (e.g., `"30m"`, `"6h"`, `"24h"`)

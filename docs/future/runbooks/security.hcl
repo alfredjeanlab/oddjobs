@@ -4,7 +4,7 @@
 # Agent reviews diffs for vulnerabilities and files bugs for issues found.
 #
 # Usage:
-#   oj cron enable security
+#   oj cron start security
 
 cron "security" {
   interval = "6h"

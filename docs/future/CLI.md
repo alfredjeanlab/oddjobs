@@ -8,9 +8,9 @@ Manage time-driven daemons defined in runbooks.
 
 ```bash
 oj cron list                     # List all crons and their status
-oj cron enable <name>            # Enable a cron
-oj cron disable <name>           # Disable a cron
-oj cron run <name>               # Run once now (ignores interval)
+oj cron start <name>             # Start a cron (begins interval timer)
+oj cron stop <name>              # Stop a cron (cancels interval timer)
+oj cron once <name>              # Run once now (ignores interval)
 ```
 
 ## oj worker stop

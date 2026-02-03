@@ -4,7 +4,7 @@
 # Simple shell steps — no agent needed.
 #
 # Usage:
-#   oj cron enable janitor
+#   oj cron start janitor
 
 cron "janitor" {
   interval = "30m"
