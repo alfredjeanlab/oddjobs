@@ -1,6 +1,31 @@
 # TODO
 
-Recently landed:
+## Backlog
+
+Decisions (human-in-the-loop) — see plans/decision-roadmap.txt
+  1. Decision debug bundle: crumb + debug.txt per decision (phase 2)
+  2. Escalation decisions: system-generated options for gate/idle/dead/error (phase 3)
+  3. AskUserQuestion decisions: capture payload, answer flows back to agent (phase 4)
+  4. Plan approval decisions: capture ExitPlanMode payload, approve/reject (phase 5)
+  5. Decision polish: status count, auto-expire on cancel, --resolved history (phase 6)
+  6. Terminal: Dedicated fullscreen TUI for decisions and status
+
+Reliability
+  7. Queue crumb files: {logs_dir}/queue/{namespace}/{queue_name}.crumb.json — full queue snapshot on every state change
+  8. Namespace log paths: queue/worker/cron logs collide across projects, need {namespace}/ prefix
+  9. Default error handling for agent errors (rate limit → retry, no internet → retry,
+     out of credits → escalate, unauthorized → escalate). See design notes below.
+
+CLI polish
+  10. CLI color output: extend colors beyond help to list, show, status views
+      - Colors landed for clap help; next step is colorizing data output
+
+Multi-project
+  11. Remote daemon: coordinate jobs across multiple machines
+
+----
+
+## Recently Completed
   - fix(engine): `oj cron once` pipelines silently vanish (CommandRun vs create_and_start_pipeline)
   - feat(runbooks): janitor cron — periodic prune of pipelines, agents, workers, workspaces
   - feat(runbooks): medic cron — triage failures, stale work, stuck merges → symptoms queue
@@ -85,25 +110,6 @@ Recently landed:
   - chore(runbooks): use local.repo in locals across oddjobs, wok, quench
   - chore(runbooks): add pipeline name templates to wok and quench
   - chore(docs): update oddjobs docs for recent features
-
-Backlog (roughly priority-ordered):
-
-Human-in-the-loop
-  1. Human In The Loop: CLI-first commands for handling escalation
-  2. Terminal: Dedicated fullscreen TUI for status and interactive inbox
-
-CLI polish
-  3. CLI color output: extend colors beyond help to list, show, status views
-      - Colors landed for clap help; next step is colorizing data output
-
-Reliability
-  4. Default error handling for agent errors (rate limit → retry, no internet → retry,
-     out of credits → escalate, unauthorized → escalate). See design notes below.
-
-Multi-project
-  5. Remote daemon: coordinate jobs across multiple machines
-
-----
 
 Key files:
   .oj/runbooks/bug.hcl            — fix worker pipeline
