@@ -112,6 +112,7 @@ where
             agent_name,
             input,
             &execution_dir,
+            &self.state_dir,
         )?;
 
         // Extract agent_id from SpawnAgent effect

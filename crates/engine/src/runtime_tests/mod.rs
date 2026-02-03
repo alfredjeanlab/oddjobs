@@ -133,6 +133,7 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
         },
         clock.clone(),
         RuntimeConfig {
+            state_dir: dir_path.clone(),
             workspaces_root: workspaces,
             log_dir: dir_path.join("logs"),
         },

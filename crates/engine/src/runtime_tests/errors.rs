@@ -91,12 +91,6 @@ async fn workspace_pipeline_creates_directory() {
     // which is very unlikely to fail, so we test the happy path instead.
     let ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
 
-    // Set OJ_STATE_DIR to point into the test temp dir so workspace
-    // is created in the test directory
-    let state_dir = ctx.project_root.join("state");
-    std::fs::create_dir_all(&state_dir).unwrap();
-    std::env::set_var("OJ_STATE_DIR", &state_dir);
-
     let result = ctx
         .runtime
         .handle_event(command_event(
@@ -110,8 +104,6 @@ async fn workspace_pipeline_creates_directory() {
         ))
         .await;
 
-    std::env::remove_var("OJ_STATE_DIR");
-
     assert!(result.is_ok(), "expected Ok, got: {:?}", result);
 
     // Pipeline should exist and be running
@@ -122,7 +114,7 @@ async fn workspace_pipeline_creates_directory() {
     assert_eq!(pipeline.step, "init");
 
     // Workspace directory should have been created
-    let workspaces_dir = state_dir.join("workspaces");
+    let workspaces_dir = ctx.project_root.join("workspaces");
     assert!(workspaces_dir.exists(), "workspaces dir should be created");
 }
 

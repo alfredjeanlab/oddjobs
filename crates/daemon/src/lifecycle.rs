@@ -37,6 +37,8 @@ pub type DaemonRuntime = Runtime<
 /// Daemon configuration
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// Root state directory (e.g. ~/.local/state/oj)
+    pub state_dir: PathBuf,
     /// Path to Unix socket
     pub socket_path: PathBuf,
     /// Path to lock/PID file
@@ -72,6 +74,7 @@ impl Config {
             snapshot_path: state_dir.join("snapshot.json"),
             workspaces_path: state_dir.join("workspaces"),
             logs_path: state_dir.join("logs"),
+            state_dir,
         })
     }
 }
@@ -427,6 +430,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         },
         SystemClock,
         RuntimeConfig {
+            state_dir: config.state_dir.clone(),
             workspaces_root: config.workspaces_path.clone(),
             log_dir: config.logs_path.clone(),
         },

@@ -120,6 +120,7 @@ async fn setup_daemon_with_pipeline() -> (DaemonState, PathBuf) {
         },
         SystemClock,
         RuntimeConfig {
+            state_dir: dir_path.clone(),
             workspaces_root: dir_path.clone(),
             log_dir: dir_path.join("logs"),
         },
@@ -131,6 +132,7 @@ async fn setup_daemon_with_pipeline() -> (DaemonState, PathBuf) {
 
     let daemon = DaemonState {
         config: Config {
+            state_dir: dir_path.clone(),
             socket_path: dir_path.join("test.sock"),
             lock_path,
             version_path: dir_path.join("test.version"),
@@ -408,6 +410,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
 /// Helper to create a Config pointing at a temp directory.
 fn test_config(dir: &Path) -> Config {
     Config {
+        state_dir: dir.to_path_buf(),
         socket_path: dir.join("test.sock"),
         lock_path: dir.join("test.lock"),
         version_path: dir.join("test.version"),
@@ -554,6 +557,7 @@ async fn reconcile_state_resumes_running_workers() {
         },
         SystemClock,
         RuntimeConfig {
+            state_dir: dir_path.clone(),
             workspaces_root: dir_path.clone(),
             log_dir: dir_path.join("logs"),
         },

@@ -85,14 +85,8 @@ where
                     format!("ws-{}-{}", ws_name, nonce)
                 };
 
-                // Compute workspace path from OJ_STATE_DIR
-                let state_dir = std::env::var("OJ_STATE_DIR").unwrap_or_else(|_| {
-                    format!(
-                        "{}/.local/state/oj",
-                        std::env::var("HOME").unwrap_or_default()
-                    )
-                });
-                let workspaces_dir = PathBuf::from(&state_dir).join("workspaces");
+                // Compute workspace path from state_dir
+                let workspaces_dir = self.state_dir.join("workspaces");
                 let workspace_path = workspaces_dir.join(&workspace_id);
 
                 let mode_str = pipeline_def.workspace.as_ref().map(|m| match m {

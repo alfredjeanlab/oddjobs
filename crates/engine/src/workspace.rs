@@ -22,23 +22,16 @@ pub fn prepare_for_agent(workspace_path: &Path) -> io::Result<()> {
 }
 
 /// Get the agent state directory in OJ state dir, creating it if needed.
-fn agent_state_dir(agent_id: &str) -> io::Result<PathBuf> {
-    let state_dir = std::env::var("OJ_STATE_DIR").unwrap_or_else(|_| {
-        format!(
-            "{}/.local/state/oj",
-            std::env::var("HOME").unwrap_or_default()
-        )
-    });
-
-    let agent_dir = PathBuf::from(&state_dir).join("agents").join(agent_id);
+fn agent_state_dir(agent_id: &str, state_dir: &Path) -> io::Result<PathBuf> {
+    let agent_dir = state_dir.join("agents").join(agent_id);
     fs::create_dir_all(&agent_dir)?;
 
     Ok(agent_dir)
 }
 
 /// Get path to agent-specific settings file in OJ state directory
-fn agent_settings_path(agent_id: &str) -> io::Result<PathBuf> {
-    Ok(agent_state_dir(agent_id)?.join("claude-settings.json"))
+fn agent_settings_path(agent_id: &str, state_dir: &Path) -> io::Result<PathBuf> {
+    Ok(agent_state_dir(agent_id, state_dir)?.join("claude-settings.json"))
 }
 
 /// Write agent prime script(s) to the state directory.
@@ -50,8 +43,9 @@ pub fn prepare_agent_prime(
     agent_id: &str,
     prime: &PrimeDef,
     vars: &HashMap<String, String>,
+    state_dir: &Path,
 ) -> io::Result<HashMap<String, PathBuf>> {
-    let agent_dir = agent_state_dir(agent_id)?;
+    let agent_dir = agent_state_dir(agent_id, state_dir)?;
     let rendered = prime.render_per_source(vars);
 
     let mut paths = HashMap::new();
@@ -88,8 +82,9 @@ pub fn prepare_agent_settings(
     agent_id: &str,
     workspace_path: &Path,
     prime_paths: &HashMap<String, PathBuf>,
+    state_dir: &Path,
 ) -> io::Result<PathBuf> {
-    let settings_path = agent_settings_path(agent_id)?;
+    let settings_path = agent_settings_path(agent_id, state_dir)?;
 
     // Load project settings from workspace (if they exist)
     let project_settings = workspace_path.join(".claude/settings.json");

@@ -55,8 +55,16 @@ fn build_spawn_effects_creates_agent_and_timer() {
         .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     // Should produce 2 effects: SpawnAgent, SetTimer
     assert_eq!(effects.len(), 2);
@@ -78,8 +86,16 @@ fn build_spawn_effects_interpolates_variables() {
         .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     // Check the SpawnAgent effect has interpolated command
     // The command uses ${prompt} which now gets the rendered agent prompt
@@ -107,6 +123,7 @@ fn build_spawn_effects_uses_absolute_cwd() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     )
     .unwrap();
 
@@ -132,6 +149,7 @@ fn build_spawn_effects_uses_relative_cwd() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     )
     .unwrap();
 
@@ -155,6 +173,7 @@ fn build_spawn_effects_prepares_workspace() {
         &pid,
         "worker",
         &HashMap::new(),
+        workspace.path(),
         workspace.path(),
     )
     .unwrap();
@@ -183,6 +202,7 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     );
 
     // Should fail due to missing prompt file
@@ -200,8 +220,16 @@ fn build_spawn_effects_carries_full_config() {
         .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     // SpawnAgent should carry command, env, and cwd
     if let Effect::SpawnAgent {
@@ -251,6 +279,7 @@ fn build_spawn_effects_timer_uses_liveness_interval() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     )
     .unwrap();
 
@@ -278,8 +307,16 @@ fn build_spawn_effects_namespaces_pipeline_inputs() {
         .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     if let Effect::SpawnAgent {
         command,
@@ -323,8 +360,16 @@ fn build_spawn_effects_inputs_namespace_in_prompt() {
     .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     if let Effect::SpawnAgent {
         command,
@@ -374,6 +419,7 @@ fn build_spawn_effects_escapes_backticks_in_prompt() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     )
     .unwrap();
 
@@ -407,6 +453,7 @@ fn build_spawn_effects_with_prime_succeeds() {
         "worker",
         &HashMap::new(),
         workspace.path(),
+        workspace.path(),
     )
     .unwrap();
 
@@ -429,6 +476,7 @@ fn build_spawn_effects_with_prime_script_succeeds() {
         &pid,
         "worker",
         &HashMap::new(),
+        workspace.path(),
         workspace.path(),
     )
     .unwrap();
@@ -458,8 +506,16 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
     .collect();
 
     let pid = PipelineId::new("pipe-1");
-    let effects =
-        build_spawn_effects(&agent, &pipeline, &pid, "worker", &input, workspace.path()).unwrap();
+    let effects = build_spawn_effects(
+        &agent,
+        &pipeline,
+        &pid,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
 
     if let Effect::SpawnAgent { command, .. } = &effects[0] {
         assert!(

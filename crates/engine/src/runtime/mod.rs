@@ -32,6 +32,8 @@ pub use oj_core::{Event, StepStatus};
 
 /// Runtime path configuration
 pub struct RuntimeConfig {
+    /// Root state directory (e.g. ~/.local/state/oj)
+    pub state_dir: PathBuf,
     /// Directory where workspaces are created
     pub workspaces_root: PathBuf,
     /// Directory for per-pipeline log files
@@ -49,6 +51,7 @@ pub struct RuntimeDeps<S, A, N> {
 /// Runtime that coordinates the system
 pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) executor: Executor<S, A, N, C>,
+    pub(crate) state_dir: PathBuf,
     pub(crate) _workspaces_root: PathBuf,
     pub(crate) logger: PipelineLogger,
     pub(crate) breadcrumb: BreadcrumbWriter,
@@ -79,6 +82,7 @@ where
                 clock,
                 event_tx,
             ),
+            state_dir: config.state_dir,
             _workspaces_root: config.workspaces_root,
             logger: PipelineLogger::new(config.log_dir.clone()),
             breadcrumb: BreadcrumbWriter::new(config.log_dir),

@@ -25,6 +25,7 @@ pub fn build_spawn_effects(
     agent_name: &str,
     input: &HashMap<String, String>,
     workspace_path: &Path,
+    state_dir: &Path,
 ) -> Result<Vec<Effect>, RuntimeError> {
     // Use workspace_path as project root for settings lookup
     // After the workspace refactor, the runbook's init step clones the project
@@ -94,22 +95,27 @@ pub fn build_spawn_effects(
 
     // Write prime script(s) if agent has prime config
     let prime_paths = if let Some(ref prime) = agent_def.prime {
-        crate::workspace::prepare_agent_prime(&agent_id, prime, &prompt_vars).map_err(|e| {
-            tracing::error!(error = %e, "agent prime preparation failed");
-            RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-        })?
+        crate::workspace::prepare_agent_prime(&agent_id, prime, &prompt_vars, state_dir).map_err(
+            |e| {
+                tracing::error!(error = %e, "agent prime preparation failed");
+                RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
+            },
+        )?
     } else {
         HashMap::new()
     };
 
     // Prepare settings file with hooks in OJ state directory
-    let settings_path =
-        crate::workspace::prepare_agent_settings(&agent_id, workspace_path, &prime_paths).map_err(
-            |e| {
-                tracing::error!(error = %e, "agent settings preparation failed");
-                RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-            },
-        )?;
+    let settings_path = crate::workspace::prepare_agent_settings(
+        &agent_id,
+        workspace_path,
+        &prime_paths,
+        state_dir,
+    )
+    .map_err(|e| {
+        tracing::error!(error = %e, "agent settings preparation failed");
+        RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
+    })?;
 
     // Build base command and append session-id, settings, and prompt (if not inline)
     let base_command = agent_def.build_command(&vars);
