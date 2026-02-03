@@ -1,10 +1,19 @@
 # TODO
 
 In progress (agents working):
-  - fix(cli): inconsistent shell exit error messages
-  - chore(cli): oj pipeline prune command
+  - feat(cli): oj status command (dashboard overview)
+  - feat(engine): step on_fail attempts support
+  - chore(cli): sort list outputs by last updated
+  - chore(cli): improve oj agent list columns (ID, NAME, PROJECT, shorter IDs)
+  - chore(cli): add oj agent prune command
 
 Recently landed:
+  - fix(cli): inconsistent shell exit error messages
+  - chore(cli): oj pipeline prune command
+  - chore(cli): oj pipeline prune default 24h → 12h
+  - fix(runbooks): fetch and rebase before push in merge pipeline
+  - chore(runbooks): increase fix and chore worker concurrency to 3
+  - chore(runbooks): rename agents to bugs and chores
   - fix(workspace): oj workspace drop for orphaned worktrees
   - fix(daemon): auto-resume workers on daemon restart
   - fix(cli): suppress empty 'Error: ' on silent exit codes
@@ -19,28 +28,25 @@ Backlog (roughly priority-ordered):
 
 Core pipeline
   1. Worker poll interval: optional poll_interval on worker blocks for periodic checks
-  2. Merge pipeline: handle non-fast-forward push (rebase-before-push or retry)
 
 Reliability
-  3. Cron: watchdog and janitor runbooks for stuck agents / stale resources
-  4. Default error handling for agent errors (rate limit → retry, no internet → retry,
+  2. Cron: watchdog and janitor runbooks for stuck agents / stale resources
+  3. Default error handling for agent errors (rate limit → retry, no internet → retry,
      out of credits → escalate, unauthorized → escalate). See design notes below.
 
 Human-in-the-loop
-  5. Status: quick status command showing active/escalated pipelines, queued merges,
-     active agents, enabled crons
-  6. Human In The Loop: CLI-first commands for handling escalation
-  7. Terminal: Dedicated fullscreen TUI for "watching" status and interactive inbox
+  4. Human In The Loop: CLI-first commands for handling escalation
+  5. Terminal: Dedicated fullscreen TUI for "watching" status and interactive inbox
 
 CLI polish
-  8. CLI color output: detect tty, respect COLOR/NO_COLOR env vars
+  6. CLI color output: detect tty, respect COLOR/NO_COLOR env vars
       - Copy color conventions from ../quench and ../wok
       - Colorize show, list, --help views and other human-facing output
       - Ask human for preferences on color scheme before implementing
 
 Multi-project
-  9. Shared queues: allow cross-project queue push (e.g. --project flag routing)
-  10. Remote daemon: coordinate jobs across multiple machines
+  7. Shared queues: allow cross-project queue push (e.g. --project flag routing)
+  8. Remote daemon: coordinate jobs across multiple machines
 
 ----
 
