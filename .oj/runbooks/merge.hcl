@@ -79,7 +79,7 @@ pipeline "merge" {
       git -C "${local.repo}" fetch origin ${var.mr.base}
       git rebase origin/${var.mr.base}
       git -C "${local.repo}" push origin ${local.branch}:${var.mr.base}
-      git -C "${local.repo}" push origin --delete ${var.mr.branch}
+      git -C "${local.repo}" push origin --delete ${var.mr.branch} || true
     SHELL
     on_done = { step = "cleanup" }
     on_fail = { step = "check", attempts = 2 }

@@ -1,14 +1,16 @@
 # TODO
 
 In progress (agents working):
-  - feat(cli): oj worker stop <name> — pause a running worker
-  - feat(cli): oj pipeline prune --failed, prune cancelled regardless of age
-  - fix(engine): DeleteWorkspace should call git worktree remove before rm -rf
+  - feat(engine): cron entrypoint — time-driven pipeline execution
+  - feat(cli): oj worker prune — remove stopped workers from state (merging)
 
 Drafts:
   - draft(cli): inline commands — execute shell command.run locally, not via daemon
 
 Recently landed:
+  - feat(cli): oj worker stop <name> — pause a running worker
+  - feat(cli): oj pipeline prune --failed, prune cancelled regardless of age
+  - fix(engine): DeleteWorkspace should call git worktree remove before rm -rf
   - chore(runbooks): add worktree cleanup steps to all pipelines (on_done/on_cancel/on_fail)
   - chore(runbooks): merge push on_fail attempts = 2, resolver gate attempts = 2
   - feat(engine): eager locals — evaluate $() in locals at creation, remove trusted prefixes
