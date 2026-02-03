@@ -1,6 +1,12 @@
 # TODO
 
 Recently landed:
+  - fix(engine): `oj cron once` pipelines silently vanish (CommandRun vs create_and_start_pipeline)
+  - feat(runbooks): janitor cron — periodic prune of pipelines, agents, workers, workspaces
+  - feat(runbooks): medic cron — triage failures, stale work, stuck merges → symptoms queue
+  - feat(runbooks): heartbeat cron — temporary debug cron for verifying timer execution
+  - feat(runbooks): town start command — launches crons
+  - chore(docs): updated runbook guide with crons, prime, inbox queues, best practices
   - feat(cli): ANSI color support for clap help output (header/literal/context/muted)
   - fix(cli): `oj run` with no arguments exits 0 (not error)
   - fix(cli): `oj run errand -h` shows errand-specific help (not generic oj run help)
@@ -83,8 +89,7 @@ Recently landed:
 Backlog (roughly priority-ordered):
 
 Crons and reliability
-  1. Cron runbooks: write janitor, reliability, security, architect cron runbooks
-      See: docs/future/runbooks/{janitor,reliability,security,architect}.hcl
+  1. Cron runbooks: security and architect crons (see docs/future/runbooks/)
   2. Default error handling for agent errors (rate limit → retry, no internet → retry,
      out of credits → escalate, unauthorized → escalate). See design notes below.
 
@@ -204,6 +209,9 @@ Key features landed:
   - Pipeline logs moved to pipeline/ subdir (consistent with agent/)
   - Consistent log flags: -n/--limit/--no-limit across all log commands
   - Short IDs: 8 hex chars everywhere (no hyphen suffix)
+  - Cron runbooks: janitor (prune), medic (triage → symptoms queue), heartbeat (debug)
+  - Town start command: `oj run start` launches crons
+  - Runbook guide: documented crons, prime, inbox queues, step consolidation
 
 Patterns that work:
   - oj run {build,fix,chore,draft} → agent → submit/push. Full loop end-to-end.
@@ -217,8 +225,14 @@ Patterns that work:
   - Commit and push TODO/doc changes before kicking off agents — avoids merge conflicts
     when agent branches diverge from main.
   - oj run drafts to review exploratory work without polluting main.
+  - Prime commands to pre-load agent context (oj status, queue list, etc.) — saves tool calls.
+  - Persisted queues as inboxes: agents push findings, humans review in bulk later.
+  - Combine independent shell commands in one step — don't over-split simple pipelines.
 
 Issues discovered:
+  - `oj cron once` pipelines silently vanish. Root cause: handle_cron_once emits CommandRun
+    which looks up a `command` block, but cron runbooks have no command block. Fix: use
+    create_and_start_pipeline directly (same path as cron timer fire). Build dispatched.
   - ExitPlanMode/AskUserQuestion tools block agents at TUI dialogs with no hook signal.
     Claude Code only fires idle_prompt after 60s, and the agent is mid-tool-call, not idle.
     Workaround: --disallowed-tools. Fixed: PreToolUse hook detects plan/question tools.
