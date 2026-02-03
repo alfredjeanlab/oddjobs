@@ -2,6 +2,8 @@
 
 ```toc
 docs/
+├── GUIDE.md                  # Runbook patterns, best practices, examples
+│
 ├── concepts/                 # What things are
 │   ├── RUNBOOKS.md           # Primitives: command, pipeline, agent
 │   └── EXECUTION.md          # Workspace and session abstractions
