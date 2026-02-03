@@ -272,7 +272,7 @@ pub(super) fn handle_agent_send(
 ///
 /// Removes terminal pipelines (failed/cancelled/done) from state and
 /// cleans up their log files. By default only prunes pipelines older
-/// than 24 hours; use `--all` to prune all terminal pipelines.
+/// than 12 hours; use `--all` to prune all terminal pipelines.
 pub(super) fn handle_pipeline_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
@@ -284,7 +284,7 @@ pub(super) fn handle_pipeline_prune(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
-    let age_threshold_ms = 24 * 60 * 60 * 1000; // 24 hours in ms
+    let age_threshold_ms = 12 * 60 * 60 * 1000; // 12 hours in ms
 
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
@@ -381,7 +381,7 @@ pub(super) async fn handle_workspace_prune(
     };
 
     let now = std::time::SystemTime::now();
-    let age_threshold = std::time::Duration::from_secs(24 * 60 * 60);
+    let age_threshold = std::time::Duration::from_secs(12 * 60 * 60);
 
     let mut entries = entries;
     while let Ok(Some(entry)) = entries.next_entry().await {
@@ -390,7 +390,7 @@ pub(super) async fn handle_workspace_prune(
             continue;
         }
 
-        // Check age via directory mtime (skip if < 24h unless --all)
+        // Check age via directory mtime (skip if < 12h unless --all)
         if !all {
             if let Ok(metadata) = tokio::fs::metadata(&path).await {
                 if let Ok(modified) = metadata.modified() {
