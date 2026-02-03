@@ -11,11 +11,13 @@
 mod agent;
 mod command;
 mod find;
+mod help;
 mod parser;
 mod pipeline;
 mod queue;
 mod slug;
 mod template;
+mod validate;
 mod worker;
 
 pub use agent::{
@@ -27,12 +29,13 @@ pub use command::{
     OptionDef, RunDirective, VariadicDef,
 };
 pub use find::{
-    collect_all_commands, collect_all_queues, find_runbook_by_command, find_runbook_by_queue,
-    find_runbook_by_worker, validate_runbook_dir, FindError,
+    collect_all_commands, collect_all_queues, extract_file_comment, find_command_with_comment,
+    find_runbook_by_command, find_runbook_by_queue, find_runbook_by_worker, validate_runbook_dir,
+    FileComment, FindError,
 };
 pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
 pub use pipeline::{NotifyConfig, PipelineDef, StepDef, StepTransition, WorkspaceMode};
 pub use queue::{QueueDef, QueueType};
 pub use slug::{pipeline_display_name, slugify};
-pub use template::{escape_for_shell, interpolate, interpolate_shell, interpolate_shell_trusted};
+pub use template::{escape_for_shell, interpolate, interpolate_shell};
 pub use worker::{WorkerDef, WorkerHandler, WorkerSource};
