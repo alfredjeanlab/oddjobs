@@ -15,7 +15,7 @@ use output::OutputFormat;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use commands::{
-    agent, cron, daemon, emit, pipeline, queue, run, session, status, worker, workspace,
+    agent, cron, daemon, emit, pipeline, project, queue, run, session, status, worker, workspace,
 };
 use std::path::{Path, PathBuf};
 
@@ -64,6 +64,8 @@ enum Commands {
     Cron(cron::CronArgs),
     /// Emit events to the daemon (for agents)
     Emit(emit::EmitArgs),
+    /// Project management
+    Project(project::ProjectArgs),
     /// Show overview of active work across all projects
     Status,
 }
@@ -242,6 +244,11 @@ async fn run() -> Result<()> {
         Commands::Emit(args) => {
             let client = DaemonClient::for_signal()?;
             emit::handle(args.command, &client, format).await?
+        }
+
+        // Project - global cross-project listing (query, graceful when daemon down)
+        Commands::Project(args) => {
+            project::handle_not_running_or(args.command, format).await?;
         }
 
         // Status - top-level dashboard (query, graceful when daemon down)

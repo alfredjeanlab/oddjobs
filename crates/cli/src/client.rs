@@ -14,7 +14,6 @@ use crate::daemon_process::{
     start_daemon_background, stop_daemon_sync, wrap_with_startup_error,
 };
 
-use oj_core::AgentSignalKind;
 use oj_daemon::protocol::{self, ProtocolError};
 use oj_daemon::{Query, Request, Response};
 use thiserror::Error;
@@ -691,15 +690,7 @@ impl DaemonClient {
             },
         };
         match self.send(&request).await? {
-            Response::AgentSignal {
-                signaled,
-                kind,
-                message,
-            } => Ok(AgentSignalResponse {
-                signaled,
-                kind,
-                message,
-            }),
+            Response::AgentSignal { signaled, .. } => Ok(AgentSignalResponse { signaled }),
             other => Self::reject(other),
         }
     }
@@ -711,6 +702,17 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Orphans { orphans } => Ok(orphans),
+            other => Self::reject(other),
+        }
+    }
+
+    /// List all projects with active work
+    pub async fn list_projects(&self) -> Result<Vec<oj_daemon::ProjectSummary>, ClientError> {
+        let req = Request::Query {
+            query: Query::ListProjects,
+        };
+        match self.send(&req).await? {
+            Response::Projects { projects } => Ok(projects),
             other => Self::reject(other),
         }
     }
@@ -729,14 +731,7 @@ impl DaemonClient {
 
 /// Response from agent signal query
 pub struct AgentSignalResponse {
-    /// Whether the agent has signaled completion
     pub signaled: bool,
-    // NOTE(compat): Exposed for future CLI display of signal details
-    #[allow(dead_code)]
-    pub kind: Option<AgentSignalKind>,
-    // NOTE(compat): same as above
-    #[allow(dead_code)]
-    pub message: Option<String>,
 }
 
 #[cfg(test)]

@@ -9,6 +9,7 @@ pub mod daemon;
 pub mod emit;
 pub mod pipeline;
 mod pipeline_wait;
+pub mod project;
 pub mod queue;
 pub mod run;
 pub mod session;

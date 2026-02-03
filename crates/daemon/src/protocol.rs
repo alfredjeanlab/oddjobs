@@ -16,7 +16,7 @@ use thiserror::Error;
 mod status;
 pub use status::{
     AgentStatusEntry, CronSummary, NamespaceStatus, OrphanAgent, OrphanSummary,
-    PipelineStatusEntry, QueueStatus,
+    PipelineStatusEntry, ProjectSummary, QueueStatus, WorkerEntry,
 };
 
 /// Request from CLI to daemon
@@ -264,6 +264,8 @@ pub enum Query {
     ListCrons,
     /// Get a cross-project status overview
     StatusOverview,
+    /// List all projects with active work
+    ListProjects,
     /// List orphaned pipelines detected from breadcrumbs at startup
     ListOrphans,
     /// Dismiss an orphaned pipeline by ID
@@ -435,6 +437,9 @@ pub enum Response {
 
     /// List of orphaned pipelines detected from breadcrumbs
     Orphans { orphans: Vec<OrphanSummary> },
+
+    /// List of projects with active work
+    Projects { projects: Vec<ProjectSummary> },
 }
 
 /// Summary of a pipeline for listing
@@ -578,13 +583,6 @@ pub struct AgentEntry {
     pub agent_id: String,
     pub pipeline_id: String,
     pub step_name: String,
-}
-
-/// Worker entry for prune responses
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct WorkerEntry {
-    pub name: String,
-    pub namespace: String,
 }
 
 /// Summary of a queue item

@@ -6,6 +6,9 @@
 #[path = "query_orphans.rs"]
 mod query_orphans;
 
+#[path = "query_projects.rs"]
+mod query_projects;
+
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -37,6 +40,7 @@ pub(super) fn handle_query(
         Query::DismissOrphan { id } => {
             return query_orphans::handle_dismiss_orphan(orphans, id, logs_path)
         }
+        Query::ListProjects => return query_projects::handle_list_projects(state),
         _ => {}
     }
 
@@ -644,7 +648,7 @@ pub(super) fn handle_query(
         }
 
         // Handled by early return above; included for exhaustiveness
-        Query::ListOrphans | Query::DismissOrphan { .. } => unreachable!(),
+        Query::ListOrphans | Query::DismissOrphan { .. } | Query::ListProjects => unreachable!(),
     }
 }
 

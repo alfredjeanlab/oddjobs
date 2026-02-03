@@ -88,3 +88,21 @@ pub struct OrphanAgent {
     pub session_name: Option<String>,
     pub log_path: PathBuf,
 }
+
+/// Worker entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerEntry {
+    pub name: String,
+    pub namespace: String,
+}
+
+/// Summary of a project with active work
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProjectSummary {
+    pub name: String,
+    pub root: PathBuf,
+    pub active_pipelines: usize,
+    pub active_agents: usize,
+    pub workers: usize,
+    pub crons: usize,
+}
