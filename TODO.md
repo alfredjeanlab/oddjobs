@@ -52,8 +52,14 @@ Core pipeline
   1. Worker poll interval: optional poll_interval on worker blocks for periodic checks
   2. Inline command execution: shell command.run executes locally (see draft)
 
-Reliability
-  2. Cron: watchdog and janitor runbooks for stuck agents / stale resources
+Crons and reliability
+  2. Cron entrypoint: time-driven pipeline execution (third entrypoint alongside commands/workers)
+      Use cases:
+        - Janitor (30m): prune stale worktrees, orphan tmux sessions, old logs (shell only)
+        - Reliability engineer (1h): review failed pipelines, dead letters, recurring errors → file bugs
+        - Security auditor (6h): review recent commits for vulnerabilities → file bugs
+      See: docs/future/RUNBOOKS.md, docs/future/runbooks/{janitor,reliability,security}.hcl
+      CLI: docs/future/CLI.md (oj cron {list,start,stop,once})
   3. Default error handling for agent errors (rate limit → retry, no internet → retry,
      out of credits → escalate, unauthorized → escalate). See design notes below.
 

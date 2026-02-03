@@ -7,7 +7,7 @@
 # janitor handles resource cleanup, this agent catches what slips through.
 #
 # Usage:
-#   oj cron enable reliability
+#   oj cron start reliability
 
 cron "reliability" {
   interval = "1h"
