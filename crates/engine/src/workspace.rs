@@ -160,6 +160,16 @@ fn inject_hooks(settings: &mut Value, agent_id: &str, prime_path: Option<&Path>)
         json!([idle_hook_entry, permission_hook_entry]),
     );
 
+    // Inject PreToolUse hook for detecting plan/question tools
+    let pretooluse_hook_entry = json!({
+        "matcher": "ExitPlanMode|AskUserQuestion|EnterPlanMode",
+        "hooks": [{
+            "type": "command",
+            "command": format!("oj agent hook pretooluse {}", agent_id)
+        }]
+    });
+    hooks_obj.insert("PreToolUse".to_string(), json!([pretooluse_hook_entry]));
+
     // Inject SessionStart hook if prime path is provided
     if let Some(path) = prime_path {
         let session_start_entry = json!({

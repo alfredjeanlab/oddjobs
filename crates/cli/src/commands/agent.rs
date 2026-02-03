@@ -11,6 +11,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 
+use oj_core::{AgentId, Event, PromptType};
+
 use crate::client::DaemonClient;
 use crate::exit_error::ExitError;
 use crate::output::{display_log, OutputFormat};
@@ -95,6 +97,17 @@ pub enum HookCommand {
         /// Agent ID to check
         agent_id: String,
     },
+    /// PreToolUse hook handler - detects plan/question tools and transitions to Prompting
+    Pretooluse {
+        /// Agent ID to emit prompt event for
+        agent_id: String,
+    },
+}
+
+/// Input from Claude Code PreToolUse hook (subset of fields we care about)
+#[derive(Deserialize)]
+struct PreToolUseInput {
+    tool_name: Option<String>,
 }
 
 /// Input from Claude Code Stop hook (subset of fields we care about)
@@ -235,6 +248,9 @@ pub async fn handle(
         AgentCommand::Hook { hook } => match hook {
             HookCommand::Stop { agent_id } => {
                 handle_stop_hook(&agent_id, client).await?;
+            }
+            HookCommand::Pretooluse { agent_id } => {
+                handle_pretooluse_hook(&agent_id, client).await?;
             }
         },
     }
@@ -466,6 +482,36 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
         }
         tokio::time::sleep(poll_interval).await;
     }
+
+    Ok(())
+}
+
+/// Map a tool name from PreToolUse input to its corresponding PromptType.
+/// Returns None for unrecognized tools.
+fn prompt_type_for_tool(tool_name: Option<&str>) -> Option<PromptType> {
+    match tool_name {
+        Some("ExitPlanMode") | Some("EnterPlanMode") => Some(PromptType::PlanApproval),
+        Some("AskUserQuestion") => Some(PromptType::Question),
+        _ => None,
+    }
+}
+
+async fn handle_pretooluse_hook(agent_id: &str, client: &DaemonClient) -> Result<()> {
+    let mut input_json = String::new();
+    io::stdin().read_to_string(&mut input_json)?;
+
+    let input: PreToolUseInput =
+        serde_json::from_str(&input_json).unwrap_or(PreToolUseInput { tool_name: None });
+
+    let Some(prompt_type) = prompt_type_for_tool(input.tool_name.as_deref()) else {
+        return Ok(());
+    };
+
+    let event = Event::AgentPrompt {
+        agent_id: AgentId::new(agent_id),
+        prompt_type,
+    };
+    client.emit_event(event).await?;
 
     Ok(())
 }

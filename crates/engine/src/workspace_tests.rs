@@ -312,3 +312,42 @@ fn prepare_agent_settings_injects_notification_hooks() {
 
     std::env::remove_var("OJ_STATE_DIR");
 }
+
+#[test]
+fn prepare_agent_settings_injects_pretooluse_hook() {
+    let state_dir = TempDir::new().unwrap();
+    let workspace = TempDir::new().unwrap();
+    std::env::set_var("OJ_STATE_DIR", state_dir.path());
+
+    let agent_id = "test-pretooluse";
+    let settings_path = prepare_agent_settings(agent_id, workspace.path(), None).unwrap();
+
+    let content = fs::read_to_string(&settings_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    // PreToolUse hook is present
+    assert!(parsed["hooks"]["PreToolUse"].is_array());
+    let hooks = parsed["hooks"]["PreToolUse"].as_array().unwrap();
+    assert_eq!(hooks.len(), 1);
+
+    // Matcher covers all three tools
+    assert_eq!(
+        hooks[0]["matcher"],
+        "ExitPlanMode|AskUserQuestion|EnterPlanMode"
+    );
+
+    // Command references the agent hook subcommand
+    let inner = hooks[0]["hooks"].as_array().unwrap();
+    assert_eq!(inner.len(), 1);
+    assert_eq!(inner[0]["type"], "command");
+    assert_eq!(
+        inner[0]["command"],
+        format!("oj agent hook pretooluse {}", agent_id)
+    );
+
+    // Other hooks are still present
+    assert!(parsed["hooks"]["Stop"].is_array());
+    assert!(parsed["hooks"]["Notification"].is_array());
+
+    std::env::remove_var("OJ_STATE_DIR");
+}

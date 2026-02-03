@@ -66,3 +66,33 @@ fn append_agent_log_writes_to_file() {
     assert!(lines[0].contains("T"), "should have timestamp");
     assert!(lines[0].contains("Z"), "should have UTC marker");
 }
+
+#[test]
+fn prompt_type_for_tool_maps_exit_plan_mode() {
+    assert_eq!(
+        prompt_type_for_tool(Some("ExitPlanMode")),
+        Some(oj_core::PromptType::PlanApproval)
+    );
+}
+
+#[test]
+fn prompt_type_for_tool_maps_enter_plan_mode() {
+    assert_eq!(
+        prompt_type_for_tool(Some("EnterPlanMode")),
+        Some(oj_core::PromptType::PlanApproval)
+    );
+}
+
+#[test]
+fn prompt_type_for_tool_maps_ask_user_question() {
+    assert_eq!(
+        prompt_type_for_tool(Some("AskUserQuestion")),
+        Some(oj_core::PromptType::Question)
+    );
+}
+
+#[test]
+fn prompt_type_for_tool_returns_none_for_unknown() {
+    assert_eq!(prompt_type_for_tool(Some("Bash")), None);
+    assert_eq!(prompt_type_for_tool(None), None);
+}
