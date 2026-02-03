@@ -66,23 +66,24 @@ fn print_available_commands(project_root: &Path) -> Result<()> {
     let runbook_dir = project_root.join(".oj/runbooks");
     let commands = oj_runbook::collect_all_commands(&runbook_dir).unwrap_or_default();
 
-    let mut buf = String::new();
-    format_available_commands(&mut buf, &commands);
-    eprint!("{buf}");
-    std::process::exit(2);
+    let mut help = crate::color::HelpPrinter::new();
+    format_available_commands(&mut help, &commands);
+    print!("{}", help.finish());
+    Ok(())
 }
 
-fn format_available_commands(buf: &mut String, commands: &[(String, oj_runbook::CommandDef)]) {
-    use std::fmt::Write;
-
-    let _ = writeln!(buf, "Usage: oj run <COMMAND> [ARGS]...");
-    let _ = writeln!(buf);
+fn format_available_commands(
+    help: &mut crate::color::HelpPrinter,
+    commands: &[(String, oj_runbook::CommandDef)],
+) {
+    help.usage("oj run <COMMAND> [ARGS]...");
+    help.blank();
 
     if commands.is_empty() {
-        let _ = writeln!(buf, "No commands found.");
-        let _ = writeln!(buf, "Define commands in .oj/runbooks/*.hcl");
+        help.plain("No commands found.");
+        help.plain("Define commands in .oj/runbooks/*.hcl");
     } else {
-        let _ = writeln!(buf, "Available Commands:");
+        help.header("Commands:");
         for (name, cmd) in commands {
             let args_str = cmd.args.usage_line();
             let line = if args_str.is_empty() {
@@ -90,16 +91,12 @@ fn format_available_commands(buf: &mut String, commands: &[(String, oj_runbook::
             } else {
                 format!("{name} {args_str}")
             };
-            if let Some(desc) = &cmd.description {
-                let _ = writeln!(buf, "  {line:<40} {desc}");
-            } else {
-                let _ = writeln!(buf, "  {line}");
-            }
+            help.entry(&line, 40, cmd.description.as_deref());
         }
     }
 
-    let _ = writeln!(buf);
-    let _ = writeln!(buf, "For more information, try '--help'.");
+    help.blank();
+    help.hint("For more information, try '--help'.");
 }
 
 pub async fn handle(

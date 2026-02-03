@@ -36,20 +36,116 @@ pub fn styles() -> Styles {
         return Styles::plain();
     }
     Styles::styled()
+        .usage(Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(codes::HEADER)))))
         .header(Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(codes::HEADER)))))
         .literal(Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(codes::LITERAL)))))
         .placeholder(Style::new().fg_color(Some(Color::Ansi256(Ansi256Color(codes::CONTEXT)))))
 }
 
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
 fn fg256(code: u8) -> String {
     format!("\x1b[38;5;{code}m")
 }
 
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
 const RESET: &str = "\x1b[0m";
+
+/// Builder for clap-style colored help text.
+///
+/// Matches the palette from [`styles()`] so custom help blocks
+/// look identical to clap's built-in output.
+pub struct HelpPrinter {
+    buf: String,
+    colorize: bool,
+}
+
+impl HelpPrinter {
+    pub fn new() -> Self {
+        Self {
+            buf: String::new(),
+            colorize: should_colorize(),
+        }
+    }
+
+    /// Create a printer that never emits color codes (for tests).
+    #[cfg(test)]
+    pub fn uncolored() -> Self {
+        Self {
+            buf: String::new(),
+            colorize: false,
+        }
+    }
+
+    /// "Usage: <rest>" — header-colored label, plain rest.
+    pub fn usage(&mut self, rest: &str) {
+        use std::fmt::Write;
+        if self.colorize {
+            let _ = writeln!(
+                self.buf,
+                "{}Usage:{} {rest}",
+                fg256(codes::HEADER),
+                RESET,
+            );
+        } else {
+            let _ = writeln!(self.buf, "Usage: {rest}");
+        }
+    }
+
+    /// Section header (e.g. "Available Commands:").
+    pub fn header(&mut self, label: &str) {
+        use std::fmt::Write;
+        if self.colorize {
+            let _ = writeln!(self.buf, "{}{label}{}", fg256(codes::HEADER), RESET);
+        } else {
+            let _ = writeln!(self.buf, "{label}");
+        }
+    }
+
+    /// Two-column entry: literal-colored name padded to `width`, optional description.
+    pub fn entry(&mut self, name: &str, width: usize, desc: Option<&str>) {
+        use std::fmt::Write;
+        if self.colorize {
+            if let Some(desc) = desc {
+                let _ = writeln!(
+                    self.buf,
+                    "  {}{name:<width$}{} {desc}",
+                    fg256(codes::LITERAL),
+                    RESET,
+                );
+            } else {
+                let _ = writeln!(self.buf, "  {}{name}{}", fg256(codes::LITERAL), RESET);
+            }
+        } else if let Some(desc) = desc {
+            let _ = writeln!(self.buf, "  {name:<width$} {desc}");
+        } else {
+            let _ = writeln!(self.buf, "  {name}");
+        }
+    }
+
+    /// Hint / footer line in context color.
+    pub fn hint(&mut self, text: &str) {
+        use std::fmt::Write;
+        if self.colorize {
+            let _ = writeln!(self.buf, "{}{text}{}", fg256(codes::CONTEXT), RESET);
+        } else {
+            let _ = writeln!(self.buf, "{text}");
+        }
+    }
+
+    /// Plain text line (no color).
+    pub fn plain(&mut self, text: &str) {
+        use std::fmt::Write;
+        let _ = writeln!(self.buf, "{text}");
+    }
+
+    /// Blank line.
+    pub fn blank(&mut self) {
+        self.buf.push('\n');
+    }
+
+    /// Consume the printer and return the formatted string.
+    pub fn finish(self) -> String {
+        self.buf
+    }
+}
 
 /// Format text with the header color (steel blue).
 // KEEP UNTIL: list/status command coloring

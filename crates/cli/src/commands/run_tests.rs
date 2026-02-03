@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use oj_runbook::{ArgSpec, CommandDef, RunDirective};
 
 use super::{execute_shell_inline, format_available_commands};
+use crate::color::HelpPrinter;
 
 fn make_shell_command(name: &str, run: &str) -> CommandDef {
     CommandDef {
@@ -267,14 +268,15 @@ fn directive_is_agent_for_agent_commands() {
 
 #[test]
 fn format_available_commands_empty_shows_no_commands() {
-    let mut buf = String::new();
-    format_available_commands(&mut buf, &[]);
+    let mut help = HelpPrinter::uncolored();
+    format_available_commands(&mut help, &[]);
+    let buf = help.finish();
 
     assert!(buf.contains("No commands found."));
     assert!(buf.contains("Define commands in .oj/runbooks/*.hcl"));
     assert!(buf.contains("Usage: oj run <COMMAND> [ARGS]..."));
     assert!(buf.contains("For more information, try '--help'."));
-    assert!(!buf.contains("Available Commands:"));
+    assert!(!buf.contains("Commands:"));
 }
 
 #[test]
@@ -290,10 +292,11 @@ fn format_available_commands_shows_commands() {
         ),
     ];
 
-    let mut buf = String::new();
-    format_available_commands(&mut buf, &commands);
+    let mut help = HelpPrinter::uncolored();
+    format_available_commands(&mut help, &commands);
+    let buf = help.finish();
 
-    assert!(buf.contains("Available Commands:"));
+    assert!(buf.contains("Commands:"));
     assert!(buf.contains("build"));
     assert!(buf.contains("greet <name>"));
     assert!(!buf.contains("No commands found."));
@@ -305,8 +308,9 @@ fn format_available_commands_shows_description() {
     cmd.description = Some("Deploy to production".to_string());
     let commands = vec![("deploy".to_string(), cmd)];
 
-    let mut buf = String::new();
-    format_available_commands(&mut buf, &commands);
+    let mut help = HelpPrinter::uncolored();
+    format_available_commands(&mut help, &commands);
+    let buf = help.finish();
 
     assert!(buf.contains("deploy"));
     assert!(buf.contains("Deploy to production"));

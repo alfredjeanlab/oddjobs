@@ -163,7 +163,7 @@ async fn run() -> Result<()> {
         None => {
             // No subcommand provided — print help and exit 0
             use clap::CommandFactory;
-            Cli::command().print_help()?;
+            Cli::command().styles(color::styles()).print_help()?;
             println!();
             return Ok(());
         }
