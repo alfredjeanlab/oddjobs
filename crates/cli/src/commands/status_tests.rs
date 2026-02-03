@@ -1,7 +1,7 @@
 use oj_daemon::NamespaceStatus;
 use serial_test::serial;
 
-use super::{format_duration, format_text, truncate_reason};
+use super::{format_duration, format_text, friendly_name_label, truncate_reason};
 
 #[test]
 #[serial]
@@ -147,7 +147,7 @@ fn active_pipeline_shows_kind_not_name() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_shows_kind_not_name() {
+fn escalated_pipeline_hides_name_when_same_as_id() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
@@ -155,8 +155,8 @@ fn escalated_pipeline_shows_kind_not_name() {
         namespace: "myproject".to_string(),
         active_pipelines: vec![],
         escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
-            id: "efgh5678".to_string(),
-            name: "efgh5678-uuid".to_string(),
+            id: "efgh5678-0000-0000-0000".to_string(),
+            name: "efgh5678-0000-0000-0000".to_string(),
             kind: "deploy".to_string(),
             step: "test".to_string(),
             step_status: "waiting".to_string(),
@@ -183,15 +183,16 @@ fn escalated_pipeline_shows_kind_not_name() {
         output.contains("gate check failed"),
         "output should contain waiting reason:\n{output}"
     );
+    // The pipeline UUID name should not appear in the rendered text
     assert!(
-        !output.contains("efgh5678-uuid"),
+        !output.contains("efgh5678-0000"),
         "output should not contain the UUID name:\n{output}"
     );
 }
 
 #[test]
 #[serial]
-fn orphaned_pipeline_shows_kind_not_name() {
+fn orphaned_pipeline_hides_name_when_same_as_id() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
@@ -200,8 +201,8 @@ fn orphaned_pipeline_shows_kind_not_name() {
         active_pipelines: vec![],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![oj_daemon::PipelineStatusEntry {
-            id: "ijkl9012".to_string(),
-            name: "ijkl9012-uuid".to_string(),
+            id: "ijkl9012-0000-0000-0000".to_string(),
+            name: "ijkl9012-0000-0000-0000".to_string(),
             kind: "ci".to_string(),
             step: "lint".to_string(),
             step_status: "running".to_string(),
@@ -223,8 +224,9 @@ fn orphaned_pipeline_shows_kind_not_name() {
         output.contains("lint"),
         "output should contain step name 'lint':\n{output}"
     );
+    // The pipeline UUID name should not appear in the rendered text
     assert!(
-        !output.contains("ijkl9012-uuid"),
+        !output.contains("ijkl9012-0000"),
         "output should not contain the UUID name:\n{output}"
     );
 }
@@ -276,7 +278,7 @@ fn escalated_pipeline_truncates_long_reason() {
         active_pipelines: vec![],
         escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
             id: "efgh5678".to_string(),
-            name: "efgh5678-uuid".to_string(),
+            name: "efgh5678".to_string(),
             kind: "deploy".to_string(),
             step: "test".to_string(),
             step_status: "Waiting".to_string(),
@@ -300,5 +302,140 @@ fn escalated_pipeline_truncates_long_reason() {
     assert!(
         output.contains("..."),
         "output should contain truncation indicator '...':\n{output}"
+    );
+}
+
+#[test]
+fn friendly_name_label_empty_when_name_equals_kind() {
+    assert_eq!(friendly_name_label("build", "build", "abc123"), "");
+}
+
+#[test]
+fn friendly_name_label_empty_when_name_equals_id() {
+    assert_eq!(friendly_name_label("abc123", "build", "abc123"), "");
+}
+
+#[test]
+fn friendly_name_label_empty_when_name_is_empty() {
+    assert_eq!(friendly_name_label("", "build", "abc123"), "");
+}
+
+#[test]
+fn friendly_name_label_shown_when_meaningful() {
+    assert_eq!(
+        friendly_name_label("fix-login-button-a1b2c3d4", "build", "abc123"),
+        " (fix-login-button-a1b2c3d4)"
+    );
+}
+
+#[test]
+#[serial]
+fn active_pipeline_shows_friendly_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "abcd1234-0000-0000-0000".to_string(),
+            name: "fix-login-button-abcd1234".to_string(),
+            kind: "build".to_string(),
+            step: "check".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: None,
+        }],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("build"),
+        "output should contain pipeline kind 'build':\n{output}"
+    );
+    assert!(
+        output.contains("(fix-login-button-abcd1234)"),
+        "output should contain friendly name:\n{output}"
+    );
+    assert!(
+        output.contains("check"),
+        "output should contain step name 'check':\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn escalated_pipeline_shows_friendly_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "efgh5678-0000-0000-0000".to_string(),
+            name: "deploy-staging-efgh5678".to_string(),
+            kind: "deploy".to_string(),
+            step: "test".to_string(),
+            step_status: "waiting".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: Some("gate check failed".to_string()),
+        }],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("deploy"),
+        "output should contain pipeline kind 'deploy':\n{output}"
+    );
+    assert!(
+        output.contains("(deploy-staging-efgh5678)"),
+        "output should contain friendly name:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn orphaned_pipeline_shows_friendly_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "ijkl9012-0000-0000-0000".to_string(),
+            name: "ci-main-branch-ijkl9012".to_string(),
+            kind: "ci".to_string(),
+            step: "lint".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: None,
+        }],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("ci"),
+        "output should contain pipeline kind 'ci':\n{output}"
+    );
+    assert!(
+        output.contains("(ci-main-branch-ijkl9012)"),
+        "output should contain friendly name:\n{output}"
     );
 }

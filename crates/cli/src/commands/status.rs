@@ -177,11 +177,13 @@ fn format_text(
             for p in &ns.active_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
+                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let _ = writeln!(
                     out,
-                    "    {}  {}  {}  {}  {}",
+                    "    {}  {}{}  {}  {}  {}",
                     color::muted(short_id),
                     p.kind,
+                    friendly,
                     p.step,
                     color::status(&p.step_status),
                     elapsed,
@@ -200,12 +202,14 @@ fn format_text(
             for p in &ns.escalated_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
+                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let _ = writeln!(
                     out,
-                    "    {} {}  {}  {}  {}  {}",
+                    "    {} {}  {}{}  {}  {}  {}",
                     color::yellow("⚠"),
                     color::muted(short_id),
                     p.kind,
+                    friendly,
                     p.step,
                     color::status(&p.step_status),
                     elapsed,
@@ -227,12 +231,14 @@ fn format_text(
             for p in &ns.orphaned_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
+                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let _ = writeln!(
                     out,
-                    "    {} {}  {}  {}  {}  {}",
+                    "    {} {}  {}{}  {}  {}  {}",
                     color::yellow("⚠"),
                     color::muted(short_id),
                     p.kind,
+                    friendly,
                     p.step,
                     color::status("orphaned"),
                     elapsed,
@@ -337,6 +343,16 @@ fn truncate_id(id: &str, max_len: usize) -> &str {
         id
     } else {
         &id[..max_len]
+    }
+}
+
+/// Returns ` (name)` when the pipeline name is a meaningful friendly name,
+/// or an empty string when it would be redundant (same as kind) or opaque (same as id).
+fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
+    if name.is_empty() || name == kind || name == id {
+        String::new()
+    } else {
+        format!(" ({})", name)
     }
 }
 
