@@ -662,6 +662,23 @@ impl DaemonClient {
         }
     }
 
+    /// Get cross-project status overview
+    pub async fn status_overview(
+        &self,
+    ) -> Result<(u64, Vec<oj_daemon::NamespaceStatus>), ClientError> {
+        let query = Request::Query {
+            query: Query::StatusOverview,
+        };
+        match self.send(&query).await? {
+            Response::StatusOverview {
+                uptime_secs,
+                namespaces,
+            } => Ok((uptime_secs, namespaces)),
+            Response::Error { message } => Err(ClientError::Rejected(message)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
+
     /// Query if an agent has signaled completion (for stop hook)
     pub async fn query_agent_signal(
         &self,

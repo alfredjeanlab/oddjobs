@@ -14,7 +14,7 @@ use output::OutputFormat;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{agent, daemon, emit, pipeline, queue, run, session, worker, workspace};
+use commands::{agent, daemon, emit, pipeline, queue, run, session, status, worker, workspace};
 use std::path::{Path, PathBuf};
 
 use crate::client::DaemonClient;
@@ -60,6 +60,8 @@ enum Commands {
     Worker(worker::WorkerArgs),
     /// Emit events to the daemon (for agents)
     Emit(emit::EmitArgs),
+    /// Show overview of active work across all projects
+    Status,
 }
 
 #[tokio::main]
@@ -201,7 +203,7 @@ async fn run() -> Result<()> {
                     let client = DaemonClient::for_action()?;
                     queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }
-                QueueCommand::List { .. } => {
+                QueueCommand::List { .. } | QueueCommand::Items { .. } => {
                     let client = DaemonClient::for_query()?;
                     queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }
@@ -224,6 +226,11 @@ async fn run() -> Result<()> {
         Commands::Emit(args) => {
             let client = DaemonClient::for_signal()?;
             emit::handle(args.command, &client, format).await?
+        }
+
+        // Status - top-level dashboard (query, graceful when daemon down)
+        Commands::Status => {
+            status::handle(format).await?;
         }
 
         Commands::Daemon(_) => unreachable!(),

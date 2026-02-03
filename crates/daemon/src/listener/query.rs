@@ -3,17 +3,20 @@
 
 //! Read-only query handlers.
 
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
-use oj_core::StepOutcome;
-use oj_storage::MaterializedState;
+use oj_core::{StepOutcome, StepStatus};
+use oj_storage::{MaterializedState, QueueItemStatus};
 
 use crate::protocol::{
-    AgentSummary, PipelineDetail, PipelineSummary, Query, QueueItemSummary, Response,
-    SessionSummary, StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceSummary,
+    AgentStatusEntry, AgentSummary, NamespaceStatus, PipelineDetail, PipelineStatusEntry,
+    PipelineSummary, Query, QueueItemSummary, QueueStatus, QueueSummary, Response, SessionSummary,
+    StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceSummary,
 };
 
 /// Handle query requests (read-only state access).
@@ -21,6 +24,7 @@ pub(super) fn handle_query(
     query: Query,
     state: &Arc<Mutex<MaterializedState>>,
     logs_path: &Path,
+    start_time: Instant,
 ) -> Response {
     let state = state.lock();
 
@@ -253,6 +257,51 @@ pub(super) fn handle_query(
             Response::PipelineLogs { log_path, content }
         }
 
+        Query::ListQueues {
+            project_root,
+            namespace,
+        } => {
+            let runbook_dir = project_root.join(".oj/runbooks");
+            let queue_defs = oj_runbook::collect_all_queues(&runbook_dir).unwrap_or_default();
+
+            let queues = queue_defs
+                .into_iter()
+                .map(|(name, def)| {
+                    let key = if namespace.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{}/{}", namespace, name)
+                    };
+                    let item_count = state
+                        .queue_items
+                        .get(&key)
+                        .map(|items| items.len())
+                        .unwrap_or(0);
+
+                    let workers: Vec<String> = state
+                        .workers
+                        .values()
+                        .filter(|w| w.queue_name == name && w.namespace == namespace)
+                        .map(|w| w.name.clone())
+                        .collect();
+
+                    let queue_type = match def.queue_type {
+                        oj_runbook::QueueType::External => "external",
+                        oj_runbook::QueueType::Persisted => "persisted",
+                    };
+
+                    QueueSummary {
+                        name,
+                        queue_type: queue_type.to_string(),
+                        item_count,
+                        workers,
+                    }
+                })
+                .collect();
+
+            Response::Queues { queues }
+        }
+
         Query::ListQueueItems {
             queue_name,
             namespace,
@@ -390,6 +439,154 @@ pub(super) fn handle_query(
                 .collect();
             Response::Workers { workers }
         }
+
+        Query::StatusOverview => {
+            let uptime_secs = start_time.elapsed().as_secs();
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+
+            // Collect all namespaces seen across entities
+            let mut ns_active: BTreeMap<String, Vec<PipelineStatusEntry>> = BTreeMap::new();
+            let mut ns_escalated: BTreeMap<String, Vec<PipelineStatusEntry>> = BTreeMap::new();
+            let mut ns_agents: BTreeMap<String, Vec<AgentStatusEntry>> = BTreeMap::new();
+
+            for p in state.pipelines.values() {
+                if p.is_terminal() {
+                    continue;
+                }
+
+                let created_at_ms = p.step_history.first().map(|r| r.started_at_ms).unwrap_or(0);
+                let elapsed_ms = now_ms.saturating_sub(created_at_ms);
+
+                let waiting_reason = match p.step_history.last().map(|r| &r.outcome) {
+                    Some(StepOutcome::Waiting(reason)) => Some(reason.clone()),
+                    _ => None,
+                };
+
+                let entry = PipelineStatusEntry {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    kind: p.kind.clone(),
+                    step: p.step.clone(),
+                    step_status: format!("{:?}", p.step_status),
+                    elapsed_ms,
+                    waiting_reason,
+                };
+
+                let ns = p.namespace.clone();
+                match p.step_status {
+                    StepStatus::Waiting => ns_escalated.entry(ns).or_default().push(entry),
+                    _ => ns_active.entry(ns).or_default().push(entry),
+                }
+
+                // Extract active agents from this pipeline's step history
+                if let Some(last_step) = p.step_history.last() {
+                    if let Some(ref agent_id) = last_step.agent_id {
+                        let status = match &last_step.outcome {
+                            StepOutcome::Running => "running",
+                            StepOutcome::Waiting(_) => "waiting",
+                            _ => continue,
+                        };
+                        ns_agents
+                            .entry(p.namespace.clone())
+                            .or_default()
+                            .push(AgentStatusEntry {
+                                agent_id: agent_id.clone(),
+                                pipeline_name: p.name.clone(),
+                                step_name: last_step.name.clone(),
+                                status: status.to_string(),
+                            });
+                    }
+                }
+            }
+
+            // Collect workers grouped by namespace
+            let mut ns_workers: BTreeMap<String, Vec<WorkerSummary>> = BTreeMap::new();
+            for w in state.workers.values() {
+                ns_workers
+                    .entry(w.namespace.clone())
+                    .or_default()
+                    .push(WorkerSummary {
+                        name: w.name.clone(),
+                        namespace: w.namespace.clone(),
+                        queue: w.queue_name.clone(),
+                        status: w.status.clone(),
+                        active: w.active_pipeline_ids.len(),
+                        concurrency: w.concurrency,
+                    });
+            }
+
+            // Collect queue stats grouped by namespace
+            let mut ns_queues: BTreeMap<String, Vec<QueueStatus>> = BTreeMap::new();
+            for (scoped_key, items) in &state.queue_items {
+                let (ns, queue_name) = if let Some(pos) = scoped_key.find('/') {
+                    (
+                        scoped_key[..pos].to_string(),
+                        scoped_key[pos + 1..].to_string(),
+                    )
+                } else {
+                    (String::new(), scoped_key.clone())
+                };
+
+                let mut pending = 0;
+                let mut active = 0;
+                let mut dead = 0;
+                for item in items {
+                    match item.status {
+                        QueueItemStatus::Pending => pending += 1,
+                        QueueItemStatus::Active => active += 1,
+                        QueueItemStatus::Dead => dead += 1,
+                        QueueItemStatus::Failed => pending += 1, // failed items pending retry
+                        QueueItemStatus::Completed => {}
+                    }
+                }
+
+                ns_queues.entry(ns).or_default().push(QueueStatus {
+                    name: queue_name,
+                    pending,
+                    active,
+                    dead,
+                });
+            }
+
+            // Build combined namespace set
+            let mut all_namespaces: HashSet<String> = HashSet::new();
+            for ns in ns_active.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+            for ns in ns_escalated.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+            for ns in ns_workers.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+            for ns in ns_queues.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+            for ns in ns_agents.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+
+            let mut namespaces: Vec<NamespaceStatus> = all_namespaces
+                .into_iter()
+                .map(|ns| NamespaceStatus {
+                    active_pipelines: ns_active.remove(&ns).unwrap_or_default(),
+                    escalated_pipelines: ns_escalated.remove(&ns).unwrap_or_default(),
+                    workers: ns_workers.remove(&ns).unwrap_or_default(),
+                    queues: ns_queues.remove(&ns).unwrap_or_default(),
+                    active_agents: ns_agents.remove(&ns).unwrap_or_default(),
+                    namespace: ns,
+                })
+                .collect();
+            namespaces.sort_by(|a, b| a.namespace.cmp(&b.namespace));
+
+            Response::StatusOverview {
+                uptime_secs,
+                namespaces,
+            }
+        }
     }
 }
 
@@ -485,3 +682,7 @@ fn read_log_file(path: &Path, lines: usize) -> String {
         Err(_) => String::new(),
     }
 }
+
+#[cfg(test)]
+#[path = "query_tests.rs"]
+mod tests;

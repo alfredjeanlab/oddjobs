@@ -209,3 +209,38 @@ fn collect_all_commands_skips_invalid() {
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0, "deploy");
 }
+
+#[test]
+fn collect_all_queues_multiple_files() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "worker.hcl", WORKER_RUNBOOK);
+    write_hcl(tmp.path(), "tasks.hcl", QUEUE_RUNBOOK);
+
+    let queues = collect_all_queues(tmp.path()).unwrap();
+    let names: Vec<&str> = queues.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(names, vec!["jobs", "tasks"]);
+}
+
+#[test]
+fn collect_all_queues_empty_dir() {
+    let tmp = TempDir::new().unwrap();
+    let queues = collect_all_queues(tmp.path()).unwrap();
+    assert!(queues.is_empty());
+}
+
+#[test]
+fn collect_all_queues_missing_dir() {
+    let queues = collect_all_queues(Path::new("/nonexistent")).unwrap();
+    assert!(queues.is_empty());
+}
+
+#[test]
+fn collect_all_queues_skips_invalid() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "bad.hcl", "this is not valid HCL {{{}}}");
+    write_hcl(tmp.path(), "tasks.hcl", QUEUE_RUNBOOK);
+
+    let queues = collect_all_queues(tmp.path()).unwrap();
+    assert_eq!(queues.len(), 1);
+    assert_eq!(queues[0].0, "tasks");
+}

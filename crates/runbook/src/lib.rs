@@ -27,8 +27,8 @@ pub use command::{
     OptionDef, RunDirective, VariadicDef,
 };
 pub use find::{
-    collect_all_commands, find_runbook_by_command, find_runbook_by_queue, find_runbook_by_worker,
-    FindError,
+    collect_all_commands, collect_all_queues, find_runbook_by_command, find_runbook_by_queue,
+    find_runbook_by_worker, FindError,
 };
 pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
 pub use pipeline::{NotifyConfig, PipelineDef, StepDef, StepTransition, WorkspaceMode};

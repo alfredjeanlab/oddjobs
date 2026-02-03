@@ -33,10 +33,15 @@ pub enum QueueCommand {
         #[arg(long = "project")]
         project: Option<String>,
     },
-    /// List items in a persisted queue
+    /// List all known queues
     List {
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
+    },
+    /// Show items in a specific queue
+    Items {
         /// Queue name
-        #[arg(long)]
         queue: String,
         /// Project namespace override
         #[arg(long = "project")]
@@ -212,7 +217,50 @@ pub async fn handle(
                 }
             }
         }
-        QueueCommand::List { queue, project } => {
+        QueueCommand::List { project } => {
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+            let request = Request::Query {
+                query: Query::ListQueues {
+                    project_root: project_root.to_path_buf(),
+                    namespace: effective_namespace,
+                },
+            };
+            match client.send(&request).await? {
+                Response::Queues { queues } => {
+                    if queues.is_empty() {
+                        println!("No queues found");
+                        return Ok(());
+                    }
+                    match format {
+                        OutputFormat::Json => {
+                            println!("{}", serde_json::to_string_pretty(&queues)?);
+                        }
+                        _ => {
+                            for q in &queues {
+                                let workers_str = if q.workers.is_empty() {
+                                    "-".to_string()
+                                } else {
+                                    q.workers.join(", ")
+                                };
+                                println!(
+                                    "{}\t{}\titems={}\tworkers={}",
+                                    q.name, q.queue_type, q.item_count, workers_str,
+                                );
+                            }
+                        }
+                    }
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        QueueCommand::Items { queue, project } => {
             let effective_namespace = project
                 .or_else(|| std::env::var("OJ_NAMESPACE").ok())
                 .unwrap_or_else(|| namespace.to_string());

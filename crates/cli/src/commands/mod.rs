@@ -11,5 +11,6 @@ mod pipeline_wait;
 pub mod queue;
 pub mod run;
 pub mod session;
+pub mod status;
 pub mod worker;
 pub mod workspace;

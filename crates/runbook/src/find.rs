@@ -78,6 +78,38 @@ pub fn collect_all_commands(
     Ok(commands)
 }
 
+/// Scan `.oj/runbooks/` and collect all queue definitions.
+/// Returns a sorted vec of (queue_name, QueueDef) pairs.
+/// Skips runbooks that fail to parse (logs warnings).
+pub fn collect_all_queues(runbook_dir: &Path) -> Result<Vec<(String, crate::QueueDef)>, FindError> {
+    if !runbook_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let files = collect_runbook_files(runbook_dir)?;
+    let mut queues = Vec::new();
+    for (path, format) in files {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
+                continue;
+            }
+        };
+        let runbook = match parse_runbook_with_format(&content, format) {
+            Ok(rb) => rb,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
+                continue;
+            }
+        };
+        for (name, queue) in runbook.queues {
+            queues.push((name, queue));
+        }
+    }
+    queues.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(queues)
+}
+
 fn find_runbook(
     runbook_dir: &Path,
     name: &str,

@@ -13,7 +13,8 @@
 pub mod protocol;
 
 pub use protocol::{
-    AgentEntry, AgentSummary, PipelineDetail, PipelineEntry, PipelineSummary, Query,
-    QueueItemSummary, Request, Response, SessionSummary, StepRecordDetail, WorkspaceDetail,
+    AgentEntry, AgentStatusEntry, AgentSummary, NamespaceStatus, PipelineDetail, PipelineEntry,
+    PipelineStatusEntry, PipelineSummary, Query, QueueItemSummary, QueueStatus, QueueSummary,
+    Request, Response, SessionSummary, StepRecordDetail, WorkerSummary, WorkspaceDetail,
     WorkspaceEntry, WorkspaceSummary, DEFAULT_TIMEOUT, MAX_MESSAGE_SIZE, PROTOCOL_VERSION,
 };

@@ -290,6 +290,48 @@ fn encode_decode_roundtrip_agents_pruned_response() {
     assert_eq!(response, decoded);
 }
 
+#[test]
+fn encode_decode_list_queues_query() {
+    let request = Request::Query {
+        query: Query::ListQueues {
+            project_root: std::path::PathBuf::from("/test/project"),
+            namespace: "myproject".to_string(),
+        },
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn encode_decode_queues_response() {
+    let response = Response::Queues {
+        queues: vec![QueueSummary {
+            name: "tasks".to_string(),
+            queue_type: "persisted".to_string(),
+            item_count: 5,
+            workers: vec!["fixer".to_string()],
+        }],
+    };
+
+    let encoded = encode(&response).expect("encode failed");
+    let decoded: Response = decode(&encoded).expect("decode failed");
+
+    assert_eq!(response, decoded);
+}
+
+#[test]
+fn encode_decode_queues_response_empty() {
+    let response = Response::Queues { queues: vec![] };
+
+    let encoded = encode(&response).expect("encode failed");
+    let decoded: Response = decode(&encoded).expect("decode failed");
+
+    assert_eq!(response, decoded);
+}
+
 #[tokio::test]
 async fn write_message_adds_length_prefix() {
     let data = b"test data";
