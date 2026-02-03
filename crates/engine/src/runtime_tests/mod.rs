@@ -12,6 +12,7 @@ mod on_dead;
 mod resume;
 mod sessions;
 mod steps;
+mod timer_cleanup;
 mod worker;
 
 use super::*;
