@@ -123,7 +123,10 @@ pipeline "draft" {
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+    run = <<-SHELL
+      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+    SHELL
   }
 }
 
@@ -147,7 +150,7 @@ pipeline "draft-rebase" {
     run = <<-SHELL
       test -n "${local.branch}" || { echo "No draft matching '${var.name}'"; exit 1; }
       git -C "${local.repo}" fetch origin ${var.base} ${local.branch}
-      git -C "${local.repo}" worktree add "${workspace.root}" origin/${local.branch}
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" origin/${local.branch}
       mkdir -p .cargo
       echo "[build]" > .cargo/config.toml
       echo "target-dir = \"${local.repo}/target\"" >> .cargo/config.toml
@@ -168,13 +171,16 @@ pipeline "draft-rebase" {
 
   step "push" {
     run = <<-SHELL
-      git -C "${local.repo}" push origin HEAD:${local.branch} --force-with-lease
+      git -C "${local.repo}" push origin ${local.branch} --force-with-lease
     SHELL
     on_done = { step = "cleanup" }
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+    run = <<-SHELL
+      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+    SHELL
   }
 }
 
@@ -198,7 +204,7 @@ pipeline "draft-refine" {
     run = <<-SHELL
       test -n "${local.branch}" || { echo "No draft matching '${var.name}'"; exit 1; }
       git -C "${local.repo}" fetch origin ${local.branch}
-      git -C "${local.repo}" worktree add "${workspace.root}" origin/${local.branch}
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" origin/${local.branch}
       mkdir -p .cargo
       echo "[build]" > .cargo/config.toml
       echo "target-dir = \"${local.repo}/target\"" >> .cargo/config.toml
@@ -215,13 +221,16 @@ pipeline "draft-refine" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit -m "refine(${var.name}): ${var.instructions}"
-      git -C "${local.repo}" push origin HEAD:${local.branch} --force-with-lease
+      git -C "${local.repo}" push origin ${local.branch} --force-with-lease
     SHELL
     on_done = { step = "cleanup" }
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+    run = <<-SHELL
+      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+    SHELL
   }
 }
 
