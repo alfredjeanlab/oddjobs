@@ -37,6 +37,7 @@ fn agent(id: &str, name: Option<&str>) -> AgentSummary {
 fn session(id: &str) -> SessionSummary {
     SessionSummary {
         id: id.to_string(),
+        namespace: String::new(),
         pipeline_id: None,
         updated_at_ms: 0,
     }
