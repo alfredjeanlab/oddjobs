@@ -91,7 +91,7 @@ pipeline "merge" {
       git -C "${local.repo}" fetch origin ${var.mr.base}
 
       # Try rebase for linear history; if it fails for any reason, abort
-      # and merge instead (preserves resolver's conflict resolutions)
+      # and merge instead -- preserves the resolver conflict resolutions
       if ! git rebase origin/${var.mr.base} 2>/dev/null; then
         git rebase --abort 2>/dev/null || true
         git merge origin/${var.mr.base} --no-edit
