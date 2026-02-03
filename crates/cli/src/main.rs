@@ -5,6 +5,7 @@
 
 mod client;
 mod client_lifecycle;
+mod color;
 mod commands;
 mod daemon_process;
 mod exit_error;
@@ -13,7 +14,7 @@ mod output;
 use output::OutputFormat;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{
     agent, cron, daemon, emit, pipeline, project, queue, run, session, status, worker, workspace,
 };
@@ -113,7 +114,8 @@ fn format_error(err: &anyhow::Error) -> String {
 }
 
 async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    let matches = Cli::command().styles(color::styles()).get_matches();
+    let cli = Cli::from_arg_matches(&matches)?;
     let format = cli.output;
 
     let command = match cli.command {

@@ -2,28 +2,13 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use clap::ValueEnum;
-use std::io::IsTerminal;
 
 /// Determine if color output should be enabled.
 ///
-/// Logic: (stdout is TTY OR COLOR=1) AND NOT NO_COLOR=1
-///
-/// Environment variables:
-/// - `NO_COLOR=1` - Disables color output (highest priority)
-/// - `COLOR=1` - Forces color output even when not a TTY
+/// Delegates to [`crate::color::should_colorize`] — the single source of truth
+/// for color detection across the CLI.
 pub fn should_use_color() -> bool {
-    // NO_COLOR takes precedence per https://no-color.org/
-    if std::env::var("NO_COLOR").is_ok_and(|v| v == "1") {
-        return false;
-    }
-
-    // Check for forced color via COLOR=1
-    if std::env::var("COLOR").is_ok_and(|v| v == "1") {
-        return true;
-    }
-
-    // Default: color if stdout is a TTY
-    std::io::stdout().is_terminal()
+    crate::color::should_colorize()
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
