@@ -66,7 +66,7 @@ agent can reference immediately without running discovery commands itself.
 Array form — cleaner for pure command sequences:
 
 ```hcl
-agent "medic" {
+agent "doctor" {
   prime = [
     "echo '## System Status'",
     "oj status 2>/dev/null || echo 'not running'",
@@ -96,7 +96,7 @@ agent "mayor" {
 to collect items for later human review:
 
 ```hcl
-queue "symptoms" {
+queue "treatments" {
   type = "persisted"
 }
 ```
