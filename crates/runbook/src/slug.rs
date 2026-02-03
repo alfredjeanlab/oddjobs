@@ -131,12 +131,16 @@ pub fn slugify(input: &str, max_len: usize) -> String {
         result = trimmed.to_string();
     }
 
-    // 5. Truncate to max_len
+    // 5. Truncate to max_len at word boundary
     if result.len() > max_len {
-        result.truncate(max_len);
+        if let Some(pos) = result[..max_len].rfind('-') {
+            result.truncate(pos);
+        } else {
+            result.truncate(max_len);
+        }
     }
 
-    // 6. Trim trailing hyphens (truncation may leave one)
+    // 6. Trim trailing hyphens (safety net)
     let trimmed = result.trim_end_matches('-');
     if trimmed.len() != result.len() {
         result = trimmed.to_string();
@@ -147,9 +151,16 @@ pub fn slugify(input: &str, max_len: usize) -> String {
 
 /// Build a pipeline name from a template result and nonce.
 ///
-/// Slugifies the input, truncates to 24 chars, and appends `-{nonce}`.
-pub fn pipeline_display_name(raw: &str, nonce: &str) -> String {
-    let slug = slugify(raw, 24);
+/// Slugifies the input, truncates to 28 chars, strips the namespace prefix
+/// (if present), and appends `-{nonce}`.
+pub fn pipeline_display_name(raw: &str, nonce: &str, namespace: &str) -> String {
+    let slug = slugify(raw, 28);
+    let slug = if !namespace.is_empty() {
+        let prefix = format!("{}-", namespace);
+        slug.strip_prefix(&prefix).unwrap_or(&slug)
+    } else {
+        &slug
+    };
     if slug.is_empty() {
         nonce.to_string()
     } else {

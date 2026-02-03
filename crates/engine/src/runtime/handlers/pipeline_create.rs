@@ -59,7 +59,7 @@ where
                 .flat_map(|(k, v)| vec![(k.clone(), v.clone()), (format!("var.{}", k), v.clone())])
                 .collect();
             let raw = oj_runbook::interpolate(name_template, &lookup);
-            oj_runbook::pipeline_display_name(&raw, nonce)
+            oj_runbook::pipeline_display_name(&raw, nonce, &namespace)
         } else {
             pipeline_name
         };

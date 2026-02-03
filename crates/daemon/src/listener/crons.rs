@@ -183,6 +183,7 @@ pub(super) async fn handle_cron_once(
     let pipeline_display_name = oj_runbook::pipeline_display_name(
         &pipeline_name,
         &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
+        namespace,
     );
 
     // Emit CommandRun-style event to create pipeline directly

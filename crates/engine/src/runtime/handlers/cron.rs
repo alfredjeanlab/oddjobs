@@ -148,6 +148,7 @@ where
         let display_name = oj_runbook::pipeline_display_name(
             &pipeline_name,
             &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
+            &namespace,
         );
 
         let mut result_events = Vec::new();

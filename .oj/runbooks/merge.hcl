@@ -31,7 +31,7 @@ worker "merge" {
 }
 
 pipeline "merge" {
-  name      = "${var.mr.branch}"
+  name      = "${var.mr.title}"
   vars      = ["mr"]
   workspace = "ephemeral"
 
