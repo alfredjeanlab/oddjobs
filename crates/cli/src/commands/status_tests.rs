@@ -324,7 +324,7 @@ fn friendly_name_label_empty_when_name_is_empty() {
 fn friendly_name_label_shown_when_meaningful() {
     assert_eq!(
         friendly_name_label("fix-login-button-a1b2c3d4", "build", "abc123"),
-        " (fix-login-button-a1b2c3d4)"
+        " fix-login-button-a1b2c3d4"
     );
 }
 
@@ -359,7 +359,7 @@ fn active_pipeline_shows_friendly_name() {
         "output should contain pipeline kind 'build':\n{output}"
     );
     assert!(
-        output.contains("(fix-login-button-abcd1234)"),
+        output.contains("fix-login-button-abcd1234"),
         "output should contain friendly name:\n{output}"
     );
     assert!(
@@ -399,7 +399,7 @@ fn escalated_pipeline_shows_friendly_name() {
         "output should contain pipeline kind 'deploy':\n{output}"
     );
     assert!(
-        output.contains("(deploy-staging-efgh5678)"),
+        output.contains("deploy-staging-efgh5678"),
         "output should contain friendly name:\n{output}"
     );
 }
@@ -435,7 +435,7 @@ fn orphaned_pipeline_shows_friendly_name() {
         "output should contain pipeline kind 'ci':\n{output}"
     );
     assert!(
-        output.contains("(ci-main-branch-ijkl9012)"),
+        output.contains("ci-main-branch-ijkl9012"),
         "output should contain friendly name:\n{output}"
     );
 }

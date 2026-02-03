@@ -346,13 +346,13 @@ fn truncate_id(id: &str, max_len: usize) -> &str {
     }
 }
 
-/// Returns ` (name)` when the pipeline name is a meaningful friendly name,
+/// Returns ` name` when the pipeline name is a meaningful friendly name,
 /// or an empty string when it would be redundant (same as kind) or opaque (same as id).
 fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     if name.is_empty() || name == kind || name == id {
         String::new()
     } else {
-        format!(" ({})", name)
+        format!(" {}", name)
     }
 }
 
