@@ -325,7 +325,7 @@ async fn explicit_next_step_is_followed() {
     assert_eq!(pipeline.step, "done");
 }
 
-/// Runbook where done step has no run command (no step definition for done)
+/// Runbook where done step has no run command (implicit completion)
 const RUNBOOK_IMPLICIT_DONE: &str = r#"
 [command.build]
 args = "<name>"
@@ -338,6 +338,10 @@ input  = ["name"]
 name = "init"
 run = "echo init"
 on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "true"
 "#;
 
 #[tokio::test]
@@ -359,11 +363,25 @@ async fn implicit_done_step_completes_immediately() {
 
     let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
 
-    // Complete init - should go directly to done and complete
+    // Complete init - should advance to done step
     ctx.runtime
         .handle_event(Event::ShellExited {
             pipeline_id: PipelineId::new(pipeline_id.clone()),
             step: "init".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+    assert_eq!(pipeline.step_status, StepStatus::Running);
+
+    // Complete done step - pipeline should complete
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "done".to_string(),
             exit_code: 0,
         })
         .await
