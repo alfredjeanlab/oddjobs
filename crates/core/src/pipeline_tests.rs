@@ -274,6 +274,56 @@ fn pipeline_total_retries_persists_across_step_reset() {
 }
 
 #[test]
+fn pipeline_step_visits_starts_empty() {
+    let clock = FakeClock::new();
+    let pipeline = Pipeline::new(test_config("pipe-1"), &clock);
+    assert!(pipeline.step_visits.is_empty());
+    assert_eq!(pipeline.get_step_visits("init"), 0);
+}
+
+#[test]
+fn pipeline_record_step_visit() {
+    let clock = FakeClock::new();
+    let mut pipeline = Pipeline::new(test_config("pipe-1"), &clock);
+
+    assert_eq!(pipeline.record_step_visit("merge"), 1);
+    assert_eq!(pipeline.record_step_visit("merge"), 2);
+    assert_eq!(pipeline.record_step_visit("check"), 1);
+    assert_eq!(pipeline.record_step_visit("merge"), 3);
+
+    assert_eq!(pipeline.get_step_visits("merge"), 3);
+    assert_eq!(pipeline.get_step_visits("check"), 1);
+    assert_eq!(pipeline.get_step_visits("unknown"), 0);
+}
+
+#[test]
+fn pipeline_step_visits_serde_round_trip() {
+    let clock = FakeClock::new();
+    let mut pipeline = Pipeline::new(test_config("pipe-1"), &clock);
+
+    pipeline.record_step_visit("merge");
+    pipeline.record_step_visit("merge");
+    pipeline.record_step_visit("check");
+
+    let json = serde_json::to_string(&pipeline).expect("serialize pipeline");
+    let restored: Pipeline = serde_json::from_str(&json).expect("deserialize pipeline");
+
+    assert_eq!(restored.get_step_visits("merge"), 2);
+    assert_eq!(restored.get_step_visits("check"), 1);
+    assert_eq!(restored.get_step_visits("unknown"), 0);
+}
+
+#[test]
+fn max_step_visits_is_reasonable() {
+    // Sanity check that the constant is a reasonable value
+    assert!(
+        MAX_STEP_VISITS >= 3 && MAX_STEP_VISITS <= 20,
+        "MAX_STEP_VISITS should be between 3 and 20, got {}",
+        MAX_STEP_VISITS
+    );
+}
+
+#[test]
 fn step_status_waiting_is_waiting() {
     assert!(StepStatus::Waiting(None).is_waiting());
     assert!(StepStatus::Waiting(Some("dec-1".to_string())).is_waiting());

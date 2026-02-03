@@ -61,6 +61,7 @@ fn make_pipeline(id: &str, step: &str) -> Pipeline {
         agent_signal: None,
         cancelling: false,
         total_retries: 0,
+        step_visits: HashMap::new(),
     }
 }
 

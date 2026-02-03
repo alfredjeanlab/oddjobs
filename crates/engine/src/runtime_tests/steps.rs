@@ -1159,3 +1159,144 @@ async fn on_done_transition_resets_action_attempts() {
         "action_attempts must be reset on on_done transition"
     );
 }
+
+// --- Circuit breaker tests ---
+
+/// Runbook with a cycle: work fails→retry, retry fails→work
+const RUNBOOK_CYCLE_CIRCUIT_BREAKER: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = "false"
+on_fail = "retry"
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "retry"
+run = "false"
+on_fail = "work"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+"#;
+
+#[tokio::test]
+async fn circuit_breaker_fails_pipeline_after_max_step_visits() {
+    let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+
+    // Drive the cycle: work→retry→work→retry→... until circuit breaker fires.
+    // Each full cycle visits both "work" and "retry" once.
+    // MAX_STEP_VISITS = 5, so after 5 visits to "work" the 6th should be blocked.
+    // Initial visit to "work" doesn't count (it's the initial step, before PipelineAdvanced).
+    // Cycle: work(fail) → retry(visit 1) → retry(fail) → work(visit 1) → ...
+    let max = oj_core::pipeline::MAX_STEP_VISITS;
+    for i in 0..50 {
+        let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+        if pipeline.is_terminal() {
+            // Circuit breaker should fire well before 50 iterations
+            assert!(
+                i <= (max as usize + 1) * 2,
+                "circuit breaker should have fired by now (iteration {i})"
+            );
+            assert_eq!(pipeline.step, "failed");
+            assert!(
+                pipeline
+                    .error
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("circuit breaker"),
+                "error should mention circuit breaker, got: {:?}",
+                pipeline.error
+            );
+            return;
+        }
+
+        let step = pipeline.step.clone();
+        ctx.runtime
+            .handle_event(Event::ShellExited {
+                pipeline_id: PipelineId::new(pipeline_id.clone()),
+                step,
+                exit_code: 1,
+            })
+            .await
+            .unwrap();
+    }
+
+    panic!("circuit breaker never fired after 50 iterations");
+}
+
+#[tokio::test]
+async fn step_visits_tracked_across_transitions() {
+    let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+
+    // Initial step "work" - step_visits not yet tracked (initial step)
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.get_step_visits("work"), 0);
+
+    // work fails → retry (visit 1 for retry)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "work".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "retry");
+    assert_eq!(pipeline.get_step_visits("retry"), 1);
+
+    // retry fails → work (visit 1 for work via PipelineAdvanced)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "retry".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+    assert_eq!(pipeline.get_step_visits("work"), 1);
+    assert_eq!(pipeline.get_step_visits("retry"), 1);
+}

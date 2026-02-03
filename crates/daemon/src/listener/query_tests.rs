@@ -63,6 +63,7 @@ fn make_pipeline(
         agent_signal: None,
         cancelling: false,
         total_retries: 0,
+        step_visits: HashMap::new(),
     }
 }
 

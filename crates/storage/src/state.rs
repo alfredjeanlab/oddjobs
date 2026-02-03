@@ -353,8 +353,9 @@ impl MaterializedState {
                     }
                     pipeline.clear_agent_signal();
 
-                    // Push new step record (unless terminal)
+                    // Push new step record and track visits (unless terminal)
                     if step != "done" && step != "failed" && step != "cancelled" {
+                        pipeline.record_step_visit(step);
                         pipeline.push_step(step, now);
                     }
                 }

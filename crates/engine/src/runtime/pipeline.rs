@@ -33,6 +33,37 @@ where
             .get_pipeline(&pipeline.kind)
             .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline.kind.clone()))?;
 
+        // Circuit breaker: prevent runaway retry cycles by limiting how many
+        // times any single step can be entered. step_visits is incremented
+        // when PipelineAdvanced is applied, so the count here is already
+        // current for this visit.
+        let visits = pipeline.get_step_visits(step_name);
+        if visits > oj_core::pipeline::MAX_STEP_VISITS {
+            let error = format!(
+                "circuit breaker: step '{}' entered {} times (limit {})",
+                step_name,
+                visits,
+                oj_core::pipeline::MAX_STEP_VISITS,
+            );
+            tracing::warn!(pipeline_id = %pipeline.id, %error);
+            self.logger.append(pipeline_id.as_str(), step_name, &error);
+            let effects = steps::failure_effects(&pipeline, &error);
+            let mut result_events = self.executor.execute_all(effects).await?;
+            self.breadcrumb.delete(&pipeline.id);
+
+            // Emit on_fail notification for the terminal failure
+            result_events.extend(
+                self.emit_notify(
+                    &pipeline,
+                    &pipeline_def.notify,
+                    pipeline_def.notify.on_fail.as_ref(),
+                )
+                .await?,
+            );
+
+            return Ok(result_events);
+        }
+
         let step_def = pipeline_def.get_step(step_name).ok_or_else(|| {
             RuntimeError::PipelineNotFound(format!("step {} not found", step_name))
         })?;

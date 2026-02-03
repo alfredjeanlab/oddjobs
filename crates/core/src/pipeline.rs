@@ -219,6 +219,11 @@ pub struct PipelineConfig {
     pub namespace: String,
 }
 
+/// Maximum number of times any single step can be entered before the pipeline
+/// is failed with a circuit-breaker error. Prevents runaway retry cycles
+/// (e.g., merge → resolve → push → reinit → merge looping indefinitely).
+pub const MAX_STEP_VISITS: u32 = 5;
+
 /// A pipeline instance
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pipeline {
@@ -266,6 +271,10 @@ pub struct Pipeline {
     /// is re-attempted, i.e. when attempt count > 1).
     #[serde(default)]
     pub total_retries: u32,
+    /// Tracks how many times each step has been entered.
+    /// Used as a circuit breaker to prevent runaway retry cycles.
+    #[serde(default)]
+    pub step_visits: HashMap<String, u32>,
 }
 
 /// Build the string key for action_attempts: "trigger:chain_pos".
@@ -309,6 +318,7 @@ impl Pipeline {
             agent_signal: None,
             cancelling: false,
             total_retries: 0,
+            step_visits: HashMap::new(),
         }
     }
 
@@ -407,6 +417,18 @@ impl Pipeline {
     /// Clear agent signal (called on step transition)
     pub fn clear_agent_signal(&mut self) {
         self.agent_signal = None;
+    }
+
+    /// Record a visit to a step. Returns the new visit count.
+    pub fn record_step_visit(&mut self, step: &str) -> u32 {
+        let count = self.step_visits.entry(step.to_string()).or_insert(0);
+        *count += 1;
+        *count
+    }
+
+    /// Get the number of times a step has been visited.
+    pub fn get_step_visits(&self, step: &str) -> u32 {
+        self.step_visits.get(step).copied().unwrap_or(0)
     }
 }
 

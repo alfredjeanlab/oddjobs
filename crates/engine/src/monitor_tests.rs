@@ -31,6 +31,7 @@ fn test_pipeline() -> Pipeline {
         namespace: String::new(),
         cancelling: false,
         total_retries: 0,
+        step_visits: HashMap::new(),
     }
 }
 
