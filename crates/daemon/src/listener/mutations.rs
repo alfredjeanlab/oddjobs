@@ -277,12 +277,16 @@ pub(super) fn handle_agent_send(
 /// Removes terminal pipelines (failed/cancelled/done) from state and
 /// cleans up their log files. By default only prunes pipelines older
 /// than 12 hours; use `--all` to prune all terminal pipelines.
+// TODO(refactor): group prune flags into a shared struct with handle_agent_prune/handle_workspace_prune
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_pipeline_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     logs_path: &std::path::Path,
+    orphans_registry: &Arc<Mutex<Vec<oj_engine::breadcrumb::Breadcrumb>>>,
     all: bool,
     failed: bool,
+    orphans: bool,
     dry_run: bool,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
@@ -294,7 +298,11 @@ pub(super) fn handle_pipeline_prune(
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
 
-    {
+    // When --orphans is used alone, skip the normal terminal-pipeline loop.
+    // When combined with --all or --failed, run both.
+    let prune_terminal = all || failed || !orphans;
+
+    if prune_terminal {
         let state_guard = state.lock();
         for pipeline in state_guard.pipelines.values() {
             if !pipeline.is_terminal() {
@@ -358,6 +366,36 @@ pub(super) fn handle_pipeline_prune(
             let _ = std::fs::remove_file(&agent_log);
             let agent_dir = logs_path.join("agent").join(&entry.id);
             let _ = std::fs::remove_dir_all(&agent_dir);
+        }
+    }
+
+    // When --orphans flag is set, collect orphaned pipelines
+    if orphans {
+        let mut orphan_guard = orphans_registry.lock();
+        let drain_indices: Vec<usize> = (0..orphan_guard.len()).collect();
+        for &i in drain_indices.iter().rev() {
+            let bc = &orphan_guard[i];
+            to_prune.push(PipelineEntry {
+                id: bc.pipeline_id.clone(),
+                name: bc.name.clone(),
+                step: "orphaned".to_string(),
+            });
+            if !dry_run {
+                let removed = orphan_guard.remove(i);
+                // Delete breadcrumb file
+                let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
+                let _ = std::fs::remove_file(&crumb);
+                // Delete pipeline log
+                let log_file = logs_path.join(format!("{}.log", removed.pipeline_id));
+                let _ = std::fs::remove_file(&log_file);
+                // Delete agent logs/dirs
+                let agent_log = logs_path
+                    .join("agent")
+                    .join(format!("{}.log", removed.pipeline_id));
+                let _ = std::fs::remove_file(&agent_log);
+                let agent_dir = logs_path.join("agent").join(&removed.pipeline_id);
+                let _ = std::fs::remove_dir_all(&agent_dir);
+            }
         }
     }
 

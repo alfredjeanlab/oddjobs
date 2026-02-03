@@ -95,6 +95,9 @@ pub enum PipelineCommand {
         /// Remove all failed pipelines regardless of age
         #[arg(long)]
         failed: bool,
+        /// Prune orphaned pipelines (breadcrumb exists but no daemon state)
+        #[arg(long)]
+        orphans: bool,
         /// Show what would be pruned without doing it
         #[arg(long)]
         dry_run: bool,
@@ -569,9 +572,10 @@ pub async fn handle(
         PipelineCommand::Prune {
             all,
             failed,
+            orphans,
             dry_run,
         } => {
-            let (pruned, skipped) = client.pipeline_prune(all, failed, dry_run).await?;
+            let (pruned, skipped) = client.pipeline_prune(all, failed, orphans, dry_run).await?;
 
             match format {
                 OutputFormat::Text => {

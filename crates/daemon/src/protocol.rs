@@ -15,8 +15,8 @@ use thiserror::Error;
 #[path = "protocol_status.rs"]
 mod status;
 pub use status::{
-    AgentStatusEntry, CronSummary, NamespaceStatus, OrphanAgent, OrphanSummary,
-    PipelineStatusEntry, ProjectSummary, QueueStatus, WorkerEntry,
+    AgentEntry, AgentStatusEntry, CronSummary, NamespaceStatus, OrphanAgent, OrphanSummary,
+    PipelineEntry, PipelineStatusEntry, ProjectSummary, QueueStatus, WorkerEntry,
 };
 
 /// Request from CLI to daemon
@@ -105,6 +105,9 @@ pub enum Request {
         /// Prune all failed pipelines regardless of age
         #[serde(default)]
         failed: bool,
+        /// Prune orphaned pipelines (breadcrumb exists but no daemon state)
+        #[serde(default)]
+        orphans: bool,
         /// Preview only -- don't actually delete
         dry_run: bool,
     },
@@ -567,22 +570,6 @@ pub struct WorkspaceEntry {
     pub id: String,
     pub path: PathBuf,
     pub branch: Option<String>,
-}
-
-/// Pipeline entry for prune responses
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PipelineEntry {
-    pub id: String,
-    pub name: String,
-    pub step: String,
-}
-
-/// Agent entry for prune responses
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AgentEntry {
-    pub agent_id: String,
-    pub pipeline_id: String,
-    pub step_name: String,
 }
 
 /// Summary of a queue item

@@ -417,7 +417,23 @@ fn encode_decode_roundtrip_pipeline_prune_with_failed() {
     let request = Request::PipelinePrune {
         all: false,
         failed: true,
+        orphans: false,
         dry_run: true,
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn encode_decode_roundtrip_pipeline_prune_with_orphans() {
+    let request = Request::PipelinePrune {
+        all: false,
+        failed: false,
+        orphans: true,
+        dry_run: false,
     };
 
     let encoded = encode(&request).expect("encode failed");
@@ -435,11 +451,34 @@ fn pipeline_prune_failed_defaults_to_false() {
         Request::PipelinePrune {
             all,
             failed,
+            orphans,
             dry_run,
         } => {
             assert!(!all);
             assert!(!failed);
+            assert!(!orphans);
             assert!(dry_run);
+        }
+        _ => panic!("Expected PipelinePrune request"),
+    }
+}
+
+#[test]
+fn pipeline_prune_orphans_defaults_to_false() {
+    // Backward compatibility: old PipelinePrune without `orphans` should deserialize
+    let json = r#"{"type":"PipelinePrune","all":true,"failed":false,"dry_run":false}"#;
+    let decoded: Request = serde_json::from_str(json).expect("deserialize failed");
+    match decoded {
+        Request::PipelinePrune {
+            all,
+            failed,
+            orphans,
+            dry_run,
+        } => {
+            assert!(all);
+            assert!(!failed);
+            assert!(!orphans);
+            assert!(!dry_run);
         }
         _ => panic!("Expected PipelinePrune request"),
     }

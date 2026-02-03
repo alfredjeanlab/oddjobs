@@ -248,8 +248,18 @@ async fn handle_request(
         Request::PipelinePrune {
             all,
             failed,
+            orphans: prune_orphans,
             dry_run,
-        } => mutations::handle_pipeline_prune(state, event_bus, logs_path, all, failed, dry_run),
+        } => mutations::handle_pipeline_prune(
+            state,
+            event_bus,
+            logs_path,
+            orphans,
+            all,
+            failed,
+            prune_orphans,
+            dry_run,
+        ),
 
         Request::AgentPrune { all, dry_run } => {
             mutations::handle_agent_prune(state, logs_path, all, dry_run)

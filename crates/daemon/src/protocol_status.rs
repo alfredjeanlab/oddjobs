@@ -89,6 +89,21 @@ pub struct OrphanAgent {
     pub log_path: PathBuf,
 }
 
+/// Pipeline entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PipelineEntry {
+    pub id: String,
+    pub name: String,
+    pub step: String,
+}
+
+/// Agent entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentEntry {
+    pub agent_id: String,
+    pub pipeline_id: String,
+    pub step_name: String,
+}
 /// Worker entry for prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkerEntry {

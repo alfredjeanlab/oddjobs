@@ -607,11 +607,13 @@ impl DaemonClient {
         &self,
         all: bool,
         failed: bool,
+        orphans: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::PipelineEntry>, usize), ClientError> {
         let req = Request::PipelinePrune {
             all,
             failed,
+            orphans,
             dry_run,
         };
         match self.send(&req).await? {
