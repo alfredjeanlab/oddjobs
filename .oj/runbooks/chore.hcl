@@ -92,7 +92,8 @@ pipeline "chore" {
 }
 
 agent "chores" {
-  run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
+  # NOTE: Since chores should quick and small, prevent unnecessary EnterPlanMode and ExitPlanMode
+  run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
   on_idle  = { action = "nudge", message = "Keep working. Complete the task, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
 

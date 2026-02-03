@@ -30,6 +30,16 @@ command "draft-rebase" {
   }
 }
 
+# Refine an existing draft branch with additional instructions.
+#
+# Examples:
+#   oj run draft-refine inline-commands "Use bash with set -euo pipefail to match engine"
+#   oj run draft-refine new-parser "Add error recovery for malformed input"
+command "draft-refine" {
+  args = "<name> <instructions>"
+  run  = { pipeline = "draft-refine" }
+}
+
 # List open draft branches, or close one.
 #
 # Examples:
@@ -167,6 +177,53 @@ pipeline "draft-rebase" {
   }
 }
 
+pipeline "draft-refine" {
+  name      = "refine-${var.name}"
+  vars      = ["name", "instructions"]
+  workspace = "ephemeral"
+
+  locals {
+    repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+    branch = "$(git -C ${invoke.dir} branch -r --list 'origin/draft/${var.name}*' | head -1 | tr -d ' ' | sed 's|^origin/||')"
+  }
+
+  notify {
+    on_start = "Refining draft: ${var.name}"
+    on_done  = "Draft refined: ${var.name}"
+    on_fail  = "Refine failed: ${var.name}"
+  }
+
+  step "init" {
+    run = <<-SHELL
+      test -n "${local.branch}" || { echo "No draft matching '${var.name}'"; exit 1; }
+      git -C "${local.repo}" fetch origin ${local.branch}
+      git -C "${local.repo}" worktree add "${workspace.root}" origin/${local.branch}
+      mkdir -p .cargo
+      echo "[build]" > .cargo/config.toml
+      echo "target-dir = \"${local.repo}/target\"" >> .cargo/config.toml
+    SHELL
+    on_done = { step = "refine" }
+  }
+
+  step "refine" {
+    run     = { agent = "refiner" }
+    on_done = { step = "push" }
+  }
+
+  step "push" {
+    run = <<-SHELL
+      git add -A
+      git diff --cached --quiet || git commit -m "refine(${var.name}): ${var.instructions}"
+      git -C "${local.repo}" push origin HEAD:${local.branch} --force-with-lease
+    SHELL
+    on_done = { step = "cleanup" }
+  }
+
+  step "cleanup" {
+    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+  }
+}
+
 # ------------------------------------------------------------------------------
 # Agents
 # ------------------------------------------------------------------------------
@@ -241,6 +298,29 @@ agent "implement" {
     > ${var.instructions}
 
     Follow the plan carefully. Ensure all phases are completed and tests pass.
+  PROMPT
+}
+
+agent "refiner" {
+  run      = "claude --model opus --dangerously-skip-permissions"
+  on_idle  = { action = "nudge", message = "Keep working. Follow the instructions, run make check, and commit." }
+  on_dead  = { action = "gate", run = "make check" }
+
+  prompt = <<-PROMPT
+    Refine this draft branch with the following changes.
+
+    ## Instructions
+
+    ${var.instructions}
+
+    ## Steps
+
+    1. Read the existing code to understand what's been built
+    2. Make the requested changes
+    3. Run `make check` to verify everything passes
+    4. Commit your changes
+
+    Keep changes focused on the instructions. Don't refactor unrelated code.
   PROMPT
 }
 
