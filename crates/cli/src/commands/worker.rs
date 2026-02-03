@@ -88,12 +88,12 @@ pub async fn handle(
 
             let request = Request::WorkerStart {
                 project_root: project_root.to_path_buf(),
-                namespace: effective_namespace,
+                namespace: effective_namespace.clone(),
                 worker_name: name.clone(),
             };
             match client.send(&request).await? {
                 Response::WorkerStarted { worker_name } => {
-                    println!("Worker '{}' started", worker_name);
+                    println!("Worker '{}' started ({})", worker_name, effective_namespace);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -111,12 +111,12 @@ pub async fn handle(
 
             let request = Request::WorkerStop {
                 worker_name: name.clone(),
-                namespace: effective_namespace,
+                namespace: effective_namespace.clone(),
                 project_root: Some(project_root.to_path_buf()),
             };
             match client.send(&request).await? {
                 Response::Ok => {
-                    println!("Worker '{}' stopped", name);
+                    println!("Worker '{}' stopped ({})", name, effective_namespace);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

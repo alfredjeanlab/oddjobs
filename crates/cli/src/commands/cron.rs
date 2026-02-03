@@ -96,12 +96,12 @@ pub async fn handle(
 
             let request = Request::CronStart {
                 project_root: project_root.to_path_buf(),
-                namespace: effective_namespace,
+                namespace: effective_namespace.clone(),
                 cron_name: name,
             };
             match client.send(&request).await? {
                 Response::CronStarted { cron_name } => {
-                    println!("Cron '{}' started", cron_name);
+                    println!("Cron '{}' started ({})", cron_name, effective_namespace);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -119,12 +119,12 @@ pub async fn handle(
 
             let request = Request::CronStop {
                 cron_name: name.clone(),
-                namespace: effective_namespace,
+                namespace: effective_namespace.clone(),
                 project_root: Some(project_root.to_path_buf()),
             };
             match client.send(&request).await? {
                 Response::Ok => {
-                    println!("Cron '{}' stopped", name);
+                    println!("Cron '{}' stopped ({})", name, effective_namespace);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
