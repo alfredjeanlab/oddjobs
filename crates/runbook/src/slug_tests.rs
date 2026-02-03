@@ -86,6 +86,36 @@ fn truncation_trims_trailing_hyphen() {
     assert!(result.len() <= 28);
 }
 
+#[test]
+fn contractions_removed() {
+    // "don't" → "don-t", both fragments are stop words
+    assert_eq!(slugify("Don't break the login", 28), "break-login");
+    // "doesn't" → "doesn-t"
+    assert_eq!(slugify("Server doesn't respond", 28), "server-respond");
+    // "can't" → "can-t", "can" is already a stop word
+    assert_eq!(slugify("Can't load config", 28), "load-config");
+    // "isn't" → "isn-t"
+    assert_eq!(slugify("Value isn't valid", 28), "value-valid");
+    // "hasn't" → "hasn-t"
+    assert_eq!(slugify("Cache hasn't refreshed", 28), "cache-refreshed");
+    // "won't" → "won-t"
+    assert_eq!(slugify("Build won't pass", 28), "build-pass");
+    // "shouldn't" → "shouldn-t"
+    assert_eq!(slugify("This shouldn't fail", 28), "fail");
+}
+
+#[test]
+fn contraction_it_s_removed() {
+    // "it's" → "it-s", both "it" and "s" are stop words
+    assert_eq!(slugify("It's broken", 28), "broken");
+}
+
+#[test]
+fn contraction_all_stop_words() {
+    // All fragments of "they're not" are stop words
+    assert_eq!(slugify("they're not", 28), "");
+}
+
 // pipeline_display_name tests
 
 #[test]

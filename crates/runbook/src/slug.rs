@@ -95,6 +95,36 @@ const STOP_WORDS: &[&str] = &[
     "when",
     "which",
     "what",
+    // Pronouns commonly found in contractions
+    "i",
+    "he",
+    "she",
+    "they",
+    "you",
+    // Contraction fragments (apostrophe replaced by hyphen, e.g. "don't" → "don-t")
+    "t",
+    "s",
+    "d",
+    "m",
+    "re",
+    "ve",
+    "ll",
+    // Left stems of common n't contractions
+    "don",
+    "doesn",
+    "didn",
+    "hasn",
+    "hadn",
+    "isn",
+    "aren",
+    "wasn",
+    "weren",
+    "won",
+    "wouldn",
+    "shouldn",
+    "couldn",
+    "mustn",
+    "needn",
 ];
 
 /// Slugify a string for use as a pipeline name component.
