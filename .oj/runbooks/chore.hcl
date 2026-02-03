@@ -57,10 +57,11 @@ pipeline "chore" {
 
   step "submit" {
     run = <<-SHELL
+      _title=$(printf '%s' "${local.title}" | tr '\n' ' ' | cut -c1-80)
       git add -A
-      git diff --cached --quiet || git commit -m "${local.title}"
+      git diff --cached --quiet || git commit -m "$_title"
       git -C "${local.repo}" push origin "${local.branch}"
-      oj queue push merges --var branch="${local.branch}" --var title="${local.title}"
+      oj queue push merges --var branch="${local.branch}" --var title="$_title"
     SHELL
     on_done = { step = "done" }
   }
