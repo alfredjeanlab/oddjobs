@@ -3,11 +3,13 @@
 
 //! `oj run <command> [args]` - Run a command from the runbook
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use clap::Args;
+use oj_runbook::RunDirective;
 
 use crate::client::DaemonClient;
 
@@ -27,6 +29,10 @@ pub struct RunArgs {
     /// Runbook file to load (e.g., "build.toml")
     #[arg(long = "runbook")]
     pub runbook: Option<String>,
+
+    /// Force execution through the daemon (even for shell commands)
+    #[arg(long)]
+    pub daemon: bool,
 }
 
 fn parse_key_val(s: &str) -> Result<(String, String), String> {
@@ -165,15 +171,88 @@ pub async fn handle(
 
     cmd_def.validate_args(&positional, &named)?;
 
-    // Send to daemon
+    // Shell directives execute locally unless --daemon is set
+    if let RunDirective::Shell(ref cmd) = cmd_def.run {
+        if !args.daemon {
+            return execute_shell_inline(
+                cmd,
+                cmd_def,
+                &positional,
+                &named,
+                project_root,
+                invoke_dir,
+                namespace,
+            );
+        }
+    }
+
+    // Pipeline, Agent, or --daemon: dispatch to daemon
+    dispatch_to_daemon(
+        client,
+        project_root,
+        invoke_dir,
+        namespace,
+        command,
+        &positional,
+        &named,
+    )
+    .await
+}
+
+fn execute_shell_inline(
+    cmd: &str,
+    cmd_def: &oj_runbook::CommandDef,
+    positional: &[String],
+    named: &HashMap<String, String>,
+    project_root: &Path,
+    invoke_dir: &Path,
+    namespace: &str,
+) -> Result<()> {
+    let parsed_args = cmd_def.parse_args(positional, named);
+    let mut vars: HashMap<String, String> = parsed_args
+        .iter()
+        .map(|(k, v)| (format!("args.{}", k), v.clone()))
+        .collect();
+    vars.insert("invoke.dir".to_string(), invoke_dir.display().to_string());
+    vars.insert("workspace".to_string(), project_root.display().to_string());
+
+    let interpolated = oj_runbook::interpolate_shell(cmd, &vars);
+
+    let status = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(&interpolated)
+        .current_dir(project_root)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .env("OJ_NAMESPACE", namespace)
+        .status()?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(1);
+        std::process::exit(code);
+    }
+
+    Ok(())
+}
+
+async fn dispatch_to_daemon(
+    client: &DaemonClient,
+    project_root: &Path,
+    invoke_dir: &Path,
+    namespace: &str,
+    command: &str,
+    positional: &[String],
+    named: &HashMap<String, String>,
+) -> Result<()> {
     let (pipeline_id, pipeline_name) = client
         .run_command(
             project_root,
             invoke_dir,
             namespace,
             command,
-            &positional,
-            &named,
+            positional,
+            named,
         )
         .await?;
 
@@ -220,3 +299,7 @@ pub async fn handle(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "run_tests.rs"]
+mod tests;
