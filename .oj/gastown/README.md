@@ -46,17 +46,17 @@ Rig scope (GT_SCOPE=rig)
 The system has a multi-tier health monitoring chain:
 
 ```
-Daemon (oj daemon, Go process)
-  │  3-minute heartbeat, dumb transport
+Daemon (oj daemon)
+  │  periodic heartbeat
   │
   └─► Boot (boot-triage.hcl)
-      │  Fresh each tick, zero context, single triage decision
+      │  Fresh each tick, zero context — restarts workers, retries queues
       │
       └─► Deacon (deacon-patrol.hcl)
-          │  Town-level patrol: inbox, escalations, convoys, ready work
+          │  Town-level patrol: inbox, escalations, convoys, dispatch
           │
           └─► Witness (witness-patrol.hcl)
-                Per-rig patrol: polecat health, mail processing
+                Per-rig patrol: polecat health, nudge stalled, resume escalated
 ```
 
 Boot exists because the daemon can't reason and the deacon can't observe
@@ -87,22 +87,22 @@ gastown/
 | File | Commands | Pipelines | Agents | Queues | Workers |
 |------|----------|-----------|--------|--------|---------|
 | infra.hcl | — | — | — | 5 | 2 |
-| start.hcl | start, status, stop | town-start, town-stop | — | — | — |
-| sling.hcl | sling | sling | polecat-worker | — | — |
-| convoy.hcl | convoy, convoy-status, convoy-dispatch | 3 | convoy-dispatcher | — | — |
+| start.hcl | gt-start, gt-status, gt-stop | — | — | — | — |
+| sling.hcl | gt-sling | sling | polecat-worker | — | — |
+| convoy.hcl | gt-convoy, gt-convoy-status, gt-convoy-dispatch | convoy-dispatch | convoy-dispatcher | — | — |
 | polecat-work.hcl | — | polecat-work | polecat | — | — |
-| witness-patrol.hcl | witness-patrol | witness-patrol | witness-agent | — | — |
-| deacon-patrol.hcl | deacon-patrol | deacon-patrol | — | — | — |
+| witness-patrol.hcl | gt-witness-patrol | witness-patrol | witness-agent | — | — |
+| deacon-patrol.hcl | gt-deacon-patrol | deacon-patrol | deacon-agent | — | — |
 | refinery-patrol.hcl | — | refinery-patrol | refinery-agent | — | — |
-| boot-triage.hcl | triage | boot-triage | boot-agent | — | — |
-| shutdown-dance.hcl | shutdown-dance | shutdown-dance | — | — | — |
-| code-review.hcl | review | code-review | 12 | — | — |
+| boot-triage.hcl | gt-triage | boot-triage | boot-agent | — | — |
+| shutdown-dance.hcl | gt-shutdown-dance | shutdown-dance | — | — | — |
+| code-review.hcl | gt-review | code-review | 12 | — | — |
 
 ## Commands Reference
 
 ```bash
 # Startup / Lifecycle
-oj run gt-start [--rig <rig>]           # Initialize town infrastructure
+oj run gt-start [--rig <rig>]           # Initialize town, start workers
 oj run gt-status                        # Check system health
 oj run gt-stop                          # Graceful shutdown
 
@@ -204,8 +204,8 @@ Steps are discovered via `bd ready --parent=<mol-id>` and closed via
 ```
 Human: oj run gt-sling auth-fix "Fix the auth bug"
   │
-  ├─ 1. bd create -t task (or use existing bead ID)
-  ├─ 2. bd mol pour polecat-work --var issue=<id>  → molecule with steps
+  ├─ 1. Create task bead (or use existing bead ID)
+  ├─ 2. Create molecule steps as child beads
   ├─ 3. Spawn polecat pipeline in ephemeral worktree
   ├─ 4. Polecat discovers steps via bd ready, executes each
   ├─ 5. Polecat commits, pushes branch, creates MR bead, sends POLECAT_DONE
@@ -236,25 +236,28 @@ Human: oj run gt-convoy "Auth overhaul" issue-1 issue-2 issue-3
 ### Health Monitoring: boot → deacon → witness
 
 ```
-Daemon heartbeat (every 3 min):
+Daemon heartbeat (periodic):
   │
   └─ oj run gt-triage
      │
-     ├─ Observe: oj status, pending mail, escalations, merge queue
-     ├─ Decide: START / NUDGE / ALERT / NOTHING
+     ├─ Observe: oj status, workers, queues, escalations
+     ├─ Act: restart stopped workers, retry dead queue items,
+     │       resume/cancel escalated pipelines
      └─ Exit (ephemeral — zero accumulated context)
 
 Deacon patrol (periodic):
   │
   ├─ Process inbox (to:deacon messages)
-  ├─ Check escalation backlog
   ├─ Auto-close completed convoys
-  └─ Check for undispatched ready work
+  ├─ Handle escalation beads
+  ├─ Dispatch undispatched ready work via gt-sling
+  └─ Restart stopped workers, retry dead queue items
 
 Witness patrol (periodic, per-rig):
   │
   ├─ Process inbox (POLECAT_DONE, MERGED)
-  ├─ Health scan: detect stalled/zombie polecats
+  ├─ Health scan: nudge stalled agents, resume escalated pipelines
+  ├─ Restart stopped workers
   └─ Report findings
 ```
 

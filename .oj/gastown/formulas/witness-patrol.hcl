@@ -15,8 +15,9 @@
 #   Stalled — session stopped mid-work (crashed, never nudged)
 #   Zombie  — completed work but failed to exit cleanly
 #
-# Usage:
-#   oj run gt-witness-patrol [--rig <rig>]
+# Examples:
+#   oj run gt-witness-patrol
+#   oj run gt-witness-patrol --rig myproject
 
 command "gt-witness-patrol" {
   args = "[--rig <rig>]"
@@ -28,8 +29,14 @@ command "gt-witness-patrol" {
 }
 
 pipeline "witness-patrol" {
+  name      = "witness-${var.rig}"
   vars      = ["rig"]
   workspace = "ephemeral"
+
+  notify {
+    on_done = "Witness patrol done: ${var.rig}"
+    on_fail = "Witness patrol failed: ${var.rig}"
+  }
 
   # Process the witness inbox
   step "inbox" {
@@ -63,9 +70,9 @@ pipeline "witness-patrol" {
   }
 }
 
-# Witness agent — monitors polecat health
+# Witness agent — monitors polecat health and takes corrective action
 agent "witness-agent" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -76,41 +83,50 @@ agent "witness-agent" {
     GT_SCOPE = "rig"
   }
 
-  prime = <<-SHELL
-    echo '## Role: Witness (Health Monitor)'
-    echo "Rig: ${var.rig}"
-    echo ''
-    echo '## Active Pipelines'
-    oj status 2>/dev/null || echo '  No active pipelines'
-    echo ''
-    echo '## Pending Mail'
-    bd list -t message --label "to:witness" --status open --json 2>/dev/null | \
-      jq -r '.[] | "  \(.title)"' 2>/dev/null || \
-      echo '  No pending mail'
-    echo ''
-    echo '## Active Pipelines'
-    oj status 2>/dev/null || echo '  Could not check oj status'
-  SHELL
+  prime = [
+    "echo '## Role: Witness (Health Monitor)'",
+    "echo 'Rig: ${var.rig}'",
+    "echo ''",
+    "echo '## oj CLI Reference'",
+    "oj --help 2>/dev/null",
+    "echo ''",
+    "echo '## Active Pipelines'",
+    "oj pipeline list --no-limit -o json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Workers'",
+    "oj worker list -o json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Pending Witness Mail'",
+    "bd list -t message --label to:witness --status open --json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Escalated Pipelines'",
+    "oj pipeline list --status escalated -o json 2>/dev/null || echo '[]'",
+  ]
 
   prompt = <<-PROMPT
     You are the Witness — health monitor for rig ${var.rig}.
 
     ## Patrol Cycle
 
-    1. Check `oj status` for running pipelines
-    2. For each, assess health:
-       - **Working**: recent activity → leave alone
-       - **Stalled**: no activity, should be working → note for nudge
-       - **Zombie**: done but didn't clean up → note for cleanup
-    3. Check for pending mail you haven't processed
-    4. Report findings concisely
+    1. Review the pipeline list from your prime context
+    2. For each running pipeline, assess health:
+       - **Working**: recent step activity → leave alone
+       - **Stalled**: agent stuck, no progress → nudge with `oj agent send <agent-id> "Keep working."`
+       - **Failed/Escalated**: check pipeline details with `oj pipeline show <id>`
+    3. For escalated pipelines: investigate with `oj pipeline logs <id>`, then either:
+       - Resume: `oj pipeline resume <id>` if the issue is transient
+       - Cancel: `oj pipeline cancel <id>` if unrecoverable
+    4. Check that workers are running: `oj worker list`
+       - If a worker is stopped, start it: `oj worker start <name>`
+    5. Check for dead queue items: `oj queue items <queue-name>`
+       - Retry dead items: `oj queue retry <queue> <item-id>`
 
     ## Rules
 
-    - Do NOT interrupt working agents
-    - Do NOT force session cycles (agents self-manage)
+    - Do NOT interrupt working agents — only act on stalled/failed/escalated
     - Stalled ≠ idle. There IS no idle state.
-    - If an agent exists without work, something is broken.
+    - If an agent exists without work, something is broken
+    - Be concise: report what you found and what you did
 
     Report findings and say "I'm done".
   PROMPT

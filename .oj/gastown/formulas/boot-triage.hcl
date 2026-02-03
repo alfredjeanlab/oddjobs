@@ -12,12 +12,12 @@
 #         └→ Deacon — continuous patrol, long-running
 #
 # Boot decision matrix:
-#   Session dead            → START (respawn)
-#   Heartbeat > 15 min      → WAKE  (nudge deacon)
-#   Heartbeat 5-15min+mail  → NUDGE (gentle prod)
-#   Heartbeat fresh          → NOTHING (exit silently)
+#   Workers stopped          → START (restart them)
+#   Escalated pipelines      → RESUME or CANCEL
+#   Dead queue items         → RETRY
+#   Everything healthy       → NOTHING (exit silently)
 #
-# Usage:
+# Examples:
 #   oj run gt-triage
 
 command "gt-triage" {
@@ -26,45 +26,25 @@ command "gt-triage" {
 }
 
 pipeline "boot-triage" {
+  name      = "boot-triage"
   workspace = "ephemeral"
 
-  # Observe system state
-  step "observe" {
-    run = <<-SHELL
-      oj status 2>/dev/null || true
-
-      for TARGET in deacon witness refinery mayor; do
-        COUNT=$(bd list -t message --label "to:$TARGET" --status open --json 2>/dev/null | \
-          jq 'length' 2>/dev/null || echo 0)
-        if [ "$COUNT" -gt 0 ]; then
-          echo "$TARGET: $COUNT pending"
-        fi
-      done
-
-      ESC=$(bd list -t task --label escalation --status open --json 2>/dev/null | \
-        jq 'length' 2>/dev/null || echo 0)
-      test "$ESC" -gt 0 && echo "escalations: $ESC"
-
-      MQ=$(bd list -t merge-request --status open --json 2>/dev/null | \
-        jq 'length' 2>/dev/null || echo 0)
-      test "$MQ" -gt 0 && echo "merge-queue: $MQ"
-    SHELL
-    on_done = { step = "decide" }
+  notify {
+    on_fail = "Boot triage failed"
   }
 
-  # Make a single triage decision
-  step "decide" {
-    run     = { agent = "boot-agent" }
+  step "triage" {
+    run = { agent = "boot-agent" }
   }
 }
 
-# Boot agent — ephemeral, fresh context, single decision
+# Boot agent — ephemeral, fresh context, single triage pass
 #
 # Gas Town: "Boot exists because the daemon can't reason and Deacon can't
 # observe itself. The separation costs complexity but enables intelligent
 # triage without constant AI cost."
 agent "boot-agent" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -74,28 +54,58 @@ agent "boot-agent" {
     GT_SCOPE = "town"
   }
 
+  prime = [
+    "echo '## Role: Boot (Ephemeral Triage)'",
+    "echo ''",
+    "echo '## oj CLI Reference'",
+    "oj --help 2>/dev/null",
+    "echo ''",
+    "echo '## System Status'",
+    "oj status 2>/dev/null || echo 'No active work'",
+    "echo ''",
+    "echo '## Workers'",
+    "oj worker list -o json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Escalated Pipelines'",
+    "oj pipeline list --status escalated -o json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Failed Pipelines (recent)'",
+    "oj pipeline list --status failed -o json 2>/dev/null || echo '[]'",
+    "echo ''",
+    "echo '## Pending Mail'",
+    "for T in deacon witness refinery; do C=$(bd list -t message --label to:$T --status open --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0); test \"$C\" -gt 0 && echo \"$T: $C pending\"; done",
+    "echo ''",
+    "echo '## Merge Queue'",
+    "bd list -t merge-request --status open --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0",
+    "echo ''",
+    "echo '## Escalations'",
+    "bd list -t task --label escalation --status open --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0",
+  ]
+
   prompt = <<-PROMPT
     You are Boot — the ephemeral triage agent. You run fresh each tick with
-    zero accumulated context. Make ONE decision and exit immediately.
+    zero accumulated context. Scan the system, fix what you can, exit.
 
-    ## Triage Decision Matrix
+    ## Triage Actions
 
-    Based on the system state shown in your prime context:
+    Based on the system state in your prime context:
 
-    | Condition                  | Action  | How                        |
-    |----------------------------|---------|----------------------------|
-    | Dead workers needed        | START   | Note what needs starting   |
-    | Stale agents + pending mail| NUDGE   | Note who needs nudging     |
-    | Unacked escalations        | ALERT   | Note the escalation        |
-    | Everything healthy         | NOTHING | Say "All clear, I'm done"  |
+    | Condition              | Action                                          |
+    |------------------------|-------------------------------------------------|
+    | Worker stopped         | `oj worker start <name>`                        |
+    | Pipeline escalated     | `oj pipeline show <id>` → resume or cancel      |
+    | Pipeline failed        | Check logs: `oj pipeline logs <id>` → note it   |
+    | Dead queue items       | `oj queue items <queue>` → `oj queue retry ...`  |
+    | Everything healthy     | Say "All clear, I'm done"                       |
 
     ## Rules
 
-    - Be FAST. Read the state, decide, exit.
-    - Don't investigate deeply — that's the deacon's job.
-    - If something looks wrong, note it. Don't fix it.
+    - Be FAST. Read the state, act, exit.
+    - Fix mechanical issues (stopped workers, dead queue items) directly
+    - For escalated pipelines: check logs, resume if transient, cancel if stuck
+    - Don't investigate deeply — that's the deacon's job
     - Healthy system = exit silently (Idle Town Principle)
 
-    What does the system need right now? Decide and say "I'm done".
+    Act on what you find, then say "I'm done".
   PROMPT
 }

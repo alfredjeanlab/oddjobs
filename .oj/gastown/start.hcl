@@ -33,6 +33,7 @@ command "gt-start" {
 
     # Start the background workers
     oj worker start refinery 2>/dev/null || true
+    oj worker start bugfix 2>/dev/null || true
   SHELL
 
   defaults = {

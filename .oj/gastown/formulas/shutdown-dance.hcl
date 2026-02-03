@@ -27,7 +27,13 @@ command "gt-shutdown-dance" {
 }
 
 pipeline "shutdown-dance" {
+  name = "shutdown-${var.target}"
   vars = ["target", "reason"]
+
+  notify {
+    on_done = "Shutdown dance done: ${var.target}"
+    on_fail = "Shutdown dance failed: ${var.target}"
+  }
 
   # Record the warrant in beads
   step "warrant" {

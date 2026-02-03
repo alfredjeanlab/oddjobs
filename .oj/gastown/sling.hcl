@@ -12,8 +12,9 @@
 #   4. Spawn polecat pipeline in ephemeral workspace
 #   5. Optionally create a convoy for tracking
 #
-# Usage:
-#   oj run gt-sling <issue> <instructions> [--base <branch>]
+# Examples:
+#   oj run gt-sling auth-fix "Fix the auth bug"
+#   oj run gt-sling gt-abc "Existing issue" --base develop
 
 command "gt-sling" {
   args = "<issue> <instructions> [--base <branch>] [--rig <rig>]"
@@ -26,13 +27,30 @@ command "gt-sling" {
 }
 
 pipeline "sling" {
+  name      = "${var.issue}"
   vars      = ["issue", "instructions", "base", "rig"]
   workspace = "ephemeral"
+  on_cancel = { step = "cleanup" }
+  on_fail   = { step = "reopen" }
+
+  locals {
+    repo    = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+    polecat = "${var.issue}-${workspace.nonce}"
+    branch  = "polecat/${var.issue}-${workspace.nonce}"
+    actor   = "${var.rig}/polecats/${var.issue}-${workspace.nonce}"
+    title   = "feat(${var.issue}): ${var.instructions}"
+  }
+
+  notify {
+    on_start = "Slung: ${var.issue}"
+    on_done  = "Polecat done: ${var.issue}"
+    on_fail  = "Polecat failed: ${var.issue}"
+  }
 
   # Create work bead, molecule steps, and spawn polecat workspace
   step "provision" {
     run = <<-SHELL
-      # If issue looks like an existing bead ID (has a dash), show it;
+      # If issue looks like an existing bead ID (has a dash), use it;
       # otherwise create a new task bead
       if echo "${var.issue}" | grep -q '-'; then
         BEAD_ID="${var.issue}"
@@ -55,76 +73,80 @@ pipeline "sling" {
       done
 
       # Hook the work to a polecat identity
-      POLECAT_NAME="${var.issue}-${workspace.nonce}"
       bd update "$BEAD_ID" \
         --status in_progress \
-        --assignee "${var.rig}/polecats/$POLECAT_NAME"
+        --assignee "${local.actor}"
 
-      # Write state for downstream steps
+      # Write bead ID for downstream steps
       echo "$BEAD_ID" > .bead-id
-      echo "$POLECAT_NAME" > .polecat-name
-      echo "Slung $BEAD_ID to ${var.rig}/polecats/$POLECAT_NAME"
+      echo "Slung $BEAD_ID to ${local.actor}"
 
       # Spawn polecat workspace
-      REPO="$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-      BRANCH="polecat/$POLECAT_NAME"
-      git -C "$REPO" worktree add -b "$BRANCH" "${workspace.root}/work" origin/${var.base}
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}/work" origin/${var.base}
     SHELL
     on_done = { step = "execute" }
   }
 
   # Run the polecat-work formula
   step "execute" {
-    run = { agent = "polecat-worker" }
-    on_done = { step = "done" }
+    run     = { agent = "polecat-worker" }
+    on_done = { step = "submit" }
   }
 
   # Completion: push, create MR, clean up
-  step "done" {
+  step "submit" {
     run = <<-SHELL
       cd "${workspace.root}/work"
-      REPO="$(git -C ${invoke.dir} rev-parse --show-toplevel)"
       BEAD_ID="$(cat ${workspace.root}/.bead-id)"
-      POLECAT_NAME="$(cat ${workspace.root}/.polecat-name)"
-      BRANCH="$(git branch --show-current)"
 
       git add -A
-      git diff --cached --quiet || git commit -m "feat(${var.issue}): ${var.instructions}"
-
-      git -C "$REPO" push origin "$BRANCH"
+      git diff --cached --quiet || git commit -m "${local.title}"
+      git -C "${local.repo}" push origin "${local.branch}"
 
       # Create merge-request bead (enters the refinery queue)
       bd create -t merge-request \
         --title "MR: ${var.instructions}" \
-        --description "Branch: $BRANCH\nIssue: $BEAD_ID\nBase: ${var.base}" \
-        --labels "branch:$BRANCH,issue:$BEAD_ID,base:${var.base},rig:${var.rig}" \
+        --description "Branch: ${local.branch}\nIssue: $BEAD_ID\nBase: ${var.base}" \
+        --labels "branch:${local.branch},issue:$BEAD_ID,base:${var.base},rig:${var.rig}" \
         --json > /dev/null
 
       # Send POLECAT_DONE mail to witness
       bd create -t message \
-        --title "POLECAT_DONE $POLECAT_NAME" \
-        --description "Exit: MERGED\nIssue: $BEAD_ID\nBranch: $BRANCH" \
-        --labels "from:${var.rig}/polecats/$POLECAT_NAME,to:witness,msg-type:polecat-done"
+        --title "POLECAT_DONE ${local.polecat}" \
+        --description "Exit: MERGED\nIssue: $BEAD_ID\nBranch: ${local.branch}" \
+        --labels "from:${local.actor},to:witness,msg-type:polecat-done"
 
       bd close "$BEAD_ID" --reason "Submitted to merge queue"
     SHELL
+    on_done = { step = "cleanup" }
+  }
+
+  step "reopen" {
+    run = <<-SHELL
+      BEAD_ID="$(cat ${workspace.root}/.bead-id 2>/dev/null || echo '')"
+      test -n "$BEAD_ID" && bd reopen "$BEAD_ID" --reason "Sling pipeline failed" 2>/dev/null || true
+    SHELL
+    on_done = { step = "cleanup" }
+  }
+
+  step "cleanup" {
+    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}/work\" 2>/dev/null || true"
   }
 }
 
 # The polecat worker agent — discovers and executes molecule steps
 agent "polecat-worker" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   cwd      = "${workspace.root}/work"
   on_idle  = { action = "nudge", message = "You have work. Check `bd ready` for your next step. Execute it. Say 'I'm done' when all steps are complete." }
   on_dead  = { action = "gate", run = "make check" }
-  on_error = { action = "escalate" }
 
   env = {
-    BD_ACTOR         = "${var.rig}/polecats/${var.issue}-${workspace.nonce}"
-    GIT_AUTHOR_NAME  = "${var.issue}-${workspace.nonce}"
+    BD_ACTOR         = "${local.actor}"
+    GIT_AUTHOR_NAME  = "${local.polecat}"
     GT_ROLE          = "polecat"
     GT_RIG           = "${var.rig}"
-    GT_POLECAT       = "${var.issue}-${workspace.nonce}"
+    GT_POLECAT       = "${local.polecat}"
   }
 
   # Prime: inject context at session start (Gas Town's gt prime equivalent)
@@ -145,10 +167,6 @@ agent "polecat-worker" {
   prompt = <<-PROMPT
     You are a polecat — an ephemeral worker. You have ONE job: execute the steps
     on your hook, then exit. There is no idle state. Done means gone.
-
-    ## The Propulsion Principle
-
-    Work was placed on your hook. The system trusts you will BEGIN IMMEDIATELY.
 
     ## Workflow
 

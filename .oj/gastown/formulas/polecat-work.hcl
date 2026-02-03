@@ -3,7 +3,7 @@
 # Gas Town equivalent: mol-polecat-work.formula.toml
 #
 # This is THE formula that polecats execute. Every polecat runs this pipeline.
-# Steps: load-context → implement → test → submit
+# Steps: init → work → submit
 #
 # Key Gas Town principles:
 #   - Propulsion: work on hook = execute immediately
@@ -13,18 +13,29 @@
 #   - Rebase-as-work: conflicts spawn fresh polecats, never "sent back"
 
 pipeline "polecat-work" {
+  name      = "${var.bug.id}"
   vars      = ["bug"]
   workspace = "ephemeral"
+  on_cancel = { step = "cancel" }
+  on_fail   = { step = "reopen" }
 
   locals {
+    repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
     branch = "polecat/${var.bug.id}-${workspace.nonce}"
+    title  = "fix: ${var.bug.title}"
+    actor  = "polecat/${var.bug.id}"
+  }
+
+  notify {
+    on_start = "Polecat: ${var.bug.title}"
+    on_done  = "Polecat done: ${var.bug.title}"
+    on_fail  = "Polecat failed: ${var.bug.title}"
   }
 
   # Initialize workspace (worktree from shared repo)
   step "init" {
     run = <<-SHELL
-      REPO=$(git -C "${invoke.dir}" rev-parse --show-toplevel)
-      git -C "$REPO" worktree add -b "${local.branch}" "${workspace.root}" HEAD
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" HEAD
 
       # Store state for agent discovery
       echo "${var.bug.id}" > .hook-bead
@@ -32,7 +43,7 @@ pipeline "polecat-work" {
 
       # Hook the bead to this polecat
       bd update "${var.bug.id}" --status in_progress \
-        --assignee "${local.branch}" 2>/dev/null || true
+        --assignee "${local.actor}" 2>/dev/null || true
     SHELL
     on_done = { step = "work" }
   }
@@ -46,13 +57,9 @@ pipeline "polecat-work" {
   # Submit: push branch, create MR bead, send POLECAT_DONE mail
   step "submit" {
     run = <<-SHELL
-      # Commit remaining work
       git add -A
-      git diff --cached --quiet || git commit -m "feat: ${var.bug.title}"
-
-      # Push branch to origin
-      REPO=$(git -C "${invoke.dir}" rev-parse --show-toplevel)
-      git -C "$REPO" push origin "${local.branch}"
+      git diff --cached --quiet || git commit -m "${local.title}"
+      git -C "${local.repo}" push origin "${local.branch}"
 
       # Create merge-request bead (enters the refinery queue)
       MR_ID=$(bd create -t merge-request \
@@ -67,9 +74,23 @@ pipeline "polecat-work" {
         --description "Exit: MERGED\nIssue: ${var.bug.id}\nMR: $MR_ID\nBranch: ${local.branch}" \
         --labels "from:polecat,to:witness,msg-type:polecat-done" 2>/dev/null || true
 
-      # Close the work bead
       bd close "${var.bug.id}" --reason "Submitted MR $MR_ID" 2>/dev/null || true
     SHELL
+    on_done = { step = "cleanup" }
+  }
+
+  step "cancel" {
+    run     = "bd close \"${var.bug.id}\" --reason 'Pipeline cancelled' 2>/dev/null || true"
+    on_done = { step = "cleanup" }
+  }
+
+  step "reopen" {
+    run     = "bd reopen \"${var.bug.id}\" --reason 'Pipeline failed' 2>/dev/null || true"
+    on_done = { step = "cleanup" }
+  }
+
+  step "cleanup" {
+    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
   }
 }
 
@@ -80,16 +101,12 @@ pipeline "polecat-work" {
 #   Sandbox (workspace)  — persists until submit
 #   Slot (identity)      — attribution, persists in beads
 agent "polecat" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "nudge", message = "Check `bd ready` for your next step. Execute it and `bd close` it when done. Say 'I'm done' when all work is complete." }
   on_dead  = { action = "gate", run = "make check" }
-  on_error = [
-    { match = "rate_limited", action = "gate", run = "sleep 60" },
-    { action = "escalate" },
-  ]
 
   env = {
-    BD_ACTOR        = "polecat/${var.bug.id}"
+    BD_ACTOR        = "${local.actor}"
     GIT_AUTHOR_NAME = "${var.bug.id}"
     GT_ROLE         = "polecat"
   }

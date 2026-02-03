@@ -14,8 +14,19 @@
 #   - Strict post-merge: push → notify witness → close MR → cleanup
 
 pipeline "refinery-patrol" {
+  name      = "refinery-${var.mr.id}"
   vars      = ["mr"]
   workspace = "ephemeral"
+
+  locals {
+    repo = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+  }
+
+  notify {
+    on_start = "Refinery: ${var.mr.id}"
+    on_done  = "Merged: ${var.mr.id}"
+    on_fail  = "Merge failed: ${var.mr.id}"
+  }
 
   # Fetch branch and create worktree from the MR branch
   step "init" {
@@ -33,11 +44,9 @@ pipeline "refinery-patrol" {
         exit 1
       fi
 
-      # Fetch and create worktree from the MR branch (not base)
-      # Gas Town flow: checkout feature → rebase onto main → ff-merge → push
-      REPO=$(git -C "${invoke.dir}" rev-parse --show-toplevel)
-      git -C "$REPO" fetch origin "$BASE" "$BRANCH"
-      git -C "$REPO" worktree add -b "refinery-${workspace.nonce}" "${workspace.root}" "origin/$BRANCH"
+      # Fetch and create worktree from the MR branch
+      git -C "${local.repo}" fetch origin "$BASE" "$BRANCH"
+      git -C "${local.repo}" worktree add -b "refinery-${workspace.nonce}" "${workspace.root}" "origin/$BRANCH"
 
       echo "$BRANCH" > .mr-branch
       echo "$BASE" > .mr-base
@@ -76,9 +85,10 @@ pipeline "refinery-patrol" {
       ISSUE="$(cat .mr-issue)"
 
       # 1. Push to target branch
-      REPO=$(git -C "${invoke.dir}" rev-parse --show-toplevel)
       MERGE_BRANCH="$(git branch --show-current)"
-      git -C "$REPO" push origin "$MERGE_BRANCH:$BASE"
+      git -C "${local.repo}" fetch origin "$BASE"
+      git rebase "origin/$BASE"
+      git -C "${local.repo}" push origin "$MERGE_BRANCH:$BASE"
 
       # 2. Send MERGED mail to witness (REQUIRED before cleanup)
       bd create -t message \
@@ -90,9 +100,16 @@ pipeline "refinery-patrol" {
       bd close "$MR_ID" --reason "Merged to $BASE" 2>/dev/null || true
 
       # 4. Cleanup: delete polecat branch
-      git -C "$REPO" push origin --delete "$BRANCH" 2>/dev/null || true
+      git -C "${local.repo}" push origin --delete "$BRANCH" 2>/dev/null || true
+    SHELL
+    on_done = { step = "cleanup" }
+    on_fail = { step = "check", attempts = 2 }
+  }
 
-      echo "Merged $BRANCH into $BASE. MR $MR_ID closed."
+  step "cleanup" {
+    run = <<-SHELL
+      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "refinery-${workspace.nonce}" 2>/dev/null || true
     SHELL
   }
 }
@@ -100,7 +117,7 @@ pipeline "refinery-patrol" {
 # Refinery agent — resolves conflicts and test failures
 # Gas Town: "The agent makes all merge/conflict decisions, not Go code" (ZFC #5)
 agent "refinery-agent" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "gate", run = "make check", attempts = 5 }
   on_dead  = { action = "escalate" }
 

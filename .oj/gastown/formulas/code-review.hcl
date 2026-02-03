@@ -34,18 +34,28 @@ command "gt-review" {
 }
 
 pipeline "code-review" {
+  name      = "review-${var.branch}"
   vars      = ["branch", "base"]
   workspace = "ephemeral"
+
+  locals {
+    repo = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+  }
+
+  notify {
+    on_start = "Reviewing: ${var.branch}"
+    on_done  = "Review done: ${var.branch}"
+    on_fail  = "Review failed: ${var.branch}"
+  }
 
   # Setup: fetch branch, generate diff
   step "setup" {
     run = <<-SHELL
-      REPO=$(git -C "${invoke.dir}" rev-parse --show-toplevel)
-      git -C "$REPO" fetch origin ${var.branch} ${var.base}
+      git -C "${local.repo}" fetch origin ${var.branch} ${var.base}
 
-      git -C "$REPO" diff origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff.patch
-      git -C "$REPO" diff --stat origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff-stat.txt
-      git -C "$REPO" log --oneline origin/${var.base}...origin/${var.branch} > ${workspace.root}/commits.txt
+      git -C "${local.repo}" diff origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff.patch
+      git -C "${local.repo}" diff --stat origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff-stat.txt
+      git -C "${local.repo}" log --oneline origin/${var.base}...origin/${var.branch} > ${workspace.root}/commits.txt
 
       CONVOY_ID=$(bd create -t convoy \
         --title "Code Review: ${var.branch}" \
@@ -136,12 +146,13 @@ pipeline "code-review" {
   }
 }
 
+
 # ---------------------------------------------------------------------------
 # Analysis Legs (1-7)
 # ---------------------------------------------------------------------------
 
 agent "reviewer-correctness" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -173,7 +184,7 @@ agent "reviewer-correctness" {
 }
 
 agent "reviewer-performance" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -203,7 +214,7 @@ agent "reviewer-performance" {
 }
 
 agent "reviewer-security" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -235,7 +246,7 @@ agent "reviewer-security" {
 }
 
 agent "reviewer-elegance" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -267,7 +278,7 @@ agent "reviewer-elegance" {
 }
 
 agent "reviewer-resilience" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -299,7 +310,7 @@ agent "reviewer-resilience" {
 }
 
 agent "reviewer-style" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -330,7 +341,7 @@ agent "reviewer-style" {
 }
 
 agent "reviewer-smells" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -368,7 +379,7 @@ agent "reviewer-smells" {
 # ---------------------------------------------------------------------------
 
 agent "reviewer-wiring" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -404,7 +415,7 @@ agent "reviewer-wiring" {
 }
 
 agent "reviewer-commits" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -439,7 +450,7 @@ agent "reviewer-commits" {
 }
 
 agent "reviewer-tests" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
@@ -482,7 +493,7 @@ agent "reviewer-tests" {
 # ---------------------------------------------------------------------------
 
 agent "reviewer-synthesis" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 

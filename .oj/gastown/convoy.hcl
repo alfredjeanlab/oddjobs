@@ -4,17 +4,16 @@
 # multiple issues, a convoy tracks them so you can see progress and know
 # when everything lands.
 #
-# Gas Town equivalent: `gt convoy create "Feature X" gt-abc gt-def`
-#
 # State is tracked in beads:
 #   - Convoy bead (type=convoy) is the root
 #   - Tracked issues linked via `bd dep add <convoy> <issue> --type=tracks`
 #   - Status: open → closed (all tracked issues closed)
 #   - Adding issues to closed convoy reopens it
 #
-# Usage:
-#   oj run gt-convoy <name> <issues...>
-#   oj run gt-convoy-status [--id <convoy-id>]
+# Examples:
+#   oj run gt-convoy sprint-1 gt-abc gt-def
+#   oj run gt-convoy-status --id gt-abc
+#   oj run gt-convoy-dispatch gt-abc
 
 command "gt-convoy" {
   args = "<name> <issues...>"
@@ -66,10 +65,15 @@ command "gt-convoy-dispatch" {
   }
 }
 
-# Dispatch all tracked issues in a convoy to polecats
-# (commands can't run agents directly — pipeline wrapper required)
 pipeline "convoy-dispatch" {
+  name = "convoy-${var.convoy_id}"
   vars = ["convoy_id", "base", "rig"]
+
+  notify {
+    on_start = "Dispatching convoy: ${var.convoy_id}"
+    on_done  = "Convoy dispatched: ${var.convoy_id}"
+    on_fail  = "Convoy dispatch failed: ${var.convoy_id}"
+  }
 
   step "dispatch" {
     run = { agent = "convoy-dispatcher" }
@@ -77,7 +81,7 @@ pipeline "convoy-dispatch" {
 }
 
 agent "convoy-dispatcher" {
-  run      = "claude --dangerously-skip-permissions"
+  run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
   on_idle  = { action = "done" }
   on_dead  = { action = "done" }
 
