@@ -41,7 +41,7 @@ impl<'de> Deserialize<'de> for PrimeDef {
             Helper::Script(s) => Ok(PrimeDef::Script(s)),
             Helper::Commands(v) => Ok(PrimeDef::Commands(v)),
             Helper::PerSource(map) => {
-                for (_key, val) in &map {
+                for val in map.values() {
                     if matches!(val, PrimeDef::PerSource(_)) {
                         return Err(serde::de::Error::custom(
                             "nested per-source prime is not allowed",
@@ -68,7 +68,7 @@ impl PrimeDef {
                 .collect::<Vec<_>>()
                 .join("\n"),
             PrimeDef::PerSource(_) => {
-                panic!("render() not valid for PerSource; use render_per_source()")
+                unreachable!("render() not valid for PerSource; use render_per_source()")
             }
         }
     }
