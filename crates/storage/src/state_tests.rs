@@ -36,6 +36,7 @@ fn step_started_event(pipeline_id: &str) -> Event {
         pipeline_id: PipelineId::new(pipeline_id),
         step: "init".to_string(),
         agent_id: None,
+        agent_name: None,
     }
 }
 

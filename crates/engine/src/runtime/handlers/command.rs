@@ -166,6 +166,7 @@ where
                             pipeline_id: pipeline_id.clone(),
                             step: step_name.to_string(),
                             agent_id: None,
+                            agent_name: None,
                         },
                     },
                     Effect::Shell {

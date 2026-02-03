@@ -16,6 +16,7 @@ pub fn step_start_effects(pipeline_id: &PipelineId, step: &str) -> Vec<Effect> {
             pipeline_id: pipeline_id.clone(),
             step: step.to_string(),
             agent_id: None,
+            agent_name: None,
         },
     }]
 }

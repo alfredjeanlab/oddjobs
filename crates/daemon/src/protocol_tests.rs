@@ -211,6 +211,8 @@ fn encode_decode_agents_response() {
             pipeline_id: "pipe-abc".to_string(),
             step_name: "build".to_string(),
             agent_id: "agent-123".to_string(),
+            agent_name: Some("claude".to_string()),
+            namespace: Some("myproject".to_string()),
             status: "running".to_string(),
             files_read: 10,
             files_written: 3,

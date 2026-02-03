@@ -194,6 +194,7 @@ where
                             pipeline_id: pipeline_id.clone(),
                             step: pipeline.step.clone(),
                             agent_id: None,
+                            agent_name: None,
                         },
                     })
                     .await?;

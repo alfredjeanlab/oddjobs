@@ -72,11 +72,17 @@ pub(super) fn handle_query(
                             _ => None,
                         },
                         agent_id: r.agent_id.clone(),
+                        agent_name: r.agent_name.clone(),
                     })
                     .collect();
 
                 // Compute agent summaries from log files
-                let agents = compute_agent_summaries(&p.id, &steps, logs_path);
+                let namespace = if p.namespace.is_empty() {
+                    None
+                } else {
+                    Some(p.namespace.as_str())
+                };
+                let agents = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 
                 Box::new(PipelineDetail {
                     id: p.id.clone(),
@@ -329,10 +335,17 @@ pub(super) fn handle_query(
                             _ => None,
                         },
                         agent_id: r.agent_id.clone(),
+                        agent_name: r.agent_name.clone(),
                     })
                     .collect();
 
-                let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path);
+                let namespace = if p.namespace.is_empty() {
+                    None
+                } else {
+                    Some(p.namespace.clone())
+                };
+                let mut summaries =
+                    compute_agent_summaries(&p.id, &steps, logs_path, namespace.as_deref());
 
                 if let Some(ref s) = status {
                     summaries.retain(|a| a.status == *s);
@@ -385,6 +398,7 @@ fn compute_agent_summaries(
     pipeline_id: &str,
     steps: &[StepRecordDetail],
     logs_path: &Path,
+    namespace: Option<&str>,
 ) -> Vec<AgentSummary> {
     use oj_engine::log_paths::agent_log_path;
 
@@ -443,6 +457,8 @@ fn compute_agent_summaries(
                 pipeline_id: pipeline_id.to_string(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
+                agent_name: step.agent_name.clone(),
+                namespace: namespace.map(|s| s.to_string()),
                 status: step.outcome.clone(),
                 files_read,
                 files_written,

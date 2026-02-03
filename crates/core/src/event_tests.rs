@@ -157,6 +157,7 @@ fn event_step_started_roundtrip() {
         pipeline_id: PipelineId::new("pipe-1"),
         step: "build".to_string(),
         agent_id: None,
+        agent_name: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "step:started");

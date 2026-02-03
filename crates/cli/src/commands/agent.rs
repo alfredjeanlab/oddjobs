@@ -133,13 +133,25 @@ pub async fn handle(
                         println!("No agents found");
                     } else {
                         println!(
-                            "{:<12} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
-                            "AGENT_ID", "PIPELINE", "STEP", "STATUS", "READ", "WRITE", "CMDS"
+                            "{:<12} {:<16} {:<16} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                            "ID",
+                            "NAME",
+                            "PROJECT",
+                            "PIPELINE",
+                            "STEP",
+                            "STATUS",
+                            "READ",
+                            "WRITE",
+                            "CMDS"
                         );
                         for a in &agents {
+                            let name = a.agent_name.as_deref().unwrap_or("-");
+                            let project = a.namespace.as_deref().unwrap_or("-");
                             println!(
-                                "{:<12} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                                "{:<12} {:<16} {:<16} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
                                 truncate(&a.agent_id, 12),
+                                truncate(name, 16),
+                                truncate(project, 16),
                                 truncate(&a.pipeline_id, 12),
                                 truncate(&a.step_name, 16),
                                 truncate(&a.status, 10),

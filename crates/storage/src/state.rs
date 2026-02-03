@@ -323,12 +323,16 @@ impl MaterializedState {
             Event::StepStarted {
                 pipeline_id,
                 agent_id,
+                agent_name,
                 ..
             } => {
                 if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
                     pipeline.step_status = StepStatus::Running;
                     if let Some(aid) = agent_id {
                         pipeline.set_current_step_agent_id(aid.as_str());
+                    }
+                    if let Some(aname) = agent_name {
+                        pipeline.set_current_step_agent_name(aname.as_str());
                     }
                     pipeline.update_current_step_outcome(StepOutcome::Running);
                 }

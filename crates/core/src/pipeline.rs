@@ -102,6 +102,9 @@ pub struct StepRecord {
     /// Agent ID that ran this step (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Agent name from the runbook definition (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
 }
 
 /// Signal from agent indicating completion intent
@@ -197,6 +200,7 @@ impl Pipeline {
                 finished_at_ms: None,
                 outcome: StepOutcome::Running,
                 agent_id: None,
+                agent_name: None,
             }],
             action_attempts: HashMap::new(),
             agent_signal: None,
@@ -231,6 +235,7 @@ impl Pipeline {
             finished_at_ms: None,
             outcome: StepOutcome::Running,
             agent_id: None,
+            agent_name: None,
         });
     }
 
@@ -239,6 +244,15 @@ impl Pipeline {
         if let Some(record) = self.step_history.last_mut() {
             if record.finished_at_ms.is_none() {
                 record.agent_id = Some(agent_id.to_string());
+            }
+        }
+    }
+
+    /// Set the agent_name on the most recent step record (if it's still running).
+    pub fn set_current_step_agent_name(&mut self, agent_name: &str) {
+        if let Some(record) = self.step_history.last_mut() {
+            if record.finished_at_ms.is_none() {
+                record.agent_name = Some(agent_name.to_string());
             }
         }
     }

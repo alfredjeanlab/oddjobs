@@ -135,6 +135,7 @@ fn make_step(name: &str, outcome: &str, started: u64, finished: Option<u64>) -> 
         outcome: outcome.into(),
         detail: None,
         agent_id: None,
+        agent_name: None,
     }
 }
 

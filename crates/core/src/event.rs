@@ -195,6 +195,9 @@ pub enum Event {
         /// Agent ID if this is an agent step (for recovery)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<AgentId>,
+        /// Agent name from the runbook definition
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_name: Option<String>,
     },
 
     /// Step is waiting for human intervention

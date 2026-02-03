@@ -388,6 +388,9 @@ pub struct StepRecordDetail {
     /// Agent ID that ran this step (if any)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Agent name from the runbook definition (if any)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
 }
 
 /// Summary of agent activity for a pipeline step
@@ -400,6 +403,12 @@ pub struct AgentSummary {
     pub step_name: String,
     /// Agent instance ID
     pub agent_id: String,
+    /// Agent name from the runbook definition
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// Project namespace
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub namespace: Option<String>,
     /// Current status: "completed", "running", "failed", "waiting"
     pub status: String,
     /// Number of files read

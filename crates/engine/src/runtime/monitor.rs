@@ -145,6 +145,7 @@ where
                     pipeline_id: pipeline_id.clone(),
                     step: pipeline.step.clone(),
                     agent_id: Some(aid.clone()),
+                    agent_name: Some(agent_name.to_string()),
                 },
             });
 
