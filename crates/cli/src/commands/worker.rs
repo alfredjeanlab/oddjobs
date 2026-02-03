@@ -207,7 +207,7 @@ pub async fn handle(
                     for entry in &pruned {
                         let label = if dry_run { "Would prune" } else { "Pruned" };
                         let ns = if entry.namespace.is_empty() {
-                            "(default)".to_string()
+                            "(no project)".to_string()
                         } else {
                             entry.namespace.clone()
                         };

@@ -95,7 +95,7 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
 
     for ns in namespaces {
         let label = if ns.namespace.is_empty() {
-            "(default)"
+            "(no project)"
         } else {
             &ns.namespace
         };
