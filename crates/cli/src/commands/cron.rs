@@ -25,16 +25,25 @@ pub enum CronCommand {
     Start {
         /// Cron name from runbook
         name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// Stop a cron (cancels interval timer)
     Stop {
         /// Cron name from runbook
         name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
     /// Run the cron's pipeline once now (ignores interval)
     Once {
         /// Cron name from runbook
         name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
     },
 }
 
@@ -46,10 +55,15 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        CronCommand::Start { name } => {
+        CronCommand::Start { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
             let request = Request::CronStart {
                 project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
+                namespace: effective_namespace,
                 cron_name: name,
             };
             match client.send(&request).await? {
@@ -64,10 +78,15 @@ pub async fn handle(
                 }
             }
         }
-        CronCommand::Stop { name } => {
+        CronCommand::Stop { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
             let request = Request::CronStop {
                 cron_name: name.clone(),
-                namespace: namespace.to_string(),
+                namespace: effective_namespace,
             };
             match client.send(&request).await? {
                 Response::Ok => {
@@ -81,10 +100,15 @@ pub async fn handle(
                 }
             }
         }
-        CronCommand::Once { name } => {
+        CronCommand::Once { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
             let request = Request::CronOnce {
                 project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
+                namespace: effective_namespace,
                 cron_name: name,
             };
             match client.send(&request).await? {
