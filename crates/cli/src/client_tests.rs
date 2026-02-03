@@ -5,7 +5,7 @@
 
 use super::{ClientError, DaemonClient};
 use crate::client_lifecycle::log_connection_error;
-use crate::daemon_process::{cleanup_stale_socket, daemon_dir, probe_socket};
+use crate::daemon_process::{cleanup_stale_socket, probe_socket};
 use serial_test::serial;
 use std::fs;
 use tempfile::tempdir;
@@ -20,12 +20,10 @@ use tempfile::tempdir;
 fn connect_does_not_delete_pid_file() {
     // Set up isolated state directory
     let state_dir = tempdir().unwrap();
-    std::env::set_var("XDG_STATE_HOME", state_dir.path());
+    std::env::set_var("OJ_STATE_DIR", state_dir.path());
 
     // Create a pid file (simulating daemon mid-startup)
-    let dir = daemon_dir().unwrap();
-    fs::create_dir_all(&dir).unwrap();
-    let pid_path = dir.join("daemon.pid");
+    let pid_path = state_dir.path().join("daemon.pid");
     fs::write(&pid_path, "12345\n").unwrap();
 
     // connect() should fail (no socket) but NOT delete the pid file
