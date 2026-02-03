@@ -16,6 +16,20 @@ command "draft" {
   }
 }
 
+# Rebase a draft branch onto its base, with agent conflict resolution.
+#
+# Examples:
+#   oj run draft-rebase inline-commands
+#   oj run draft-rebase inline-commands --base develop
+command "draft-rebase" {
+  args = "<name> [--base <branch>]"
+  run  = { pipeline = "draft-rebase" }
+
+  defaults = {
+    base = "main"
+  }
+}
+
 # List open draft branches, or close one.
 #
 # Examples:
@@ -102,6 +116,57 @@ pipeline "draft" {
   }
 }
 
+pipeline "draft-rebase" {
+  name      = "rebase-${var.name}"
+  vars      = ["name", "base"]
+  workspace = "ephemeral"
+
+  locals {
+    repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+    branch = "$(git -C ${invoke.dir} branch -r --list 'origin/draft/${var.name}*' | head -1 | tr -d ' ' | sed 's|^origin/||')"
+  }
+
+  notify {
+    on_start = "Rebasing draft: ${var.name}"
+    on_done  = "Rebased draft: ${var.name}"
+    on_fail  = "Rebase failed: ${var.name}"
+  }
+
+  step "init" {
+    run = <<-SHELL
+      test -n "${local.branch}" || { echo "No draft matching '${var.name}'"; exit 1; }
+      git -C "${local.repo}" fetch origin ${var.base} ${local.branch}
+      git -C "${local.repo}" worktree add "${workspace.root}" origin/${local.branch}
+      mkdir -p .cargo
+      echo "[build]" > .cargo/config.toml
+      echo "target-dir = \"${local.repo}/target\"" >> .cargo/config.toml
+    SHELL
+    on_done = { step = "rebase" }
+  }
+
+  step "rebase" {
+    run     = "git rebase origin/${var.base}"
+    on_done = { step = "push" }
+    on_fail = { step = "resolve" }
+  }
+
+  step "resolve" {
+    run     = { agent = "draft-resolver" }
+    on_done = { step = "push" }
+  }
+
+  step "push" {
+    run = <<-SHELL
+      git -C "${local.repo}" push origin HEAD:${local.branch} --force-with-lease
+    SHELL
+    on_done = { step = "cleanup" }
+  }
+
+  step "cleanup" {
+    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+  }
+}
+
 # ------------------------------------------------------------------------------
 # Agents
 # ------------------------------------------------------------------------------
@@ -176,5 +241,24 @@ agent "implement" {
     > ${var.instructions}
 
     Follow the plan carefully. Ensure all phases are completed and tests pass.
+  PROMPT
+}
+
+agent "draft-resolver" {
+  run      = "claude --model opus --dangerously-skip-permissions"
+  on_idle  = { action = "gate", run = "make check", attempts = 2 }
+  on_dead  = { action = "escalate" }
+
+  prompt = <<-PROMPT
+    You are rebasing draft branch ${local.branch} onto ${var.base}.
+
+    The previous step failed -- either a rebase conflict or a test failure.
+
+    1. Run `git status` to check for rebase conflicts
+    2. If conflicts exist, resolve them and `git add` the files
+    3. If mid-rebase, run `git rebase --continue` to proceed
+    4. Run `make check` to verify everything passes
+    5. Fix any test failures
+    6. When `make check` passes, say "I'm done"
   PROMPT
 }

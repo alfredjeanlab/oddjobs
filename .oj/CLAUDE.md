@@ -1,29 +1,45 @@
 # Runbooks
 
-Runbooks are written in HCL.
+Runbooks are written in HCL. Located in `.oj/runbooks/`.
 
-## Available Runbooks
+## Available Commands
 
-### runbooks/build.hcl
-Feature development: init → plan agent → implement agent → submit
+### build.hcl — Feature development
+init → plan agent → implement agent → submit to merge queue
 
 ```bash
 oj run build my-feature "Add user authentication"
 ```
 
-### runbooks/bugfix.hcl
-Bug worker pool: pulls bugs from wok → fix agent → submit → done
+### bug.hcl — Bug fixes (worker pool)
+Files bug in wok, worker pulls → fix agent → submit → mark done
 
 ```bash
 oj run fix "Button doesn't respond to clicks"
-oj worker start fix
 ```
 
-### runbooks/merge.hcl
-Local merge queue: merge → check → push (with conflict resolution agent)
+### chore.hcl — Chores (worker pool)
+Files chore in wok, worker pulls → agent → submit → mark done
 
 ```bash
-oj queue push merges '{"branch": "fix-123", "title": "fix: button color"}'
+oj run chore "Update dependencies to latest versions"
+```
+
+### draft.hcl — Exploratory work
+Pushed to `draft/<name>` branches, not merged.
+
+```bash
+oj run draft inline-commands "Execute shell commands locally"
+oj run draft-rebase inline-commands   # rebase draft onto main
+oj run drafts                         # list open drafts
+oj run drafts --close inline-commands # delete a draft branch
+```
+
+### merge.hcl — Local merge queue
+merge → check → push, with agent conflict resolution
+
+```bash
+oj run merge feature/auth-abc123 "feat: add authentication"
 oj worker start merge
 ```
 
@@ -49,83 +65,55 @@ pipeline "deploy" {
     run = "make test"
   }
 }
-
-agent "reviewer" {
-  run      = "claude --dangerously-skip-permissions"
-  on_idle  = { action = "nudge", message = "Keep working." }
-  on_dead  = { action = "gate", run = "make check" }
-  prompt   = "Review the code."
-}
 ```
 
 ## Key Patterns
 
-**Pipeline name templates** — give pipelines human-readable names derived from input:
+**Locals** — computed once at pipeline creation, available as `${local.*}`:
 
 ```hcl
-pipeline "build" {
-  name = "${var.name}"
-  # displays as "auth-a1b2c3d4" instead of "build-a1b2c3d4"
+locals {
+  repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
+  branch = "feature/${var.name}-${workspace.nonce}"
+  title  = "feat(${var.name}): ${var.instructions}"
 }
 ```
 
-**Locals** — define variables computed once at pipeline creation, available as `${local.*}`:
+Use `local.repo` to resolve the main repo root from an ephemeral worktree.
 
-```hcl
-pipeline "build" {
-  vars      = ["name", "instructions"]
-  workspace = "ephemeral"
+**Pipeline name templates** — human-readable names: `name = "${var.name}"`
 
-  locals {
-    repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "feature/${var.name}-${workspace.nonce}"
-    title  = "feat(${var.name}): ${var.instructions}"
-  }
+**Notifications** — desktop alerts on lifecycle: `notify { on_start/on_done/on_fail }`
 
-  step "init" {
-    run = <<-SHELL
-      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" HEAD
-    SHELL
-  }
-}
-```
-
-The `local.repo` pattern resolves the main repository root, letting ephemeral workspace steps push branches and manage worktrees in the original repo.
-
-**Pipeline notifications** — desktop notifications on lifecycle events:
-
-```hcl
-pipeline "build" {
-  notify {
-    on_start = "Building: ${var.name}"
-    on_done  = "Build landed: ${var.name}"
-    on_fail  = "Build failed: ${var.name}"
-  }
-}
-```
+**Agent gates** — use `on_idle = { action = "gate", run = "make check" }` to verify
+agent work via a shell command. No separate check step needed; the gate runs between
+nudge cycles and controls step completion.
 
 ## Best Practices
 
-**Shell scripts:**
-- `set -euo pipefail` is automatic — commands fail on error
+**Shell:**
+- `set -euo pipefail` is automatic
 - Use newlines, not `&&` chains
-- Use `test` command, not `if` statements
+- Use `test`, not `if` statements
 
 **Agents:**
-- Always use `run = "claude --dangerously-skip-permissions"`
-- Set `on_idle` (nudge/done/fail/escalate/gate) and `on_dead` (done/fail/recover/escalate/gate)
-- Keep prompts focused on the task; the orchestrator handles completion
+- Always `run = "claude --dangerously-skip-permissions"` (or `--model opus`)
+- Set both `on_idle` and `on_dead` handlers
+- Use gates (`on_idle = { action = "gate", run = "..." }`) to verify completion
+- Keep prompts focused; the orchestrator handles lifecycle
 
 **Steps:**
-- Use `on_done = { step = "next" }` for explicit transitions
-- Use `on_fail` only for special handling (like conflict resolution)
-- Use `run = { agent = "name" }` to invoke agents from pipeline steps
+- `on_done = { step = "next" }` for explicit transitions
+- `on_fail` for special handling (e.g. conflict resolution agent)
+- `run = { agent = "name" }` to invoke agents from steps
+- `on_fail = { step = "retry", attempts = 2 }` for bounded retry
 
 **Workspaces:**
-- Use `workspace = "ephemeral"` for isolated git worktrees
-- Share build cache via `.cargo/config.toml` pointing at the main repo's target dir
+- `workspace = "ephemeral"` for isolated git worktrees
+- Share build cache: `.cargo/config.toml` → main repo's `target/` dir
+- Always add a cleanup step: `git worktree remove --force`
 
 **Workers and queues:**
-- Use `queue` + `worker` for pull-based processing
-- Queue types: `persisted` (internal) or `external` (backed by external tool)
+- `queue` + `worker` for pull-based processing
+- Queue types: `persisted` (internal) or `external` (backed by wok, etc.)
 - Workers have `source`, `handler`, and `concurrency`
