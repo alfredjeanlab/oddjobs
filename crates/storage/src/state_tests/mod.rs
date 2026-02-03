@@ -46,6 +46,7 @@ fn session_create_event(id: &str, pipeline_id: &str) -> Event {
     Event::SessionCreated {
         id: SessionId::new(id),
         pipeline_id: PipelineId::new(pipeline_id),
+        agent_run_id: None,
     }
 }
 
@@ -276,6 +277,42 @@ fn apply_event_session_lifecycle() {
     state.apply_event(&session_delete_event("sess-1"));
 
     assert!(!state.sessions.contains_key("sess-1"));
+}
+
+#[test]
+fn session_created_with_agent_run_id_sets_session_on_agent_run() {
+    let mut state = MaterializedState::default();
+
+    // Create a standalone agent run first
+    let ar_id = oj_core::AgentRunId::new("ar-1");
+    state.apply_event(&Event::AgentRunCreated {
+        id: ar_id.clone(),
+        agent_name: "worker".to_string(),
+        command_name: "fix".to_string(),
+        namespace: String::new(),
+        cwd: PathBuf::from("/test"),
+        runbook_hash: "abc".to_string(),
+        vars: [("description".to_string(), "fix the bug".to_string())]
+            .into_iter()
+            .collect(),
+        created_at_epoch_ms: 1_000_000,
+    });
+
+    assert!(state.agent_runs.contains_key("ar-1"));
+    assert!(state.agent_runs["ar-1"].session_id.is_none());
+
+    // SessionCreated with agent_run_id should link the session
+    state.apply_event(&Event::SessionCreated {
+        id: SessionId::new("sess-1"),
+        pipeline_id: PipelineId::new(""),
+        agent_run_id: Some(ar_id),
+    });
+
+    assert!(state.sessions.contains_key("sess-1"));
+    assert_eq!(
+        state.agent_runs["ar-1"].session_id.as_deref(),
+        Some("sess-1")
+    );
 }
 
 // === Step history tests ===

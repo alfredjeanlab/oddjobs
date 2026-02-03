@@ -172,6 +172,9 @@ pub enum Event {
     SessionCreated {
         id: SessionId,
         pipeline_id: PipelineId,
+        /// For standalone agents, the AgentRunId that owns this session
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_run_id: Option<AgentRunId>,
     },
 
     #[serde(rename = "session:input")]
@@ -650,8 +653,16 @@ impl Event {
                     &hash[..12]
                 )
             }
-            Event::SessionCreated { id, pipeline_id } => {
-                format!("{t} id={id} pipeline={pipeline_id}")
+            Event::SessionCreated {
+                id,
+                pipeline_id,
+                agent_run_id,
+            } => {
+                if let Some(ref ar_id) = agent_run_id {
+                    format!("{t} id={id} agent_run={ar_id}")
+                } else {
+                    format!("{t} id={id} pipeline={pipeline_id}")
+                }
             }
             Event::SessionInput { id, .. } => format!("{t} id={id}"),
             Event::SessionDeleted { id } => format!("{t} id={id}"),

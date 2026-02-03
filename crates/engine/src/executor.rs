@@ -121,7 +121,7 @@ where
                 agent_id,
                 agent_name,
                 pipeline_id,
-                agent_run_id: _,
+                agent_run_id,
                 workspace_path,
                 input,
                 command,
@@ -154,6 +154,7 @@ where
                 let event = Event::SessionCreated {
                     id: oj_core::SessionId::new(handle.session_id),
                     pipeline_id,
+                    agent_run_id,
                 };
                 {
                     let mut state = self.state.lock();

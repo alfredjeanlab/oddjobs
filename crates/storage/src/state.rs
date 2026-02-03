@@ -433,7 +433,11 @@ impl MaterializedState {
                 self.pipelines.remove(id.as_str());
             }
 
-            Event::SessionCreated { id, pipeline_id } => {
+            Event::SessionCreated {
+                id,
+                pipeline_id,
+                agent_run_id,
+            } => {
                 self.sessions.insert(
                     id.to_string(),
                     Session {
@@ -441,9 +445,15 @@ impl MaterializedState {
                         pipeline_id: pipeline_id.to_string(),
                     },
                 );
-                // Also update the pipeline's session_id
+                // Update the pipeline's session_id
                 if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
                     pipeline.session_id = Some(id.to_string());
+                }
+                // Update the agent_run's session_id (standalone agents)
+                if let Some(ref ar_id) = agent_run_id {
+                    if let Some(agent_run) = self.agent_runs.get_mut(ar_id.as_str()) {
+                        agent_run.session_id = Some(id.to_string());
+                    }
                 }
             }
 

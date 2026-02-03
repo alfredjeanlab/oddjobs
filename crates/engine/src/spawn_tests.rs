@@ -529,6 +529,67 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
     }
 }
 
+#[test]
+fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
+    let workspace = TempDir::new().unwrap();
+    let agent = AgentDef {
+        name: "fixer".to_string(),
+        run: "claude --print \"${prompt}\"".to_string(),
+        prompt: Some("Fix: ${var.description}".to_string()),
+        ..Default::default()
+    };
+    let input: HashMap<String, String> = [("description".to_string(), "broken button".to_string())]
+        .into_iter()
+        .collect();
+
+    let empty_pipeline_id = PipelineId::new("");
+    let agent_run_id = oj_core::AgentRunId::new("ar-test-1");
+    let ctx = SpawnContext {
+        pipeline_id: &empty_pipeline_id,
+        agent_run_id: Some(&agent_run_id),
+        name: "fixer",
+        namespace: "",
+    };
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "fixer",
+        &input,
+        workspace.path(),
+        workspace.path(),
+    )
+    .unwrap();
+
+    // SpawnAgent should carry the agent_run_id
+    if let Effect::SpawnAgent {
+        agent_run_id: effect_ar_id,
+        pipeline_id,
+        command,
+        input: effect_inputs,
+        ..
+    } = &effects[0]
+    {
+        assert_eq!(
+            effect_ar_id.as_ref().map(|id| id.as_str()),
+            Some("ar-test-1")
+        );
+        assert_eq!(pipeline_id.as_str(), "");
+        // Command args should be accessible via var. namespace
+        assert_eq!(
+            effect_inputs.get("var.description"),
+            Some(&"broken button".to_string())
+        );
+        // Prompt should be interpolated with the var
+        assert!(
+            command.contains("Fix: broken button"),
+            "Expected interpolated prompt, got: {}",
+            command
+        );
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}
+
 // =============================================================================
 // Session Config Tests
 // =============================================================================
