@@ -92,6 +92,9 @@ pub enum PipelineCommand {
         /// Remove all terminal pipelines regardless of age
         #[arg(long)]
         all: bool,
+        /// Remove all failed pipelines regardless of age
+        #[arg(long)]
+        failed: bool,
         /// Show what would be pruned without doing it
         #[arg(long)]
         dry_run: bool,
@@ -514,8 +517,12 @@ pub async fn handle(
             let (log_path, content) = client.get_pipeline_logs(&id, limit).await?;
             display_log(&log_path, &content, follow, format, "pipeline", &id).await?;
         }
-        PipelineCommand::Prune { all, dry_run } => {
-            let (pruned, skipped) = client.pipeline_prune(all, dry_run).await?;
+        PipelineCommand::Prune {
+            all,
+            failed,
+            dry_run,
+        } => {
+            let (pruned, skipped) = client.pipeline_prune(all, failed, dry_run).await?;
 
             match format {
                 OutputFormat::Text => {

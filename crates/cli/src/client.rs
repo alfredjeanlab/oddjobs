@@ -299,11 +299,9 @@ impl DaemonClient {
         }
     }
 
-    /// Emit an event to the daemon
-    ///
-    /// If the connection fails (e.g., daemon socket is stale), this will
-    /// reconnect and retry once. Uses signal semantics - no daemon restart,
-    /// as restarting would lose the agent context making the signal pointless.
+    /// Emit an event to the daemon. If the connection fails (e.g., daemon
+    /// socket is stale), reconnects and retries once with signal semantics
+    /// (no daemon restart, as that would lose agent context).
     pub async fn emit_event(&self, event: oj_core::Event) -> Result<(), ClientError> {
         let request = Request::Event { event };
         match self.send_simple(&request).await {
@@ -593,28 +591,27 @@ impl DaemonClient {
         &self,
         id: &str,
     ) -> Result<Vec<oj_daemon::WorkspaceEntry>, ClientError> {
-        let request = Request::WorkspaceDrop { id: id.to_string() };
-        match self.send(&request).await? {
-            Response::WorkspacesDropped { dropped } => Ok(dropped),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
-        }
+        self.send_workspace_drop(Request::WorkspaceDrop { id: id.to_string() })
+            .await
     }
 
     /// Delete all failed workspaces
     pub async fn workspace_drop_failed(
         &self,
     ) -> Result<Vec<oj_daemon::WorkspaceEntry>, ClientError> {
-        match self.send(&Request::WorkspaceDropFailed).await? {
-            Response::WorkspacesDropped { dropped } => Ok(dropped),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
-        }
+        self.send_workspace_drop(Request::WorkspaceDropFailed).await
     }
 
     /// Delete all workspaces
     pub async fn workspace_drop_all(&self) -> Result<Vec<oj_daemon::WorkspaceEntry>, ClientError> {
-        match self.send(&Request::WorkspaceDropAll).await? {
+        self.send_workspace_drop(Request::WorkspaceDropAll).await
+    }
+
+    async fn send_workspace_drop(
+        &self,
+        request: Request,
+    ) -> Result<Vec<oj_daemon::WorkspaceEntry>, ClientError> {
+        match self.send(&request).await? {
             Response::WorkspacesDropped { dropped } => Ok(dropped),
             Response::Error { message } => Err(ClientError::Rejected(message)),
             _ => Err(ClientError::UnexpectedResponse),
@@ -625,9 +622,14 @@ impl DaemonClient {
     pub async fn pipeline_prune(
         &self,
         all: bool,
+        failed: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::PipelineEntry>, usize), ClientError> {
-        let request = Request::PipelinePrune { all, dry_run };
+        let request = Request::PipelinePrune {
+            all,
+            failed,
+            dry_run,
+        };
         match self.send(&request).await? {
             Response::PipelinesPruned { pruned, skipped } => Ok((pruned, skipped)),
             Response::Error { message } => Err(ClientError::Rejected(message)),
@@ -737,7 +739,7 @@ pub struct AgentSignalResponse {
     // NOTE(compat): Exposed for future CLI display of signal details
     #[allow(dead_code)]
     pub kind: Option<AgentSignalKind>,
-    // NOTE(compat): Exposed for future CLI display of signal details
+    // NOTE(compat): same as above
     #[allow(dead_code)]
     pub message: Option<String>,
 }

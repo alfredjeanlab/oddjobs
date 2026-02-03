@@ -101,6 +101,9 @@ pub enum Request {
     PipelinePrune {
         /// Prune all terminal pipelines regardless of age
         all: bool,
+        /// Prune all failed pipelines regardless of age
+        #[serde(default)]
+        failed: bool,
         /// Preview only -- don't actually delete
         dry_run: bool,
     },

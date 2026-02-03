@@ -411,6 +411,39 @@ fn status_orphan_count_defaults_to_zero() {
     }
 }
 
+#[test]
+fn encode_decode_roundtrip_pipeline_prune_with_failed() {
+    let request = Request::PipelinePrune {
+        all: false,
+        failed: true,
+        dry_run: true,
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn pipeline_prune_failed_defaults_to_false() {
+    // Backward compatibility: old PipelinePrune without `failed` should deserialize
+    let json = r#"{"type":"PipelinePrune","all":false,"dry_run":true}"#;
+    let decoded: Request = serde_json::from_str(json).expect("deserialize failed");
+    match decoded {
+        Request::PipelinePrune {
+            all,
+            failed,
+            dry_run,
+        } => {
+            assert!(!all);
+            assert!(!failed);
+            assert!(dry_run);
+        }
+        _ => panic!("Expected PipelinePrune request"),
+    }
+}
+
 #[tokio::test]
 async fn write_message_adds_length_prefix() {
     let data = b"test data";

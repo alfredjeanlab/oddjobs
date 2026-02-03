@@ -282,6 +282,7 @@ pub(super) fn handle_pipeline_prune(
     event_bus: &EventBus,
     logs_path: &std::path::Path,
     all: bool,
+    failed: bool,
     dry_run: bool,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
@@ -301,8 +302,20 @@ pub(super) fn handle_pipeline_prune(
                 continue;
             }
 
-            // Check age via step history (most recent activity)
-            if !all {
+            // --failed flag: only prune failed pipelines (skip done/cancelled)
+            if failed && pipeline.step != "failed" {
+                skipped += 1;
+                continue;
+            }
+
+            // Determine if this pipeline skips the age check:
+            // - --all: everything skips age check
+            // - --failed: failed pipelines skip age check
+            // - cancelled pipelines always skip age check (default behavior)
+            let skip_age_check =
+                all || (failed && pipeline.step == "failed") || pipeline.step == "cancelled";
+
+            if !skip_age_check {
                 let created_at_ms = pipeline
                     .step_history
                     .first()

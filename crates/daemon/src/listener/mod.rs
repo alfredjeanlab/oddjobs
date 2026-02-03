@@ -244,9 +244,11 @@ async fn handle_request(
             mutations::handle_workspace_drop(state, event_bus, None, false, true).await
         }
 
-        Request::PipelinePrune { all, dry_run } => {
-            mutations::handle_pipeline_prune(state, event_bus, logs_path, all, dry_run)
-        }
+        Request::PipelinePrune {
+            all,
+            failed,
+            dry_run,
+        } => mutations::handle_pipeline_prune(state, event_bus, logs_path, all, failed, dry_run),
 
         Request::AgentPrune { all, dry_run } => {
             mutations::handle_agent_prune(state, logs_path, all, dry_run)
