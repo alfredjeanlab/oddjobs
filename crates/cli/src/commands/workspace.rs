@@ -9,6 +9,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::OutputFormat;
 
 #[derive(Args)]
@@ -129,13 +130,20 @@ pub async fn handle(
 
                         if show_project {
                             println!(
-                                "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} STATUS",
-                                "ID", "PROJECT", "PATH", "BRANCH",
+                                "{} {} {} {} {}",
+                                color::header(&format!("{:<id_w$}", "ID")),
+                                color::header(&format!("{:<proj_w$}", "PROJECT")),
+                                color::header(&format!("{:<path_w$}", "PATH")),
+                                color::header(&format!("{:<branch_w$}", "BRANCH")),
+                                color::header("STATUS"),
                             );
                         } else {
                             println!(
-                                "{:<id_w$} {:<path_w$} {:<branch_w$} STATUS",
-                                "ID", "PATH", "BRANCH",
+                                "{} {} {} {}",
+                                color::header(&format!("{:<id_w$}", "ID")),
+                                color::header(&format!("{:<path_w$}", "PATH")),
+                                color::header(&format!("{:<branch_w$}", "BRANCH")),
+                                color::header("STATUS"),
                             );
                         }
                         for w in &workspaces {
@@ -149,20 +157,20 @@ pub async fn handle(
                                     &w.namespace
                                 };
                                 println!(
-                                    "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
-                                    &w.id[..8.min(w.id.len())],
+                                    "{} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
+                                    color::muted(&format!("{:<id_w$}", &w.id[..8.min(w.id.len())])),
                                     &proj[..proj_w.min(proj.len())],
                                     path_str,
                                     branch,
-                                    w.status
+                                    color::status(&w.status),
                                 );
                             } else {
                                 println!(
-                                    "{:<id_w$} {:<path_w$} {:<branch_w$} {}",
-                                    &w.id[..8.min(w.id.len())],
+                                    "{} {:<path_w$} {:<branch_w$} {}",
+                                    color::muted(&format!("{:<id_w$}", &w.id[..8.min(w.id.len())])),
                                     path_str,
                                     branch,
-                                    w.status
+                                    color::status(&w.status),
                                 );
                             }
                         }
@@ -187,15 +195,19 @@ pub async fn handle(
             match format {
                 OutputFormat::Text => {
                     if let Some(w) = workspace {
-                        println!("Workspace: {}", w.id);
-                        println!("  Path: {}", w.path.display());
+                        println!("{} {}", color::header("Workspace:"), w.id);
+                        println!("  {} {}", color::context("Path:"), w.path.display());
                         if let Some(branch) = &w.branch {
-                            println!("  Branch: {}", branch);
+                            println!("  {} {}", color::context("Branch:"), branch);
                         }
                         if let Some(owner) = &w.owner {
-                            println!("  Owner: {}", owner);
+                            println!("  {} {}", color::context("Owner:"), owner);
                         }
-                        println!("  Status: {}", w.status);
+                        println!(
+                            "  {} {}",
+                            color::context("Status:"),
+                            color::status(&w.status)
+                        );
                     } else {
                         println!("Workspace not found: {}", id);
                     }

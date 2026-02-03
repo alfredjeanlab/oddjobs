@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::OutputFormat;
 
 #[derive(Args)]
@@ -90,15 +91,13 @@ async fn handle_list(client: &DaemonClient, format: OutputFormat) -> Result<()> 
 
             // Print header
             println!(
-                "{:<name_w$}  {:<root_w$}  {:>9}  {:>7}  {:>6}  {:>5}",
-                "NAME",
-                "ROOT",
-                "PIPELINES",
-                "WORKERS",
-                "AGENTS",
-                "CRONS",
-                name_w = name_w,
-                root_w = root_w,
+                "{}  {}  {:>9}  {:>7}  {:>6}  {:>5}",
+                color::header(&format!("{:<name_w$}", "NAME", name_w = name_w)),
+                color::header(&format!("{:<root_w$}", "ROOT", root_w = root_w)),
+                color::header("PIPELINES"),
+                color::header("WORKERS"),
+                color::header("AGENTS"),
+                color::header("CRONS"),
             );
 
             // Print rows

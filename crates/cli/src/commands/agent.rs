@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use oj_core::{AgentId, Event, PromptType};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::exit_error::ExitError;
 use crate::output::{display_log, OutputFormat};
 
@@ -160,16 +161,16 @@ pub async fn handle(
                         println!("No agents found");
                     } else {
                         println!(
-                            "{:<8} {:<16} {:<16} {:<8} {:<16} {:<10} {:>5} {:>5} {:>4}",
-                            "ID",
-                            "NAME",
-                            "PROJECT",
-                            "PIPELINE",
-                            "STEP",
-                            "STATUS",
-                            "READ",
-                            "WRITE",
-                            "CMDS"
+                            "{} {} {} {} {} {} {:>5} {:>5} {:>4}",
+                            color::header(&format!("{:<8}", "ID")),
+                            color::header(&format!("{:<16}", "NAME")),
+                            color::header(&format!("{:<16}", "PROJECT")),
+                            color::header(&format!("{:<8}", "PIPELINE")),
+                            color::header(&format!("{:<16}", "STEP")),
+                            color::header(&format!("{:<10}", "STATUS")),
+                            color::header("READ"),
+                            color::header("WRITE"),
+                            color::header("CMDS"),
                         );
                         for a in &agents {
                             let name = a.agent_name.as_deref().unwrap_or("-");
@@ -188,13 +189,13 @@ pub async fn handle(
                                 truncate(&a.step_name, 16)
                             };
                             println!(
-                                "{:<8} {:<16} {:<16} {:<8} {:<16} {:<10} {:>5} {:>5} {:>4}",
-                                truncate(&a.agent_id, 8),
+                                "{} {:<16} {:<16} {:<8} {:<16} {} {:>5} {:>5} {:>4}",
+                                color::muted(&format!("{:<8}", truncate(&a.agent_id, 8))),
                                 truncate(name, 16),
                                 truncate(project, 16),
                                 pipeline_col,
                                 step_col,
-                                truncate(&a.status, 10),
+                                color::status(&format!("{:<10}", truncate(&a.status, 10))),
                                 a.files_read,
                                 a.files_written,
                                 a.commands_run,
@@ -216,47 +217,62 @@ pub async fn handle(
             match format {
                 OutputFormat::Text => {
                     if let Some(a) = agent {
-                        println!("Agent: {}", a.agent_id);
-                        println!("  Name: {}", a.agent_name.as_deref().unwrap_or("-"));
+                        println!("{} {}", color::header("Agent:"), a.agent_id);
+                        println!(
+                            "  {} {}",
+                            color::context("Name:"),
+                            a.agent_name.as_deref().unwrap_or("-")
+                        );
                         if let Some(ref ns) = a.namespace {
                             if !ns.is_empty() {
-                                println!("  Project: {}", ns);
+                                println!("  {} {}", color::context("Project:"), ns);
                             }
                         }
                         if a.pipeline_id.is_empty() {
-                            println!("  Source: standalone");
+                            println!("  {} standalone", color::context("Source:"));
                         } else {
-                            println!("  Pipeline: {} ({})", a.pipeline_id, a.pipeline_name);
-                            println!("  Step: {}", a.step_name);
+                            println!(
+                                "  {} {} ({})",
+                                color::context("Pipeline:"),
+                                a.pipeline_id,
+                                a.pipeline_name
+                            );
+                            println!("  {} {}", color::context("Step:"), a.step_name);
                         }
-                        println!("  Status: {}", a.status);
+                        println!(
+                            "  {} {}",
+                            color::context("Status:"),
+                            color::status(&a.status)
+                        );
 
                         println!();
-                        println!("  Activity:");
+                        println!("  {}", color::header("Activity:"));
                         println!("    Files read: {}", a.files_read);
                         println!("    Files written: {}", a.files_written);
                         println!("    Commands run: {}", a.commands_run);
 
                         println!();
                         if let Some(ref session) = a.session_id {
-                            println!("  Session: {}", session);
+                            println!("  {} {}", color::context("Session:"), session);
                         }
                         if let Some(ref ws) = a.workspace_path {
-                            println!("  Workspace: {}", ws.display());
+                            println!("  {} {}", color::context("Workspace:"), ws.display());
                         }
                         println!(
-                            "  Started: {}",
+                            "  {} {}",
+                            color::context("Started:"),
                             crate::output::format_time_ago(a.started_at_ms)
                         );
                         println!(
-                            "  Updated: {}",
+                            "  {} {}",
+                            color::context("Updated:"),
                             crate::output::format_time_ago(a.updated_at_ms)
                         );
                         if let Some(ref err) = a.error {
-                            println!("  Error: {}", err);
+                            println!("  {} {}", color::context("Error:"), err);
                         } else if let Some(ref reason) = a.exit_reason {
                             if reason.starts_with("failed") || reason == "gone" {
-                                println!("  Error: {}", reason);
+                                println!("  {} {}", color::context("Error:"), reason);
                             }
                         }
                     } else {

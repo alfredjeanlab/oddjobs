@@ -9,6 +9,7 @@ use clap::{Args, Subcommand};
 use oj_daemon::{Query, Request, Response};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{format_time_ago, OutputFormat};
 
 #[derive(Args)]
@@ -70,8 +71,12 @@ pub async fn handle(
                         }
                         _ => {
                             println!(
-                                "{:<10} {:<20} {:<8} {:<8} SUMMARY",
-                                "ID", "PIPELINE", "AGE", "SOURCE"
+                                "{} {} {} {} {}",
+                                color::header(&format!("{:<10}", "ID")),
+                                color::header(&format!("{:<20}", "PIPELINE")),
+                                color::header(&format!("{:<8}", "AGE")),
+                                color::header(&format!("{:<8}", "SOURCE")),
+                                color::header("SUMMARY"),
                             );
                             for d in &decisions {
                                 let short_id = if d.id.len() > 8 { &d.id[..8] } else { &d.id };
@@ -92,8 +97,12 @@ pub async fn handle(
                                     d.summary.clone()
                                 };
                                 println!(
-                                    "{:<10} {:<20} {:<8} {:<8} {}",
-                                    short_id, pipeline_display, age, d.source, summary
+                                    "{} {:<20} {:<8} {:<8} {}",
+                                    color::muted(&format!("{:<10}", short_id)),
+                                    pipeline_display,
+                                    age,
+                                    d.source,
+                                    summary
                                 );
                             }
                         }
@@ -132,16 +141,28 @@ pub async fn handle(
                                 };
                                 let age = format_time_ago(d.created_at_ms);
 
-                                println!("Decision: {}", short_id);
-                                println!("Pipeline: {}", pipeline_display);
-                                println!("Source:   {}", d.source);
-                                println!("Age:      {}", age);
+                                println!(
+                                    "{} {}",
+                                    color::header("Decision:"),
+                                    color::muted(short_id)
+                                );
+                                println!("{} {}", color::context("Pipeline:"), pipeline_display);
+                                println!("{} {}", color::context("Source:  "), d.source);
+                                println!("{} {}", color::context("Age:    "), age);
                                 if let Some(ref aid) = d.agent_id {
-                                    println!("Agent:    {}", &aid[..8.min(aid.len())]);
+                                    println!(
+                                        "{} {}",
+                                        color::context("Agent:  "),
+                                        color::muted(&aid[..8.min(aid.len())])
+                                    );
                                 }
 
                                 if d.resolved_at_ms.is_some() {
-                                    println!("Status:   resolved");
+                                    println!(
+                                        "{} {}",
+                                        color::context("Status: "),
+                                        color::status("completed")
+                                    );
                                     if let Some(c) = d.chosen {
                                         let label = d
                                             .options
@@ -149,22 +170,27 @@ pub async fn handle(
                                             .find(|o| o.number == c)
                                             .map(|o| o.label.as_str())
                                             .unwrap_or("?");
-                                        println!("Chosen:   {} ({})", c, label);
+                                        println!(
+                                            "{} {} ({})",
+                                            color::context("Chosen: "),
+                                            c,
+                                            label
+                                        );
                                     }
                                     if let Some(ref m) = d.message {
-                                        println!("Message:  {}", m);
+                                        println!("{} {}", color::context("Message:"), m);
                                     }
                                 }
 
                                 println!();
-                                println!("Context:");
+                                println!("{}", color::header("Context:"));
                                 for line in d.context.lines() {
                                     println!("  {}", line);
                                 }
 
                                 if !d.options.is_empty() {
                                     println!();
-                                    println!("Options:");
+                                    println!("{}", color::header("Options:"));
                                     for opt in &d.options {
                                         let rec = if opt.recommended {
                                             " (recommended)"

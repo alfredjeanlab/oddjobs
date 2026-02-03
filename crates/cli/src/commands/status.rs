@@ -8,6 +8,7 @@ use std::fmt::Write;
 use anyhow::Result;
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::OutputFormat;
 
 #[derive(clap::Args)]
@@ -78,7 +79,9 @@ async fn handle_once(format: OutputFormat, watch_interval: Option<&str>) -> Resu
 
 fn handle_not_running(format: OutputFormat) -> Result<()> {
     match format {
-        OutputFormat::Text => println!("oj daemon: not running"),
+        OutputFormat::Text => {
+            println!("{} not running", color::header("oj daemon:"));
+        }
         OutputFormat::Json => println!(r#"{{ "status": "not_running" }}"#),
     }
     Ok(())
@@ -99,7 +102,13 @@ fn format_text(
         .map(|ns| ns.escalated_pipelines.len())
         .sum();
 
-    let _ = write!(out, "oj daemon: up {}", uptime);
+    let _ = write!(
+        out,
+        "{} {} {}",
+        color::header("oj daemon:"),
+        color::status("running"),
+        uptime
+    );
     if let Some(interval) = watch_interval {
         let _ = write!(out, " | every {}", interval);
     }
@@ -112,14 +121,14 @@ fn format_text(
         );
     }
     if total_escalated > 0 {
-        let _ = write!(out, " | {} escalated", total_escalated);
+        let _ = write!(out, " | {} {}", total_escalated, color::status("escalated"));
     }
     let total_orphaned: usize = namespaces
         .iter()
         .map(|ns| ns.orphaned_pipelines.len())
         .sum();
     if total_orphaned > 0 {
-        let _ = write!(out, " | {} orphaned", total_orphaned);
+        let _ = write!(out, " | {} {}", total_orphaned, color::status("orphaned"));
     }
     out.push('\n');
 
@@ -147,7 +156,8 @@ fn format_text(
         }
 
         // Namespace header
-        let _ = write!(out, "\n── {} ", label);
+        let label_colored = color::header(&format!("── {} ", label));
+        let _ = write!(out, "\n{}", label_colored);
         let pad = 48usize.saturating_sub(label.len() + 4);
         for _ in 0..pad {
             out.push('─');
@@ -156,14 +166,25 @@ fn format_text(
 
         // Active pipelines
         if !ns.active_pipelines.is_empty() {
-            let _ = writeln!(out, "  Pipelines ({} active):", ns.active_pipelines.len());
+            let _ = writeln!(
+                out,
+                "  {}",
+                color::header(&format!(
+                    "Pipelines ({} active):",
+                    ns.active_pipelines.len()
+                ))
+            );
             for p in &ns.active_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,
                     "    {}  {}  {}  {}  {}",
-                    short_id, p.name, p.step, p.step_status, elapsed,
+                    color::muted(short_id),
+                    p.name,
+                    p.step,
+                    color::status(&p.step_status),
+                    elapsed,
                 );
             }
             out.push('\n');
@@ -171,14 +192,23 @@ fn format_text(
 
         // Escalated pipelines
         if !ns.escalated_pipelines.is_empty() {
-            let _ = writeln!(out, "  Escalated ({}):", ns.escalated_pipelines.len());
+            let _ = writeln!(
+                out,
+                "  {}",
+                color::header(&format!("Escalated ({}):", ns.escalated_pipelines.len()))
+            );
             for p in &ns.escalated_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,
-                    "    ⚠ {}  {}  {}  {}  {}",
-                    short_id, p.name, p.step, p.step_status, elapsed,
+                    "    {} {}  {}  {}  {}  {}",
+                    color::status("⚠"),
+                    color::muted(short_id),
+                    p.name,
+                    p.step,
+                    color::status(&p.step_status),
+                    elapsed,
                 );
                 if let Some(ref reason) = p.waiting_reason {
                     let _ = writeln!(out, "      → {}", reason);
@@ -189,14 +219,23 @@ fn format_text(
 
         // Orphaned pipelines
         if !ns.orphaned_pipelines.is_empty() {
-            let _ = writeln!(out, "  Orphaned ({}):", ns.orphaned_pipelines.len());
+            let _ = writeln!(
+                out,
+                "  {}",
+                color::header(&format!("Orphaned ({}):", ns.orphaned_pipelines.len()))
+            );
             for p in &ns.orphaned_pipelines {
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,
-                    "    ⚠ {}  {}  {}  Orphaned  {}",
-                    short_id, p.name, p.step, elapsed,
+                    "    {} {}  {}  {}  {}  {}",
+                    color::status("⚠"),
+                    color::muted(short_id),
+                    p.name,
+                    p.step,
+                    color::status("Orphaned"),
+                    elapsed,
                 );
             }
             let _ = writeln!(out, "    Run `oj daemon orphans` for recovery details");
@@ -205,13 +244,21 @@ fn format_text(
 
         // Workers
         if !ns.workers.is_empty() {
-            let _ = writeln!(out, "  Workers:");
+            let _ = writeln!(out, "  {}", color::header("Workers:"));
             for w in &ns.workers {
-                let indicator = if w.status == "running" { "●" } else { "○" };
+                let indicator = if w.status == "running" {
+                    color::status("●")
+                } else {
+                    color::muted("○")
+                };
                 let _ = writeln!(
                     out,
                     "    {}  {} {}  {}/{} active",
-                    w.name, indicator, w.status, w.active, w.concurrency,
+                    w.name,
+                    indicator,
+                    color::status(&w.status),
+                    w.active,
+                    w.concurrency,
                 );
             }
             out.push('\n');
@@ -224,7 +271,7 @@ fn format_text(
             .filter(|q| q.pending > 0 || q.active > 0 || q.dead > 0)
             .collect();
         if !non_empty_queues.is_empty() {
-            let _ = writeln!(out, "  Queues:");
+            let _ = writeln!(out, "  {}", color::header("Queues:"));
             for q in &non_empty_queues {
                 let _ = write!(
                     out,
@@ -232,7 +279,7 @@ fn format_text(
                     q.name, q.pending, q.active,
                 );
                 if q.dead > 0 {
-                    let _ = write!(out, ", {} dead", q.dead);
+                    let _ = write!(out, ", {} {}", q.dead, color::status("dead"));
                 }
                 out.push('\n');
             }
@@ -241,12 +288,19 @@ fn format_text(
 
         // Active agents
         if !ns.active_agents.is_empty() {
-            let _ = writeln!(out, "  Agents ({} running):", ns.active_agents.len());
+            let _ = writeln!(
+                out,
+                "  {}",
+                color::header(&format!("Agents ({} running):", ns.active_agents.len()))
+            );
             for a in &ns.active_agents {
                 let _ = writeln!(
                     out,
                     "    {}/{}  {}  {}",
-                    a.pipeline_name, a.step_name, a.agent_id, a.status,
+                    a.pipeline_name,
+                    a.step_name,
+                    color::muted(&a.agent_id),
+                    color::status(&a.status),
                 );
             }
             out.push('\n');

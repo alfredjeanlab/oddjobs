@@ -9,6 +9,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{format_time_ago, should_use_color, OutputFormat};
 use oj_daemon::protocol::SessionSummary;
 
@@ -140,14 +141,19 @@ fn format_session_list(w: &mut impl Write, sessions: &[SessionSummary]) {
     if show_project {
         let _ = writeln!(
             w,
-            "{:<session_w$} {:<proj_w$} {:<pipeline_w$} UPDATED",
-            "SESSION", "PROJECT", "PIPELINE"
+            "{} {} {} {}",
+            color::header(&format!("{:<session_w$}", "SESSION")),
+            color::header(&format!("{:<proj_w$}", "PROJECT")),
+            color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
+            color::header("UPDATED"),
         );
     } else {
         let _ = writeln!(
             w,
-            "{:<session_w$} {:<pipeline_w$} UPDATED",
-            "SESSION", "PIPELINE"
+            "{} {} {}",
+            color::header(&format!("{:<session_w$}", "SESSION")),
+            color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
+            color::header("UPDATED"),
         );
     }
     for s in sessions {
@@ -161,14 +167,19 @@ fn format_session_list(w: &mut impl Write, sessions: &[SessionSummary]) {
             };
             let _ = writeln!(
                 w,
-                "{:<session_w$} {:<proj_w$} {:<pipeline_w$} {}",
-                s.id, proj, pipeline, updated_ago
+                "{} {:<proj_w$} {:<pipeline_w$} {}",
+                color::muted(&format!("{:<session_w$}", &s.id)),
+                proj,
+                pipeline,
+                updated_ago
             );
         } else {
             let _ = writeln!(
                 w,
-                "{:<session_w$} {:<pipeline_w$} {}",
-                s.id, pipeline, updated_ago
+                "{} {:<pipeline_w$} {}",
+                color::muted(&format!("{:<session_w$}", &s.id)),
+                pipeline,
+                updated_ago
             );
         }
     }

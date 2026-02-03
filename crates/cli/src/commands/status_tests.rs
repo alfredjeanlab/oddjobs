@@ -1,27 +1,44 @@
 use oj_daemon::NamespaceStatus;
+use serial_test::serial;
 
 use super::{format_duration, format_text};
 
 #[test]
+#[serial]
 fn header_without_watch_interval() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
     let out = format_text(120, &[], None);
-    assert_eq!(out, "oj daemon: up 2m\n");
+    assert_eq!(out, "oj daemon: running 2m\n");
 }
 
 #[test]
+#[serial]
 fn header_with_watch_interval() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
     let out = format_text(120, &[], Some("5s"));
-    assert_eq!(out, "oj daemon: up 2m | every 5s\n");
+    assert_eq!(out, "oj daemon: running 2m | every 5s\n");
 }
 
 #[test]
+#[serial]
 fn header_with_custom_watch_interval() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
     let out = format_text(3700, &[], Some("10s"));
-    assert_eq!(out, "oj daemon: up 1h1m | every 10s\n");
+    assert_eq!(out, "oj daemon: running 1h1m | every 10s\n");
 }
 
 #[test]
+#[serial]
 fn header_with_active_pipelines_and_watch() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
         active_pipelines: vec![oj_daemon::PipelineStatusEntry {
@@ -43,12 +60,16 @@ fn header_with_active_pipelines_and_watch() {
     let first_line = out.lines().next().unwrap();
     assert_eq!(
         first_line,
-        "oj daemon: up 1m | every 2s | 1 active pipeline"
+        "oj daemon: running 1m | every 2s | 1 active pipeline"
     );
 }
 
 #[test]
+#[serial]
 fn header_without_watch_has_no_every() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
         active_pipelines: vec![oj_daemon::PipelineStatusEntry {
@@ -68,7 +89,7 @@ fn header_without_watch_has_no_every() {
     };
     let out = format_text(60, &[ns], None);
     let first_line = out.lines().next().unwrap();
-    assert_eq!(first_line, "oj daemon: up 1m | 1 active pipeline");
+    assert_eq!(first_line, "oj daemon: running 1m | 1 active pipeline");
     assert!(!first_line.contains("every"));
 }
 

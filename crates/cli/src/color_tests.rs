@@ -57,20 +57,6 @@ fn header_produces_ansi_when_color_forced() {
 
 #[test]
 #[serial]
-fn literal_produces_ansi_when_color_forced() {
-    std::env::set_var("COLOR", "1");
-    std::env::remove_var("NO_COLOR");
-
-    let result = literal("bar");
-    assert!(
-        result.contains("\x1b[38;5;250m"),
-        "expected ANSI literal color"
-    );
-    assert!(result.contains("bar"));
-}
-
-#[test]
-#[serial]
 fn context_produces_ansi_when_color_forced() {
     std::env::set_var("COLOR", "1");
     std::env::remove_var("NO_COLOR");
@@ -102,7 +88,6 @@ fn helpers_plain_when_no_color() {
     std::env::remove_var("COLOR");
 
     assert_eq!(header("foo"), "foo");
-    assert_eq!(literal("bar"), "bar");
     assert_eq!(context("baz"), "baz");
     assert_eq!(muted("dim"), "dim");
 }
@@ -121,4 +106,124 @@ fn should_colorize_respects_color_force() {
     std::env::remove_var("NO_COLOR");
     std::env::set_var("COLOR", "1");
     assert!(should_colorize(), "COLOR=1 should force color on");
+}
+
+#[test]
+#[serial]
+fn status_green_for_running() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("running");
+    assert!(
+        result.contains("\x1b[32m"),
+        "expected green ANSI for running"
+    );
+    assert!(result.contains("running"));
+    assert!(result.contains("\x1b[0m"), "expected ANSI reset");
+}
+
+#[test]
+#[serial]
+fn status_green_for_completed() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("completed");
+    assert!(
+        result.contains("\x1b[32m"),
+        "expected green ANSI for completed"
+    );
+}
+
+#[test]
+#[serial]
+fn status_yellow_for_waiting() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("waiting");
+    assert!(
+        result.contains("\x1b[33m"),
+        "expected yellow ANSI for waiting"
+    );
+    assert!(result.contains("waiting"));
+}
+
+#[test]
+#[serial]
+fn status_yellow_for_escalated() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("escalated");
+    assert!(
+        result.contains("\x1b[33m"),
+        "expected yellow ANSI for escalated"
+    );
+}
+
+#[test]
+#[serial]
+fn status_red_for_failed() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("failed");
+    assert!(result.contains("\x1b[31m"), "expected red ANSI for failed");
+    assert!(result.contains("failed"));
+}
+
+#[test]
+#[serial]
+fn status_red_for_cancelled() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("cancelled");
+    assert!(
+        result.contains("\x1b[31m"),
+        "expected red ANSI for cancelled"
+    );
+}
+
+#[test]
+#[serial]
+fn status_plain_when_no_color() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    assert_eq!(status("running"), "running");
+    assert_eq!(status("failed"), "failed");
+    assert_eq!(status("waiting"), "waiting");
+}
+
+#[test]
+#[serial]
+fn status_unknown_returns_plain() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("custom_status");
+    assert_eq!(
+        result, "custom_status",
+        "unknown statuses should not be colored"
+    );
+}
+
+#[test]
+#[serial]
+fn status_case_insensitive() {
+    std::env::set_var("COLOR", "1");
+    std::env::remove_var("NO_COLOR");
+
+    let result = status("Running");
+    assert!(
+        result.contains("\x1b[32m"),
+        "expected green ANSI for Running (case insensitive)"
+    );
+    assert!(
+        result.contains("Running"),
+        "should preserve original casing"
+    );
 }

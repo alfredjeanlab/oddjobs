@@ -380,7 +380,7 @@ fn list_columns_fit_data() {
     // "my-build" (8) is wider than "NAME" (4), so NAME column = 8
     // "implement" (9) is wider than "STEP" (4), so STEP column = 9
     let header = lines[0];
-    assert!(header.starts_with("ID"));
+    assert!(header.contains("ID"));
     assert!(header.contains("NAME"));
     assert!(header.contains("STATUS"));
 

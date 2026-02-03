@@ -12,8 +12,6 @@ pub mod codes {
     /// Descriptions and context: medium grey
     pub const CONTEXT: u8 = 245;
     /// Muted / secondary text: darker grey
-    // KEEP UNTIL: list/status command coloring
-    #[allow(dead_code)]
     pub const MUTED: u8 = 240;
 }
 
@@ -143,8 +141,6 @@ impl HelpPrinter {
 }
 
 /// Format text with the header color (steel blue).
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
 pub fn header(text: &str) -> String {
     if should_colorize() {
         format!("{}{}{}", fg256(codes::HEADER), text, RESET)
@@ -153,20 +149,7 @@ pub fn header(text: &str) -> String {
     }
 }
 
-/// Format text with the literal color (light grey).
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
-pub fn literal(text: &str) -> String {
-    if should_colorize() {
-        format!("{}{}{}", fg256(codes::LITERAL), text, RESET)
-    } else {
-        text.to_string()
-    }
-}
-
 /// Format text with the context color (medium grey).
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
 pub fn context(text: &str) -> String {
     if should_colorize() {
         format!("{}{}{}", fg256(codes::CONTEXT), text, RESET)
@@ -176,14 +159,34 @@ pub fn context(text: &str) -> String {
 }
 
 /// Format text with the muted color (darker grey).
-// KEEP UNTIL: list/status command coloring
-#[allow(dead_code)]
 pub fn muted(text: &str) -> String {
     if should_colorize() {
         format!("{}{}{}", fg256(codes::MUTED), text, RESET)
     } else {
         text.to_string()
     }
+}
+
+/// Colorize a status string based on its semantic meaning.
+///
+/// - Green: completed, done, running, started (healthy active states)
+/// - Yellow: waiting, escalated, pending, idle, orphaned, stopping, stopped
+/// - Red: failed, cancelled, dead, gone, error
+/// - Default (no color): unknown states
+pub fn status(text: &str) -> String {
+    if !should_colorize() {
+        return text.to_string();
+    }
+    let lower = text.to_lowercase();
+    let code = match lower.as_str() {
+        "completed" | "done" | "running" | "started" => "\x1b[32m",
+        "waiting" | "escalated" | "pending" | "idle" | "orphaned" | "stopping" | "stopped" => {
+            "\x1b[33m"
+        }
+        "failed" | "cancelled" | "dead" | "gone" | "error" => "\x1b[31m",
+        _ => return text.to_string(),
+    };
+    format!("{code}{text}{RESET}")
 }
 
 #[cfg(test)]

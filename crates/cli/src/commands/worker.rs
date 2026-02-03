@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{display_log, OutputFormat};
 
 use oj_daemon::{Query, Request, Response};
@@ -208,13 +209,22 @@ pub async fn handle(
 
                                 if show_project {
                                     println!(
-                                        "{:<name_w$} {:<proj_w$} {:<queue_w$} {:<status_w$} {:<active_w$} CONCURRENCY",
-                                        "NAME", "PROJECT", "QUEUE", "STATUS", "ACTIVE",
+                                        "{} {} {} {} {} {}",
+                                        color::header(&format!("{:<name_w$}", "NAME")),
+                                        color::header(&format!("{:<proj_w$}", "PROJECT")),
+                                        color::header(&format!("{:<queue_w$}", "QUEUE")),
+                                        color::header(&format!("{:<status_w$}", "STATUS")),
+                                        color::header(&format!("{:<active_w$}", "ACTIVE")),
+                                        color::header("CONCURRENCY"),
                                     );
                                 } else {
                                     println!(
-                                        "{:<name_w$} {:<queue_w$} {:<status_w$} {:<active_w$} CONCURRENCY",
-                                        "NAME", "QUEUE", "STATUS", "ACTIVE",
+                                        "{} {} {} {} {}",
+                                        color::header(&format!("{:<name_w$}", "NAME")),
+                                        color::header(&format!("{:<queue_w$}", "QUEUE")),
+                                        color::header(&format!("{:<status_w$}", "STATUS")),
+                                        color::header(&format!("{:<active_w$}", "ACTIVE")),
+                                        color::header("CONCURRENCY"),
                                     );
                                 }
                                 for w in &workers {
@@ -225,20 +235,20 @@ pub async fn handle(
                                             &w.namespace
                                         };
                                         println!(
-                                            "{:<name_w$} {:<proj_w$} {:<queue_w$} {:<status_w$} {:<active_w$} {}",
+                                            "{:<name_w$} {:<proj_w$} {:<queue_w$} {} {:<active_w$} {}",
                                             &w.name[..w.name.len().min(name_w)],
                                             &proj[..proj.len().min(proj_w)],
                                             &w.queue[..w.queue.len().min(queue_w)],
-                                            &w.status,
+                                            color::status(&format!("{:<status_w$}", &w.status)),
                                             w.active,
                                             w.concurrency,
                                         );
                                     } else {
                                         println!(
-                                            "{:<name_w$} {:<queue_w$} {:<status_w$} {:<active_w$} {}",
+                                            "{:<name_w$} {:<queue_w$} {} {:<active_w$} {}",
                                             &w.name[..w.name.len().min(name_w)],
                                             &w.queue[..w.queue.len().min(queue_w)],
-                                            &w.status,
+                                            color::status(&format!("{:<status_w$}", &w.status)),
                                             w.active,
                                             w.concurrency,
                                         );

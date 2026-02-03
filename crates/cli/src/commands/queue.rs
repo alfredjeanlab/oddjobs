@@ -10,6 +10,7 @@ use std::path::Path;
 use oj_daemon::{Query, Request, Response};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{display_log, OutputFormat};
 
 #[derive(Args)]
@@ -275,6 +276,14 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&queues)?);
                         }
                         _ => {
+                            println!(
+                                "{}\t{}\t{}\t{}\t{}",
+                                color::header("PROJECT"),
+                                color::header("NAME"),
+                                color::header("TYPE"),
+                                color::header("ITEMS"),
+                                color::header("WORKERS"),
+                            );
                             for q in &queues {
                                 let workers_str = if q.workers.is_empty() {
                                     "-".to_string()
@@ -325,6 +334,13 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&items)?);
                         }
                         _ => {
+                            println!(
+                                "{}\t{}\t{}\t{}",
+                                color::header("ID"),
+                                color::header("STATUS"),
+                                color::header("WORKER"),
+                                color::header("DATA"),
+                            );
                             for item in &items {
                                 let data_str: String = item
                                     .data
@@ -335,8 +351,8 @@ pub async fn handle(
                                 let worker = item.worker_name.as_deref().unwrap_or("-");
                                 println!(
                                     "{}\t{}\tworker={}\t{}",
-                                    &item.id[..8],
-                                    item.status,
+                                    color::muted(&item.id[..8]),
+                                    color::status(&item.status),
                                     worker,
                                     data_str,
                                 );

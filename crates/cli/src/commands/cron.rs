@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{display_log, OutputFormat};
 
 use oj_daemon::{Query, Request, Response};
@@ -255,13 +256,22 @@ pub async fn handle(
 
                                 if show_project {
                                     println!(
-                                        "{:<name_w$} {:<proj_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} STATUS",
-                                        "KIND", "PROJECT", "INTERVAL", "PIPELINE", "TIME",
+                                        "{} {} {} {} {} {}",
+                                        color::header(&format!("{:<name_w$}", "KIND")),
+                                        color::header(&format!("{:<proj_w$}", "PROJECT")),
+                                        color::header(&format!("{:<interval_w$}", "INTERVAL")),
+                                        color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
+                                        color::header(&format!("{:<time_w$}", "TIME")),
+                                        color::header("STATUS"),
                                     );
                                 } else {
                                     println!(
-                                        "{:<name_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} STATUS",
-                                        "KIND", "INTERVAL", "PIPELINE", "TIME",
+                                        "{} {} {} {} {}",
+                                        color::header(&format!("{:<name_w$}", "KIND")),
+                                        color::header(&format!("{:<interval_w$}", "INTERVAL")),
+                                        color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
+                                        color::header(&format!("{:<time_w$}", "TIME")),
+                                        color::header("STATUS"),
                                     );
                                 }
                                 for c in &crons {
@@ -273,12 +283,14 @@ pub async fn handle(
                                         };
                                         println!(
                                             "{:<name_w$} {:<proj_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} {}",
-                                            c.name, proj, c.interval, c.pipeline, c.time, c.status,
+                                            c.name, proj, c.interval, c.pipeline, c.time,
+                                            color::status(&c.status),
                                         );
                                     } else {
                                         println!(
                                             "{:<name_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} {}",
-                                            c.name, c.interval, c.pipeline, c.time, c.status,
+                                            c.name, c.interval, c.pipeline, c.time,
+                                            color::status(&c.status),
                                         );
                                     }
                                 }

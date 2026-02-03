@@ -9,6 +9,7 @@
 use anyhow::Result;
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::OutputFormat;
 
 /// The kind of entity matched during resolution.
@@ -259,18 +260,22 @@ pub async fn handle_show(
             match format {
                 OutputFormat::Text => {
                     if let Some(a) = agent {
-                        println!("Agent: {}", a.agent_id);
+                        println!("{} {}", color::header("Agent:"), a.agent_id);
                         if let Some(ref name) = a.agent_name {
-                            println!("  Name: {}", name);
+                            println!("  {} {}", color::context("Name:"), name);
                         }
-                        println!("  Status: {}", a.status);
-                        println!("  Pipeline: {}", a.pipeline_id);
-                        println!("  Step: {}", a.step_name);
-                        println!("  Files read: {}", a.files_read);
-                        println!("  Files written: {}", a.files_written);
-                        println!("  Commands run: {}", a.commands_run);
+                        println!(
+                            "  {} {}",
+                            color::context("Status:"),
+                            color::status(&a.status)
+                        );
+                        println!("  {} {}", color::context("Pipeline:"), a.pipeline_id);
+                        println!("  {} {}", color::context("Step:"), a.step_name);
+                        println!("  {} {}", color::context("Files read:"), a.files_read);
+                        println!("  {} {}", color::context("Files written:"), a.files_written);
+                        println!("  {} {}", color::context("Commands run:"), a.commands_run);
                         if let Some(ref reason) = a.exit_reason {
-                            println!("  Exit reason: {}", reason);
+                            println!("  {} {}", color::context("Exit reason:"), reason);
                         }
                     } else {
                         eprintln!("Agent not found: {}", entity.id);
@@ -289,12 +294,13 @@ pub async fn handle_show(
             match format {
                 OutputFormat::Text => {
                     if let Some(s) = session {
-                        println!("Session: {}", s.id);
+                        println!("{} {}", color::header("Session:"), s.id);
                         if let Some(ref pid) = s.pipeline_id {
-                            println!("  Pipeline: {}", pid);
+                            println!("  {} {}", color::context("Pipeline:"), pid);
                         }
                         println!(
-                            "  Updated: {}",
+                            "  {} {}",
+                            color::context("Updated:"),
                             crate::output::format_time_ago(s.updated_at_ms)
                         );
                     } else {

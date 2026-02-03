@@ -11,6 +11,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{display_log, format_time_ago, should_use_color, OutputFormat};
 
 #[derive(Args)]
@@ -236,8 +237,15 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
         if show_retries {
             let _ = writeln!(
                 out,
-                "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} STATUS",
-                "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED", "RETRIES",
+                "{} {} {} {} {} {} {} {}",
+                color::header(&format!("{:<w_id$}", "ID")),
+                color::header(&format!("{:<w_proj$}", "PROJECT")),
+                color::header(&format!("{:<w_name$}", "NAME")),
+                color::header(&format!("{:<w_kind$}", "KIND")),
+                color::header(&format!("{:<w_step$}", "STEP")),
+                color::header(&format!("{:<w_updated$}", "UPDATED")),
+                color::header(&format!("{:<w_retries$}", "RETRIES")),
+                color::header("STATUS"),
             );
             for (id, p, updated) in &rows {
                 let proj = if p.namespace.is_empty() {
@@ -247,15 +255,23 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
                 };
                 let _ = writeln!(
                     out,
-                    "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
-                    id, proj, p.name, p.kind, p.step, updated, p.retry_count, p.step_status,
+                    "{} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
+                    color::muted(&format!("{:<w_id$}", id)),
+                    proj, p.name, p.kind, p.step, updated, p.retry_count,
+                    color::status(&p.step_status),
                 );
             }
         } else {
             let _ = writeln!(
                 out,
-                "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} STATUS",
-                "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED",
+                "{} {} {} {} {} {} {}",
+                color::header(&format!("{:<w_id$}", "ID")),
+                color::header(&format!("{:<w_proj$}", "PROJECT")),
+                color::header(&format!("{:<w_name$}", "NAME")),
+                color::header(&format!("{:<w_kind$}", "KIND")),
+                color::header(&format!("{:<w_step$}", "STEP")),
+                color::header(&format!("{:<w_updated$}", "UPDATED")),
+                color::header("STATUS"),
             );
             for (id, p, updated) in &rows {
                 let proj = if p.namespace.is_empty() {
@@ -265,35 +281,63 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
                 };
                 let _ = writeln!(
                     out,
-                    "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
-                    id, proj, p.name, p.kind, p.step, updated, p.step_status,
+                    "{} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
+                    color::muted(&format!("{:<w_id$}", id)),
+                    proj,
+                    p.name,
+                    p.kind,
+                    p.step,
+                    updated,
+                    color::status(&p.step_status),
                 );
             }
         }
     } else if show_retries {
         let _ = writeln!(
             out,
-            "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} STATUS",
-            "ID", "NAME", "KIND", "STEP", "UPDATED", "RETRIES",
+            "{} {} {} {} {} {} {}",
+            color::header(&format!("{:<w_id$}", "ID")),
+            color::header(&format!("{:<w_name$}", "NAME")),
+            color::header(&format!("{:<w_kind$}", "KIND")),
+            color::header(&format!("{:<w_step$}", "STEP")),
+            color::header(&format!("{:<w_updated$}", "UPDATED")),
+            color::header(&format!("{:<w_retries$}", "RETRIES")),
+            color::header("STATUS"),
         );
         for (id, p, updated) in &rows {
             let _ = writeln!(
                 out,
-                "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
-                id, p.name, p.kind, p.step, updated, p.retry_count, p.step_status,
+                "{} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
+                color::muted(&format!("{:<w_id$}", id)),
+                p.name,
+                p.kind,
+                p.step,
+                updated,
+                p.retry_count,
+                color::status(&p.step_status),
             );
         }
     } else {
         let _ = writeln!(
             out,
-            "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} STATUS",
-            "ID", "NAME", "KIND", "STEP", "UPDATED",
+            "{} {} {} {} {} {}",
+            color::header(&format!("{:<w_id$}", "ID")),
+            color::header(&format!("{:<w_name$}", "NAME")),
+            color::header(&format!("{:<w_kind$}", "KIND")),
+            color::header(&format!("{:<w_step$}", "STEP")),
+            color::header(&format!("{:<w_updated$}", "UPDATED")),
+            color::header("STATUS"),
         );
         for (id, p, updated) in &rows {
             let _ = writeln!(
                 out,
-                "{:<w_id$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
-                id, p.name, p.kind, p.step, updated, p.step_status,
+                "{} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
+                color::muted(&format!("{:<w_id$}", id)),
+                p.name,
+                p.kind,
+                p.step,
+                updated,
+                color::status(&p.step_status),
             );
         }
     }
@@ -362,17 +406,21 @@ pub async fn handle(
             match format {
                 OutputFormat::Text => {
                     if let Some(p) = pipeline {
-                        println!("Pipeline: {}", p.id);
-                        println!("  Name: {}", p.name);
+                        println!("{} {}", color::header("Pipeline:"), p.id);
+                        println!("  {} {}", color::context("Name:"), p.name);
                         if !p.namespace.is_empty() {
-                            println!("  Project: {}", p.namespace);
+                            println!("  {} {}", color::context("Project:"), p.namespace);
                         }
-                        println!("  Kind: {}", p.kind);
-                        println!("  Status: {}", p.step_status);
+                        println!("  {} {}", color::context("Kind:"), p.kind);
+                        println!(
+                            "  {} {}",
+                            color::context("Status:"),
+                            color::status(&p.step_status)
+                        );
 
                         if !p.steps.is_empty() {
                             println!();
-                            println!("  Steps:");
+                            println!("  {}", color::header("Steps:"));
                             for step in &p.steps {
                                 let duration = super::pipeline_wait::format_duration(
                                     step.started_at_ms,
@@ -395,25 +443,35 @@ pub async fn handle(
                                     },
                                     other => other.to_string(),
                                 };
-                                println!("    {:<12} {:<8} {}", step.name, duration, status);
+                                println!(
+                                    "    {:<12} {:<8} {}",
+                                    step.name,
+                                    duration,
+                                    color::status(&status)
+                                );
                             }
                         }
 
                         if !p.agents.is_empty() {
                             println!();
-                            println!("  Agents:");
+                            println!("  {}", color::header("Agents:"));
                             for agent in &p.agents {
                                 let summary = format_agent_summary(agent);
                                 let session_id = truncate(&agent.agent_id, 8);
                                 if summary.is_empty() {
                                     println!(
-                                        "    {:<12} {:<12} {}",
-                                        agent.step_name, agent.status, session_id,
+                                        "    {:<12} {} {}",
+                                        agent.step_name,
+                                        color::status(&format!("{:<12}", &agent.status)),
+                                        color::muted(session_id),
                                     );
                                 } else {
                                     println!(
-                                        "    {:<12} {:<12} {} ({})",
-                                        agent.step_name, agent.status, summary, session_id,
+                                        "    {:<12} {} {} ({})",
+                                        agent.step_name,
+                                        color::status(&format!("{:<12}", &agent.status)),
+                                        summary,
+                                        color::muted(session_id),
                                     );
                                 }
                             }
@@ -421,16 +479,16 @@ pub async fn handle(
 
                         println!();
                         if let Some(session) = &p.session_id {
-                            println!("  Session: {}", session);
+                            println!("  {} {}", color::context("Session:"), session);
                         }
                         if let Some(ws) = &p.workspace_path {
-                            println!("  Workspace: {}", ws.display());
+                            println!("  {} {}", color::context("Workspace:"), ws.display());
                         }
                         if let Some(error) = &p.error {
-                            println!("  Error: {}", error);
+                            println!("  {} {}", color::context("Error:"), error);
                         }
                         if !p.vars.is_empty() {
-                            println!("  Vars:");
+                            println!("  {}", color::header("Vars:"));
                             if verbose {
                                 for (k, v) in &p.vars {
                                     if v.contains('\n') {
