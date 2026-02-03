@@ -893,3 +893,168 @@ fn list_queues_shows_all_namespaces() {
         other => panic!("unexpected response: {:?}", other),
     }
 }
+
+#[test]
+fn get_agent_returns_detail_by_exact_id() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    let agent_id = "pipe123-build";
+    {
+        let mut s = state.lock();
+        let mut p = make_pipeline(
+            "pipe123",
+            "my-pipeline",
+            "myproject",
+            "build",
+            StepStatus::Running,
+            StepOutcome::Running,
+            Some(agent_id),
+            1000,
+        );
+        p.workspace_path = Some(std::path::PathBuf::from("/tmp/ws"));
+        p.session_id = Some("sess-1".to_string());
+        s.pipelines.insert("pipe123".to_string(), p);
+    }
+
+    let response = handle_query(
+        Query::GetAgent {
+            agent_id: agent_id.to_string(),
+        },
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+
+    match response {
+        Response::Agent { agent } => {
+            let a = agent.expect("agent should be found");
+            assert_eq!(a.agent_id, agent_id);
+            assert_eq!(a.pipeline_id, "pipe123");
+            assert_eq!(a.pipeline_name, "my-pipeline");
+            assert_eq!(a.step_name, "build");
+            assert_eq!(a.namespace, Some("myproject".to_string()));
+            assert_eq!(a.status, "running");
+            assert_eq!(a.workspace_path, Some(std::path::PathBuf::from("/tmp/ws")));
+            assert_eq!(a.session_id, Some("sess-1".to_string()));
+            assert_eq!(a.started_at_ms, 1000);
+            assert!(a.error.is_none());
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_agent_returns_detail_by_prefix() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe999".to_string(),
+            make_pipeline(
+                "pipe999",
+                "test-pipe",
+                "",
+                "deploy",
+                StepStatus::Completed,
+                StepOutcome::Completed,
+                Some("pipe999-deploy"),
+                2000,
+            ),
+        );
+    }
+
+    let response = handle_query(
+        Query::GetAgent {
+            agent_id: "pipe999-dep".to_string(),
+        },
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+
+    match response {
+        Response::Agent { agent } => {
+            let a = agent.expect("agent should be found by prefix");
+            assert_eq!(a.agent_id, "pipe999-deploy");
+            assert_eq!(a.pipeline_name, "test-pipe");
+            assert_eq!(a.step_name, "deploy");
+            assert_eq!(a.status, "completed");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_agent_returns_none_when_not_found() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    let response = handle_query(
+        Query::GetAgent {
+            agent_id: "nonexistent".to_string(),
+        },
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+
+    match response {
+        Response::Agent { agent } => {
+            assert!(agent.is_none(), "should return None for unknown agent");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_agent_includes_error_for_failed_agent() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipefail".to_string(),
+            make_pipeline(
+                "pipefail",
+                "fail-pipe",
+                "proj",
+                "check",
+                StepStatus::Completed,
+                StepOutcome::Failed("compilation error".to_string()),
+                Some("pipefail-check"),
+                3000,
+            ),
+        );
+    }
+
+    let response = handle_query(
+        Query::GetAgent {
+            agent_id: "pipefail-check".to_string(),
+        },
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+
+    match response {
+        Response::Agent { agent } => {
+            let a = agent.expect("failed agent should be found");
+            assert_eq!(a.status, "failed");
+            assert_eq!(a.error, Some("compilation error".to_string()));
+            assert!(a.exit_reason.as_ref().unwrap().starts_with("failed"));
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}

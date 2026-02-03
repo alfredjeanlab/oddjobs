@@ -380,6 +380,22 @@ impl DaemonClient {
         }
     }
 
+    /// Query for a specific agent by ID (or prefix)
+    pub async fn get_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<oj_daemon::AgentDetail>, ClientError> {
+        let request = Request::Query {
+            query: Query::GetAgent {
+                agent_id: agent_id.to_string(),
+            },
+        };
+        match self.send(&request).await? {
+            Response::Agent { agent } => Ok(agent.map(|b| *b)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Query for agents across all pipelines
     pub async fn list_agents(
         &self,

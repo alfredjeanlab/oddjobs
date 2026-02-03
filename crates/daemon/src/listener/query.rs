@@ -24,7 +24,7 @@ use oj_storage::{MaterializedState, QueueItemStatus};
 use oj_engine::breadcrumb::Breadcrumb;
 
 use crate::protocol::{
-    AgentStatusEntry, AgentSummary, CronSummary, NamespaceStatus, PipelineDetail,
+    AgentDetail, AgentStatusEntry, AgentSummary, CronSummary, NamespaceStatus, PipelineDetail,
     PipelineStatusEntry, PipelineSummary, Query, QueueItemSummary, QueueStatus, Response,
     SessionSummary, StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceSummary,
 };
@@ -132,6 +132,84 @@ pub(super) fn handle_query(
             let pipeline = pipeline.or_else(|| query_orphans::find_orphan_detail(orphans, &id));
 
             Response::Pipeline { pipeline }
+        }
+
+        Query::GetAgent { agent_id } => {
+            // Search all pipelines for a matching agent by ID or prefix
+            let agent = state.pipelines.values().find_map(|p| {
+                let steps: Vec<StepRecordDetail> = p
+                    .step_history
+                    .iter()
+                    .map(|r| StepRecordDetail {
+                        name: r.name.clone(),
+                        started_at_ms: r.started_at_ms,
+                        finished_at_ms: r.finished_at_ms,
+                        outcome: match &r.outcome {
+                            StepOutcome::Running => "running".to_string(),
+                            StepOutcome::Completed => "completed".to_string(),
+                            StepOutcome::Failed(_) => "failed".to_string(),
+                            StepOutcome::Waiting(_) => "waiting".to_string(),
+                        },
+                        detail: match &r.outcome {
+                            StepOutcome::Failed(e) => Some(e.clone()),
+                            StepOutcome::Waiting(r) => Some(r.clone()),
+                            _ => None,
+                        },
+                        agent_id: r.agent_id.clone(),
+                        agent_name: r.agent_name.clone(),
+                    })
+                    .collect();
+
+                let namespace = if p.namespace.is_empty() {
+                    None
+                } else {
+                    Some(p.namespace.as_str())
+                };
+                let summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
+
+                // Find agent matching by exact ID or prefix
+                let summary = summaries
+                    .iter()
+                    .find(|a| a.agent_id == agent_id || a.agent_id.starts_with(&agent_id))?;
+
+                // Find the matching step record for timestamps and error
+                let step = steps
+                    .iter()
+                    .find(|s| s.agent_id.as_deref() == Some(&summary.agent_id));
+
+                let error = step.and_then(|s| {
+                    if s.outcome == "failed" {
+                        s.detail.clone()
+                    } else {
+                        None
+                    }
+                });
+
+                let started_at_ms = step.map(|s| s.started_at_ms).unwrap_or(0);
+                let finished_at_ms = step.and_then(|s| s.finished_at_ms);
+
+                Some(Box::new(AgentDetail {
+                    agent_id: summary.agent_id.clone(),
+                    agent_name: summary.agent_name.clone(),
+                    pipeline_id: p.id.clone(),
+                    pipeline_name: p.name.clone(),
+                    step_name: summary.step_name.clone(),
+                    namespace: namespace.map(|s| s.to_string()),
+                    status: summary.status.clone(),
+                    workspace_path: p.workspace_path.clone(),
+                    session_id: p.session_id.clone(),
+                    files_read: summary.files_read,
+                    files_written: summary.files_written,
+                    commands_run: summary.commands_run,
+                    exit_reason: summary.exit_reason.clone(),
+                    error,
+                    started_at_ms,
+                    finished_at_ms,
+                    updated_at_ms: summary.updated_at_ms,
+                }))
+            });
+
+            Response::Agent { agent }
         }
 
         Query::ListSessions => {

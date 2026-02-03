@@ -45,6 +45,11 @@ pub enum AgentCommand {
         #[arg(long, conflicts_with = "limit")]
         no_limit: bool,
     },
+    /// Show detailed info for a single agent
+    Show {
+        /// Agent ID (or prefix)
+        id: String,
+    },
     /// Send a message to a running agent
     Send {
         /// Agent ID or pipeline ID (or prefix)
@@ -192,6 +197,60 @@ pub async fn handle(
                             remaining
                         );
                     }
+                }
+            }
+        }
+        AgentCommand::Show { id } => {
+            let agent = client.get_agent(&id).await?;
+
+            match format {
+                OutputFormat::Text => {
+                    if let Some(a) = agent {
+                        println!("Agent: {}", a.agent_id);
+                        println!("  Name: {}", a.agent_name.as_deref().unwrap_or("-"));
+                        if let Some(ref ns) = a.namespace {
+                            if !ns.is_empty() {
+                                println!("  Project: {}", ns);
+                            }
+                        }
+                        println!("  Pipeline: {} ({})", a.pipeline_id, a.pipeline_name);
+                        println!("  Step: {}", a.step_name);
+                        println!("  Status: {}", a.status);
+
+                        println!();
+                        println!("  Activity:");
+                        println!("    Files read: {}", a.files_read);
+                        println!("    Files written: {}", a.files_written);
+                        println!("    Commands run: {}", a.commands_run);
+
+                        println!();
+                        if let Some(ref session) = a.session_id {
+                            println!("  Session: {}", session);
+                        }
+                        if let Some(ref ws) = a.workspace_path {
+                            println!("  Workspace: {}", ws.display());
+                        }
+                        println!(
+                            "  Started: {}",
+                            crate::output::format_time_ago(a.started_at_ms)
+                        );
+                        println!(
+                            "  Updated: {}",
+                            crate::output::format_time_ago(a.updated_at_ms)
+                        );
+                        if let Some(ref err) = a.error {
+                            println!("  Error: {}", err);
+                        } else if let Some(ref reason) = a.exit_reason {
+                            if reason.starts_with("failed") || reason == "gone" {
+                                println!("  Error: {}", reason);
+                            }
+                        }
+                    } else {
+                        println!("Agent not found: {}", id);
+                    }
+                }
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&agent)?);
                 }
             }
         }

@@ -255,6 +255,10 @@ pub enum Query {
         #[serde(default)]
         namespace: String,
     },
+    /// Get detailed info for a single agent by ID (or prefix)
+    GetAgent {
+        agent_id: String,
+    },
     /// List agents across all pipelines
     ListAgents {
         /// Filter by pipeline ID prefix
@@ -309,6 +313,9 @@ pub enum Response {
 
     /// List of agents
     Agents { agents: Vec<AgentSummary> },
+
+    /// Single agent details
+    Agent { agent: Option<Box<AgentDetail>> },
 
     /// List of sessions
     Sessions { sessions: Vec<SessionSummary> },
@@ -499,6 +506,28 @@ pub struct StepRecordDetail {
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
+}
+
+/// Detailed agent information for `oj agent show`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AgentDetail {
+    pub agent_id: String,
+    pub agent_name: Option<String>,
+    pub pipeline_id: String,
+    pub pipeline_name: String,
+    pub step_name: String,
+    pub namespace: Option<String>,
+    pub status: String,
+    pub workspace_path: Option<PathBuf>,
+    pub session_id: Option<String>,
+    pub files_read: usize,
+    pub files_written: usize,
+    pub commands_run: usize,
+    pub exit_reason: Option<String>,
+    pub error: Option<String>,
+    pub started_at_ms: u64,
+    pub finished_at_ms: Option<u64>,
+    pub updated_at_ms: u64,
 }
 
 /// Summary of agent activity for a pipeline step
