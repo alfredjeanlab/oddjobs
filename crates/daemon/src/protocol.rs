@@ -15,7 +15,8 @@ use thiserror::Error;
 #[path = "protocol_status.rs"]
 mod status;
 pub use status::{
-    AgentStatusEntry, NamespaceStatus, OrphanAgent, OrphanSummary, PipelineStatusEntry, QueueStatus,
+    AgentStatusEntry, CronSummary, NamespaceStatus, OrphanAgent, OrphanSummary,
+    PipelineStatusEntry, QueueStatus,
 };
 
 /// Request from CLI to daemon
@@ -154,6 +155,29 @@ pub enum Request {
         namespace: String,
     },
 
+    /// Start a cron timer
+    CronStart {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        cron_name: String,
+    },
+
+    /// Stop a cron timer
+    CronStop {
+        cron_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
+    /// Run the cron's pipeline once immediately (no timer)
+    CronOnce {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        cron_name: String,
+    },
+
     /// Push an item to a persisted queue
     QueuePush {
         project_root: PathBuf,
@@ -236,6 +260,8 @@ pub enum Query {
     },
     /// List all workers and their status
     ListWorkers,
+    /// List all crons and their status
+    ListCrons,
     /// Get a cross-project status overview
     StatusOverview,
     /// List orphaned pipelines detected from breadcrumbs at startup
@@ -367,6 +393,12 @@ pub enum Response {
 
     /// Worker started successfully
     WorkerStarted { worker_name: String },
+
+    /// Cron started successfully
+    CronStarted { cron_name: String },
+
+    /// List of crons
+    Crons { crons: Vec<CronSummary> },
 
     /// Item pushed to queue
     QueuePushed { queue_name: String, item_id: String },

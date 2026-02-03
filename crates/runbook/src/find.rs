@@ -125,6 +125,11 @@ pub fn find_runbook_by_queue(runbook_dir: &Path, name: &str) -> Result<Option<Ru
     find_runbook(runbook_dir, name, |rb| rb.get_queue(name).is_some())
 }
 
+/// Scan `.oj/runbooks/` recursively for the file defining cron `name`.
+pub fn find_runbook_by_cron(runbook_dir: &Path, name: &str) -> Result<Option<Runbook>, FindError> {
+    find_runbook(runbook_dir, name, |rb| rb.get_cron(name).is_some())
+}
+
 /// Scan `.oj/runbooks/` and collect all command definitions.
 /// Returns a sorted vec of (command_name, CommandDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
@@ -250,6 +255,7 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
                 "worker",
                 runbook.workers.keys().cloned().collect::<Vec<_>>(),
             ),
+            ("cron", runbook.crons.keys().cloned().collect::<Vec<_>>()),
         ] {
             let (entity_type, names) = entity_type_names;
             for name in names {

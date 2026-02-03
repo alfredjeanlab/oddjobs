@@ -144,3 +144,27 @@ fn is_queue_retry() {
     let id = TimerId::new("cooldown:pipe-123:idle:0");
     assert!(!id.is_queue_retry());
 }
+
+#[test]
+fn cron_timer_id_format() {
+    let id = TimerId::cron("janitor", "");
+    assert_eq!(id.as_str(), "cron:janitor");
+}
+
+#[test]
+fn cron_timer_id_with_namespace() {
+    let id = TimerId::cron("janitor", "myproject");
+    assert_eq!(id.as_str(), "cron:myproject/janitor");
+}
+
+#[test]
+fn is_cron() {
+    let id = TimerId::cron("janitor", "");
+    assert!(id.is_cron());
+
+    let id = TimerId::cron("janitor", "myproject");
+    assert!(id.is_cron());
+
+    let id = TimerId::new("liveness:pipe-123");
+    assert!(!id.is_cron());
+}

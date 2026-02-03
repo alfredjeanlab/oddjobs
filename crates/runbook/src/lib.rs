@@ -10,6 +10,7 @@
 
 mod agent;
 mod command;
+mod cron;
 mod find;
 mod help;
 mod parser;
@@ -28,10 +29,11 @@ pub use command::{
     parse_arg_spec, ArgDef, ArgSpec, ArgSpecError, ArgValidationError, CommandDef, FlagDef,
     OptionDef, RunDirective, VariadicDef,
 };
+pub use cron::CronDef;
 pub use find::{
     collect_all_commands, collect_all_queues, extract_file_comment, find_command_with_comment,
-    find_runbook_by_command, find_runbook_by_queue, find_runbook_by_worker, validate_runbook_dir,
-    FileComment, FindError,
+    find_runbook_by_command, find_runbook_by_cron, find_runbook_by_queue, find_runbook_by_worker,
+    validate_runbook_dir, FileComment, FindError,
 };
 pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
 pub use pipeline::{NotifyConfig, PipelineDef, StepDef, StepTransition, WorkspaceMode};

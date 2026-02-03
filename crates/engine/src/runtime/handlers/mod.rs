@@ -5,6 +5,7 @@
 
 mod agent;
 mod command;
+pub(crate) mod cron;
 mod lifecycle;
 mod pipeline_create;
 mod timer;
@@ -134,6 +135,35 @@ where
                 result_events.extend(self.handle_workspace_drop(id).await?);
             }
 
+            // -- cron events --
+            Event::CronStarted {
+                cron_name,
+                project_root,
+                runbook_hash,
+                interval,
+                pipeline_name,
+                namespace,
+            } => {
+                result_events.extend(
+                    self.handle_cron_started(
+                        cron_name,
+                        project_root,
+                        runbook_hash,
+                        interval,
+                        pipeline_name,
+                        namespace,
+                    )
+                    .await?,
+                );
+            }
+
+            Event::CronStopped {
+                cron_name,
+                namespace,
+            } => {
+                result_events.extend(self.handle_cron_stopped(cron_name, namespace).await?);
+            }
+
             // -- worker events --
             Event::WorkerStarted {
                 worker_name,
@@ -248,7 +278,8 @@ where
             | Event::PipelineUpdated { .. }
             | Event::WorkerItemDispatched { .. }
             | Event::QueueItemRetry { .. }
-            | Event::QueueItemDead { .. } => {}
+            | Event::QueueItemDead { .. }
+            | Event::CronFired { .. } => {}
         }
 
         Ok(result_events)

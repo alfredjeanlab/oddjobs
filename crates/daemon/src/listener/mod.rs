@@ -8,6 +8,7 @@
 //! onto the EventBus for processing by the engine.
 
 mod commands;
+mod crons;
 mod mutations;
 mod query;
 mod queues;
@@ -288,6 +289,23 @@ async fn handle_request(
             worker_name,
             namespace,
         } => workers::handle_worker_stop(&worker_name, &namespace, event_bus),
+
+        Request::CronStart {
+            project_root,
+            namespace,
+            cron_name,
+        } => crons::handle_cron_start(&project_root, &namespace, &cron_name, event_bus),
+
+        Request::CronStop {
+            cron_name,
+            namespace,
+        } => crons::handle_cron_stop(&cron_name, &namespace, event_bus),
+
+        Request::CronOnce {
+            project_root,
+            namespace,
+            cron_name,
+        } => crons::handle_cron_once(&project_root, &namespace, &cron_name, event_bus, state).await,
 
         Request::QueuePush {
             project_root,

@@ -106,6 +106,20 @@ pub struct QueueItem {
     pub failure_count: u32,
 }
 
+/// Record of a running cron for WAL replay / restart recovery
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CronRecord {
+    pub name: String,
+    #[serde(default)]
+    pub namespace: String,
+    pub project_root: PathBuf,
+    pub runbook_hash: String,
+    /// "running" or "stopped"
+    pub status: String,
+    pub interval: String,
+    pub pipeline_name: String,
+}
+
 /// Materialized state built from WAL operations
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MaterializedState {
@@ -118,6 +132,8 @@ pub struct MaterializedState {
     pub workers: HashMap<String, WorkerRecord>,
     #[serde(default)]
     pub queue_items: HashMap<String, Vec<QueueItem>>,
+    #[serde(default)]
+    pub crons: HashMap<String, CronRecord>,
 }
 
 /// Build a composite key for namespace-scoped lookups.
@@ -647,6 +663,43 @@ impl MaterializedState {
                 }
             }
 
+            // -- cron events --
+            Event::CronStarted {
+                cron_name,
+                project_root,
+                runbook_hash,
+                interval,
+                pipeline_name,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, cron_name);
+                self.crons.insert(
+                    key,
+                    CronRecord {
+                        name: cron_name.clone(),
+                        namespace: namespace.clone(),
+                        project_root: project_root.clone(),
+                        runbook_hash: runbook_hash.clone(),
+                        status: "running".to_string(),
+                        interval: interval.clone(),
+                        pipeline_name: pipeline_name.clone(),
+                    },
+                );
+            }
+
+            Event::CronStopped {
+                cron_name,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, cron_name);
+                if let Some(record) = self.crons.get_mut(&key) {
+                    record.status = "stopped".to_string();
+                }
+            }
+
+            // CronFired is a tracking event; pipeline creation is handled by PipelineCreated
+            Event::CronFired { .. } => {}
+
             // Events that don't affect persisted state
             // (These are action/signal events handled by the runtime)
             Event::Custom
@@ -667,5 +720,5 @@ impl MaterializedState {
 }
 
 #[cfg(test)]
-#[path = "state_tests.rs"]
+#[path = "state_tests/mod.rs"]
 mod tests;

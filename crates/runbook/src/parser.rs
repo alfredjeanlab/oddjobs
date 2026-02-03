@@ -8,8 +8,8 @@ use crate::validate::{
     validate_duration_str, validate_shell_command,
 };
 use crate::{
-    ActionTrigger, AgentDef, ArgSpecError, CommandDef, PipelineDef, PrimeDef, QueueDef, QueueType,
-    RunDirective, WorkerDef,
+    ActionTrigger, AgentDef, ArgSpecError, CommandDef, CronDef, PipelineDef, PrimeDef, QueueDef,
+    QueueType, RunDirective, WorkerDef,
 };
 use oj_shell as shell;
 use serde::{Deserialize, Serialize};
@@ -76,6 +76,8 @@ pub struct Runbook {
     pub queues: HashMap<String, QueueDef>,
     #[serde(default, alias = "worker")]
     pub workers: HashMap<String, WorkerDef>,
+    #[serde(default, alias = "cron")]
+    pub crons: HashMap<String, CronDef>,
 }
 
 impl Runbook {
@@ -102,6 +104,11 @@ impl Runbook {
     /// Get a worker definition by name
     pub fn get_worker(&self, name: &str) -> Option<&WorkerDef> {
         self.workers.get(name)
+    }
+
+    /// Get a cron definition by name
+    pub fn get_cron(&self, name: &str) -> Option<&CronDef> {
+        self.crons.get(name)
     }
 }
 
@@ -144,6 +151,9 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     }
     for (name, worker) in &mut runbook.workers {
         worker.name = name.clone();
+    }
+    for (name, cron) in &mut runbook.crons {
+        cron.name = name.clone();
     }
 
     // 3. Validation — step names must not be empty
@@ -281,6 +291,37 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                         .cloned()
                         .collect::<Vec<_>>()
                         .join(", "),
+                ),
+            });
+        }
+    }
+
+    // 6.5. Validate cron cross-references
+    for (name, cron) in &runbook.crons {
+        // Validate interval
+        if let Err(e) = validate_duration_str(&cron.interval) {
+            return Err(ParseError::InvalidFormat {
+                location: format!("cron.{}.interval", name),
+                message: e,
+            });
+        }
+        // Validate run is a pipeline reference
+        let pipeline_name = match cron.run.pipeline_name() {
+            Some(p) => p,
+            None => {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("cron.{}.run", name),
+                    message: "cron run must reference a pipeline".to_string(),
+                });
+            }
+        };
+        if !runbook.pipelines.contains_key(pipeline_name) {
+            return Err(ParseError::InvalidFormat {
+                location: format!("cron.{}.run", name),
+                message: format!(
+                    "references unknown pipeline '{}'; available pipelines: {}",
+                    pipeline_name,
+                    sorted_keys(&runbook.pipelines),
                 ),
             });
         }

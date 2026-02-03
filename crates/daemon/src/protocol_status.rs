@@ -9,6 +9,17 @@ use serde::{Deserialize, Serialize};
 
 use super::WorkerSummary;
 
+/// Summary of a cron for listing
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CronSummary {
+    pub name: String,
+    #[serde(default)]
+    pub namespace: String,
+    pub interval: String,
+    pub pipeline: String,
+    pub status: String,
+}
+
 /// Per-namespace status summary
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NamespaceStatus {

@@ -4,6 +4,7 @@
 //! CLI command implementations
 
 pub mod agent;
+pub mod cron;
 pub mod daemon;
 pub mod emit;
 pub mod pipeline;

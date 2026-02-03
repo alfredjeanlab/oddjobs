@@ -14,7 +14,9 @@ use output::OutputFormat;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use commands::{agent, daemon, emit, pipeline, queue, run, session, status, worker, workspace};
+use commands::{
+    agent, cron, daemon, emit, pipeline, queue, run, session, status, worker, workspace,
+};
 use std::path::{Path, PathBuf};
 
 use crate::client::DaemonClient;
@@ -58,6 +60,8 @@ enum Commands {
     Queue(queue::QueueArgs),
     /// Worker management
     Worker(worker::WorkerArgs),
+    /// Cron management
+    Cron(cron::CronArgs),
     /// Emit events to the daemon (for agents)
     Emit(emit::EmitArgs),
     /// Show overview of active work across all projects
@@ -219,6 +223,18 @@ async fn run() -> Result<()> {
             _ => {
                 let client = DaemonClient::for_action()?;
                 worker::handle(args.command, &client, &project_root, &namespace, format).await?
+            }
+        },
+
+        // Cron commands - mixed action/query
+        Commands::Cron(args) => match &args.command {
+            cron::CronCommand::List { .. } => {
+                let client = DaemonClient::for_query()?;
+                cron::handle(args.command, &client, &project_root, &namespace, format).await?
+            }
+            _ => {
+                let client = DaemonClient::for_action()?;
+                cron::handle(args.command, &client, &project_root, &namespace, format).await?
             }
         },
 

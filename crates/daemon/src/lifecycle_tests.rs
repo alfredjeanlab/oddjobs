@@ -52,6 +52,7 @@ fn test_runbook() -> Runbook {
         agents: HashMap::new(),
         queues: HashMap::new(),
         workers: HashMap::new(),
+        crons: HashMap::new(),
     }
 }
 

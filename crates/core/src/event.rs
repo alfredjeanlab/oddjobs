@@ -255,6 +255,33 @@ pub enum Event {
     #[serde(rename = "workspace:drop")]
     WorkspaceDrop { id: WorkspaceId },
 
+    // -- cron --
+    #[serde(rename = "cron:started")]
+    CronStarted {
+        cron_name: String,
+        project_root: PathBuf,
+        runbook_hash: String,
+        interval: String,
+        pipeline_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
+    #[serde(rename = "cron:stopped")]
+    CronStopped {
+        cron_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
+    #[serde(rename = "cron:fired")]
+    CronFired {
+        cron_name: String,
+        pipeline_id: PipelineId,
+        #[serde(default)]
+        namespace: String,
+    },
+
     // -- worker --
     #[serde(rename = "worker:started")]
     WorkerStarted {
@@ -443,6 +470,9 @@ impl Event {
             Event::WorkspaceFailed { .. } => "workspace:failed",
             Event::WorkspaceDeleted { .. } => "workspace:deleted",
             Event::WorkspaceDrop { .. } => "workspace:drop",
+            Event::CronStarted { .. } => "cron:started",
+            Event::CronStopped { .. } => "cron:stopped",
+            Event::CronFired { .. } => "cron:fired",
             Event::WorkerStarted { .. } => "worker:started",
             Event::WorkerWake { .. } => "worker:wake",
             Event::WorkerPollComplete { .. } => "worker:poll_complete",
@@ -557,6 +587,13 @@ impl Event {
             | Event::WorkspaceFailed { id, .. }
             | Event::WorkspaceDeleted { id } => format!("{t} id={id}"),
             Event::WorkspaceDrop { id, .. } => format!("{t} id={id}"),
+            Event::CronStarted { cron_name, .. } => format!("{t} cron={cron_name}"),
+            Event::CronStopped { cron_name, .. } => format!("{t} cron={cron_name}"),
+            Event::CronFired {
+                cron_name,
+                pipeline_id,
+                ..
+            } => format!("{t} cron={cron_name} pipeline={pipeline_id}"),
             Event::WorkerStarted { worker_name, .. } => {
                 format!("{t} worker={worker_name}")
             }
@@ -636,6 +673,7 @@ impl Event {
             | Event::PipelineCancel { id, .. }
             | Event::PipelineDeleted { id, .. } => Some(id),
             Event::WorkerItemDispatched { pipeline_id, .. } => Some(pipeline_id),
+            Event::CronFired { pipeline_id, .. } => Some(pipeline_id),
             _ => None,
         }
     }

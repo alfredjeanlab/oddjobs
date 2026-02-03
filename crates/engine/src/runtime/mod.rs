@@ -11,6 +11,7 @@ use crate::{
     breadcrumb::BreadcrumbWriter, error::RuntimeError, pipeline_logger::PipelineLogger, Executor,
     Scheduler,
 };
+use handlers::cron::CronState;
 use handlers::worker::WorkerState;
 #[cfg(test)]
 use handlers::worker::WorkerStatus;
@@ -54,6 +55,7 @@ pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) agent_pipelines: Mutex<HashMap<AgentId, String>>,
     pub(crate) runbook_cache: Mutex<HashMap<String, Runbook>>,
     pub(crate) worker_states: Mutex<HashMap<String, WorkerState>>,
+    pub(crate) cron_states: Mutex<HashMap<String, CronState>>,
 }
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -83,6 +85,7 @@ where
             agent_pipelines: Mutex::new(HashMap::new()),
             runbook_cache: Mutex::new(HashMap::new()),
             worker_states: Mutex::new(HashMap::new()),
+            cron_states: Mutex::new(HashMap::new()),
         }
     }
 

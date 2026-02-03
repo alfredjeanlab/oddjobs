@@ -19,9 +19,9 @@ use oj_storage::{MaterializedState, QueueItemStatus};
 use oj_engine::breadcrumb::Breadcrumb;
 
 use crate::protocol::{
-    AgentStatusEntry, AgentSummary, NamespaceStatus, PipelineDetail, PipelineStatusEntry,
-    PipelineSummary, Query, QueueItemSummary, QueueStatus, QueueSummary, Response, SessionSummary,
-    StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceSummary,
+    AgentStatusEntry, AgentSummary, CronSummary, NamespaceStatus, PipelineDetail,
+    PipelineStatusEntry, PipelineSummary, Query, QueueItemSummary, QueueStatus, QueueSummary,
+    Response, SessionSummary, StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceSummary,
 };
 
 /// Handle query requests (read-only state access).
@@ -459,6 +459,21 @@ pub(super) fn handle_query(
                 })
                 .collect();
             Response::Workers { workers }
+        }
+
+        Query::ListCrons => {
+            let crons = state
+                .crons
+                .values()
+                .map(|c| CronSummary {
+                    name: c.name.clone(),
+                    namespace: c.namespace.clone(),
+                    interval: c.interval.clone(),
+                    pipeline: c.pipeline_name.clone(),
+                    status: c.status.clone(),
+                })
+                .collect();
+            Response::Crons { crons }
         }
 
         Query::StatusOverview => {

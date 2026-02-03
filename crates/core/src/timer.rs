@@ -72,6 +72,20 @@ impl TimerId {
         self.0.starts_with("queue-retry:")
     }
 
+    /// Timer ID for a cron interval tick.
+    pub fn cron(cron_name: &str, namespace: &str) -> Self {
+        if namespace.is_empty() {
+            Self::new(format!("cron:{}", cron_name))
+        } else {
+            Self::new(format!("cron:{}/{}", namespace, cron_name))
+        }
+    }
+
+    /// Returns true if this is a cron timer.
+    pub fn is_cron(&self) -> bool {
+        self.0.starts_with("cron:")
+    }
+
     /// Extracts the pipeline ID portion if this is a pipeline-related timer.
     ///
     /// Returns `Some(&str)` for liveness, exit-deferred, and cooldown timers.

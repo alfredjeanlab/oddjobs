@@ -128,6 +128,8 @@ pub struct ReconcileContext {
     pub pipeline_count: usize,
     /// Number of workers with status "running" to reconcile
     pub worker_count: usize,
+    /// Number of crons with status "running" to reconcile
+    pub cron_count: usize,
 }
 
 impl DaemonState {
@@ -450,6 +452,11 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         .values()
         .filter(|w| w.status == "running")
         .count();
+    let cron_count = state_snapshot
+        .crons
+        .values()
+        .filter(|c| c.status == "running")
+        .count();
 
     info!("Daemon started");
 
@@ -473,6 +480,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             event_tx: internal_tx,
             pipeline_count,
             worker_count,
+            cron_count,
         },
     })
 }
@@ -564,6 +572,35 @@ pub(crate) async fn reconcile_state(
                 queue_name: worker.queue_name.clone(),
                 concurrency: worker.concurrency,
                 namespace: worker.namespace.clone(),
+            })
+            .await;
+    }
+
+    // Resume crons that were running before the daemon restarted.
+    let running_crons: Vec<_> = state
+        .crons
+        .values()
+        .filter(|c| c.status == "running")
+        .collect();
+
+    if !running_crons.is_empty() {
+        info!("Resuming {} running crons", running_crons.len());
+    }
+
+    for cron in &running_crons {
+        info!(
+            cron = %cron.name,
+            namespace = %cron.namespace,
+            "resuming cron after daemon restart"
+        );
+        let _ = event_tx
+            .send(Event::CronStarted {
+                cron_name: cron.name.clone(),
+                project_root: cron.project_root.clone(),
+                runbook_hash: cron.runbook_hash.clone(),
+                interval: cron.interval.clone(),
+                pipeline_name: cron.pipeline_name.clone(),
+                namespace: cron.namespace.clone(),
             })
             .await;
     }
