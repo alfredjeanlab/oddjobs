@@ -44,11 +44,18 @@ pub(super) fn handle_queue_push(
         }
     };
 
-    // Validate queue is persisted
+    // External queues: wake workers to re-run the list command (no data needed)
     if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+        wake_attached_workers(
+            project_root,
+            namespace,
+            queue_name,
+            &runbook,
+            event_bus,
+            state,
+        )?;
+
+        return Ok(Response::Ok);
     }
 
     // Validate data is a JSON object

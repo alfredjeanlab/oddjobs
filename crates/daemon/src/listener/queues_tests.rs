@@ -288,3 +288,114 @@ fn drop_nonexistent_item_returns_error() {
         result
     );
 }
+
+/// Helper: create a project dir with an external queue and worker.
+fn project_with_external_queue_and_worker() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let runbook_dir = dir.path().join(".oj/runbooks");
+    std::fs::create_dir_all(&runbook_dir).unwrap();
+    std::fs::write(
+        runbook_dir.join("test.hcl"),
+        r#"
+queue "issues" {
+  type = "external"
+  list = "echo '[{\"id\":\"1\",\"title\":\"bug\"}]'"
+  take = "echo taking ${item.id}"
+}
+
+worker "triager" {
+  source  = { queue = "issues" }
+  handler = { pipeline = "triage" }
+}
+
+pipeline "triage" {
+  step "run" {
+    run = "echo triaging"
+  }
+}
+"#,
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn push_external_queue_wakes_workers() {
+    let project = project_with_external_queue_and_worker();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a running worker
+    let mut initial_state = MaterializedState::default();
+    initial_state.workers.insert(
+        "triager".to_string(),
+        oj_storage::WorkerRecord {
+            name: "triager".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "issues".to_string(),
+            concurrency: 1,
+            namespace: String::new(),
+        },
+    );
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push with empty data — should refresh, not error
+    let data = serde_json::json!({});
+    let result = handle_queue_push(project.path(), "", "issues", data, &event_bus, &state).unwrap();
+
+    assert!(
+        matches!(result, Response::Ok),
+        "expected Ok, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    // External push should only produce WorkerWake (no QueuePushed event)
+    assert_eq!(events.len(), 1, "expected 1 event, got: {:?}", events);
+    assert!(
+        matches!(
+            &events[0],
+            Event::WorkerWake { worker_name, .. } if worker_name == "triager"
+        ),
+        "event should be WorkerWake, got: {:?}",
+        events[0]
+    );
+}
+
+#[test]
+fn push_external_queue_auto_starts_stopped_worker() {
+    let project = project_with_external_queue_and_worker();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let data = serde_json::json!({});
+    let result = handle_queue_push(project.path(), "", "issues", data, &event_bus, &state).unwrap();
+
+    assert!(
+        matches!(result, Response::Ok),
+        "expected Ok, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    // Expect: RunbookLoaded, WorkerStarted (auto-start, no QueuePushed)
+    assert_eq!(events.len(), 2, "expected 2 events, got: {:?}", events);
+    assert!(
+        matches!(&events[0], Event::RunbookLoaded { .. }),
+        "first event should be RunbookLoaded, got: {:?}",
+        events[0]
+    );
+    assert!(
+        matches!(
+            &events[1],
+            Event::WorkerStarted { worker_name, queue_name, .. }
+            if worker_name == "triager" && queue_name == "issues"
+        ),
+        "second event should be WorkerStarted, got: {:?}",
+        events[1]
+    );
+}

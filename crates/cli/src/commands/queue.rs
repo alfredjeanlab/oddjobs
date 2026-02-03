@@ -20,7 +20,7 @@ pub struct QueueArgs {
 
 #[derive(Subcommand)]
 pub enum QueueCommand {
-    /// Push an item to a persisted queue
+    /// Push an item to a queue (or trigger a poll for external queues)
     Push {
         /// Queue name
         queue: String,
@@ -118,7 +118,12 @@ pub async fn handle(
             var,
             project,
         } => {
-            let json_data = build_data_map(data, var)?;
+            // Build data map; allow empty data for external queues (triggers poll)
+            let json_data = if data.is_none() && var.is_empty() {
+                serde_json::Value::Object(serde_json::Map::new())
+            } else {
+                build_data_map(data, var)?
+            };
 
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
             let effective_namespace = project
@@ -138,6 +143,9 @@ pub async fn handle(
                     item_id,
                 } => {
                     println!("Pushed item '{}' to queue '{}'", item_id, queue_name);
+                }
+                Response::Ok => {
+                    println!("Refreshed external queue '{}'", queue);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

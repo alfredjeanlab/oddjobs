@@ -178,7 +178,7 @@ pub enum Request {
         cron_name: String,
     },
 
-    /// Push an item to a persisted queue
+    /// Push an item to a queue (persisted: enqueue data; external: trigger poll)
     QueuePush {
         project_root: PathBuf,
         #[serde(default)]
@@ -402,7 +402,7 @@ pub enum Response {
     /// List of crons
     Crons { crons: Vec<CronSummary> },
 
-    /// Item pushed to queue
+    /// Item pushed to queue (persisted) or workers woken to re-poll (external)
     QueuePushed { queue_name: String, item_id: String },
 
     /// Item was dropped from queue
