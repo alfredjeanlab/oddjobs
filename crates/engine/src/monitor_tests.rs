@@ -276,7 +276,7 @@ fn nudge_fails_without_session_id() {
 }
 
 #[test]
-fn escalate_cancels_both_timers() {
+fn escalate_cancels_exit_deferred_but_keeps_liveness() {
     let pipeline = test_pipeline();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
@@ -298,8 +298,8 @@ fn escalate_cancels_both_timers() {
         let expected_exit_deferred = TimerId::exit_deferred(&PipelineId::new(&pipeline.id));
 
         assert!(
-            cancelled_timer_ids.contains(&expected_liveness.as_str()),
-            "should cancel liveness timer, got: {:?}",
+            !cancelled_timer_ids.contains(&expected_liveness.as_str()),
+            "should NOT cancel liveness timer (agent still running), got: {:?}",
             cancelled_timer_ids
         );
         assert!(

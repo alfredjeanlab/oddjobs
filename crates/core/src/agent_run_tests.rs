@@ -24,7 +24,7 @@ fn agent_run_status_terminal() {
     assert!(!AgentRunStatus::Waiting.is_terminal());
     assert!(AgentRunStatus::Completed.is_terminal());
     assert!(AgentRunStatus::Failed.is_terminal());
-    assert!(AgentRunStatus::Escalated.is_terminal());
+    assert!(!AgentRunStatus::Escalated.is_terminal());
 }
 
 #[test]

@@ -85,10 +85,7 @@ pub enum AgentRunStatus {
 impl AgentRunStatus {
     /// Whether this status is terminal (no further transitions expected)
     pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            AgentRunStatus::Completed | AgentRunStatus::Failed | AgentRunStatus::Escalated
-        )
+        matches!(self, AgentRunStatus::Completed | AgentRunStatus::Failed)
     }
 }
 

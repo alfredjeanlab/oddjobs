@@ -714,9 +714,7 @@ where
                             decision_id: None,
                         },
                     },
-                    Effect::CancelTimer {
-                        id: TimerId::liveness(&pipeline_id),
-                    },
+                    // Cancel exit-deferred timer (agent is still alive; liveness continues)
                     Effect::CancelTimer {
                         id: TimerId::exit_deferred(&pipeline_id),
                     },

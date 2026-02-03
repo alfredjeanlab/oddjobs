@@ -209,10 +209,7 @@ pub fn build_action_effects(
                         decision_id: None,
                     },
                 },
-                // Stop monitoring timers (human will intervene)
-                Effect::CancelTimer {
-                    id: TimerId::liveness(&pipeline_id),
-                },
+                // Cancel exit-deferred timer (agent is still alive; liveness continues)
                 Effect::CancelTimer {
                     id: TimerId::exit_deferred(&pipeline_id),
                 },
@@ -314,9 +311,7 @@ pub fn build_action_effects_for_agent_run(
                         reason: Some(trigger.to_string()),
                     },
                 },
-                Effect::CancelTimer {
-                    id: TimerId::liveness_agent_run(&agent_run_id),
-                },
+                // Cancel exit-deferred timer (agent is still alive; liveness continues)
                 Effect::CancelTimer {
                     id: TimerId::exit_deferred_agent_run(&agent_run_id),
                 },

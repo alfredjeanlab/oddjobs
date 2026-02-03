@@ -565,9 +565,7 @@ where
                             reason: Some(msg.to_string()),
                         },
                     },
-                    Effect::CancelTimer {
-                        id: TimerId::liveness_agent_run(&agent_run_id),
-                    },
+                    // Cancel exit-deferred timer (agent is still alive; liveness continues)
                     Effect::CancelTimer {
                         id: TimerId::exit_deferred_agent_run(&agent_run_id),
                     },
