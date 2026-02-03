@@ -58,7 +58,8 @@ Crons and reliability
         - Janitor (30m): prune stale worktrees, orphan tmux sessions, old logs (shell only)
         - Reliability engineer (1h): review failed pipelines, dead letters, recurring errors → file bugs
         - Security auditor (6h): review recent commits for vulnerabilities → file bugs
-      See: docs/future/RUNBOOKS.md, docs/future/runbooks/{janitor,reliability,security}.hcl
+        - Architect (daily): review recent changes for design drift, duplication, quality regressions
+      See: docs/future/RUNBOOKS.md, docs/future/runbooks/{janitor,reliability,security,architect}.hcl
       CLI: docs/future/CLI.md (oj cron {list,start,stop,once})
   3. Default error handling for agent errors (rate limit → retry, no internet → retry,
      out of credits → escalate, unauthorized → escalate). See design notes below.
