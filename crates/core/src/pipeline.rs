@@ -159,8 +159,9 @@ pub struct Pipeline {
     pub error: Option<String>,
     /// Tracks attempt counts per (trigger, chain_position) for the current step.
     /// Reset when transitioning to a new step.
+    /// Key format: "trigger:chain_pos" (e.g., "on_fail:0").
     #[serde(default)]
-    pub action_attempts: HashMap<(String, usize), u32>,
+    pub action_attempts: HashMap<String, u32>,
     /// Signal from agent indicating completion intent.
     /// Cleared when step transitions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -168,6 +169,11 @@ pub struct Pipeline {
     /// True when running an on_cancel cleanup step. Prevents re-cancellation.
     #[serde(default)]
     pub cancelling: bool,
+}
+
+/// Build the string key for action_attempts: "trigger:chain_pos".
+fn action_key(trigger: &str, chain_pos: usize) -> String {
+    format!("{trigger}:{chain_pos}")
 }
 
 impl Pipeline {
@@ -278,7 +284,7 @@ impl Pipeline {
 
     /// Increment and return the new attempt count for a given action
     pub fn increment_action_attempt(&mut self, trigger: &str, chain_pos: usize) -> u32 {
-        let key = (trigger.to_string(), chain_pos);
+        let key = action_key(trigger, chain_pos);
         let count = self.action_attempts.entry(key).or_insert(0);
         *count += 1;
         *count
@@ -287,7 +293,7 @@ impl Pipeline {
     /// Get current attempt count for a given action
     pub fn get_action_attempt(&self, trigger: &str, chain_pos: usize) -> u32 {
         self.action_attempts
-            .get(&(trigger.to_string(), chain_pos))
+            .get(&action_key(trigger, chain_pos))
             .copied()
             .unwrap_or(0)
     }

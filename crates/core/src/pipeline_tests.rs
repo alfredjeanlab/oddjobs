@@ -199,3 +199,24 @@ fn pipeline_reset_action_attempts() {
     assert_eq!(pipeline.get_action_attempt("exit", 0), 0);
     assert!(pipeline.action_attempts.is_empty());
 }
+
+#[test]
+fn pipeline_serde_round_trip_with_action_attempts() {
+    let clock = FakeClock::new();
+    let mut pipeline = Pipeline::new(test_config("pipe-1"), &clock);
+
+    // Populate action_attempts
+    pipeline.increment_action_attempt("on_idle", 0);
+    pipeline.increment_action_attempt("on_idle", 0);
+    pipeline.increment_action_attempt("on_fail", 1);
+
+    // Serialize to JSON (this previously failed with tuple keys)
+    let json = serde_json::to_string(&pipeline).expect("serialize pipeline");
+
+    // Deserialize back
+    let restored: Pipeline = serde_json::from_str(&json).expect("deserialize pipeline");
+
+    assert_eq!(restored.get_action_attempt("on_idle", 0), 2);
+    assert_eq!(restored.get_action_attempt("on_fail", 1), 1);
+    assert_eq!(restored.get_action_attempt("unknown", 0), 0);
+}

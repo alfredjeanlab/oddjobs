@@ -407,8 +407,11 @@ impl Wal {
             .append(true)
             .open(&self.path)?;
 
-        // Reset read offset (entries have moved)
-        self.read_offset = 0;
+        // Re-scan to find the correct read_offset for our current processed_seq.
+        // Blindly resetting to 0 would cause next_unprocessed to re-return the
+        // entry at seq == processed_seq (already processed).
+        let (_, read_offset, _) = Self::scan_wal(&self.file, self.processed_seq)?;
+        self.read_offset = read_offset;
 
         Ok(())
     }

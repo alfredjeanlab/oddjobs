@@ -177,6 +177,11 @@ impl DaemonState {
     pub fn shutdown(&mut self) -> Result<(), LifecycleError> {
         info!("Shutting down daemon...");
 
+        // 0. Flush buffered WAL events to disk before tearing down
+        if let Err(e) = self.event_bus.flush() {
+            warn!("Failed to flush WAL on shutdown: {}", e);
+        }
+
         // 1. Remove socket file (listener task stops when tokio runtime exits)
         if self.config.socket_path.exists() {
             if let Err(e) = std::fs::remove_file(&self.config.socket_path) {

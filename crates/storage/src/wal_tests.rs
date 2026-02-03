@@ -471,3 +471,40 @@ fn test_next_unprocessed_handles_binary_data() {
     let result = wal.next_unprocessed().unwrap();
     assert!(result.is_none());
 }
+
+#[test]
+fn test_truncate_before_read_offset_is_correct() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("test.wal");
+
+    let mut wal = Wal::open(&path, 0).unwrap();
+
+    wal.append(&test_event("cmd1")).unwrap();
+    wal.append(&test_event("cmd2")).unwrap();
+    wal.append(&test_event("cmd3")).unwrap();
+    wal.flush().unwrap();
+
+    // Process entries 1 and 2
+    let e1 = wal.next_unprocessed().unwrap().unwrap();
+    assert_eq!(e1.seq, 1);
+    wal.mark_processed(1);
+
+    let e2 = wal.next_unprocessed().unwrap().unwrap();
+    assert_eq!(e2.seq, 2);
+    wal.mark_processed(2);
+
+    // Truncate entries before seq=2 (keep 2 and 3)
+    wal.truncate_before(2).unwrap();
+
+    // next_unprocessed should return seq=3 (not seq=2, which is already processed)
+    let entry = wal.next_unprocessed().unwrap().unwrap();
+    assert_eq!(entry.seq, 3);
+    if let Event::TimerStart { id } = &entry.event {
+        assert_eq!(id, "test:cmd3");
+    } else {
+        panic!("Expected TimerStart event");
+    }
+
+    // No more entries
+    assert!(wal.next_unprocessed().unwrap().is_none());
+}

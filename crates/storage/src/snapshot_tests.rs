@@ -161,3 +161,30 @@ fn test_load_corrupt_snapshot_rotates_bak_files() {
     let bak4 = path.with_extension("bak.4");
     assert!(!bak4.exists());
 }
+
+#[test]
+fn test_snapshot_round_trip_with_action_attempts() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("snapshot.json");
+
+    let mut state = MaterializedState::default();
+    let mut pipeline = Pipeline::new(test_config("pipe-1", "test-pipeline"), &SystemClock);
+
+    // Populate action_attempts (previously caused serialization failure)
+    pipeline.increment_action_attempt("on_idle", 0);
+    pipeline.increment_action_attempt("on_idle", 0);
+    pipeline.increment_action_attempt("on_fail", 1);
+
+    state.pipelines.insert("pipe-1".to_string(), pipeline);
+
+    let snapshot = Snapshot::new(50, state);
+    snapshot.save(&path).unwrap();
+
+    let loaded = Snapshot::load(&path).unwrap().unwrap();
+    assert_eq!(loaded.seq, 50);
+
+    let p = loaded.state.pipelines.get("pipe-1").unwrap();
+    assert_eq!(p.get_action_attempt("on_idle", 0), 2);
+    assert_eq!(p.get_action_attempt("on_fail", 1), 1);
+    assert_eq!(p.get_action_attempt("unknown", 0), 0);
+}
