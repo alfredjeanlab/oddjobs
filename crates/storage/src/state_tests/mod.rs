@@ -1088,3 +1088,184 @@ fn get_decision_prefix_lookup() {
     // No match
     assert!(state.get_decision("dec-xyz").is_none());
 }
+
+// =============================================================================
+// Action attempts preservation on on_fail transitions
+// =============================================================================
+
+fn step_failed_event(pipeline_id: &str, step: &str, error: &str) -> Event {
+    Event::StepFailed {
+        pipeline_id: PipelineId::new(pipeline_id),
+        step: step.to_string(),
+        error: error.to_string(),
+    }
+}
+
+#[test]
+fn on_done_transition_resets_action_attempts() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+
+    // Simulate some action attempts on the current step
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 2);
+
+    // Mark step as completed (success path)
+    state.apply_event(&Event::StepCompleted {
+        pipeline_id: PipelineId::new("pipe-1"),
+        step: "init".to_string(),
+    });
+
+    // Advance to next step (success transition)
+    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+
+    // action_attempts should be reset on success transition
+    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 0);
+}
+
+#[test]
+fn on_fail_transition_preserves_action_attempts() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+
+    // Simulate action attempts (e.g., on_dead fail action fired)
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 2);
+
+    // Step fails (StepFailed sets step_status to Failed)
+    state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
+
+    // on_fail transition to a different step
+    state.apply_event(&pipeline_transition_event("pipe-1", "recover"));
+
+    // action_attempts should be preserved across on_fail transitions
+    assert_eq!(
+        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        2,
+        "action_attempts must be preserved on on_fail transition"
+    );
+}
+
+#[test]
+fn on_fail_same_step_cycle_preserves_action_attempts() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+
+    // Simulate action attempts
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 1);
+
+    // Step fails
+    state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
+
+    // on_fail → same step (self-cycle)
+    state.apply_event(&pipeline_transition_event("pipe-1", "work"));
+
+    // action_attempts should be preserved
+    assert_eq!(
+        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        1,
+        "action_attempts must be preserved on same-step on_fail cycle"
+    );
+
+    // Step should be re-initialized (new step record pushed)
+    assert_eq!(state.pipelines["pipe-1"].step, "work");
+    assert_eq!(
+        state.pipelines["pipe-1"].step_status,
+        oj_core::StepStatus::Pending
+    );
+}
+
+#[test]
+fn on_fail_same_step_cycle_pushes_new_step_record() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+
+    // Initially one step record
+    assert_eq!(state.pipelines["pipe-1"].step_history.len(), 1);
+
+    // Step fails
+    state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
+
+    // on_fail → same step
+    state.apply_event(&pipeline_transition_event("pipe-1", "work"));
+
+    // Should have 2 records: the failed one and the new one
+    assert_eq!(
+        state.pipelines["pipe-1"].step_history.len(),
+        2,
+        "same-step on_fail should push a new step record"
+    );
+    assert_eq!(
+        state.pipelines["pipe-1"].step_history[0].outcome,
+        StepOutcome::Failed("agent exited".to_string())
+    );
+    assert!(state.pipelines["pipe-1"].step_history[0]
+        .finished_at_ms
+        .is_some());
+    assert_eq!(
+        state.pipelines["pipe-1"].step_history[1].outcome,
+        StepOutcome::Running
+    );
+    assert!(state.pipelines["pipe-1"].step_history[1]
+        .finished_at_ms
+        .is_none());
+}
+
+#[test]
+fn on_fail_multi_step_cycle_preserves_attempts_across_chain() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "step-a"));
+
+    // Attempt 1 on step-a
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+
+    // step-a fails → on_fail → step-b
+    state.apply_event(&step_failed_event("pipe-1", "step-a", "failed"));
+    state.apply_event(&pipeline_transition_event("pipe-1", "step-b"));
+    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 1);
+
+    // Attempt 2 on step-b
+    state
+        .pipelines
+        .get_mut("pipe-1")
+        .unwrap()
+        .increment_action_attempt("exit", 0);
+
+    // step-b fails → on_fail → step-a (cycle)
+    state.apply_event(&step_failed_event("pipe-1", "step-b", "failed"));
+    state.apply_event(&pipeline_transition_event("pipe-1", "step-a"));
+
+    // Attempts should accumulate across the cycle: 1 + 1 = 2
+    assert_eq!(
+        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        2,
+        "action_attempts must accumulate across multi-step on_fail cycles"
+    );
+}

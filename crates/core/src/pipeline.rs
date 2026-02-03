@@ -237,8 +237,9 @@ pub struct Pipeline {
     #[serde(skip, default = "Instant::now")]
     pub created_at: Instant,
     pub error: Option<String>,
-    /// Tracks attempt counts per (trigger, chain_position) for the current step.
-    /// Reset when transitioning to a new step.
+    /// Tracks attempt counts per (trigger, chain_position).
+    /// Reset on success transitions (on_done); preserved on failure transitions
+    /// (on_fail) so that attempt limits work across on_fail cycles.
     /// Key format: "trigger:chain_pos" (e.g., "on_fail:0").
     #[serde(default)]
     pub action_attempts: HashMap<String, u32>,
@@ -386,7 +387,7 @@ impl Pipeline {
             .unwrap_or(0)
     }
 
-    /// Reset action attempts (called on step transition)
+    /// Reset action attempts (called on success step transitions, not on_fail)
     pub fn reset_action_attempts(&mut self) {
         self.action_attempts.clear();
     }

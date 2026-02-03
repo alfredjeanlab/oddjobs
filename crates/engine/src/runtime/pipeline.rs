@@ -177,6 +177,19 @@ where
             }
         }
 
+        // Mark current step as completed so that PipelineAdvanced sees
+        // step_status == Completed and correctly resets action_attempts.
+        // (Without this, an agent exiting non-zero with on_dead="done" would
+        // leave step_status == Failed, causing action_attempts to carry over.)
+        self.executor
+            .execute(Effect::Emit {
+                event: Event::StepCompleted {
+                    pipeline_id: pipeline_id.clone(),
+                    step: pipeline.step.clone(),
+                },
+            })
+            .await?;
+
         // Determine next step: explicit on_done > complete
         // Steps without on_done complete the pipeline (same as on_fail requiring explicit targets)
         let next_transition = current_step_def.and_then(|p| p.on_done.clone());

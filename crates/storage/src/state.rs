@@ -312,8 +312,10 @@ impl MaterializedState {
 
             Event::PipelineAdvanced { id, step } => {
                 if let Some(pipeline) = self.pipelines.get_mut(id.as_str()) {
-                    // Idempotency: skip if already on this step
-                    if pipeline.step == *step {
+                    // Idempotency: skip if already on this step, UNLESS recovering
+                    // from failure (on_fail → same step cycle).
+                    let is_failure_transition = pipeline.step_status == StepStatus::Failed;
+                    if pipeline.step == *step && !is_failure_transition {
                         return;
                     }
                     // Clear stale error and session when resuming from terminal state
@@ -342,8 +344,13 @@ impl MaterializedState {
                         _ => StepStatus::Pending,
                     };
 
-                    // Reset action attempts and agent signal on step transition
-                    pipeline.reset_action_attempts();
+                    // Only reset action attempts on success transitions.
+                    // On failure (on_fail) transitions, preserve attempts so that
+                    // cycle limits work — the agent action's `attempts` field should
+                    // bound retries across the entire on_fail chain, not per-step.
+                    if !is_failure_transition {
+                        pipeline.reset_action_attempts();
+                    }
                     pipeline.clear_agent_signal();
 
                     // Push new step record (unless terminal)

@@ -950,3 +950,212 @@ async fn locals_eagerly_evaluate_shell_expressions() {
         "Shell command substitution should be eagerly evaluated in locals"
     );
 }
+
+// --- on_fail cycle tests ---
+
+/// Runbook with on_fail self-cycle: step retries itself on failure
+const RUNBOOK_ON_FAIL_SELF_CYCLE: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = "false"
+on_fail = "work"
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+"#;
+
+#[tokio::test]
+async fn on_fail_self_cycle_preserves_action_attempts() {
+    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+
+    // Set some action_attempts to simulate agent retry tracking
+    ctx.runtime.lock_state_mut(|state| {
+        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+            p.increment_action_attempt("exit", 0);
+            p.increment_action_attempt("exit", 0);
+        }
+    });
+
+    // Verify attempts are set
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.get_action_attempt("exit", 0), 2);
+
+    // Shell fails → on_fail = "work" (self-cycle)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "work".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work", "should cycle back to work step");
+    // action_attempts should be preserved across the on_fail cycle
+    assert_eq!(
+        pipeline.get_action_attempt("exit", 0),
+        2,
+        "action_attempts must be preserved on on_fail self-cycle"
+    );
+}
+
+/// Runbook with multi-step on_fail cycle: A fails→B, B fails→A
+const RUNBOOK_ON_FAIL_MULTI_STEP_CYCLE: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = "false"
+on_fail = "recover"
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "recover"
+run = "false"
+on_fail = "work"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+"#;
+
+#[tokio::test]
+async fn on_fail_multi_step_cycle_preserves_action_attempts() {
+    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_MULTI_STEP_CYCLE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+
+    // Set action_attempts to simulate prior attempts
+    ctx.runtime.lock_state_mut(|state| {
+        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+            p.increment_action_attempt("exit", 0);
+        }
+    });
+
+    // work fails → on_fail → recover
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "work".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "recover");
+    assert_eq!(
+        pipeline.get_action_attempt("exit", 0),
+        1,
+        "action_attempts preserved after work→recover on_fail transition"
+    );
+
+    // recover fails → on_fail → work (completing the cycle)
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "recover".to_string(),
+            exit_code: 1,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+    assert_eq!(
+        pipeline.get_action_attempt("exit", 0),
+        1,
+        "action_attempts preserved across full on_fail cycle"
+    );
+}
+
+#[tokio::test]
+async fn on_done_transition_resets_action_attempts() {
+    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+
+    // Set action_attempts
+    ctx.runtime.lock_state_mut(|state| {
+        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+            p.increment_action_attempt("exit", 0);
+            p.increment_action_attempt("exit", 0);
+        }
+    });
+
+    // Shell succeeds → on_done = "done"
+    ctx.runtime
+        .handle_event(Event::ShellExited {
+            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            step: "work".to_string(),
+            exit_code: 0,
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+    // action_attempts should be reset on success transition
+    assert_eq!(
+        pipeline.get_action_attempt("exit", 0),
+        0,
+        "action_attempts must be reset on on_done transition"
+    );
+}
