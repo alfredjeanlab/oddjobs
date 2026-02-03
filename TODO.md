@@ -19,13 +19,28 @@ Reliability
 CLI polish
   10. CLI color output: extend colors beyond help to list, show, status views
       - Colors landed for clap help; next step is colorizing data output
+  11. "Did you mean?" suggestions for typos and cross-project lookups
+      - Fuzzy-match resource names (queues, workers, crons) on not-found errors
+      - Suggest --project when resource exists in another namespace
+      - Build dispatched (pipeline e9cb54ef)
 
 Multi-project
-  11. Remote daemon: coordinate jobs across multiple machines
+  12. Remote daemon: coordinate jobs across multiple machines
 
 ----
 
+## In Flight
+  - fix(engine): queue items stuck in Active status after worker restart (pipeline bb7f78ff)
+  - chore(cli): `oj queue drop` should accept ID prefixes (pipeline d12e5c65)
+  - feat(cli): "did you mean?" suggestions for resource name typos and cross-project lookups (pipeline e9cb54ef)
+
 ## Recently Completed
+  - feat(engine): standalone agent runs — `oj run <name>` with `run = { agent = "..." }` spawns top-level agents
+  - feat(engine): decision system phase 1 — data model, storage, events, CLI (oj decision list/show/resolve)
+  - feat(cli): TIME column in `oj cron list` (next fire countdown for running, last fired age for stopped)
+  - fix(cli): rename NAME → KIND column in `oj cron list`
+  - chore(runbooks): prime merge resolver with git status, commit log, and diffstat
+  - chore(runbooks): town start/stop manages project workers across all projects
   - fix(engine): `oj cron once` pipelines silently vanish (CommandRun vs create_and_start_pipeline)
   - feat(runbooks): janitor cron — periodic prune of pipelines, agents, workers, workspaces
   - feat(runbooks): medic cron — triage failures, stale work, stuck merges → symptoms queue
@@ -215,8 +230,12 @@ Key features landed:
   - Consistent log flags: -n/--limit/--no-limit across all log commands
   - Short IDs: 8 hex chars everywhere (no hyphen suffix)
   - Cron runbooks: janitor (prune), medic (triage → symptoms queue), heartbeat (debug)
-  - Town start command: `oj run start` launches crons
+  - Town start command: `oj run start` launches crons and project workers
   - Runbook guide: documented crons, prime, inbox queues, step consolidation
+  - Standalone agent runs: `oj run <name>` with `run = { agent = "..." }` as top-level WAL entity
+  - Decision system phase 1: data model, WAL events, oj decision list/show/resolve
+  - Cron list: TIME column (next fire / last fired), KIND column rename
+  - Merge resolver prime: git status + commit log + diffstat injected at session start
 
 Patterns that work:
   - oj run {build,fix,chore,draft} → agent → submit/push. Full loop end-to-end.
@@ -256,3 +275,10 @@ Issues discovered:
   - Submit step fails when local.title contains special chars (quotes, $, backticks).
     Root cause: locals launder untrusted var.* content into trusted namespace.
     Fixed by eager locals (above). Workaround: manually push + queue merge.
+  - Queue items stuck in Active status after worker/daemon restart. Root cause:
+    PipelineAdvanced removes pipeline from active_pipeline_ids in materialized state,
+    but if check_worker_pipeline_complete doesn't run (restart between WAL apply and
+    engine handler), no QueueCompleted event is emitted. The item_pipeline_map is
+    in-memory only and reconstruction misses completed pipelines. Fix dispatched.
+  - `oj queue drop` requires full UUID while other queue commands accept prefixes.
+    Chore dispatched.
