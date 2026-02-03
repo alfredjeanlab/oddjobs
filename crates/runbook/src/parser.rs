@@ -9,7 +9,7 @@ use crate::{
 };
 use oj_shell as shell;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 /// Runbook file format
@@ -570,7 +570,197 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
+    // 8. Detect duplicate step names within pipelines
+    for (pipeline_name, pipeline) in &runbook.pipelines {
+        let mut seen = HashSet::new();
+        for (i, step) in pipeline.steps.iter().enumerate() {
+            if !seen.insert(step.name.as_str()) {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("pipeline.{}.step[{}]({})", pipeline_name, i, step.name),
+                    message: format!("duplicate step name '{}'", step.name),
+                });
+            }
+        }
+    }
+
+    // 9. Validate step transition references
+    for (pipeline_name, pipeline) in &runbook.pipelines {
+        let step_names: HashSet<&str> = pipeline.steps.iter().map(|s| s.name.as_str()).collect();
+
+        // Check pipeline-level transitions
+        for (field, transition) in [
+            ("on_done", &pipeline.on_done),
+            ("on_fail", &pipeline.on_fail),
+            ("on_cancel", &pipeline.on_cancel),
+        ] {
+            if let Some(t) = transition {
+                if !step_names.contains(t.step_name()) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("pipeline.{}.{}", pipeline_name, field),
+                        message: format!(
+                            "references unknown step '{}'; available steps: {}",
+                            t.step_name(),
+                            sorted_names(&step_names),
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Check step-level transitions
+        for (i, step) in pipeline.steps.iter().enumerate() {
+            for (field, transition) in [
+                ("on_done", &step.on_done),
+                ("on_fail", &step.on_fail),
+                ("on_cancel", &step.on_cancel),
+            ] {
+                if let Some(t) = transition {
+                    if !step_names.contains(t.step_name()) {
+                        return Err(ParseError::InvalidFormat {
+                            location: format!(
+                                "pipeline.{}.step[{}]({}).{}",
+                                pipeline_name, i, step.name, field
+                            ),
+                            message: format!(
+                                "references unknown step '{}'; available steps: {}",
+                                t.step_name(),
+                                sorted_names(&step_names),
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 10. Validate agent and pipeline references in steps and commands
+    for (pipeline_name, pipeline) in &runbook.pipelines {
+        for (i, step) in pipeline.steps.iter().enumerate() {
+            if let Some(agent_name) = step.run.agent_name() {
+                if !runbook.agents.contains_key(agent_name) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!(
+                            "pipeline.{}.step[{}]({}).run",
+                            pipeline_name, i, step.name
+                        ),
+                        message: format!(
+                            "references unknown agent '{}'; available agents: {}",
+                            agent_name,
+                            sorted_keys(&runbook.agents),
+                        ),
+                    });
+                }
+            }
+            if let Some(pl_name) = step.run.pipeline_name() {
+                if !runbook.pipelines.contains_key(pl_name) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!(
+                            "pipeline.{}.step[{}]({}).run",
+                            pipeline_name, i, step.name
+                        ),
+                        message: format!(
+                            "references unknown pipeline '{}'; available pipelines: {}",
+                            pl_name,
+                            sorted_keys(&runbook.pipelines),
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    for (cmd_name, cmd) in &runbook.commands {
+        if let Some(agent_name) = cmd.run.agent_name() {
+            if !runbook.agents.contains_key(agent_name) {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("command.{}.run", cmd_name),
+                    message: format!(
+                        "references unknown agent '{}'; available agents: {}",
+                        agent_name,
+                        sorted_keys(&runbook.agents),
+                    ),
+                });
+            }
+        }
+        if let Some(pl_name) = cmd.run.pipeline_name() {
+            if !runbook.pipelines.contains_key(pl_name) {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("command.{}.run", cmd_name),
+                    message: format!(
+                        "references unknown pipeline '{}'; available pipelines: {}",
+                        pl_name,
+                        sorted_keys(&runbook.pipelines),
+                    ),
+                });
+            }
+        }
+    }
+
+    // 11. Warn on unreachable steps
+    for (pipeline_name, pipeline) in &runbook.pipelines {
+        if pipeline.steps.len() <= 1 {
+            continue;
+        }
+        let mut referenced: HashSet<&str> = HashSet::new();
+        // Collect from pipeline-level transitions
+        for t in [&pipeline.on_done, &pipeline.on_fail, &pipeline.on_cancel]
+            .into_iter()
+            .flatten()
+        {
+            referenced.insert(t.step_name());
+        }
+        // Collect from step-level transitions
+        for step in &pipeline.steps {
+            for t in [&step.on_done, &step.on_fail, &step.on_cancel]
+                .into_iter()
+                .flatten()
+            {
+                referenced.insert(t.step_name());
+            }
+        }
+        // Warn on unreachable (skip first step)
+        for step in pipeline.steps.iter().skip(1) {
+            if !referenced.contains(step.name.as_str()) {
+                tracing::warn!(
+                    "pipeline.{}: step '{}' is unreachable \
+                     (not referenced by any on_done/on_fail/on_cancel)",
+                    pipeline_name,
+                    step.name
+                );
+            }
+        }
+    }
+
+    // 12. Warn on dead-end steps (no on_done and not the last step)
+    for (pipeline_name, pipeline) in &runbook.pipelines {
+        let last_idx = pipeline.steps.len().saturating_sub(1);
+        for (i, step) in pipeline.steps.iter().enumerate() {
+            if i < last_idx && step.on_done.is_none() && pipeline.on_done.is_none() {
+                tracing::warn!(
+                    "pipeline.{}: step '{}' has no on_done and is not the last step \
+                     (will complete the pipeline instead of advancing)",
+                    pipeline_name,
+                    step.name
+                );
+            }
+        }
+    }
+
     Ok(runbook)
+}
+
+/// Sort and join names from a HashSet for deterministic error messages.
+fn sorted_names(names: &HashSet<&str>) -> String {
+    let mut v: Vec<&str> = names.iter().copied().collect();
+    v.sort();
+    v.join(", ")
+}
+
+/// Sort and join keys from a HashMap for deterministic error messages.
+fn sorted_keys<V>(map: &HashMap<String, V>) -> String {
+    let mut v: Vec<&str> = map.keys().map(|k| k.as_str()).collect();
+    v.sort();
+    v.join(", ")
 }
 
 #[cfg(test)]

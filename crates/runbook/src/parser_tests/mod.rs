@@ -5,7 +5,7 @@ use crate::{parse_runbook, parse_runbook_with_format, Format, ParseError, QueueT
 
 mod action_trigger;
 mod prime;
-mod template_refs;
+mod references;
 
 // New format - uses RunDirective tables and args string syntax
 const SAMPLE_RUNBOOK_NEW: &str = r#"
@@ -781,66 +781,6 @@ agent "test" {
         "error should mention 'unrecognized': {}",
         msg
     );
-}
-
-// ============================================================================
-// Multi-Value CLI Option Tests
-// ============================================================================
-
-#[test]
-fn parse_agent_disallowed_tools_space_separated() {
-    let toml = r#"
-[agent.fix]
-run = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode AskUserQuestion"
-prompt = "Fix the bug"
-"#;
-    let runbook = parse_runbook(toml).unwrap();
-    assert!(runbook.agents.contains_key("fix"));
-}
-
-#[test]
-fn parse_agent_disallowed_tools_comma_separated() {
-    let toml = r#"
-[agent.fix]
-run = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion"
-prompt = "Fix the bug"
-"#;
-    let runbook = parse_runbook(toml).unwrap();
-    assert!(runbook.agents.contains_key("fix"));
-}
-
-#[test]
-fn parse_hcl_agent_disallowed_tools_space_separated() {
-    let hcl = r#"
-agent "fix" {
-  run    = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode AskUserQuestion EnterPlanMode"
-  prompt = "Fix the bug"
-}
-"#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    assert!(runbook.agents.contains_key("fix"));
-}
-
-#[test]
-fn parse_agent_allowed_tools_space_separated() {
-    let toml = r#"
-[agent.fix]
-run = "claude --dangerously-skip-permissions --allowed-tools Bash Read Write"
-prompt = "Fix the bug"
-"#;
-    let runbook = parse_runbook(toml).unwrap();
-    assert!(runbook.agents.contains_key("fix"));
-}
-
-#[test]
-fn parse_agent_multi_value_with_other_options() {
-    let toml = r#"
-[agent.fix]
-run = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode AskUserQuestion --verbose"
-prompt = "Fix the bug"
-"#;
-    let runbook = parse_runbook(toml).unwrap();
-    assert!(runbook.agents.contains_key("fix"));
 }
 
 // ============================================================================

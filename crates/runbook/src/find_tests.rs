@@ -9,6 +9,114 @@ fn write_hcl(dir: &Path, name: &str, content: &str) {
     fs::write(dir.join(name), content).unwrap();
 }
 
+// ============================================================================
+// Cross-Runbook Duplicate Detection (validate_runbook_dir)
+// ============================================================================
+
+#[test]
+fn validate_duplicate_command_across_files() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "a.hcl", CMD_RUNBOOK);
+    write_hcl(tmp.path(), "b.hcl", CMD_RUNBOOK); // same "deploy" command
+
+    let errs = validate_runbook_dir(tmp.path()).unwrap_err();
+    assert!(!errs.is_empty());
+    let msg = errs[0].to_string();
+    assert!(
+        msg.contains("command") && msg.contains("deploy"),
+        "expected duplicate command error, got: {msg}"
+    );
+}
+
+#[test]
+fn validate_duplicate_agent_across_files() {
+    let tmp = TempDir::new().unwrap();
+    let agent_hcl = r#"
+agent "planner" {
+  run = "claude"
+}
+"#;
+    write_hcl(tmp.path(), "a.hcl", agent_hcl);
+    write_hcl(tmp.path(), "b.hcl", agent_hcl);
+
+    let errs = validate_runbook_dir(tmp.path()).unwrap_err();
+    assert!(!errs.is_empty());
+    let msg = errs[0].to_string();
+    assert!(
+        msg.contains("agent") && msg.contains("planner"),
+        "expected duplicate agent error, got: {msg}"
+    );
+}
+
+#[test]
+fn validate_duplicate_pipeline_across_files() {
+    let tmp = TempDir::new().unwrap();
+    let pipeline_hcl = r#"
+pipeline "build" {
+  step "run" {
+    run = "echo build"
+  }
+}
+"#;
+    write_hcl(tmp.path(), "a.hcl", pipeline_hcl);
+    write_hcl(tmp.path(), "b.hcl", pipeline_hcl);
+
+    let errs = validate_runbook_dir(tmp.path()).unwrap_err();
+    assert!(!errs.is_empty());
+    let msg = errs[0].to_string();
+    assert!(
+        msg.contains("pipeline") && msg.contains("build"),
+        "expected duplicate pipeline error, got: {msg}"
+    );
+}
+
+#[test]
+fn validate_same_name_different_entity_types_is_ok() {
+    let tmp = TempDir::new().unwrap();
+    // "build" used as both a command and a pipeline - different types, should be fine
+    write_hcl(
+        tmp.path(),
+        "a.hcl",
+        r#"
+command "build" {
+  run = { pipeline = "build" }
+}
+
+pipeline "build" {
+  step "run" {
+    run = "echo build"
+  }
+}
+"#,
+    );
+
+    assert!(validate_runbook_dir(tmp.path()).is_ok());
+}
+
+#[test]
+fn validate_no_duplicates_across_files() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "deploy.hcl", CMD_RUNBOOK);
+    write_hcl(tmp.path(), "build.hcl", CMD_RUNBOOK_B);
+
+    assert!(validate_runbook_dir(tmp.path()).is_ok());
+}
+
+#[test]
+fn validate_missing_dir_is_ok() {
+    assert!(validate_runbook_dir(Path::new("/nonexistent")).is_ok());
+}
+
+#[test]
+fn validate_skips_invalid_runbooks() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "bad.hcl", "this is not valid HCL {{{}}}");
+    write_hcl(tmp.path(), "deploy.hcl", CMD_RUNBOOK);
+
+    // Should succeed since the bad file is skipped
+    assert!(validate_runbook_dir(tmp.path()).is_ok());
+}
+
 const CMD_RUNBOOK: &str = r#"
 command "deploy" {
   args = "<env>"
