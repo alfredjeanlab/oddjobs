@@ -11,7 +11,7 @@ use tempfile::tempdir;
 use oj_core::{Pipeline, StepOutcome, StepRecord, StepStatus};
 use oj_storage::{MaterializedState, QueueItem, QueueItemStatus, WorkerRecord};
 
-use oj_engine::breadcrumb::Breadcrumb;
+use oj_engine::breadcrumb::{Breadcrumb, BreadcrumbAgent};
 
 use crate::protocol::{Query, Response};
 
@@ -381,6 +381,196 @@ fn status_overview_includes_active_agents() {
             assert_eq!(ns.active_agents[0].pipeline_name, "fix/login");
             assert_eq!(ns.active_agents[0].step_name, "work");
             assert_eq!(ns.active_agents[0].status, "running");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+fn make_breadcrumb(pipeline_id: &str, name: &str, project: &str, step: &str) -> Breadcrumb {
+    Breadcrumb {
+        pipeline_id: pipeline_id.to_string(),
+        project: project.to_string(),
+        kind: "command".to_string(),
+        name: name.to_string(),
+        vars: HashMap::new(),
+        current_step: step.to_string(),
+        step_status: "Running".to_string(),
+        agents: vec![BreadcrumbAgent {
+            agent_id: "orphan-agent-1".to_string(),
+            session_name: Some("tmux-orphan-1".to_string()),
+            log_path: std::path::PathBuf::from("/tmp/agent.log"),
+        }],
+        workspace_id: None,
+        workspace_root: Some(std::path::PathBuf::from("/tmp/ws")),
+        updated_at: "2026-01-15T10:30:00Z".to_string(),
+    }
+}
+
+#[test]
+fn list_pipelines_includes_orphans() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+    let orphans = Arc::new(Mutex::new(vec![make_breadcrumb(
+        "orphan-1234",
+        "fix/orphan",
+        "oddjobs",
+        "work",
+    )]));
+
+    let response = handle_query(Query::ListPipelines, &state, &orphans, temp.path(), start);
+    match response {
+        Response::Pipelines { pipelines } => {
+            assert_eq!(pipelines.len(), 1);
+            assert_eq!(pipelines[0].id, "orphan-1234");
+            assert_eq!(pipelines[0].name, "fix/orphan");
+            assert_eq!(pipelines[0].step_status, "Orphaned");
+            assert_eq!(pipelines[0].namespace, "oddjobs");
+            assert!(pipelines[0].updated_at_ms > 0);
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_pipeline_falls_back_to_orphan() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+    let orphans = Arc::new(Mutex::new(vec![make_breadcrumb(
+        "orphan-5678",
+        "fix/orphan",
+        "oddjobs",
+        "work",
+    )]));
+
+    let response = handle_query(
+        Query::GetPipeline {
+            id: "orphan-5678".to_string(),
+        },
+        &state,
+        &orphans,
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::Pipeline { pipeline } => {
+            let p = pipeline.expect("should find orphan pipeline");
+            assert_eq!(p.id, "orphan-5678");
+            assert_eq!(p.step_status, "Orphaned");
+            assert_eq!(p.session_id.as_deref(), Some("tmux-orphan-1"));
+            assert!(p.error.is_some());
+            assert_eq!(p.agents.len(), 1);
+            assert_eq!(p.agents[0].status, "orphaned");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_pipeline_prefers_state_over_orphan() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    // Add pipeline to both state and orphans with same ID
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "shared-id".to_string(),
+            make_pipeline(
+                "shared-id",
+                "fix/real",
+                "oddjobs",
+                "work",
+                StepStatus::Running,
+                StepOutcome::Running,
+                None,
+                1000,
+            ),
+        );
+    }
+    let orphans = Arc::new(Mutex::new(vec![make_breadcrumb(
+        "shared-id",
+        "fix/orphan",
+        "oddjobs",
+        "work",
+    )]));
+
+    let response = handle_query(
+        Query::GetPipeline {
+            id: "shared-id".to_string(),
+        },
+        &state,
+        &orphans,
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::Pipeline { pipeline } => {
+            let p = pipeline.expect("should find pipeline");
+            // State version should be returned, not orphan
+            assert_eq!(p.name, "fix/real");
+            assert_ne!(p.step_status, "Orphaned");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn status_overview_includes_orphans() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+    let orphans = Arc::new(Mutex::new(vec![make_breadcrumb(
+        "orphan-status-1",
+        "fix/orphan",
+        "oddjobs",
+        "work",
+    )]));
+
+    let response = handle_query(Query::StatusOverview, &state, &orphans, temp.path(), start);
+    match response {
+        Response::StatusOverview { namespaces, .. } => {
+            assert_eq!(namespaces.len(), 1);
+            let ns = &namespaces[0];
+            assert_eq!(ns.namespace, "oddjobs");
+            assert_eq!(ns.orphaned_pipelines.len(), 1);
+            assert_eq!(ns.orphaned_pipelines[0].id, "orphan-status-1");
+            assert_eq!(ns.orphaned_pipelines[0].step_status, "Orphaned");
+            assert!(ns.orphaned_pipelines[0].elapsed_ms > 0);
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+#[test]
+fn get_pipeline_orphan_prefix_match() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+    let orphans = Arc::new(Mutex::new(vec![make_breadcrumb(
+        "orphan-abcdef123456",
+        "fix/orphan",
+        "oddjobs",
+        "work",
+    )]));
+
+    // Use prefix to match
+    let response = handle_query(
+        Query::GetPipeline {
+            id: "orphan-abcdef".to_string(),
+        },
+        &state,
+        &orphans,
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::Pipeline { pipeline } => {
+            let p = pipeline.expect("should find orphan by prefix");
+            assert_eq!(p.id, "orphan-abcdef123456");
+            assert_eq!(p.step_status, "Orphaned");
         }
         other => panic!("unexpected response: {:?}", other),
     }

@@ -17,6 +17,8 @@ pub struct NamespaceStatus {
     pub active_pipelines: Vec<PipelineStatusEntry>,
     /// Pipelines in Waiting status (escalated to human)
     pub escalated_pipelines: Vec<PipelineStatusEntry>,
+    /// Orphaned pipelines detected from breadcrumb files
+    pub orphaned_pipelines: Vec<PipelineStatusEntry>,
     /// Workers and their status
     pub workers: Vec<WorkerSummary>,
     /// Queue depths: (queue_name, pending_count, active_count, dead_count)

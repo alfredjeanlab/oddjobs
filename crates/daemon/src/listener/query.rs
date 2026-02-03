@@ -44,7 +44,7 @@ pub(super) fn handle_query(
 
     match query {
         Query::ListPipelines => {
-            let pipelines = state
+            let mut pipelines: Vec<PipelineSummary> = state
                 .pipelines
                 .values()
                 .map(|p| {
@@ -66,6 +66,9 @@ pub(super) fn handle_query(
                     }
                 })
                 .collect();
+
+            query_orphans::append_orphan_summaries(&mut pipelines, orphans);
+
             Response::Pipelines { pipelines }
         }
 
@@ -117,6 +120,10 @@ pub(super) fn handle_query(
                     namespace: p.namespace.clone(),
                 })
             });
+
+            // If not found in state, check orphans
+            let pipeline = pipeline.or_else(|| query_orphans::find_orphan_detail(orphans, &id));
+
             Response::Pipeline { pipeline }
         }
 
@@ -576,12 +583,18 @@ pub(super) fn handle_query(
                 });
             }
 
+            // Collect orphaned pipelines grouped by namespace
+            let mut ns_orphaned = query_orphans::collect_orphan_status_entries(orphans, now_ms);
+
             // Build combined namespace set
             let mut all_namespaces: HashSet<String> = HashSet::new();
             for ns in ns_active.keys() {
                 all_namespaces.insert(ns.clone());
             }
             for ns in ns_escalated.keys() {
+                all_namespaces.insert(ns.clone());
+            }
+            for ns in ns_orphaned.keys() {
                 all_namespaces.insert(ns.clone());
             }
             for ns in ns_workers.keys() {
@@ -599,6 +612,7 @@ pub(super) fn handle_query(
                 .map(|ns| NamespaceStatus {
                     active_pipelines: ns_active.remove(&ns).unwrap_or_default(),
                     escalated_pipelines: ns_escalated.remove(&ns).unwrap_or_default(),
+                    orphaned_pipelines: ns_orphaned.remove(&ns).unwrap_or_default(),
                     workers: ns_workers.remove(&ns).unwrap_or_default(),
                     queues: ns_queues.remove(&ns).unwrap_or_default(),
                     active_agents: ns_agents.remove(&ns).unwrap_or_default(),

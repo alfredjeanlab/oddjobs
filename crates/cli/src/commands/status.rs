@@ -79,6 +79,13 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
     if total_escalated > 0 {
         let _ = write!(out, " | {} escalated", total_escalated);
     }
+    let total_orphaned: usize = namespaces
+        .iter()
+        .map(|ns| ns.orphaned_pipelines.len())
+        .sum();
+    if total_orphaned > 0 {
+        let _ = write!(out, " | {} orphaned", total_orphaned);
+    }
     out.push('\n');
 
     if namespaces.is_empty() {
@@ -96,6 +103,7 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
         // Check if this namespace has any content to show
         let has_content = !ns.active_pipelines.is_empty()
             || !ns.escalated_pipelines.is_empty()
+            || !ns.orphaned_pipelines.is_empty()
             || !ns.workers.is_empty()
             || !ns.queues.is_empty()
             || !ns.active_agents.is_empty();
@@ -142,6 +150,22 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
                     let _ = writeln!(out, "      → {}", reason);
                 }
             }
+            out.push('\n');
+        }
+
+        // Orphaned pipelines
+        if !ns.orphaned_pipelines.is_empty() {
+            let _ = writeln!(out, "  Orphaned ({}):", ns.orphaned_pipelines.len());
+            for p in &ns.orphaned_pipelines {
+                let short_id = truncate_id(&p.id, 12);
+                let elapsed = format_duration_ms(p.elapsed_ms);
+                let _ = writeln!(
+                    out,
+                    "    ⚠ {}  {}  {}  Orphaned  {}",
+                    short_id, p.name, p.step, elapsed,
+                );
+            }
+            let _ = writeln!(out, "    Run `oj daemon orphans` for recovery details");
             out.push('\n');
         }
 
