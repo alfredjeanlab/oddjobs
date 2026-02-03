@@ -536,6 +536,8 @@ pub struct AgentSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionSummary {
     pub id: String,
+    #[serde(default)]
+    pub namespace: String,
     pub pipeline_id: Option<String>,
     /// Most recent activity timestamp (from associated pipeline)
     #[serde(default)]

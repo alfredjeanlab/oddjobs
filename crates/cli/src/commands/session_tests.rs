@@ -57,6 +57,64 @@ fn session_exists(session_id: &str) -> bool {
         .unwrap_or(false)
 }
 
+use oj_daemon::protocol::SessionSummary;
+
+fn make_session(id: &str, namespace: &str, pipeline_id: Option<&str>) -> SessionSummary {
+    SessionSummary {
+        id: id.to_string(),
+        namespace: namespace.to_string(),
+        pipeline_id: pipeline_id.map(|s| s.to_string()),
+        updated_at_ms: 0,
+    }
+}
+
+fn output_string(buf: &[u8]) -> String {
+    String::from_utf8(buf.to_vec()).unwrap()
+}
+
+#[test]
+fn list_with_project_column() {
+    let sessions = vec![
+        make_session("sess-1", "myproject", Some("pipe-1")),
+        make_session("sess-2", "other", Some("pipe-2")),
+    ];
+    let mut buf = Vec::new();
+    super::format_session_list(&mut buf, &sessions);
+    let out = output_string(&buf);
+    let lines: Vec<&str> = out.lines().collect();
+
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].contains("PROJECT"));
+    assert!(lines[1].contains("myproject"));
+    assert!(lines[2].contains("other"));
+}
+
+#[test]
+fn list_mixed_namespace_shows_no_project_for_empty() {
+    let sessions = vec![
+        make_session("sess-1", "myproject", Some("pipe-1")),
+        make_session("sess-2", "", Some("pipe-2")),
+    ];
+    let mut buf = Vec::new();
+    super::format_session_list(&mut buf, &sessions);
+    let out = output_string(&buf);
+    let lines: Vec<&str> = out.lines().collect();
+
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].contains("PROJECT"));
+    assert!(lines[1].contains("myproject"));
+    assert!(lines[2].contains("(no project)"));
+}
+
+#[test]
+fn list_no_project_when_all_empty_namespace() {
+    let sessions = vec![make_session("sess-1", "", Some("pipe-1"))];
+    let mut buf = Vec::new();
+    super::format_session_list(&mut buf, &sessions);
+    let out = output_string(&buf);
+    assert!(!out.contains("PROJECT"));
+}
+
 #[test]
 fn attach_uses_session_id_directly_without_prefix() {
     if !tmux_available() {

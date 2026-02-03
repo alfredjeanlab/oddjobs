@@ -3,11 +3,14 @@
 
 //! `oj session` - Session management commands
 
+use std::io::Write;
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
 use crate::output::{format_time_ago, should_use_color, OutputFormat};
+use oj_daemon::protocol::SessionSummary;
 
 #[derive(Args)]
 pub struct SessionArgs {
@@ -64,36 +67,7 @@ pub async fn handle(
                     if sessions.is_empty() {
                         println!("No sessions");
                     } else {
-                        // Calculate column widths based on data
-                        let session_width = sessions
-                            .iter()
-                            .map(|s| s.id.len())
-                            .max()
-                            .unwrap_or(0)
-                            .max("SESSION".len());
-                        let pipeline_width = sessions
-                            .iter()
-                            .map(|s| {
-                                s.pipeline_id.as_ref().map(|p| p.len()).unwrap_or(1)
-                                // "-" is 1 char
-                            })
-                            .max()
-                            .unwrap_or(0)
-                            .max("PIPELINE".len());
-
-                        println!(
-                            "{:<session_width$} {:<pipeline_width$} UPDATED",
-                            "SESSION", "PIPELINE"
-                        );
-                        for s in sessions {
-                            let updated_ago = format_time_ago(s.updated_at_ms);
-                            println!(
-                                "{:<session_width$} {:<pipeline_width$} {}",
-                                s.id,
-                                s.pipeline_id.as_deref().unwrap_or("-"),
-                                updated_ago
-                            );
-                        }
+                        format_session_list(&mut std::io::stdout(), &sessions);
                     }
                 }
                 OutputFormat::Json => {
@@ -124,6 +98,80 @@ pub async fn handle(
     }
 
     Ok(())
+}
+
+fn format_session_list(w: &mut impl Write, sessions: &[SessionSummary]) {
+    // Determine whether to show PROJECT column
+    let namespaces: std::collections::HashSet<&str> =
+        sessions.iter().map(|s| s.namespace.as_str()).collect();
+    let show_project = namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+
+    // Calculate column widths based on data
+    let session_w = sessions
+        .iter()
+        .map(|s| s.id.len())
+        .max()
+        .unwrap_or(0)
+        .max("SESSION".len());
+    let no_project = "(no project)";
+    let proj_w = if show_project {
+        sessions
+            .iter()
+            .map(|s| {
+                if s.namespace.is_empty() {
+                    no_project.len()
+                } else {
+                    s.namespace.len()
+                }
+            })
+            .max()
+            .unwrap_or(7)
+            .max(7)
+    } else {
+        0
+    };
+    let pipeline_w = sessions
+        .iter()
+        .map(|s| s.pipeline_id.as_ref().map(|p| p.len()).unwrap_or(1))
+        .max()
+        .unwrap_or(0)
+        .max("PIPELINE".len());
+
+    if show_project {
+        let _ = writeln!(
+            w,
+            "{:<session_w$} {:<proj_w$} {:<pipeline_w$} UPDATED",
+            "SESSION", "PROJECT", "PIPELINE"
+        );
+    } else {
+        let _ = writeln!(
+            w,
+            "{:<session_w$} {:<pipeline_w$} UPDATED",
+            "SESSION", "PIPELINE"
+        );
+    }
+    for s in sessions {
+        let updated_ago = format_time_ago(s.updated_at_ms);
+        let pipeline = s.pipeline_id.as_deref().unwrap_or("-");
+        if show_project {
+            let proj = if s.namespace.is_empty() {
+                no_project
+            } else {
+                &s.namespace
+            };
+            let _ = writeln!(
+                w,
+                "{:<session_w$} {:<proj_w$} {:<pipeline_w$} {}",
+                s.id, proj, pipeline, updated_ago
+            );
+        } else {
+            let _ = writeln!(
+                w,
+                "{:<session_w$} {:<pipeline_w$} {}",
+                s.id, pipeline, updated_ago
+            );
+        }
+    }
 }
 
 #[cfg(test)]

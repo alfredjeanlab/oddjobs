@@ -149,8 +149,14 @@ pub(super) fn handle_query(
                                 .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
                         })
                         .unwrap_or(0);
+                    let namespace = state
+                        .pipelines
+                        .get(&s.pipeline_id)
+                        .map(|p| p.namespace.clone())
+                        .unwrap_or_default();
                     SessionSummary {
                         id: s.id.clone(),
+                        namespace,
                         pipeline_id: Some(s.pipeline_id.clone()),
                         updated_at_ms,
                     }
