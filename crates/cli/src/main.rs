@@ -252,7 +252,9 @@ async fn run() -> Result<()> {
                     let client = DaemonClient::for_action()?;
                     queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }
-                QueueCommand::List { .. } | QueueCommand::Items { .. } => {
+                QueueCommand::List { .. }
+                | QueueCommand::Items { .. }
+                | QueueCommand::Logs { .. } => {
                     let client = DaemonClient::for_query()?;
                     queue::handle(args.command, &client, &project_root, &namespace, format).await?
                 }

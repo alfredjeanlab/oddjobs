@@ -9,7 +9,7 @@ mod pipeline;
 
 use crate::{
     breadcrumb::BreadcrumbWriter, error::RuntimeError, pipeline_logger::PipelineLogger,
-    worker_logger::WorkerLogger, Executor, Scheduler,
+    queue_logger::QueueLogger, worker_logger::WorkerLogger, Executor, Scheduler,
 };
 use handlers::cron::CronState;
 use handlers::worker::WorkerState;
@@ -55,6 +55,7 @@ pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) _workspaces_root: PathBuf,
     pub(crate) logger: PipelineLogger,
     pub(crate) worker_logger: WorkerLogger,
+    pub(crate) queue_logger: QueueLogger,
     pub(crate) breadcrumb: BreadcrumbWriter,
     pub(crate) agent_pipelines: Mutex<HashMap<AgentId, String>>,
     pub(crate) runbook_cache: Mutex<HashMap<String, Runbook>>,
@@ -87,6 +88,7 @@ where
             _workspaces_root: config.workspaces_root,
             logger: PipelineLogger::new(config.log_dir.clone()),
             worker_logger: WorkerLogger::new(config.log_dir.clone()),
+            queue_logger: QueueLogger::new(config.log_dir.clone()),
             breadcrumb: BreadcrumbWriter::new(config.log_dir),
             agent_pipelines: Mutex::new(HashMap::new()),
             runbook_cache: Mutex::new(HashMap::new()),

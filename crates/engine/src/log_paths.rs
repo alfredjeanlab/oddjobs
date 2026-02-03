@@ -64,6 +64,20 @@ pub fn worker_log_path(logs_dir: &Path, worker_name: &str) -> PathBuf {
     logs_dir.join("worker").join(format!("{}.log", worker_name))
 }
 
+/// Build the path to a queue's activity log file.
+///
+/// Structure: `{logs_dir}/queue/{queue_name}.log`
+///
+/// The `queue_name` may contain `/` (e.g. `namespace/queue_name`),
+/// in which case `Path::join` creates nested directories automatically.
+///
+/// # Arguments
+/// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
+/// * `queue_name` - Queue name (possibly namespace-scoped like `ns/queue`)
+pub fn queue_log_path(logs_dir: &Path, queue_name: &str) -> PathBuf {
+    logs_dir.join("queue").join(format!("{}.log", queue_name))
+}
+
 /// Build the path to a pipeline breadcrumb file.
 ///
 /// Structure: `{logs_dir}/{pipeline_id}.crumb.json`

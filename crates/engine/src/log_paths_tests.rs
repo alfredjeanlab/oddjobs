@@ -46,6 +46,21 @@ fn worker_log_path_with_namespace() {
 }
 
 #[test]
+fn queue_log_path_builds_expected_path() {
+    let result = queue_log_path(Path::new("/state/logs"), "build-queue");
+    assert_eq!(result, PathBuf::from("/state/logs/queue/build-queue.log"));
+}
+
+#[test]
+fn queue_log_path_with_namespace() {
+    let result = queue_log_path(Path::new("/state/logs"), "myproject/build-queue");
+    assert_eq!(
+        result,
+        PathBuf::from("/state/logs/queue/myproject/build-queue.log")
+    );
+}
+
+#[test]
 fn breadcrumb_path_builds_expected_path() {
     let result = breadcrumb_path(Path::new("/state/logs"), "pipeline-001");
     assert_eq!(result, PathBuf::from("/state/logs/pipeline-001.crumb.json"));

@@ -725,6 +725,26 @@ pub(super) fn handle_query(
             }
         }
 
+        Query::GetQueueLogs {
+            queue_name,
+            namespace,
+            lines,
+        } => {
+            use oj_engine::log_paths::queue_log_path;
+
+            let scoped = if namespace.is_empty() {
+                queue_name
+            } else {
+                format!("{}/{}", namespace, queue_name)
+            };
+            let path = queue_log_path(logs_path, &scoped);
+            let content = read_log_file(&path, lines);
+            Response::QueueLogs {
+                log_path: path,
+                content,
+            }
+        }
+
         // Handled by early return above; included for exhaustiveness
         Query::ListOrphans | Query::DismissOrphan { .. } | Query::ListProjects => unreachable!(),
     }

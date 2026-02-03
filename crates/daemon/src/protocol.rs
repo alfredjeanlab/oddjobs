@@ -303,6 +303,14 @@ pub enum Query {
     DismissOrphan {
         id: String,
     },
+    /// Get queue activity logs
+    GetQueueLogs {
+        queue_name: String,
+        #[serde(default)]
+        namespace: String,
+        /// Number of most recent lines to return (0 = all)
+        lines: usize,
+    },
 }
 
 /// Response from daemon to CLI
@@ -490,6 +498,14 @@ pub enum Response {
 
     /// List of projects with active work
     Projects { projects: Vec<ProjectSummary> },
+
+    /// Queue activity log contents
+    QueueLogs {
+        /// Path to the log file (for --follow mode)
+        log_path: PathBuf,
+        /// Log content (most recent N lines)
+        content: String,
+    },
 }
 
 /// Summary of a pipeline for listing

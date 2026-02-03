@@ -203,8 +203,27 @@ where
             Event::QueuePushed {
                 queue_name,
                 namespace,
+                item_id,
+                data,
                 ..
             } => {
+                // Log queue push event
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                let data_str = data
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                self.queue_logger.append(
+                    &scoped,
+                    item_id,
+                    &format!("pushed data={{{}}}", data_str),
+                );
+
                 let (worker_names, all_workers): (Vec<String>, Vec<String>) = {
                     let workers = self.worker_states.lock();
                     let all: Vec<String> = workers.keys().cloned().collect();
@@ -241,10 +260,62 @@ where
             }
 
             // Queue state mutations handled by MaterializedState::apply_event
-            Event::QueueTaken { .. }
-            | Event::QueueCompleted { .. }
-            | Event::QueueFailed { .. }
-            | Event::QueueDropped { .. } => {}
+            // Log queue lifecycle events
+            Event::QueueTaken {
+                queue_name,
+                item_id,
+                worker_name,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger.append(
+                    &scoped,
+                    item_id,
+                    &format!("dispatched worker={}", worker_name),
+                );
+            }
+            Event::QueueCompleted {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger.append(&scoped, item_id, "completed");
+            }
+            Event::QueueFailed {
+                queue_name,
+                item_id,
+                error,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger
+                    .append(&scoped, item_id, &format!("failed error=\"{}\"", error));
+            }
+            Event::QueueDropped {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger.append(&scoped, item_id, "dropped");
+            }
 
             // Populate in-process runbook cache so subsequent WorkerStarted
             // events (including WAL replay after restart) can find the runbook.
@@ -277,9 +348,33 @@ where
             | Event::PipelineCancelling { .. }
             | Event::PipelineUpdated { .. }
             | Event::WorkerItemDispatched { .. }
-            | Event::QueueItemRetry { .. }
-            | Event::QueueItemDead { .. }
             | Event::CronFired { .. } => {}
+
+            // Queue retry/dead: log lifecycle events
+            Event::QueueItemRetry {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger.append(&scoped, item_id, "retried");
+            }
+            Event::QueueItemDead {
+                queue_name,
+                item_id,
+                namespace,
+            } => {
+                let scoped = if namespace.is_empty() {
+                    queue_name.clone()
+                } else {
+                    format!("{}/{}", namespace, queue_name)
+                };
+                self.queue_logger.append(&scoped, item_id, "dead");
+            }
         }
 
         Ok(result_events)

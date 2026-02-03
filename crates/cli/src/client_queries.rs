@@ -470,6 +470,26 @@ impl DaemonClient {
         }
     }
 
+    /// Get queue activity logs
+    pub async fn get_queue_logs(
+        &self,
+        queue_name: &str,
+        namespace: &str,
+        lines: usize,
+    ) -> Result<(PathBuf, String), ClientError> {
+        let request = Request::Query {
+            query: Query::GetQueueLogs {
+                queue_name: queue_name.to_string(),
+                namespace: namespace.to_string(),
+                lines,
+            },
+        };
+        match self.send(&request).await? {
+            Response::QueueLogs { log_path, content } => Ok((log_path, content)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Dismiss an orphaned pipeline by deleting its breadcrumb
     pub async fn dismiss_orphan(&self, id: &str) -> Result<(), ClientError> {
         let request = Request::Query {
