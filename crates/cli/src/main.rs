@@ -66,11 +66,6 @@ enum Commands {
     Cron(cron::CronArgs),
     /// Decision management
     Decision(decision::DecisionArgs),
-    /// List pending decisions (shorthand for `oj decision list`)
-    Decisions {
-        #[arg(long = "project")]
-        project: Option<String>,
-    },
     /// Emit events to the daemon (for agents)
     Emit(emit::EmitArgs),
     /// Project management
@@ -306,17 +301,6 @@ async fn run() -> Result<()> {
                 }
             }
         }
-        Commands::Decisions { project } => {
-            let client = DaemonClient::for_query()?;
-            decision::handle(
-                decision::DecisionCommand::List { project },
-                &client,
-                &namespace,
-                format,
-            )
-            .await?
-        }
-
         // Signal commands - operational, agent-initiated
         Commands::Emit(args) => {
             let client = DaemonClient::for_signal()?;
