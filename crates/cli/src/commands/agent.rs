@@ -155,7 +155,7 @@ pub async fn handle(
                         println!("No agents found");
                     } else {
                         println!(
-                            "{:<12} {:<16} {:<16} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                            "{:<8} {:<16} {:<16} {:<8} {:<16} {:<10} {:>5} {:>5} {:>4}",
                             "ID",
                             "NAME",
                             "PROJECT",
@@ -173,11 +173,11 @@ pub async fn handle(
                                 _ => "(no project)",
                             };
                             println!(
-                                "{:<12} {:<16} {:<16} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
-                                truncate(&a.agent_id, 12),
+                                "{:<8} {:<16} {:<16} {:<8} {:<16} {:<10} {:>5} {:>5} {:>4}",
+                                truncate(&a.agent_id, 8),
                                 truncate(name, 16),
                                 truncate(project, 16),
-                                truncate(&a.pipeline_id, 12),
+                                truncate(&a.pipeline_id, 8),
                                 truncate(&a.step_name, 16),
                                 truncate(&a.status, 10),
                                 a.files_read,
@@ -223,7 +223,7 @@ pub async fn handle(
 
                     for entry in &pruned {
                         let label = if dry_run { "Would prune" } else { "Pruned" };
-                        let short_pid = &entry.pipeline_id[..12.min(entry.pipeline_id.len())];
+                        let short_pid = &entry.pipeline_id[..8.min(entry.pipeline_id.len())];
                         println!(
                             "{} agent {} ({}, {})",
                             label, entry.agent_id, short_pid, entry.step_name

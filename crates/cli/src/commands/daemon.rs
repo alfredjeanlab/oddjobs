@@ -240,18 +240,18 @@ async fn orphans(format: OutputFormat) -> Result<()> {
 
             println!("Orphaned Pipelines (not in recovered state):\n");
             println!(
-                "{:<14} {:<12} {:<10} {:<20} {:<12} {:<10} LAST UPDATED",
+                "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} LAST UPDATED",
                 "ID", "PROJECT", "KIND", "NAME", "STEP", "STATUS"
             );
 
             for o in &orphans {
-                let short_id = if o.pipeline_id.len() > 12 {
-                    &o.pipeline_id[..12]
+                let short_id = if o.pipeline_id.len() > 8 {
+                    &o.pipeline_id[..8]
                 } else {
                     &o.pipeline_id
                 };
                 println!(
-                    "{:<14} {:<12} {:<10} {:<20} {:<12} {:<10} {}",
+                    "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} {}",
                     short_id,
                     truncate(&o.project, 12),
                     truncate(&o.kind, 10),

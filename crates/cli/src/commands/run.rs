@@ -214,7 +214,7 @@ async fn dispatch_to_daemon(
         )
         .await?;
 
-    let short_id = &pipeline_id[..12.min(pipeline_id.len())];
+    let short_id = &pipeline_id[..8.min(pipeline_id.len())];
     println!("Project: {namespace}");
     println!("Command {} invoked.", command);
     println!("Waiting for pipeline to start... (Ctrl+C to skip)");

@@ -124,7 +124,7 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
         if !ns.active_pipelines.is_empty() {
             let _ = writeln!(out, "  Pipelines ({} active):", ns.active_pipelines.len());
             for p in &ns.active_pipelines {
-                let short_id = truncate_id(&p.id, 12);
+                let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,
@@ -139,7 +139,7 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
         if !ns.escalated_pipelines.is_empty() {
             let _ = writeln!(out, "  Escalated ({}):", ns.escalated_pipelines.len());
             for p in &ns.escalated_pipelines {
-                let short_id = truncate_id(&p.id, 12);
+                let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,
@@ -157,7 +157,7 @@ fn format_text(uptime_secs: u64, namespaces: &[oj_daemon::NamespaceStatus]) {
         if !ns.orphaned_pipelines.is_empty() {
             let _ = writeln!(out, "  Orphaned ({}):", ns.orphaned_pipelines.len());
             for p in &ns.orphaned_pipelines {
-                let short_id = truncate_id(&p.id, 12);
+                let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let _ = writeln!(
                     out,

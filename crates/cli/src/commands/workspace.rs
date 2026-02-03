@@ -90,7 +90,7 @@ pub async fn handle(
                         // Compute dynamic column widths from data
                         let id_w = workspaces
                             .iter()
-                            .map(|w| w.id.len().min(12))
+                            .map(|w| w.id.len().min(8))
                             .max()
                             .unwrap_or(2)
                             .max(2);
@@ -147,7 +147,7 @@ pub async fn handle(
                                 };
                                 println!(
                                     "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
-                                    &w.id[..id_w.min(w.id.len())],
+                                    &w.id[..8.min(w.id.len())],
                                     &proj[..proj_w.min(proj.len())],
                                     path_str,
                                     branch,
@@ -156,7 +156,7 @@ pub async fn handle(
                             } else {
                                 println!(
                                     "{:<id_w$} {:<path_w$} {:<branch_w$} {}",
-                                    &w.id[..id_w.min(w.id.len())],
+                                    &w.id[..8.min(w.id.len())],
                                     path_str,
                                     branch,
                                     w.status
@@ -223,9 +223,7 @@ pub async fn handle(
                     for ws in &dropped {
                         println!(
                             "Dropping {} ({})",
-                            ws.branch
-                                .as_deref()
-                                .unwrap_or(&ws.id[..12.min(ws.id.len())]),
+                            ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
                             ws.path.display()
                         );
                     }
@@ -252,9 +250,7 @@ pub async fn handle(
                         println!(
                             "{} {} ({})",
                             label,
-                            ws.branch
-                                .as_deref()
-                                .unwrap_or(&ws.id[..12.min(ws.id.len())]),
+                            ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
                             ws.path.display()
                         );
                     }

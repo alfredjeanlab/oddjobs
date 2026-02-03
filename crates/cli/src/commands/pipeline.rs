@@ -178,7 +178,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
     let rows: Vec<_> = pipelines
         .iter()
         .map(|p| {
-            let id = &p.id[..12.min(p.id.len())];
+            let id = &p.id[..8.min(p.id.len())];
             let updated = format_time_ago(p.updated_at_ms);
             (id, p, updated)
         })
@@ -401,7 +401,7 @@ pub async fn handle(
                             println!("  Agents:");
                             for agent in &p.agents {
                                 let summary = format_agent_summary(agent);
-                                let session_id = truncate(&agent.agent_id, 24);
+                                let session_id = truncate(&agent.agent_id, 8);
                                 if summary.is_empty() {
                                     println!(
                                         "    {:<12} {:<12} {}",
@@ -542,7 +542,7 @@ pub async fn handle(
                     println!("╰──── end peek ────");
                 }
                 None => {
-                    let short_id = &pipeline.id[..12.min(pipeline.id.len())];
+                    let short_id = &pipeline.id[..8.min(pipeline.id.len())];
                     let is_terminal = pipeline.step == "done"
                         || pipeline.step == "failed"
                         || pipeline.step == "cancelled";
@@ -585,7 +585,7 @@ pub async fn handle(
 
                     for entry in &pruned {
                         let label = if dry_run { "Would prune" } else { "Pruned" };
-                        let short_id = &entry.id[..12.min(entry.id.len())];
+                        let short_id = &entry.id[..8.min(entry.id.len())];
                         println!("{} {} ({}, {})", label, entry.name, short_id, entry.step);
                     }
 
