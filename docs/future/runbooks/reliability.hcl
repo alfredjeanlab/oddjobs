@@ -1,8 +1,6 @@
-# Reliability Runbook
-#
 # Periodic review of failures, dead letters, and recurring issues.
-# Agent investigates patterns and files bugs for systemic problems.
 #
+# Agent investigates patterns and files bugs for systemic problems.
 # Defense-in-depth: per-agent on_idle/on_dead handles immediate recovery,
 # janitor handles resource cleanup, this agent catches what slips through.
 #
@@ -15,13 +13,17 @@ cron "reliability" {
 }
 
 pipeline "reliability-check" {
+  notify {
+    on_fail = "Reliability check failed"
+  }
+
   step "analyze" {
     run = { agent = "reliability-eng" }
   }
 }
 
 agent "reliability-eng" {
-  run     = "claude --dangerously-skip-permissions"
+  run     = "claude --model opus --dangerously-skip-permissions"
   on_idle = { action = "done" }
   on_dead = { action = "done" }
 
@@ -36,7 +38,7 @@ agent "reliability-eng" {
        - Same merge conflict recurring?
        - Agent getting stuck on the same type of task?
     5. If you identify a systemic fix:
-       `wok new bug "reliability: <description>"` then `oj worker start fix`
+       `wok new bug "reliability: <description>"`
     6. If dead letter items look retryable: `oj queue retry <queue> <id>`
     7. If nothing actionable, say "I'm done"
   PROMPT

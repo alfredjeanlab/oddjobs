@@ -1,6 +1,5 @@
-# Janitor Runbook
-#
 # Periodic cleanup of stale resources.
+#
 # Simple shell steps — no agent needed.
 #
 # Usage:
@@ -12,6 +11,10 @@ cron "janitor" {
 }
 
 pipeline "cleanup" {
+  notify {
+    on_fail = "Janitor failed"
+  }
+
   step "worktrees" {
     run     = "oj workspace prune"
     on_done = { step = "sessions" }

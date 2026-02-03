@@ -1,6 +1,5 @@
-# Security Runbook
-#
 # Periodic security audit of recent changes.
+#
 # Agent reviews diffs for vulnerabilities and files bugs for issues found.
 #
 # Usage:
@@ -12,13 +11,17 @@ cron "security" {
 }
 
 pipeline "security-audit" {
+  notify {
+    on_fail = "Security audit failed"
+  }
+
   step "audit" {
     run = { agent = "security-auditor" }
   }
 }
 
 agent "security-auditor" {
-  run     = "claude --dangerously-skip-permissions"
+  run     = "claude --model opus --dangerously-skip-permissions"
   on_idle = { action = "done" }
   on_dead = { action = "done" }
 
@@ -32,7 +35,7 @@ agent "security-auditor" {
        - Unsafe deserialization, path traversal
        - Overly permissive file or network access
     3. If you find issues, file them:
-       `wok new bug "security: <description>"` then `oj worker start fix`
+       `wok new bug "security: <description>"`
     4. If nothing found, say "I'm done"
   PROMPT
 }
