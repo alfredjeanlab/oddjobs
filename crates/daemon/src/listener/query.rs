@@ -515,6 +515,17 @@ pub(super) fn handle_query(
                         status: w.status.clone(),
                         active: w.active_pipeline_ids.len(),
                         concurrency: w.concurrency,
+                        updated_at_ms: w
+                            .active_pipeline_ids
+                            .iter()
+                            .filter_map(|pid| state.pipelines.get(pid))
+                            .filter_map(|p| {
+                                p.step_history
+                                    .last()
+                                    .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
+                            })
+                            .max()
+                            .unwrap_or(0),
                     });
             }
 
