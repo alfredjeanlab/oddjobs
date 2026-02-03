@@ -103,3 +103,128 @@ fn format_duration_values() {
     assert_eq!(format_duration(3660), "1h1m");
     assert_eq!(format_duration(86400), "1d");
 }
+
+#[test]
+#[serial]
+fn active_pipeline_shows_kind_not_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "abcd1234-0000-0000-0000".to_string(),
+            name: "abcd1234-0000-0000-0000".to_string(),
+            kind: "build".to_string(),
+            step: "check".to_string(),
+            step_status: "Running".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: None,
+        }],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("build"),
+        "output should contain pipeline kind 'build':\n{output}"
+    );
+    assert!(
+        output.contains("check"),
+        "output should contain step name 'check':\n{output}"
+    );
+    // The pipeline UUID name should not appear in the rendered text
+    assert!(
+        !output.contains("abcd1234-0000"),
+        "output should not contain the UUID name:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn escalated_pipeline_shows_kind_not_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "efgh5678".to_string(),
+            name: "efgh5678-uuid".to_string(),
+            kind: "deploy".to_string(),
+            step: "test".to_string(),
+            step_status: "Waiting".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: Some("gate check failed".to_string()),
+        }],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("deploy"),
+        "output should contain pipeline kind 'deploy':\n{output}"
+    );
+    assert!(
+        output.contains("test"),
+        "output should contain step name 'test':\n{output}"
+    );
+    assert!(
+        output.contains("gate check failed"),
+        "output should contain waiting reason:\n{output}"
+    );
+    assert!(
+        !output.contains("efgh5678-uuid"),
+        "output should not contain the UUID name:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn orphaned_pipeline_shows_kind_not_name() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "ijkl9012".to_string(),
+            name: "ijkl9012-uuid".to_string(),
+            kind: "ci".to_string(),
+            step: "lint".to_string(),
+            step_status: "Running".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: None,
+        }],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("ci"),
+        "output should contain pipeline kind 'ci':\n{output}"
+    );
+    assert!(
+        output.contains("lint"),
+        "output should contain step name 'lint':\n{output}"
+    );
+    assert!(
+        !output.contains("ijkl9012-uuid"),
+        "output should not contain the UUID name:\n{output}"
+    );
+}
