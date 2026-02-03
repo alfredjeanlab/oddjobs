@@ -24,6 +24,11 @@ pub enum WorkerCommand {
         /// Worker name from runbook
         name: String,
     },
+    /// Stop a worker (active pipelines continue, no new items dispatched)
+    Stop {
+        /// Worker name from runbook
+        name: String,
+    },
     /// List all workers and their status
     List {},
 }
@@ -45,6 +50,23 @@ pub async fn handle(
             match client.send(&request).await? {
                 Response::WorkerStarted { worker_name } => {
                     println!("Worker '{}' started", worker_name);
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        WorkerCommand::Stop { name } => {
+            let request = Request::WorkerStop {
+                worker_name: name.clone(),
+                namespace: namespace.to_string(),
+            };
+            match client.send(&request).await? {
+                Response::Ok => {
+                    println!("Worker '{}' stopped", name);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

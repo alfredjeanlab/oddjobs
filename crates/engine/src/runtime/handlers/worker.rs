@@ -438,21 +438,11 @@ where
         &self,
         worker_name: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline_ids: Vec<PipelineId> = {
-            let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_name) {
-                state.status = WorkerStatus::Stopped;
-                state.active_pipelines.drain().collect()
-            } else {
-                vec![]
-            }
-        };
-
-        let mut result_events = Vec::new();
-        for pipeline_id in pipeline_ids {
-            result_events.extend(self.handle_pipeline_cancel(&pipeline_id).await?);
+        let mut workers = self.worker_states.lock();
+        if let Some(state) = workers.get_mut(worker_name) {
+            state.status = WorkerStatus::Stopped;
         }
-        Ok(result_events)
+        Ok(vec![])
     }
 
     /// Check if a completed pipeline belongs to a worker and trigger re-poll if so.

@@ -12,6 +12,8 @@ use crate::{
     Scheduler,
 };
 use handlers::worker::WorkerState;
+#[cfg(test)]
+use handlers::worker::WorkerStatus;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{AgentId, Clock, Pipeline};
 use oj_runbook::Runbook;

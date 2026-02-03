@@ -497,9 +497,9 @@ async fn pipeline_completion_triggers_repoll_and_fills_slot() {
     );
 }
 
-/// Stopping a worker with active pipelines should cancel all of them.
+/// Stopping a worker marks it stopped but lets active pipelines finish.
 #[tokio::test]
-async fn worker_stop_cancels_all_active_pipelines() {
+async fn worker_stop_leaves_active_pipelines_running() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 2);
 
@@ -517,32 +517,58 @@ async fn worker_stop_cancels_all_active_pipelines() {
         .await
         .unwrap();
 
-    let cancelled_ids: Vec<&PipelineId> = stop_events
+    // No pipelines should be cancelled
+    let cancelled_count = stop_events
         .iter()
-        .filter_map(|e| match e {
-            Event::PipelineAdvanced { id, step } if step == "cancelled" => Some(id),
-            _ => None,
-        })
-        .collect();
+        .filter(|e| matches!(e, Event::PipelineAdvanced { step, .. } if step == "cancelled"))
+        .count();
     assert_eq!(
-        cancelled_ids.len(),
-        2,
-        "both active pipelines should be cancelled"
+        cancelled_count, 0,
+        "stop should not cancel active pipelines"
     );
-    for pid in &dispatched {
-        assert!(
-            cancelled_ids.contains(&pid),
-            "pipeline {} should be cancelled",
-            pid
-        );
-    }
 
+    // Worker should be stopped but still tracking active pipelines
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert!(
-        state.active_pipelines.is_empty(),
-        "active_pipelines should be drained after stop"
-    );
+    assert_eq!(state.status, WorkerStatus::Stopped);
+    assert_eq!(state.active_pipelines.len(), 2);
+    for pid in &dispatched {
+        assert!(state.active_pipelines.contains(pid));
+    }
+}
+
+/// A stopped worker should not dispatch new items on wake.
+#[tokio::test]
+async fn stopped_worker_does_not_dispatch_on_wake() {
+    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    push_persisted_items(&ctx, "bugs", 1);
+
+    // Start and dispatch first item
+    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 1).await;
+    assert_eq!(count_dispatched(&events), 1);
+
+    // Stop the worker
+    ctx.runtime
+        .handle_event(Event::WorkerStopped {
+            worker_name: "fixer".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Push more items and try to wake
+    push_persisted_items(&ctx, "bugs", 1);
+    let wake_events = ctx
+        .runtime
+        .handle_event(Event::WorkerWake {
+            worker_name: "fixer".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // No new dispatches should happen
+    assert_eq!(count_dispatched(&wake_events), 0);
 }
 
 /// A worker at capacity should not dispatch new items even when woken.
