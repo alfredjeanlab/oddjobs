@@ -22,49 +22,9 @@ pub struct RunArgs {
     #[arg(trailing_var_arg = true)]
     pub args: Vec<String>,
 
-    /// Named arguments (key=value)
-    #[arg(short = 'a', long = "arg", value_parser = parse_key_val)]
-    pub named_args: Vec<(String, String)>,
-
     /// Runbook file to load (e.g., "build.toml")
     #[arg(long = "runbook")]
     pub runbook: Option<String>,
-
-    /// Force execution through the daemon (even for shell commands)
-    #[arg(long)]
-    pub daemon: bool,
-}
-
-fn parse_key_val(s: &str) -> Result<(String, String), String> {
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid key=value: no `=` found in `{s}`"))?;
-    Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
-}
-
-/// Extract `-a key=value` / `--arg key=value` entries from raw args.
-///
-/// When `trailing_var_arg` is active, clap captures these as positional strings
-/// if they appear after the first positional argument. This function pulls them
-/// out so they can be handled as named arguments.
-fn extract_named_args(raw: &[String]) -> (Vec<String>, Vec<(String, String)>) {
-    let mut remaining = Vec::new();
-    let mut named = Vec::new();
-    let mut i = 0;
-
-    while i < raw.len() {
-        if (raw[i] == "-a" || raw[i] == "--arg") && i + 1 < raw.len() {
-            if let Ok(kv) = parse_key_val(&raw[i + 1]) {
-                named.push(kv);
-                i += 2;
-                continue;
-            }
-        }
-        remaining.push(raw[i].clone());
-        i += 1;
-    }
-
-    (remaining, named)
 }
 
 /// Quick validation that a command exists in the runbook.
@@ -165,39 +125,25 @@ pub async fn handle(
         bail!("command not found: {}", command);
     };
 
-    // Pre-extract any -a/--arg entries from trailing args (clap's trailing_var_arg
-    // captures them as positional when they appear after the first positional arg)
-    let (remaining_raw, extra_named) = extract_named_args(&args.args);
-
-    // Split remaining raw args into positional and named based on command's ArgSpec
-    let (positional, mut named) = cmd_def.args.split_raw_args(&remaining_raw);
-
-    // Merge: extracted -a args, then explicit clap -a args (later takes precedence)
-    for (k, v) in extra_named {
-        named.insert(k, v);
-    }
-    for (k, v) in args.named_args {
-        named.insert(k, v);
-    }
+    // Split raw args into positional and named based on command's ArgSpec
+    let (positional, named) = cmd_def.args.split_raw_args(&args.args);
 
     cmd_def.validate_args(&positional, &named)?;
 
-    // Shell directives execute locally unless --daemon is set
+    // Shell directives execute locally
     if let RunDirective::Shell(ref cmd) = cmd_def.run {
-        if !args.daemon {
-            return execute_shell_inline(
-                cmd,
-                cmd_def,
-                &positional,
-                &named,
-                project_root,
-                invoke_dir,
-                namespace,
-            );
-        }
+        return execute_shell_inline(
+            cmd,
+            cmd_def,
+            &positional,
+            &named,
+            project_root,
+            invoke_dir,
+            namespace,
+        );
     }
 
-    // Pipeline, Agent, or --daemon: dispatch to daemon
+    // Pipeline or Agent: dispatch to daemon
     dispatch_to_daemon(
         client,
         project_root,
