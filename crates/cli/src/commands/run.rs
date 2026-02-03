@@ -4,6 +4,7 @@
 //! `oj run <command> [args]` - Run a command from the runbook
 
 use std::collections::HashMap;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,14 @@ pub struct RunArgs {
     /// Runbook file to load (e.g., "build.toml")
     #[arg(long = "runbook")]
     pub runbook: Option<String>,
+
+    /// Attach to the agent's tmux session after starting
+    #[arg(long = "attach", conflicts_with = "no_attach")]
+    pub attach: bool,
+
+    /// Do not attach to the agent's tmux session
+    #[arg(long = "no-attach", conflicts_with = "attach")]
+    pub no_attach: bool,
 }
 
 /// Quick validation that a command exists in the runbook.
@@ -113,8 +122,31 @@ pub async fn handle(
         return print_available_commands(project_root);
     };
 
+    // Extract --attach/--no-attach from trailing args (since trailing_var_arg
+    // is greedy, these flags may end up in args.args rather than clap fields)
+    let mut raw_args = args.args.clone();
+    let mut cli_attach = None;
+    raw_args.retain(|a| {
+        if a == "--attach" {
+            cli_attach = Some(true);
+            false
+        } else if a == "--no-attach" {
+            cli_attach = Some(false);
+            false
+        } else {
+            true
+        }
+    });
+    let attach_override = if args.attach {
+        Some(true)
+    } else if args.no_attach {
+        Some(false)
+    } else {
+        cli_attach
+    };
+
     // Check for --help before anything else
-    if args.args.iter().any(|a| a == "--help" || a == "-h") {
+    if raw_args.iter().any(|a| a == "--help" || a == "-h") {
         return print_command_help(project_root, command, args.runbook.as_deref());
     }
 
@@ -126,7 +158,7 @@ pub async fn handle(
     };
 
     // Split raw args into positional and named based on command's ArgSpec
-    let (positional, named) = cmd_def.args.split_raw_args(&args.args);
+    let (positional, named) = cmd_def.args.split_raw_args(&raw_args);
 
     cmd_def.validate_args(&positional, &named)?;
 
@@ -143,18 +175,42 @@ pub async fn handle(
         );
     }
 
+    // Resolve attach preference: CLI override > runbook default > false
+    let should_attach = attach_override.or(cmd_def.run.attach()).unwrap_or(false);
+
     // Pipeline or Agent: dispatch to daemon
     let client = DaemonClient::for_action()?;
-    dispatch_to_daemon(
-        &client,
-        project_root,
-        invoke_dir,
-        namespace,
-        command,
-        &positional,
-        &named,
-    )
-    .await
+    let result = client
+        .run_command(
+            project_root,
+            invoke_dir,
+            namespace,
+            command,
+            &positional,
+            &named,
+        )
+        .await?;
+
+    match result {
+        crate::client::RunCommandResult::Pipeline {
+            pipeline_id,
+            pipeline_name,
+        } => dispatch_pipeline(&client, namespace, command, &pipeline_id, &pipeline_name).await,
+        crate::client::RunCommandResult::AgentRun {
+            agent_run_id,
+            agent_name,
+        } => {
+            dispatch_agent_run(
+                &client,
+                namespace,
+                command,
+                &agent_run_id,
+                &agent_name,
+                should_attach,
+            )
+            .await
+        }
+    }
 }
 
 fn execute_shell_inline(
@@ -193,41 +249,6 @@ fn execute_shell_inline(
     }
 
     Ok(())
-}
-
-async fn dispatch_to_daemon(
-    client: &DaemonClient,
-    project_root: &Path,
-    invoke_dir: &Path,
-    namespace: &str,
-    command: &str,
-    positional: &[String],
-    named: &HashMap<String, String>,
-) -> Result<()> {
-    let result = client
-        .run_command(
-            project_root,
-            invoke_dir,
-            namespace,
-            command,
-            positional,
-            named,
-        )
-        .await?;
-
-    match result {
-        crate::client::RunCommandResult::Pipeline {
-            pipeline_id,
-            pipeline_name,
-        } => dispatch_pipeline(client, namespace, command, &pipeline_id, &pipeline_name).await,
-        crate::client::RunCommandResult::AgentRun {
-            agent_run_id,
-            agent_name,
-        } => {
-            dispatch_agent_run(namespace, command, &agent_run_id, &agent_name);
-            Ok(())
-        }
-    }
 }
 
 async fn dispatch_pipeline(
@@ -284,14 +305,64 @@ async fn dispatch_pipeline(
     Ok(())
 }
 
-fn dispatch_agent_run(namespace: &str, command: &str, agent_run_id: &str, agent_name: &str) {
+async fn dispatch_agent_run(
+    client: &DaemonClient,
+    namespace: &str,
+    command: &str,
+    agent_run_id: &str,
+    agent_name: &str,
+    should_attach: bool,
+) -> Result<()> {
     let short_id = &agent_run_id[..8.min(agent_run_id.len())];
     println!("Project: {namespace}");
     println!("Command {} invoked.", command);
     println!("Agent: {agent_name} ({short_id})");
     println!();
-    println!("  oj agent show {short_id}");
-    println!("  oj agent logs {short_id}");
+
+    if !should_attach || !std::io::stdout().is_terminal() {
+        println!("  oj agent show {short_id}");
+        println!("  oj agent logs {short_id}");
+        return Ok(());
+    }
+
+    // Poll for session_id to appear on the agent run
+    println!("Waiting for agent session... (Ctrl+C to skip)");
+
+    let poll_interval = Duration::from_millis(300);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut session_id = None;
+
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    loop {
+        tokio::select! {
+            _ = &mut ctrl_c => break,
+            _ = tokio::time::sleep(poll_interval) => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                if let Ok(Some(detail)) = client.get_agent(agent_run_id).await {
+                    if let Some(ref sid) = detail.session_id {
+                        session_id = Some(sid.clone());
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    match session_id {
+        Some(sid) => {
+            crate::commands::session::attach(&sid)?;
+        }
+        None => {
+            println!("Agent session not ready yet. You can attach manually:");
+            println!("  oj attach {short_id}");
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -518,8 +518,12 @@ pub enum RunDirective {
     Shell(String),
     /// Pipeline reference: `run = { pipeline = "build" }`
     Pipeline { pipeline: String },
-    /// Agent reference: `run = { agent = "planning" }`
-    Agent { agent: String },
+    /// Agent reference: `run = { agent = "planning" }` or `run = { agent = "planning", attach = true }`
+    Agent {
+        agent: String,
+        #[serde(default)]
+        attach: Option<bool>,
+    },
 }
 
 impl RunDirective {
@@ -557,7 +561,15 @@ impl RunDirective {
     /// Get the agent name if this is an agent directive
     pub fn agent_name(&self) -> Option<&str> {
         match self {
-            RunDirective::Agent { agent } => Some(agent),
+            RunDirective::Agent { agent, .. } => Some(agent),
+            _ => None,
+        }
+    }
+
+    /// Get the attach preference if this is an agent directive
+    pub fn attach(&self) -> Option<bool> {
+        match self {
+            RunDirective::Agent { attach, .. } => *attach,
             _ => None,
         }
     }

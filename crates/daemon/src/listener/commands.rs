@@ -60,11 +60,12 @@ pub(super) async fn handle_run_command(
 
     // Detect if this is a standalone agent command
     let is_agent = matches!(&cmd_def.run, oj_runbook::RunDirective::Agent { .. });
-    let agent_name_if_standalone = if let oj_runbook::RunDirective::Agent { agent } = &cmd_def.run {
-        Some(agent.clone())
-    } else {
-        None
-    };
+    let agent_name_if_standalone =
+        if let oj_runbook::RunDirective::Agent { agent, .. } = &cmd_def.run {
+            Some(agent.clone())
+        } else {
+            None
+        };
 
     // Get pipeline name from command definition (shell commands use the command name)
     let pipeline_name = cmd_def.run.pipeline_name().unwrap_or(command).to_string();

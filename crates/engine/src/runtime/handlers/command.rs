@@ -185,7 +185,7 @@ where
 
                 Ok(result_events)
             }
-            RunDirective::Agent { agent } => {
+            RunDirective::Agent { agent, .. } => {
                 let agent_name = agent.clone();
                 let agent_def = runbook
                     .get_agent(&agent_name)

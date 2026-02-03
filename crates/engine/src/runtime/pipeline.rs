@@ -99,7 +99,7 @@ where
                 result_events.extend(self.executor.execute_all(effects).await?);
             }
 
-            RunDirective::Agent { agent } => {
+            RunDirective::Agent { agent, .. } => {
                 result_events.extend(self.spawn_agent(pipeline_id, agent, input).await?);
             }
 

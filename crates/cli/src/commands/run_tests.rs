@@ -261,6 +261,7 @@ fn directive_is_pipeline_for_pipeline_commands() {
 fn directive_is_agent_for_agent_commands() {
     let directive = RunDirective::Agent {
         agent: "planning".to_string(),
+        attach: None,
     };
     assert!(!directive.is_shell());
     assert!(directive.is_agent());
@@ -314,4 +315,83 @@ fn format_available_commands_shows_description() {
 
     assert!(buf.contains("deploy"));
     assert!(buf.contains("Deploy to production"));
+}
+
+// Tests for --attach/--no-attach flag extraction from trailing args
+
+/// Helper to simulate extracting attach override from raw args,
+/// matching the logic in handle().
+fn extract_attach_override(raw: &[&str]) -> (Option<bool>, Vec<String>) {
+    let mut args: Vec<String> = raw.iter().map(|s| s.to_string()).collect();
+    let mut cli_attach = None;
+    args.retain(|a| {
+        if a == "--attach" {
+            cli_attach = Some(true);
+            false
+        } else if a == "--no-attach" {
+            cli_attach = Some(false);
+            false
+        } else {
+            true
+        }
+    });
+    (cli_attach, args)
+}
+
+#[test]
+fn attach_flag_extracted_from_trailing_args() {
+    let (attach, remaining) = extract_attach_override(&["some-arg", "--attach"]);
+    assert_eq!(attach, Some(true));
+    assert_eq!(remaining, vec!["some-arg"]);
+}
+
+#[test]
+fn no_attach_flag_extracted_from_trailing_args() {
+    let (attach, remaining) = extract_attach_override(&["some-arg", "--no-attach"]);
+    assert_eq!(attach, Some(false));
+    assert_eq!(remaining, vec!["some-arg"]);
+}
+
+#[test]
+fn no_flag_leaves_args_unchanged() {
+    let (attach, remaining) = extract_attach_override(&["some-arg", "other"]);
+    assert_eq!(attach, None);
+    assert_eq!(remaining, vec!["some-arg", "other"]);
+}
+
+#[test]
+fn attach_flag_between_positional_args() {
+    let (attach, remaining) = extract_attach_override(&["first", "--attach", "second"]);
+    assert_eq!(attach, Some(true));
+    assert_eq!(remaining, vec!["first", "second"]);
+}
+
+#[test]
+fn attach_override_precedence_cli_over_runbook() {
+    // CLI --attach overrides runbook attach = false
+    let cli_override = Some(true);
+    let runbook_attach = Some(false);
+    let should_attach = cli_override.or(runbook_attach).unwrap_or(false);
+    assert!(should_attach);
+
+    // CLI --no-attach overrides runbook attach = true
+    let cli_override = Some(false);
+    let runbook_attach = Some(true);
+    let should_attach = cli_override.or(runbook_attach).unwrap_or(false);
+    assert!(!should_attach);
+}
+
+#[test]
+fn attach_override_precedence_runbook_over_default() {
+    // No CLI flag, runbook says attach = true
+    let cli_override: Option<bool> = None;
+    let runbook_attach = Some(true);
+    let should_attach = cli_override.or(runbook_attach).unwrap_or(false);
+    assert!(should_attach);
+
+    // No CLI flag, no runbook setting -> default false
+    let cli_override: Option<bool> = None;
+    let runbook_attach: Option<bool> = None;
+    let should_attach = cli_override.or(runbook_attach).unwrap_or(false);
+    assert!(!should_attach);
 }

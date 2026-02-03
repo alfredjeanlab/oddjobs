@@ -29,6 +29,7 @@ fn sample_pipeline() -> PipelineDef {
                 name: "plan".to_string(),
                 run: RunDirective::Agent {
                     agent: "planner".to_string(),
+                    attach: None,
                 },
                 on_done: None,
                 on_fail: None,
@@ -38,6 +39,7 @@ fn sample_pipeline() -> PipelineDef {
                 name: "execute".to_string(),
                 run: RunDirective::Agent {
                     agent: "executor".to_string(),
+                    attach: None,
                 },
                 on_done: Some(StepTransition {
                     step: "done".to_string(),

@@ -236,9 +236,11 @@ fn run_directive_pipeline() {
 fn run_directive_agent() {
     let directive = RunDirective::Agent {
         agent: "planning".to_string(),
+        attach: None,
     };
     assert!(directive.is_agent());
     assert_eq!(directive.agent_name(), Some("planning"));
+    assert_eq!(directive.attach(), None);
 }
 
 // TOML deserialization tests
@@ -274,6 +276,68 @@ fn deserialize_agent_run() {
     let toml = r#"run = { agent = "planning" }"#;
     let test: Test = toml::from_str(toml).unwrap();
     assert_eq!(test.run.agent_name(), Some("planning"));
+    assert_eq!(test.run.attach(), None);
+}
+
+#[test]
+fn deserialize_agent_run_with_attach_true() {
+    #[derive(Deserialize)]
+    struct Test {
+        run: RunDirective,
+    }
+    let toml = r#"run = { agent = "planning", attach = true }"#;
+    let test: Test = toml::from_str(toml).unwrap();
+    assert_eq!(
+        test.run,
+        RunDirective::Agent {
+            agent: "planning".to_string(),
+            attach: Some(true),
+        }
+    );
+    assert_eq!(test.run.attach(), Some(true));
+}
+
+#[test]
+fn deserialize_agent_run_with_attach_false() {
+    #[derive(Deserialize)]
+    struct Test {
+        run: RunDirective,
+    }
+    let toml = r#"run = { agent = "planning", attach = false }"#;
+    let test: Test = toml::from_str(toml).unwrap();
+    assert_eq!(
+        test.run,
+        RunDirective::Agent {
+            agent: "planning".to_string(),
+            attach: Some(false),
+        }
+    );
+    assert_eq!(test.run.attach(), Some(false));
+}
+
+#[test]
+fn deserialize_agent_run_hcl_with_attach() {
+    let hcl = r#"
+command "mayor" {
+  run = { agent = "mayor", attach = true }
+}
+"#;
+    let runbook: crate::Runbook = hcl::from_str(hcl).unwrap();
+    let cmd = runbook.commands.get("mayor").unwrap();
+    assert_eq!(cmd.run.agent_name(), Some("mayor"));
+    assert_eq!(cmd.run.attach(), Some(true));
+}
+
+#[test]
+fn attach_accessor_returns_none_for_non_agent() {
+    assert_eq!(RunDirective::Shell("echo".to_string()).attach(), None);
+    assert_eq!(
+        RunDirective::Pipeline {
+            pipeline: "build".to_string()
+        }
+        .attach(),
+        None
+    );
 }
 
 #[test]

@@ -112,7 +112,7 @@ pub fn get_agent_def<'a>(
 
     // Extract agent name from run directive
     let agent_name = match &step_def.run {
-        RunDirective::Agent { agent } => agent,
+        RunDirective::Agent { agent, .. } => agent,
         _ => {
             return Err(RuntimeError::InvalidRunDirective {
                 context: format!("step {}", pipeline.step),
