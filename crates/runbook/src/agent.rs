@@ -8,16 +8,21 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 
+/// Valid SessionStart source values for matcher filtering.
+pub const VALID_PRIME_SOURCES: &[&str] = &["startup", "resume", "clear", "compact"];
+
 /// Shell commands to run at session start for context injection.
 ///
-/// Supports two forms:
+/// Supports three forms:
 /// - `Script`: a single shell script string (may be multi-line)
 /// - `Commands`: an array of individual commands (each validated as a single shell command)
+/// - `PerSource`: a map from SessionStart source to a `Script` or `Commands` definition
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum PrimeDef {
     Script(String),
     Commands(Vec<String>),
+    PerSource(HashMap<String, PrimeDef>),
 }
 
 impl<'de> Deserialize<'de> for PrimeDef {
@@ -30,16 +35,30 @@ impl<'de> Deserialize<'de> for PrimeDef {
         enum Helper {
             Script(String),
             Commands(Vec<String>),
+            PerSource(HashMap<String, PrimeDef>),
         }
         match Helper::deserialize(deserializer)? {
             Helper::Script(s) => Ok(PrimeDef::Script(s)),
             Helper::Commands(v) => Ok(PrimeDef::Commands(v)),
+            Helper::PerSource(map) => {
+                for (_key, val) in &map {
+                    if matches!(val, PrimeDef::PerSource(_)) {
+                        return Err(serde::de::Error::custom(
+                            "nested per-source prime is not allowed",
+                        ));
+                    }
+                }
+                Ok(PrimeDef::PerSource(map))
+            }
         }
     }
 }
 
 impl PrimeDef {
     /// Render the prime script content with variable interpolation.
+    ///
+    /// Only valid for `Script` and `Commands`. Panics on `PerSource` —
+    /// use `render_per_source()` instead.
     pub fn render(&self, vars: &HashMap<String, String>) -> String {
         match self {
             PrimeDef::Script(s) => crate::template::interpolate(s, vars),
@@ -48,6 +67,27 @@ impl PrimeDef {
                 .map(|cmd| crate::template::interpolate(cmd, vars))
                 .collect::<Vec<_>>()
                 .join("\n"),
+            PrimeDef::PerSource(_) => {
+                panic!("render() not valid for PerSource; use render_per_source()")
+            }
+        }
+    }
+
+    /// Render prime scripts per source with variable interpolation.
+    ///
+    /// For `PerSource`, returns a map of source name to rendered script content.
+    /// For `Script`/`Commands`, returns a single-entry map with empty string key (all sources).
+    pub fn render_per_source(&self, vars: &HashMap<String, String>) -> HashMap<String, String> {
+        match self {
+            PrimeDef::PerSource(map) => map
+                .iter()
+                .map(|(source, def)| (source.clone(), def.render(vars)))
+                .collect(),
+            other => {
+                let mut m = HashMap::new();
+                m.insert(String::new(), other.render(vars));
+                m
+            }
         }
     }
 }

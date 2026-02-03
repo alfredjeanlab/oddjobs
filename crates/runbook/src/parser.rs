@@ -197,9 +197,36 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             validate_agent_command(&agent.run, &run_location, has_prompt)?;
         }
 
-        if let Some(PrimeDef::Commands(cmds)) = &agent.prime {
-            for (i, cmd) in cmds.iter().enumerate() {
-                validate_shell_command(cmd, &format!("agent.{}.prime[{}]", name, i))?;
+        if let Some(ref prime) = agent.prime {
+            match prime {
+                PrimeDef::Commands(cmds) => {
+                    for (i, cmd) in cmds.iter().enumerate() {
+                        validate_shell_command(cmd, &format!("agent.{}.prime[{}]", name, i))?;
+                    }
+                }
+                PrimeDef::PerSource(map) => {
+                    for (source, def) in map {
+                        if !crate::agent::VALID_PRIME_SOURCES.contains(&source.as_str()) {
+                            return Err(ParseError::InvalidFormat {
+                                location: format!("agent.{}.prime", name),
+                                message: format!(
+                                    "unknown prime source '{}'; valid sources: {}",
+                                    source,
+                                    crate::agent::VALID_PRIME_SOURCES.join(", ")
+                                ),
+                            });
+                        }
+                        if let PrimeDef::Commands(cmds) = def {
+                            for (i, cmd) in cmds.iter().enumerate() {
+                                validate_shell_command(
+                                    cmd,
+                                    &format!("agent.{}.prime.{}[{}]", name, source, i),
+                                )?;
+                            }
+                        }
+                    }
+                }
+                PrimeDef::Script(_) => {}
             }
         }
     }

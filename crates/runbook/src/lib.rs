@@ -23,7 +23,7 @@ mod worker;
 
 pub use agent::{
     ActionConfig, ActionTrigger, AgentAction, AgentDef, Attempts, ErrorActionConfig, ErrorMatch,
-    ErrorType, PrimeDef,
+    ErrorType, PrimeDef, VALID_PRIME_SOURCES,
 };
 pub use command::{
     parse_arg_spec, ArgDef, ArgSpec, ArgSpecError, ArgValidationError, CommandDef, FlagDef,

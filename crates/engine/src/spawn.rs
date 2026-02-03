@@ -92,25 +92,24 @@ pub fn build_spawn_effects(
         RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
     })?;
 
-    // Write prime script if agent has one
-    let prime_path = if let Some(ref prime) = agent_def.prime {
-        Some(
-            crate::workspace::prepare_agent_prime(&agent_id, prime, &prompt_vars).map_err(|e| {
-                tracing::error!(error = %e, "agent prime preparation failed");
-                RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-            })?,
-        )
+    // Write prime script(s) if agent has prime config
+    let prime_paths = if let Some(ref prime) = agent_def.prime {
+        crate::workspace::prepare_agent_prime(&agent_id, prime, &prompt_vars).map_err(|e| {
+            tracing::error!(error = %e, "agent prime preparation failed");
+            RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
+        })?
     } else {
-        None
+        HashMap::new()
     };
 
     // Prepare settings file with hooks in OJ state directory
     let settings_path =
-        crate::workspace::prepare_agent_settings(&agent_id, workspace_path, prime_path.as_deref())
-            .map_err(|e| {
+        crate::workspace::prepare_agent_settings(&agent_id, workspace_path, &prime_paths).map_err(
+            |e| {
                 tracing::error!(error = %e, "agent settings preparation failed");
                 RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-            })?;
+            },
+        )?;
 
     // Build base command and append session-id, settings, and prompt (if not inline)
     let base_command = agent_def.build_command(&vars);
