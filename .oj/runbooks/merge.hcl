@@ -52,12 +52,14 @@ pipeline "merge" {
       git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
     SHELL
     on_done = { step = "merge" }
+    on_fail = { step = "reinit" }
   }
 
   step "reinit" {
     run = <<-SHELL
       git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+      rm -rf "${workspace.root}" 2>/dev/null || true
       git -C "${local.repo}" fetch origin ${var.mr.base} ${var.mr.branch}
       git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
     SHELL
@@ -87,7 +89,14 @@ pipeline "merge" {
       git diff --cached --quiet || git commit --amend --no-edit
       git rebase --abort 2>/dev/null || true
       git -C "${local.repo}" fetch origin ${var.mr.base}
-      git rebase origin/${var.mr.base}
+
+      # Try rebase for linear history; if it fails for any reason, abort
+      # and merge instead (preserves resolver's conflict resolutions)
+      if ! git rebase origin/${var.mr.base} 2>/dev/null; then
+        git rebase --abort 2>/dev/null || true
+        git merge origin/${var.mr.base} --no-edit
+      fi
+
       git -C "${local.repo}" push origin ${local.branch}:${var.mr.base}
       git -C "${local.repo}" push origin --delete ${var.mr.branch} || true
     SHELL
