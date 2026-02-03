@@ -76,6 +76,26 @@ pub fn prevalidate_command(
     Ok(runbook)
 }
 
+fn print_command_help(
+    project_root: &Path,
+    command: &str,
+    runbook_file: Option<&str>,
+) -> Result<()> {
+    let runbook = crate::load_runbook(project_root, command, runbook_file)?;
+    let cmd_def = runbook
+        .get_command(command)
+        .ok_or_else(|| anyhow::anyhow!("unknown command: {}", command))?;
+
+    let runbook_dir = project_root.join(".oj/runbooks");
+    let comment = oj_runbook::find_command_with_comment(&runbook_dir, command)
+        .ok()
+        .flatten()
+        .and_then(|(_, comment)| comment);
+
+    eprint!("{}", cmd_def.format_help(command, comment.as_ref()));
+    std::process::exit(0);
+}
+
 fn print_available_commands(project_root: &Path) -> Result<()> {
     let runbook_dir = project_root.join(".oj/runbooks");
     let commands = oj_runbook::collect_all_commands(&runbook_dir).unwrap_or_default();
@@ -115,6 +135,11 @@ pub async fn handle(
     let Some(ref command) = args.command else {
         return print_available_commands(project_root);
     };
+
+    // Check for --help before anything else
+    if args.args.iter().any(|a| a == "--help" || a == "-h") {
+        return print_command_help(project_root, command, args.runbook.as_deref());
+    }
 
     // Prevalidate locally for fast feedback
     let runbook = prevalidate_command(project_root, command, args.runbook.as_deref())?;

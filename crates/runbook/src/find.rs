@@ -4,9 +4,82 @@
 //! Runbook file discovery
 
 use crate::parser::Format;
-use crate::{parse_runbook_with_format, Runbook};
+use crate::{parse_runbook_with_format, CommandDef, Runbook};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+
+/// Leading comment block extracted from a runbook file.
+pub struct FileComment {
+    /// Text up to the first blank comment line (short description).
+    pub short: String,
+    /// Remaining comment text after the blank line.
+    pub long: String,
+}
+
+/// Extract the leading comment block from a runbook file's raw content.
+///
+/// Reads lines starting with `#`, strips the `# ` prefix, and returns:
+/// - `short`: text up to the first blank comment line (two consecutive newlines)
+/// - `long`: remaining comment text after the blank line
+///
+/// Returns `None` if the file has no leading comment block.
+pub fn extract_file_comment(content: &str) -> Option<FileComment> {
+    let mut lines = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            let text = trimmed
+                .strip_prefix("# ")
+                .unwrap_or(trimmed.strip_prefix('#').unwrap_or(""));
+            lines.push(text.to_string());
+        } else if trimmed.is_empty() && lines.is_empty() {
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    let split_pos = lines.iter().position(|l| l.is_empty());
+    let (short_lines, long_lines) = match split_pos {
+        Some(pos) => (&lines[..pos], &lines[pos + 1..]),
+        None => (lines.as_slice(), &[][..]),
+    };
+
+    Some(FileComment {
+        short: short_lines.join("\n"),
+        long: long_lines.join("\n"),
+    })
+}
+
+/// Find a command definition and its runbook file comment.
+pub fn find_command_with_comment(
+    runbook_dir: &Path,
+    command_name: &str,
+) -> Result<Option<(CommandDef, Option<FileComment>)>, FindError> {
+    if !runbook_dir.exists() {
+        return Ok(None);
+    }
+    let files = collect_runbook_files(runbook_dir)?;
+    for (path, format) in files {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let runbook = match parse_runbook_with_format(&content, format) {
+            Ok(rb) => rb,
+            Err(_) => continue,
+        };
+        if let Some(cmd) = runbook.commands.get(command_name) {
+            let comment = extract_file_comment(&content);
+            return Ok(Some((cmd.clone(), comment)));
+        }
+    }
+    Ok(None)
+}
 
 /// Errors from runbook file scanning
 #[derive(Debug, Error)]
@@ -70,7 +143,21 @@ pub fn collect_all_commands(
                 continue;
             }
         };
-        for (name, cmd) in runbook.commands {
+        let comment = extract_file_comment(&content);
+        for (name, mut cmd) in runbook.commands {
+            if cmd.description.is_none() {
+                if let Some(ref comment) = comment {
+                    let desc_line = comment
+                        .short
+                        .lines()
+                        .nth(1)
+                        .or_else(|| comment.short.lines().next())
+                        .unwrap_or("");
+                    if !desc_line.is_empty() {
+                        cmd.description = Some(desc_line.to_string());
+                    }
+                }
+            }
             commands.push((name, cmd));
         }
     }

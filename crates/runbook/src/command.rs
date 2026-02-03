@@ -668,6 +668,15 @@ impl CommandDef {
 
         result
     }
+
+    /// Format a `--help` page for this command.
+    pub fn format_help(
+        &self,
+        command_name: &str,
+        comment: Option<&crate::find::FileComment>,
+    ) -> String {
+        crate::help::format_command_help(self, command_name, comment)
+    }
 }
 
 #[cfg(test)]

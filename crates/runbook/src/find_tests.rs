@@ -244,3 +244,104 @@ fn collect_all_queues_skips_invalid() {
     assert_eq!(queues.len(), 1);
     assert_eq!(queues[0].0, "tasks");
 }
+
+// extract_file_comment tests
+
+#[test]
+fn extract_comment_multi_paragraph() {
+    let content = "# Build Runbook\n# Feature development workflow\n#\n# Usage:\n#   oj run build <name>\n\ncommand \"build\" {}\n";
+    let comment = extract_file_comment(content).unwrap();
+    assert_eq!(comment.short, "Build Runbook\nFeature development workflow");
+    assert_eq!(comment.long, "Usage:\n  oj run build <name>");
+}
+
+#[test]
+fn extract_comment_single_line() {
+    let content = "# Simple command\n\ncommand \"test\" {}\n";
+    let comment = extract_file_comment(content).unwrap();
+    assert_eq!(comment.short, "Simple command");
+    assert!(comment.long.is_empty());
+}
+
+#[test]
+fn extract_comment_no_comment() {
+    let content = "command \"test\" {}\n";
+    assert!(extract_file_comment(content).is_none());
+}
+
+#[test]
+fn extract_comment_leading_blank_lines() {
+    let content = "\n\n# After blanks\n\ncommand \"test\" {}\n";
+    let comment = extract_file_comment(content).unwrap();
+    assert_eq!(comment.short, "After blanks");
+}
+
+#[test]
+fn extract_comment_bare_hash() {
+    let content = "#\n# Title\n#\n# Body\n\ncommand \"test\" {}\n";
+    let comment = extract_file_comment(content).unwrap();
+    // First bare # produces empty string, which is the split point
+    // So short = "" (before the split), long = "Title\n\nBody" (wait, no)
+    // Actually: lines = ["", "Title", "", "Body"]
+    // split_pos = 0 (first empty), short = [] (empty), long = ["Title", "", "Body"]
+    assert_eq!(comment.short, "");
+    assert_eq!(comment.long, "Title\n\nBody");
+}
+
+#[test]
+fn find_command_with_comment_returns_data() {
+    let tmp = TempDir::new().unwrap();
+    let content = "# Build Runbook\n# Feature workflow\n#\n# Usage:\n#   oj run build <name>\n\ncommand \"build\" {\n  args = \"<name>\"\n  run  = \"echo build\"\n}\n";
+    write_hcl(tmp.path(), "build.hcl", content);
+
+    let result = find_command_with_comment(tmp.path(), "build").unwrap();
+    assert!(result.is_some());
+    let (cmd, comment) = result.unwrap();
+    assert_eq!(cmd.name, "build");
+    let comment = comment.unwrap();
+    assert_eq!(comment.short, "Build Runbook\nFeature workflow");
+    assert!(comment.long.contains("Usage:"));
+}
+
+#[test]
+fn find_command_with_comment_missing() {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "deploy.hcl", CMD_RUNBOOK);
+
+    let result = find_command_with_comment(tmp.path(), "nonexistent").unwrap();
+    assert!(result.is_none());
+}
+
+#[test]
+fn collect_all_commands_populates_description_from_comment() {
+    let tmp = TempDir::new().unwrap();
+    let content = "# Build Runbook\n# Feature workflow: init → plan → implement\n\ncommand \"build\" {\n  args = \"<name>\"\n  run  = \"echo build\"\n}\n";
+    write_hcl(tmp.path(), "build.hcl", content);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(
+        commands[0].1.description.as_deref(),
+        Some("Feature workflow: init → plan → implement")
+    );
+}
+
+#[test]
+fn collect_all_commands_explicit_description_not_overridden() {
+    let tmp = TempDir::new().unwrap();
+    let content = "# Build Runbook\n# Comment description\n\ncommand \"build\" {\n  description = \"Explicit\"\n  args = \"<name>\"\n  run  = \"echo build\"\n}\n";
+    write_hcl(tmp.path(), "build.hcl", content);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert_eq!(commands[0].1.description.as_deref(), Some("Explicit"));
+}
+
+#[test]
+fn collect_all_commands_single_line_comment_used_as_description() {
+    let tmp = TempDir::new().unwrap();
+    let content = "# Simple command\n\ncommand \"test\" {\n  run = \"echo test\"\n}\n";
+    write_hcl(tmp.path(), "test.hcl", content);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert_eq!(commands[0].1.description.as_deref(), Some("Simple command"));
+}
