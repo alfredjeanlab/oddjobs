@@ -1,9 +1,16 @@
 # TODO
 
+In progress (agents working):
+  - feat(cli): oj worker stop <name> — pause a running worker
+  - feat(cli): oj pipeline prune --failed, prune cancelled regardless of age
+  - fix(engine): DeleteWorkspace should call git worktree remove before rm -rf
+
 Drafts:
   - draft(cli): inline commands — execute shell command.run locally, not via daemon
 
 Recently landed:
+  - chore(runbooks): add worktree cleanup steps to all pipelines (on_done/on_cancel/on_fail)
+  - chore(runbooks): merge push on_fail attempts = 2, resolver gate attempts = 2
   - feat(engine): eager locals — evaluate $() in locals at creation, remove trusted prefixes
   - feat(engine): PreToolUse hook for ExitPlanMode/AskUserQuestion → Prompting state
   - feat(runbook): validate name references and step reachability at parse time
@@ -144,6 +151,7 @@ Key features landed:
   - `oj run merge` convenience command across all projects
   - PreToolUse hook: detect plan/question tools before agent gets stuck
   - Step on_fail attempts: bounded retry for push→check loops
+  - Worktree cleanup steps in all runbooks (build, fix, chore, draft, merge)
 
 Patterns that work:
   - oj run {build,fix,chore,draft} → agent → submit/push. Full loop end-to-end.
