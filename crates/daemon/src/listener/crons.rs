@@ -249,6 +249,42 @@ pub(super) async fn handle_cron_once(
     })
 }
 
+/// Handle a CronRestart request: stop (if running), reload runbook, start.
+pub(super) fn handle_cron_restart(
+    project_root: &Path,
+    namespace: &str,
+    cron_name: &str,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Stop cron if it exists in state
+    let scoped = if namespace.is_empty() {
+        cron_name.to_string()
+    } else {
+        format!("{}/{}", namespace, cron_name)
+    };
+    let exists = {
+        let state = state.lock();
+        state.crons.contains_key(&scoped)
+    };
+    if exists {
+        let stop_event = Event::CronStopped {
+            cron_name: cron_name.to_string(),
+            namespace: namespace.to_string(),
+        };
+        event_bus
+            .send(stop_event)
+            .map_err(|_| ConnectionError::WalError)?;
+    }
+
+    // Start with fresh runbook
+    handle_cron_start(project_root, namespace, cron_name, event_bus, state)
+}
+
+#[cfg(test)]
+#[path = "crons_tests.rs"]
+mod tests;
+
 /// Load a runbook that contains the given cron name.
 fn load_runbook_for_cron(
     project_root: &Path,

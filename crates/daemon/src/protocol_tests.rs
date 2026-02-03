@@ -548,6 +548,34 @@ fn workspace_prune_namespace_defaults_to_none() {
     }
 }
 
+#[test]
+fn encode_decode_roundtrip_worker_restart() {
+    let request = Request::WorkerRestart {
+        project_root: std::path::PathBuf::from("/test/project"),
+        namespace: "myproject".to_string(),
+        worker_name: "fixer".to_string(),
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
+#[test]
+fn encode_decode_roundtrip_cron_restart() {
+    let request = Request::CronRestart {
+        project_root: std::path::PathBuf::from("/test/project"),
+        namespace: "myproject".to_string(),
+        cron_name: "nightly".to_string(),
+    };
+
+    let encoded = encode(&request).expect("encode failed");
+    let decoded: Request = decode(&encoded).expect("decode failed");
+
+    assert_eq!(request, decoded);
+}
+
 #[tokio::test]
 async fn write_message_adds_length_prefix() {
     let data = b"test data";

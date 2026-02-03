@@ -169,6 +169,14 @@ pub enum Request {
         project_root: Option<PathBuf>,
     },
 
+    /// Restart a worker (stop, reload runbook, start)
+    WorkerRestart {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        worker_name: String,
+    },
+
     /// Start a cron timer
     CronStart {
         project_root: PathBuf,
@@ -184,6 +192,14 @@ pub enum Request {
         namespace: String,
         #[serde(default)]
         project_root: Option<PathBuf>,
+    },
+
+    /// Restart a cron (stop, reload runbook, start)
+    CronRestart {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        cron_name: String,
     },
 
     /// Prune stopped crons from daemon state

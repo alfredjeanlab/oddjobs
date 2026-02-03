@@ -321,6 +321,18 @@ async fn handle_request(
             project_root.as_deref(),
         ),
 
+        Request::WorkerRestart {
+            project_root,
+            namespace,
+            worker_name,
+        } => workers::handle_worker_restart(
+            &project_root,
+            &namespace,
+            &worker_name,
+            event_bus,
+            state,
+        ),
+
         Request::CronStart {
             project_root,
             namespace,
@@ -338,6 +350,12 @@ async fn handle_request(
             state,
             project_root.as_deref(),
         ),
+
+        Request::CronRestart {
+            project_root,
+            namespace,
+            cron_name,
+        } => crons::handle_cron_restart(&project_root, &namespace, &cron_name, event_bus, state),
 
         Request::CronOnce {
             project_root,

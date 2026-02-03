@@ -36,6 +36,14 @@ pub enum WorkerCommand {
         #[arg(long = "project")]
         project: Option<String>,
     },
+    /// Restart a worker (stop, reload runbook, start)
+    Restart {
+        /// Worker name from runbook
+        name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
+    },
     /// View worker activity log
     Logs {
         /// Worker name
@@ -117,6 +125,28 @@ pub async fn handle(
             match client.send(&request).await? {
                 Response::Ok => {
                     println!("Worker '{}' stopped ({})", name, effective_namespace);
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        WorkerCommand::Restart { name, project } => {
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
+            let request = Request::WorkerRestart {
+                project_root: project_root.to_path_buf(),
+                namespace: effective_namespace,
+                worker_name: name.clone(),
+            };
+            match client.send(&request).await? {
+                Response::WorkerStarted { worker_name } => {
+                    println!("Worker '{}' restarted", worker_name);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

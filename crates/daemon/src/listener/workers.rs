@@ -154,6 +154,38 @@ pub(super) fn handle_worker_stop(
     Ok(Response::Ok)
 }
 
+/// Handle a WorkerRestart request: stop (if running), reload runbook, start.
+pub(super) fn handle_worker_restart(
+    project_root: &Path,
+    namespace: &str,
+    worker_name: &str,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Stop worker if it exists in state
+    let scoped = if namespace.is_empty() {
+        worker_name.to_string()
+    } else {
+        format!("{}/{}", namespace, worker_name)
+    };
+    let exists = {
+        let state = state.lock();
+        state.workers.contains_key(&scoped)
+    };
+    if exists {
+        let stop_event = Event::WorkerStopped {
+            worker_name: worker_name.to_string(),
+            namespace: namespace.to_string(),
+        };
+        event_bus
+            .send(stop_event)
+            .map_err(|_| ConnectionError::WalError)?;
+    }
+
+    // Start with fresh runbook
+    handle_worker_start(project_root, namespace, worker_name, event_bus, state)
+}
+
 #[cfg(test)]
 #[path = "workers_tests.rs"]
 mod tests;

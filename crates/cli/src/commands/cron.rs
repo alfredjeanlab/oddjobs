@@ -42,6 +42,14 @@ pub enum CronCommand {
         #[arg(long = "project")]
         project: Option<String>,
     },
+    /// Restart a cron (stop, reload runbook, start)
+    Restart {
+        /// Cron name from runbook
+        name: String,
+        /// Project namespace override
+        #[arg(long = "project")]
+        project: Option<String>,
+    },
     /// Run the cron's pipeline once now (ignores interval)
     Once {
         /// Cron name from runbook
@@ -125,6 +133,28 @@ pub async fn handle(
             match client.send(&request).await? {
                 Response::Ok => {
                     println!("Cron '{}' stopped ({})", name, effective_namespace);
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        CronCommand::Restart { name, project } => {
+            let effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+
+            let request = Request::CronRestart {
+                project_root: project_root.to_path_buf(),
+                namespace: effective_namespace,
+                cron_name: name.clone(),
+            };
+            match client.send(&request).await? {
+                Response::CronStarted { cron_name } => {
+                    println!("Cron '{}' restarted", cron_name);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
