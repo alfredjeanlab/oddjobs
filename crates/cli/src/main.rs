@@ -142,11 +142,8 @@ async fn run() -> Result<()> {
     // - Query commands: connect only, no restart (reads that need existing state)
     // - Signal commands: connect only, no restart (agent-initiated, context-dependent)
     match command {
-        // Action commands - mutate state, user-initiated
-        Commands::Run(args) => {
-            let client = DaemonClient::for_action()?;
-            run::handle(args, &client, &project_root, &invoke_dir, &namespace).await?
-        }
+        // Run commands - shell commands execute inline, pipelines/agents need the daemon
+        Commands::Run(args) => run::handle(args, &project_root, &invoke_dir, &namespace).await?,
 
         // Pipeline commands - mixed action/query
         Commands::Pipeline(args) => {

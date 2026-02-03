@@ -104,7 +104,6 @@ fn format_available_commands(buf: &mut String, commands: &[(String, oj_runbook::
 
 pub async fn handle(
     args: RunArgs,
-    client: &DaemonClient,
     project_root: &Path,
     invoke_dir: &Path,
     namespace: &str,
@@ -144,8 +143,9 @@ pub async fn handle(
     }
 
     // Pipeline or Agent: dispatch to daemon
+    let client = DaemonClient::for_action()?;
     dispatch_to_daemon(
-        client,
+        &client,
         project_root,
         invoke_dir,
         namespace,

@@ -13,6 +13,8 @@ mod prelude;
 mod cli_errors;
 #[path = "specs/cli/help.rs"]
 mod cli_help;
+#[path = "specs/cli/run.rs"]
+mod cli_run;
 
 // project/
 #[path = "specs/project/setup.rs"]
