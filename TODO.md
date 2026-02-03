@@ -88,21 +88,20 @@ Recently landed:
 
 Backlog (roughly priority-ordered):
 
-Crons and reliability
-  1. Cron runbooks: security and architect crons (see docs/future/runbooks/)
-  2. Default error handling for agent errors (rate limit → retry, no internet → retry,
-     out of credits → escalate, unauthorized → escalate). See design notes below.
-
 Human-in-the-loop
-  3. Human In The Loop: CLI-first commands for handling escalation
-  4. Terminal: Dedicated fullscreen TUI for status and interactive inbox
+  1. Human In The Loop: CLI-first commands for handling escalation
+  2. Terminal: Dedicated fullscreen TUI for status and interactive inbox
 
 CLI polish
-  5. CLI color output: extend colors beyond help to list, show, status views
+  3. CLI color output: extend colors beyond help to list, show, status views
       - Colors landed for clap help; next step is colorizing data output
 
+Reliability
+  4. Default error handling for agent errors (rate limit → retry, no internet → retry,
+     out of credits → escalate, unauthorized → escalate). See design notes below.
+
 Multi-project
-  6. Remote daemon: coordinate jobs across multiple machines
+  5. Remote daemon: coordinate jobs across multiple machines
 
 ----
 
