@@ -218,9 +218,10 @@ fn execute_shell_inline(
 
     let interpolated = oj_runbook::interpolate_shell(cmd, &vars);
 
-    let status = std::process::Command::new("sh")
+    let wrapped = format!("set -euo pipefail\n{interpolated}");
+    let status = std::process::Command::new("bash")
         .arg("-c")
-        .arg(&interpolated)
+        .arg(&wrapped)
         .current_dir(project_root)
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
