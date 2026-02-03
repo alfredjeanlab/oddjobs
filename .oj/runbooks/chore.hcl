@@ -30,6 +30,8 @@ pipeline "chore" {
   name      = "${var.task.title}"
   vars      = ["task"]
   workspace = "ephemeral"
+  on_cancel = { step = "cancel" }
+  on_fail   = { step = "reopen" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
@@ -71,6 +73,14 @@ pipeline "chore" {
 
   step "done" {
     run = "cd ${invoke.dir} && wok done ${var.task.id}"
+  }
+
+  step "cancel" {
+    run = "cd ${invoke.dir} && wok close ${var.task.id} --reason 'Chore pipeline cancelled'"
+  }
+
+  step "reopen" {
+    run = "cd ${invoke.dir} && wok reopen ${var.task.id} --reason 'Chore pipeline failed'"
   }
 }
 

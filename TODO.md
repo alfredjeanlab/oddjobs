@@ -3,17 +3,24 @@
 In progress (agents working):
   - feat(cli): oj status command (dashboard overview)
   - feat(engine): step on_fail attempts support
+  - feat(cli): refactor oj queue CLI (list queues, items subcommand)
+  - feat(engine): pipeline breadcrumb files for orphan detection
+  - feat(engine): PreToolUse hook for ExitPlanMode/AskUserQuestion → Prompting state
+  - fix(parser): handle multi-value CLI options (--disallowed-tools, --allowed-tools)
+  - fix(cli): oj pipeline peek fallback when session gone
+
+Recently landed:
   - chore(cli): sort list outputs by last updated
   - chore(cli): improve oj agent list columns (ID, NAME, PROJECT, shorter IDs)
   - chore(cli): add oj agent prune command
-
-Recently landed:
-  - fix(cli): inconsistent shell exit error messages
-  - chore(cli): oj pipeline prune command
   - chore(cli): oj pipeline prune default 24h → 12h
-  - fix(runbooks): fetch and rebase before push in merge pipeline
+  - chore(runbooks): on_cancel → close issue, on_fail → reopen issue
+  - chore(runbooks): disallow ExitPlanMode/AskUserQuestion in fix/chore agents
   - chore(runbooks): increase fix and chore worker concurrency to 3
   - chore(runbooks): rename agents to bugs and chores
+  - fix(runbooks): fetch and rebase before push in merge pipeline
+  - fix(cli): inconsistent shell exit error messages
+  - chore(cli): oj pipeline prune command
   - fix(workspace): oj workspace drop for orphaned worktrees
   - fix(daemon): auto-resume workers on daemon restart
   - fix(cli): suppress empty 'Error: ' on silent exit codes
@@ -110,7 +117,7 @@ Key features landed:
   - Desktop notifications on pipeline/agent lifecycle (on_start/on_done/on_fail)
   - Notification hooks for instant agent idle/prompt detection (no polling)
   - Dead letter queue with retry semantics and configurable cooldown
-  - Worker concurrency > 1 for parallel dispatch
+  - Worker concurrency > 1 for parallel dispatch (tested with concurrency=3)
   - Pipeline locals {}, name templates, on_cancel step, --var syntax throughout
   - WAL materialization for consistent query state across daemon restarts
   - Trusted-prefix interpolation: $(cmd) in locals works for shell steps
@@ -118,6 +125,8 @@ Key features landed:
   - Workspace drop resilience for orphaned worktrees
   - Auto-resume workers on daemon restart
   - Deduplicated workspace nonces, suppress empty Error: on silent exits
+  - Pipeline on_cancel/on_fail → wok issue lifecycle (close/reopen)
+  - --disallowed-tools to prevent agents from using plan mode or asking questions
 
 Patterns that work:
   - oj run {build,fix,chore} → agent → submit → merge queue. Full loop end-to-end.
@@ -125,7 +134,17 @@ Patterns that work:
     oj pipeline wait <id1> <id2> <id3> for streaming progress.
   - Multi-project: run pipelines across oddjobs, wok, quench simultaneously.
   - Merge queue handles conflicts automatically via resolve agent.
+  - Merge queue: fetch+rebase before push handles non-fast-forward when main moves.
   - Cherry-pick from worktree branch when a step fails, then make install + daemon restart.
   - Manual merge fallback: git fetch + merge when merge queue is stuck.
   - Commit and push TODO/doc changes before kicking off agents — avoids merge conflicts
     when agent branches diverge from main.
+
+Issues discovered:
+  - ExitPlanMode/AskUserQuestion tools block agents at TUI dialogs with no hook signal.
+    Claude Code only fires idle_prompt after 60s, and the agent is mid-tool-call, not idle.
+    Workaround: --disallowed-tools. Proper fix: PreToolUse hook to detect and escalate.
+  - Pipeline state can be lost on daemon restart (WAL durability gap). Breadcrumb files
+    (<pipeline-id>.crumb.json in logs/) planned for orphan detection.
+  - Runbook parser treats multi-value options (--disallowed-tools A B) as positional args.
+    Workaround: comma-separated (--disallowed-tools A,B,C).

@@ -33,6 +33,8 @@ pipeline "fix" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
   workspace = "ephemeral"
+  on_cancel = { step = "cancel" }
+  on_fail   = { step = "reopen" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
@@ -74,6 +76,14 @@ pipeline "fix" {
 
   step "done" {
     run = "cd ${invoke.dir} && wok done ${var.bug.id}"
+  }
+
+  step "cancel" {
+    run = "cd ${invoke.dir} && wok close ${var.bug.id} --reason 'Fix pipeline cancelled'"
+  }
+
+  step "reopen" {
+    run = "cd ${invoke.dir} && wok reopen ${var.bug.id} --reason 'Fix pipeline failed'"
   }
 }
 
