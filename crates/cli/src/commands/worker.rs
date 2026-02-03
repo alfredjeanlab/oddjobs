@@ -26,6 +26,16 @@ pub enum WorkerCommand {
     },
     /// List all workers and their status
     List {},
+    /// Remove stopped workers from daemon state
+    Prune {
+        /// Prune all stopped workers (currently same as default)
+        #[arg(long)]
+        all: bool,
+
+        /// Show what would be pruned without making changes
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 pub async fn handle(
@@ -145,6 +155,38 @@ pub async fn handle(
                 }
                 Response::Error { message } => anyhow::bail!("{}", message),
                 _ => anyhow::bail!("unexpected response from daemon"),
+            }
+        }
+        WorkerCommand::Prune { all, dry_run } => {
+            let (pruned, skipped) = client.worker_prune(all, dry_run).await?;
+
+            match format {
+                OutputFormat::Text => {
+                    if dry_run {
+                        println!("Dry run — no changes made\n");
+                    }
+
+                    for entry in &pruned {
+                        let label = if dry_run { "Would prune" } else { "Pruned" };
+                        let ns = if entry.namespace.is_empty() {
+                            "(default)".to_string()
+                        } else {
+                            entry.namespace.clone()
+                        };
+                        println!("{} worker '{}' ({})", label, entry.name, ns);
+                    }
+
+                    let verb = if dry_run { "would be pruned" } else { "pruned" };
+                    println!("\n{} worker(s) {}, {} skipped", pruned.len(), verb, skipped);
+                }
+                OutputFormat::Json => {
+                    let obj = serde_json::json!({
+                        "dry_run": dry_run,
+                        "pruned": pruned,
+                        "skipped": skipped,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&obj)?);
+                }
             }
         }
     }

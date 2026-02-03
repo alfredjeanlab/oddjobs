@@ -533,6 +533,14 @@ impl MaterializedState {
                 }
             }
 
+            Event::WorkerDeleted {
+                worker_name,
+                namespace,
+            } => {
+                let key = scoped_key(namespace, worker_name);
+                self.workers.remove(&key);
+            }
+
             // -- queue events --
             Event::QueuePushed {
                 queue_name,

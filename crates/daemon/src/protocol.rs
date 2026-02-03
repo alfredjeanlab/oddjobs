@@ -124,6 +124,14 @@ pub enum Request {
         dry_run: bool,
     },
 
+    /// Prune stopped workers from daemon state
+    WorkerPrune {
+        /// Prune all stopped workers (accepts for consistency)
+        all: bool,
+        /// Preview only -- don't actually delete
+        dry_run: bool,
+    },
+
     /// Start a worker to process queue items
     WorkerStart {
         project_root: PathBuf,
@@ -341,6 +349,12 @@ pub enum Response {
         skipped: usize,
     },
 
+    /// Worker prune result
+    WorkersPruned {
+        pruned: Vec<WorkerEntry>,
+        skipped: usize,
+    },
+
     /// Response for bulk cancel operations
     PipelinesCancelled {
         /// IDs of successfully cancelled pipelines
@@ -532,6 +546,13 @@ pub struct AgentEntry {
     pub agent_id: String,
     pub pipeline_id: String,
     pub step_name: String,
+}
+
+/// Worker entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WorkerEntry {
+    pub name: String,
+    pub namespace: String,
 }
 
 /// Summary of a queue item

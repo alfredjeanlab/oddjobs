@@ -85,6 +85,7 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 | `worker:poll_complete` | WorkerPollComplete | `worker_name`, `items` |
 | `worker:item_dispatched` | WorkerItemDispatched | `worker_name`, `item_id`, `pipeline_id` |
 | `worker:stopped` | WorkerStopped | `worker_name` |
+| `worker:deleted` | WorkerDeleted | `worker_name`, `namespace` |
 
 `worker:wake` and `worker:poll_complete` do not mutate state — they are signals handled by the runtime to drive the poll/dispatch cycle.
 

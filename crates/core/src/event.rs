@@ -298,6 +298,13 @@ pub enum Event {
         namespace: String,
     },
 
+    #[serde(rename = "worker:deleted")]
+    WorkerDeleted {
+        worker_name: String,
+        #[serde(default)]
+        namespace: String,
+    },
+
     // -- queue --
     #[serde(rename = "queue:pushed")]
     QueuePushed {
@@ -441,6 +448,7 @@ impl Event {
             Event::WorkerPollComplete { .. } => "worker:poll_complete",
             Event::WorkerItemDispatched { .. } => "worker:item_dispatched",
             Event::WorkerStopped { .. } => "worker:stopped",
+            Event::WorkerDeleted { .. } => "worker:deleted",
             Event::QueuePushed { .. } => "queue:pushed",
             Event::QueueTaken { .. } => "queue:taken",
             Event::QueueCompleted { .. } => "queue:completed",
@@ -563,6 +571,16 @@ impl Event {
                 ..
             } => format!("{t} worker={worker_name} item={item_id} pipeline={pipeline_id}"),
             Event::WorkerStopped { worker_name, .. } => format!("{t} worker={worker_name}"),
+            Event::WorkerDeleted {
+                worker_name,
+                namespace,
+            } => {
+                if namespace.is_empty() {
+                    format!("{t} worker={worker_name}")
+                } else {
+                    format!("{t} worker={worker_name} ns={namespace}")
+                }
+            }
             Event::QueuePushed {
                 queue_name,
                 item_id,

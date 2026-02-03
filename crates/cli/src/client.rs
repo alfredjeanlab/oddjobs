@@ -331,8 +331,7 @@ impl DaemonClient {
         };
         match self.send(&query).await? {
             Response::Pipelines { pipelines } => Ok(pipelines),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -346,8 +345,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Pipeline { pipeline } => Ok(pipeline.map(|b| *b)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -360,8 +358,7 @@ impl DaemonClient {
                 sessions_active,
                 orphan_count,
             } => Ok((uptime_secs, pipelines_active, sessions_active, orphan_count)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -369,8 +366,7 @@ impl DaemonClient {
     pub async fn shutdown(&self, kill: bool) -> Result<(), ClientError> {
         match self.send(&Request::Shutdown { kill }).await? {
             Response::Ok | Response::ShuttingDown => Ok(()),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -381,8 +377,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Hello { version } => Ok(version),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -400,8 +395,7 @@ impl DaemonClient {
         };
         match self.send(&query).await? {
             Response::Agents { agents } => Ok(agents),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -412,8 +406,7 @@ impl DaemonClient {
         };
         match self.send(&query).await? {
             Response::Sessions { sessions } => Ok(sessions),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -453,9 +446,7 @@ impl DaemonClient {
     /// Cancel one or more pipelines by ID
     pub async fn pipeline_cancel(&self, ids: &[String]) -> Result<CancelResult, ClientError> {
         let request = Request::PipelineCancel { ids: ids.to_vec() };
-        let response = self.send(&request).await?;
-
-        match response {
+        match self.send(&request).await? {
             Response::PipelinesCancelled {
                 cancelled,
                 already_terminal,
@@ -465,8 +456,7 @@ impl DaemonClient {
                 already_terminal,
                 not_found,
             }),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -509,8 +499,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::SessionPeek { output } => Ok(output),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -528,8 +517,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::PipelineLogs { log_path, content } => Ok((log_path, content)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -553,8 +541,7 @@ impl DaemonClient {
                 content,
                 steps,
             } => Ok((log_path, content, steps)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -581,8 +568,7 @@ impl DaemonClient {
                 pipeline_id,
                 pipeline_name,
             } => Ok((pipeline_id, pipeline_name)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -613,8 +599,7 @@ impl DaemonClient {
     ) -> Result<Vec<oj_daemon::WorkspaceEntry>, ClientError> {
         match self.send(&request).await? {
             Response::WorkspacesDropped { dropped } => Ok(dropped),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -625,15 +610,14 @@ impl DaemonClient {
         failed: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::PipelineEntry>, usize), ClientError> {
-        let request = Request::PipelinePrune {
+        let req = Request::PipelinePrune {
             all,
             failed,
             dry_run,
         };
-        match self.send(&request).await? {
+        match self.send(&req).await? {
             Response::PipelinesPruned { pruned, skipped } => Ok((pruned, skipped)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -643,11 +627,9 @@ impl DaemonClient {
         all: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::AgentEntry>, usize), ClientError> {
-        let request = Request::AgentPrune { all, dry_run };
-        match self.send(&request).await? {
+        match self.send(&Request::AgentPrune { all, dry_run }).await? {
             Response::AgentsPruned { pruned, skipped } => Ok((pruned, skipped)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -657,9 +639,26 @@ impl DaemonClient {
         all: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::WorkspaceEntry>, usize), ClientError> {
-        let request = Request::WorkspacePrune { all, dry_run };
-        match self.send(&request).await? {
+        match self.send(&Request::WorkspacePrune { all, dry_run }).await? {
             Response::WorkspacesPruned { pruned, skipped } => Ok((pruned, skipped)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Prune stopped workers from daemon state
+    pub async fn worker_prune(
+        &self,
+        all: bool,
+        dry_run: bool,
+    ) -> Result<(Vec<oj_daemon::WorkerEntry>, usize), ClientError> {
+        match self.send(&Request::WorkerPrune { all, dry_run }).await? {
+            Response::WorkersPruned { pruned, skipped } => Ok((pruned, skipped)),
+            other => Self::reject(other),
+        }
+    }
+
+    fn reject<T>(resp: Response) -> Result<T, ClientError> {
+        match resp {
             Response::Error { message } => Err(ClientError::Rejected(message)),
             _ => Err(ClientError::UnexpectedResponse),
         }
@@ -677,8 +676,7 @@ impl DaemonClient {
                 uptime_secs,
                 namespaces,
             } => Ok((uptime_secs, namespaces)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -702,8 +700,7 @@ impl DaemonClient {
                 kind,
                 message,
             }),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -714,8 +711,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Orphans { orphans } => Ok(orphans),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -726,8 +722,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Ok => Ok(()),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 }

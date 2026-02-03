@@ -243,6 +243,7 @@ where
             | Event::WorkspaceReady { .. }
             | Event::WorkspaceFailed { .. }
             | Event::WorkspaceDeleted { .. }
+            | Event::WorkerDeleted { .. }
             | Event::PipelineCancelling { .. }
             | Event::PipelineUpdated { .. }
             | Event::WorkerItemDispatched { .. }

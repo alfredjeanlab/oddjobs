@@ -447,8 +447,6 @@ fn apply_event_worker_started_with_queue_and_concurrency() {
         concurrency: 3,
         namespace: String::new(),
     });
-
-    assert!(state.workers.contains_key("fixer"));
     let worker = &state.workers["fixer"];
     assert_eq!(worker.status, "running");
     assert_eq!(worker.queue_name, "bugs");
@@ -459,22 +457,13 @@ fn apply_event_worker_started_with_queue_and_concurrency() {
 #[test]
 fn apply_event_worker_stopped_sets_status() {
     let mut state = MaterializedState::default();
-    state.apply_event(&Event::WorkerStarted {
-        worker_name: "fixer".to_string(),
-        project_root: PathBuf::from("/test/project"),
-        runbook_hash: "abc123".to_string(),
-        queue_name: "bugs".to_string(),
-        concurrency: 1,
-        namespace: String::new(),
-    });
-
+    state.apply_event(&worker_start_event("fixer", ""));
     assert_eq!(state.workers["fixer"].status, "running");
 
     state.apply_event(&Event::WorkerStopped {
         worker_name: "fixer".to_string(),
         namespace: String::new(),
     });
-
     assert_eq!(state.workers["fixer"].status, "stopped");
 }
 
@@ -529,14 +518,7 @@ fn worker_started_preserves_active_pipeline_ids_on_restart() {
     let mut state = MaterializedState::default();
 
     // Simulate pre-restart state: worker with active pipelines
-    state.apply_event(&Event::WorkerStarted {
-        worker_name: "fixer".to_string(),
-        project_root: PathBuf::from("/test/project"),
-        runbook_hash: "hash1".to_string(),
-        queue_name: "bugs".to_string(),
-        concurrency: 2,
-        namespace: String::new(),
-    });
+    state.apply_event(&worker_start_event("fixer", ""));
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
@@ -553,14 +535,7 @@ fn worker_started_preserves_active_pipeline_ids_on_restart() {
     assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 2);
 
     // Simulate daemon restart: WorkerStarted replayed from WAL
-    state.apply_event(&Event::WorkerStarted {
-        worker_name: "fixer".to_string(),
-        project_root: PathBuf::from("/test/project"),
-        runbook_hash: "hash1".to_string(),
-        queue_name: "bugs".to_string(),
-        concurrency: 2,
-        namespace: String::new(),
-    });
+    state.apply_event(&worker_start_event("fixer", ""));
 
     // Active pipeline IDs must be preserved
     let worker = &state.workers["fixer"];
@@ -639,14 +614,7 @@ fn apply_event_step_failed_idempotent() {
 #[test]
 fn apply_event_worker_item_dispatched_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&Event::WorkerStarted {
-        worker_name: "fixer".to_string(),
-        project_root: PathBuf::from("/test"),
-        runbook_hash: "abc".to_string(),
-        queue_name: "bugs".to_string(),
-        concurrency: 2,
-        namespace: String::new(),
-    });
+    state.apply_event(&worker_start_event("fixer", ""));
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
@@ -963,4 +931,52 @@ fn failure_count_backward_compat_defaults_to_zero() {
 
     let state: MaterializedState = serde_json::from_str(json).expect("deserialize");
     assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+}
+
+// === Worker delete tests ===
+
+fn worker_start_event(name: &str, ns: &str) -> Event {
+    Event::WorkerStarted {
+        worker_name: name.to_string(),
+        project_root: PathBuf::from("/test/project"),
+        runbook_hash: "abc123".to_string(),
+        queue_name: "queue".to_string(),
+        concurrency: 1,
+        namespace: ns.to_string(),
+    }
+}
+
+#[test]
+fn apply_event_worker_deleted_lifecycle_and_ghost() {
+    let mut state = MaterializedState::default();
+
+    // Namespaced worker: start → stop → delete
+    state.apply_event(&worker_start_event("fixer", "myproject"));
+    assert_eq!(state.workers["myproject/fixer"].status, "running");
+    state.apply_event(&Event::WorkerStopped {
+        worker_name: "fixer".to_string(),
+        namespace: "myproject".to_string(),
+    });
+    assert_eq!(state.workers["myproject/fixer"].status, "stopped");
+    state.apply_event(&Event::WorkerDeleted {
+        worker_name: "fixer".to_string(),
+        namespace: "myproject".to_string(),
+    });
+    assert!(!state.workers.contains_key("myproject/fixer"));
+
+    // Ghost worker (empty namespace): start → delete
+    state.apply_event(&worker_start_event("ghost", ""));
+    assert!(state.workers.contains_key("ghost"));
+    state.apply_event(&Event::WorkerDeleted {
+        worker_name: "ghost".to_string(),
+        namespace: String::new(),
+    });
+    assert!(!state.workers.contains_key("ghost"));
+
+    // Delete nonexistent worker is a no-op
+    state.apply_event(&Event::WorkerDeleted {
+        worker_name: "nonexistent".to_string(),
+        namespace: String::new(),
+    });
+    assert!(state.workers.is_empty());
 }
