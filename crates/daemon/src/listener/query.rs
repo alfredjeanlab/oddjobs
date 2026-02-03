@@ -514,6 +514,25 @@ pub(super) fn handle_query(
             Response::Workers { workers }
         }
 
+        Query::GetCronLogs { name, lines } => {
+            use oj_engine::log_paths::cron_log_path;
+
+            let log_path = cron_log_path(logs_path, &name);
+            let content = match std::fs::read_to_string(&log_path) {
+                Ok(text) => {
+                    if lines > 0 {
+                        let all_lines: Vec<&str> = text.lines().collect();
+                        let start = all_lines.len().saturating_sub(lines);
+                        all_lines[start..].join("\n")
+                    } else {
+                        text
+                    }
+                }
+                Err(_) => String::new(),
+            };
+            Response::CronLogs { log_path, content }
+        }
+
         Query::ListCrons => {
             let crons = state
                 .crons

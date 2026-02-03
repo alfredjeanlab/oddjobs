@@ -25,6 +25,12 @@ fn agent_session_log_dir_builds_expected_path() {
 }
 
 #[test]
+fn cron_log_path_builds_expected_path() {
+    let result = cron_log_path(Path::new("/state/logs"), "nightly-deploy");
+    assert_eq!(result, PathBuf::from("/state/logs/cron/nightly-deploy.log"));
+}
+
+#[test]
 fn breadcrumb_path_builds_expected_path() {
     let result = breadcrumb_path(Path::new("/state/logs"), "pipeline-001");
     assert_eq!(result, PathBuf::from("/state/logs/pipeline-001.crumb.json"));

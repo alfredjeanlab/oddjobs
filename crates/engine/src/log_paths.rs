@@ -45,6 +45,13 @@ pub fn agent_session_log_dir(logs_dir: &Path, agent_id: &str) -> PathBuf {
     logs_dir.join("agent").join(agent_id)
 }
 
+/// Build the path to a cron log file.
+///
+/// Structure: `{logs_dir}/cron/{cron_name}.log`
+pub fn cron_log_path(logs_dir: &Path, cron_name: &str) -> PathBuf {
+    logs_dir.join("cron").join(format!("{}.log", cron_name))
+}
+
 /// Build the path to a pipeline breadcrumb file.
 ///
 /// Structure: `{logs_dir}/{pipeline_id}.crumb.json`

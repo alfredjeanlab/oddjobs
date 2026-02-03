@@ -278,6 +278,13 @@ pub enum Query {
     ListWorkers,
     /// List all crons and their status
     ListCrons,
+    /// Get cron activity logs
+    GetCronLogs {
+        /// Cron name
+        name: String,
+        /// Number of most recent lines to return (0 = all)
+        lines: usize,
+    },
     /// Get a cross-project status overview
     StatusOverview,
     /// List all projects with active work
@@ -420,6 +427,14 @@ pub enum Response {
 
     /// List of crons
     Crons { crons: Vec<CronSummary> },
+
+    /// Cron log contents
+    CronLogs {
+        /// Path to the log file (for --follow mode)
+        log_path: PathBuf,
+        /// Log content (most recent N lines)
+        content: String,
+    },
 
     /// Item pushed to queue (persisted) or workers woken to re-poll (external)
     QueuePushed { queue_name: String, item_id: String },

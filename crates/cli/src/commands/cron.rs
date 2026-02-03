@@ -7,7 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::output::OutputFormat;
+use crate::output::{display_log, OutputFormat};
 
 use oj_daemon::{Query, Request, Response};
 
@@ -43,6 +43,20 @@ pub enum CronCommand {
         name: String,
         /// Project namespace override
         #[arg(long = "project")]
+        project: Option<String>,
+    },
+    /// View cron activity log
+    Logs {
+        /// Cron name from runbook
+        name: String,
+        /// Stream live activity (like tail -f)
+        #[arg(long, short)]
+        follow: bool,
+        /// Number of recent lines to show (default: 50)
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+        /// Project namespace override
+        #[arg(long)]
         project: Option<String>,
     },
 }
@@ -125,6 +139,18 @@ pub async fn handle(
                     anyhow::bail!("unexpected response from daemon");
                 }
             }
+        }
+        CronCommand::Logs {
+            name,
+            follow,
+            limit,
+            project,
+        } => {
+            let _effective_namespace = project
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .unwrap_or_else(|| namespace.to_string());
+            let (log_path, content) = client.get_cron_logs(&name, limit).await?;
+            display_log(&log_path, &content, follow, format, "cron", &name).await?;
         }
         CronCommand::List {} => {
             let request = Request::Query {

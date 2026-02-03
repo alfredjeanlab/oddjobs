@@ -6,6 +6,8 @@
 use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
+use crate::log_paths::cron_log_path;
+use crate::pipeline_logger::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use std::collections::HashMap;
@@ -25,6 +27,26 @@ pub(crate) struct CronState {
 pub(crate) enum CronStatus {
     Running,
     Stopped,
+}
+
+/// Append a timestamped line to the cron log file.
+///
+/// Creates the `{logs_dir}/cron/` directory on first write.
+/// Errors are silently ignored — logging must not break the cron.
+fn append_cron_log(logs_dir: &Path, cron_name: &str, message: &str) {
+    let path = cron_log_path(logs_dir, cron_name);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        use std::io::Write;
+        let ts = format_utc_now();
+        let _ = writeln!(f, "[{}] {}", ts, message);
+    }
 }
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -71,6 +93,15 @@ where
             })
             .await?;
 
+        append_cron_log(
+            self.logger.log_dir(),
+            cron_name,
+            &format!(
+                "started (interval={}, pipeline={})",
+                interval, pipeline_name
+            ),
+        );
+
         Ok(vec![])
     }
 
@@ -91,6 +122,8 @@ where
         self.executor
             .execute(Effect::CancelTimer { id: timer_id })
             .await?;
+
+        append_cron_log(self.logger.log_dir(), cron_name, "stopped");
 
         Ok(vec![])
     }
@@ -116,6 +149,11 @@ where
                 ),
                 _ => {
                     tracing::debug!(cron = cron_name, "cron timer fired but cron not running");
+                    append_cron_log(
+                        self.logger.log_dir(),
+                        cron_name,
+                        "skip: cron not in running state",
+                    );
                     return Ok(vec![]);
                 }
             }
@@ -168,6 +206,16 @@ where
             .await?,
         );
 
+        append_cron_log(
+            self.logger.log_dir(),
+            cron_name,
+            &format!(
+                "tick: triggered pipeline {} ({})",
+                pipeline_name,
+                &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())]
+            ),
+        );
+
         // Emit CronFired tracking event
         result_events.extend(
             self.executor
@@ -216,12 +264,15 @@ where
         // Load runbook from disk
         let runbook_dir = project_root.join(".oj/runbooks");
         let runbook = oj_runbook::find_runbook_by_cron(&runbook_dir, cron_name)
-            .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
+            .map_err(|e| {
+                let msg = e.to_string();
+                append_cron_log(self.logger.log_dir(), cron_name, &format!("error: {}", msg));
+                RuntimeError::RunbookLoadError(msg)
+            })?
             .ok_or_else(|| {
-                RuntimeError::RunbookLoadError(format!(
-                    "no runbook found containing cron '{}'",
-                    cron_name
-                ))
+                let msg = format!("no runbook found containing cron '{}'", cron_name);
+                append_cron_log(self.logger.log_dir(), cron_name, &format!("error: {}", msg));
+                RuntimeError::RunbookLoadError(msg)
             })?;
 
         // Compute content hash

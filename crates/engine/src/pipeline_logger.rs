@@ -26,6 +26,11 @@ impl PipelineLogger {
         Self { log_dir }
     }
 
+    /// Returns the base log directory path.
+    pub fn log_dir(&self) -> &Path {
+        &self.log_dir
+    }
+
     /// Append a log line for the given pipeline.
     ///
     /// Format: `2026-01-30T08:14:09Z [step] message`
@@ -98,7 +103,7 @@ impl PipelineLogger {
 }
 
 /// Format the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
-fn format_utc_now() -> String {
+pub(crate) fn format_utc_now() -> String {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
