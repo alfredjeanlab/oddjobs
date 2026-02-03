@@ -87,11 +87,11 @@ Types: feat, fix, chore, docs, test, refactor
 
 Before committing changes:
 
-- [ ] Run `make check` for full verification
-  - `cargo fmt --all -- --check`
-  - `cargo clippy --all-targets --all-features -- -D warnings`
-  - `quench check` (must pass)
-  - `cargo test --all`
+- [ ] Run `make check` for local verification (fast, skips cloc and audit)
+  - `cargo fmt --all`
+  - `cargo clippy --all -- -D warnings`
+  - `quench check --fix --no-cloc`
   - `cargo build --all`
-  - `cargo audit`
+  - `cargo test --all`
   - `cargo deny check licenses bans sources`
+- [ ] Run `make ci` for full CI verification (adds cloc and audit)
