@@ -24,14 +24,14 @@ pub enum CliArg<'a> {
         /// The value portion (e.g., "value")
         value: &'a str,
     },
-    /// A long option with separate value: `--key value`.
+    /// A long option with separate value(s): `--key value` or `--key val1 val2`.
     LongOptionSeparate {
         /// The key word (`--key`)
         key_word: &'a Word,
         /// The key name (e.g., "key")
         key: &'a str,
-        /// The value word
-        value_word: &'a Word,
+        /// The value word(s)
+        value_words: Vec<&'a Word>,
     },
     /// A positional argument (not a flag/option).
     Positional(&'a Word),
@@ -74,11 +74,15 @@ impl SimpleCommand {
     /// - `--flag`: long flag (not in `options_with_values`)
     /// - `--key=value`: long option with inline value
     /// - `--key value`: long option with separate value (if key is in `options_with_values`)
+    /// - `--key val1 val2`: long option with multiple values (if key is in `multi_value_options`)
     /// - Everything else: positional arguments
     ///
     /// The `options_with_values` parameter specifies which long options consume
     /// the next argument as their value. Without this, we can't distinguish
     /// `--model haiku` (option with value) from `--print prompt` (flag + positional).
+    ///
+    /// The `multi_value_options` parameter specifies which long options consume
+    /// all following non-flag arguments as values (e.g., `--disallowed-tools A B C`).
     ///
     /// # Example
     ///
@@ -92,14 +96,18 @@ impl SimpleCommand {
     /// };
     ///
     /// let options_with_values = &["model"];
-    /// let args = cmd.parse_cli_args(options_with_values);
+    /// let args = cmd.parse_cli_args(options_with_values, &[]);
     /// assert!(args[0].is_flag());       // -v
     /// assert!(args[1].is_option());     // --model haiku
     /// assert!(args[2].is_flag());       // --print
     /// assert!(args[3].is_positional()); // pos1
     /// # Ok::<(), oj_shell::ParseError>(())
     /// ```
-    pub fn parse_cli_args(&self, options_with_values: &[&str]) -> Vec<CliArg<'_>> {
+    pub fn parse_cli_args(
+        &self,
+        options_with_values: &[&str],
+        multi_value_options: &[&str],
+    ) -> Vec<CliArg<'_>> {
         let mut result = Vec::new();
         let mut i = 0;
 
@@ -122,19 +130,41 @@ impl SimpleCommand {
                         result.push(CliArg::LongOptionInline { word, key, value });
                     } else {
                         let key = &s[2..];
-                        // Check if this option takes a value AND there's a next arg
-                        let takes_value = options_with_values.contains(&key);
+                        let is_multi = multi_value_options.contains(&key);
+                        let takes_value = is_multi || options_with_values.contains(&key);
                         let has_next = i + 1 < self.args.len();
 
                         if takes_value && has_next {
-                            // --key value (separate)
-                            let value_word = &self.args[i + 1];
-                            result.push(CliArg::LongOptionSeparate {
-                                key_word: word,
-                                key,
-                                value_word,
-                            });
-                            i += 1; // Skip the value
+                            if is_multi {
+                                // --key val1 val2 ... (consume all non-flag args)
+                                let mut value_words = Vec::new();
+                                while i + 1 < self.args.len() {
+                                    let next = &self.args[i + 1];
+                                    let is_flag = next.parts.first().is_some_and(|p| match p {
+                                        WordPart::Literal { value, .. } => value.starts_with('-'),
+                                        _ => false,
+                                    });
+                                    if is_flag {
+                                        break;
+                                    }
+                                    value_words.push(next);
+                                    i += 1;
+                                }
+                                result.push(CliArg::LongOptionSeparate {
+                                    key_word: word,
+                                    key,
+                                    value_words,
+                                });
+                            } else {
+                                // --key value (single value)
+                                let value_word = &self.args[i + 1];
+                                result.push(CliArg::LongOptionSeparate {
+                                    key_word: word,
+                                    key,
+                                    value_words: vec![value_word],
+                                });
+                                i += 1; // Skip the value
+                            }
                         } else {
                             // --flag (no value)
                             result.push(CliArg::LongFlag(word));
@@ -192,6 +222,9 @@ impl SimpleCommand {
     /// The `options_with_values` parameter specifies which long options consume
     /// the next argument as their value (see [`parse_cli_args`]).
     ///
+    /// The `multi_value_options` parameter specifies which long options consume
+    /// all following non-flag arguments as values.
+    ///
     /// # Example
     ///
     /// ```
@@ -202,12 +235,16 @@ impl SimpleCommand {
     ///     Command::Simple(c) => c,
     ///     _ => panic!("expected simple command"),
     /// };
-    /// let positionals = cmd.positional_args(&["opt"]);
+    /// let positionals = cmd.positional_args(&["opt"], &[]);
     /// assert_eq!(positionals.len(), 2);  // pos1, pos2 (val is --opt's value)
     /// # Ok::<(), oj_shell::ParseError>(())
     /// ```
-    pub fn positional_args(&self, options_with_values: &[&str]) -> Vec<&Word> {
-        self.parse_cli_args(options_with_values)
+    pub fn positional_args(
+        &self,
+        options_with_values: &[&str],
+        multi_value_options: &[&str],
+    ) -> Vec<&Word> {
+        self.parse_cli_args(options_with_values, multi_value_options)
             .into_iter()
             .filter_map(|arg| match arg {
                 CliArg::Positional(w) => Some(w),
@@ -216,3 +253,7 @@ impl SimpleCommand {
             .collect()
     }
 }
+
+#[cfg(test)]
+#[path = "args_tests.rs"]
+mod tests;

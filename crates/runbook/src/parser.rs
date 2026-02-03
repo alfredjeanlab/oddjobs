@@ -117,24 +117,21 @@ fn validation_diagnostic(err: &shell::ValidationError, source: &str) -> String {
 /// ensuring only supported agent adapters are referenced.
 const SUPPORTED_AGENT_COMMANDS: &[&str] = &["claude", "claudeless"];
 
-/// Claude/claudeless CLI options that take a value argument.
+/// Claude/claudeless CLI options that take a single value argument.
 ///
 /// These options consume the next argument as their value, so we need to know
 /// them to correctly identify positional arguments in the command.
 /// Options with `=` syntax (e.g., `--model=haiku`) are handled automatically.
+///
+/// Options that accept multiple space-separated values belong in
+/// [`CLAUDE_MULTI_VALUE_OPTIONS`] instead.
 const CLAUDE_OPTIONS_WITH_VALUES: &[&str] = &[
     // claude options
-    "add-dir",
     "agent",
     "agents",
-    "allowed-tools",
-    "allowedTools",
     "append-system-prompt",
-    "betas",
     "debug",
     "debug-file",
-    "disallowed-tools",
-    "disallowedTools",
     "fallback-model",
     "file",
     "from-pr",
@@ -151,10 +148,24 @@ const CLAUDE_OPTIONS_WITH_VALUES: &[&str] = &[
     "setting-sources",
     "settings",
     "system-prompt",
-    "tools",
     // claudeless options
     "scenario",
     "tool-mode",
+];
+
+/// Claude/claudeless CLI options that accept multiple space-separated values.
+///
+/// These options consume all following non-flag arguments as values.
+/// For example, `--disallowed-tools ExitPlanMode AskUserQuestion` treats
+/// both `ExitPlanMode` and `AskUserQuestion` as values for `--disallowed-tools`.
+const CLAUDE_MULTI_VALUE_OPTIONS: &[&str] = &[
+    "add-dir",
+    "allowed-tools",
+    "allowedTools",
+    "betas",
+    "disallowed-tools",
+    "disallowedTools",
+    "tools",
 ];
 
 /// Validate a shell command string, returning an error with context on failure.
@@ -273,7 +284,7 @@ fn validate_agent_command(
     // Reject positional arguments when prompt field is configured (system appends it)
     if has_prompt
         && !simple
-            .positional_args(CLAUDE_OPTIONS_WITH_VALUES)
+            .positional_args(CLAUDE_OPTIONS_WITH_VALUES, CLAUDE_MULTI_VALUE_OPTIONS)
             .is_empty()
     {
         return Err(ParseError::InvalidFormat {
