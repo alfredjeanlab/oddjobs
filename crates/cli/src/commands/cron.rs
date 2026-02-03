@@ -126,10 +126,17 @@ pub async fn handle(
                                 // Compute dynamic column widths from data
                                 let name_w =
                                     crons.iter().map(|c| c.name.len()).max().unwrap_or(4).max(4);
+                                let no_project = "(no project)";
                                 let proj_w = if show_project {
                                     crons
                                         .iter()
-                                        .map(|c| c.namespace.len())
+                                        .map(|c| {
+                                            if c.namespace.is_empty() {
+                                                no_project.len()
+                                            } else {
+                                                c.namespace.len()
+                                            }
+                                        })
                                         .max()
                                         .unwrap_or(7)
                                         .max(7)
@@ -162,9 +169,14 @@ pub async fn handle(
                                 }
                                 for c in &crons {
                                     if show_project {
+                                        let proj = if c.namespace.is_empty() {
+                                            no_project
+                                        } else {
+                                            &c.namespace
+                                        };
                                         println!(
                                             "{:<name_w$} {:<proj_w$} {:<interval_w$} {:<pipeline_w$} {}",
-                                            c.name, c.namespace, c.interval, c.pipeline, c.status,
+                                            c.name, proj, c.interval, c.pipeline, c.status,
                                         );
                                     } else {
                                         println!(

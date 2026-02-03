@@ -94,10 +94,17 @@ pub async fn handle(
                             .max()
                             .unwrap_or(2)
                             .max(2);
+                        let no_project = "(no project)";
                         let proj_w = if show_project {
                             workspaces
                                 .iter()
-                                .map(|w| w.namespace.len())
+                                .map(|w| {
+                                    if w.namespace.is_empty() {
+                                        no_project.len()
+                                    } else {
+                                        w.namespace.len()
+                                    }
+                                })
                                 .max()
                                 .unwrap_or(7)
                                 .max(7)
@@ -133,10 +140,15 @@ pub async fn handle(
                                 w.path.display().to_string().chars().take(path_w).collect();
                             let branch = w.branch.as_deref().unwrap_or("-");
                             if show_project {
+                                let proj = if w.namespace.is_empty() {
+                                    no_project
+                                } else {
+                                    &w.namespace
+                                };
                                 println!(
                                     "{:<id_w$} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
                                     &w.id[..id_w.min(w.id.len())],
-                                    &w.namespace[..proj_w.min(w.namespace.len())],
+                                    &proj[..proj_w.min(proj.len())],
                                     path_str,
                                     branch,
                                     w.status

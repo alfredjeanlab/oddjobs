@@ -214,9 +214,16 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
     let w_retries = 7; // width of "RETRIES"
 
     if show_project {
+        let no_project = "(no project)";
         let w_proj = rows
             .iter()
-            .map(|(_, p, _)| p.namespace.len())
+            .map(|(_, p, _)| {
+                if p.namespace.is_empty() {
+                    no_project.len()
+                } else {
+                    p.namespace.len()
+                }
+            })
             .max()
             .unwrap_or(0)
             .max(7);
@@ -227,10 +234,15 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
                 "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED", "RETRIES",
             );
             for (id, p, updated) in &rows {
+                let proj = if p.namespace.is_empty() {
+                    no_project
+                } else {
+                    &p.namespace
+                };
                 let _ = writeln!(
                     out,
                     "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
-                    id, p.namespace, p.name, p.kind, p.step, updated, p.retry_count, p.step_status,
+                    id, proj, p.name, p.kind, p.step, updated, p.retry_count, p.step_status,
                 );
             }
         } else {
@@ -240,10 +252,15 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
                 "ID", "PROJECT", "NAME", "KIND", "STEP", "UPDATED",
             );
             for (id, p, updated) in &rows {
+                let proj = if p.namespace.is_empty() {
+                    no_project
+                } else {
+                    &p.namespace
+                };
                 let _ = writeln!(
                     out,
                     "{:<w_id$} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
-                    id, p.namespace, p.name, p.kind, p.step, updated, p.step_status,
+                    id, proj, p.name, p.kind, p.step, updated, p.step_status,
                 );
             }
         }

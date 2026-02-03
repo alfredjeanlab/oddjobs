@@ -130,10 +130,17 @@ pub async fn handle(
                                     .max()
                                     .unwrap_or(4)
                                     .max(4);
+                                let no_project = "(no project)";
                                 let proj_w = if show_project {
                                     workers
                                         .iter()
-                                        .map(|w| w.namespace.len())
+                                        .map(|w| {
+                                            if w.namespace.is_empty() {
+                                                no_project.len()
+                                            } else {
+                                                w.namespace.len()
+                                            }
+                                        })
                                         .max()
                                         .unwrap_or(7)
                                         .max(7)
@@ -167,10 +174,15 @@ pub async fn handle(
                                 }
                                 for w in &workers {
                                     if show_project {
+                                        let proj = if w.namespace.is_empty() {
+                                            no_project
+                                        } else {
+                                            &w.namespace
+                                        };
                                         println!(
                                             "{:<name_w$} {:<proj_w$} {:<queue_w$} {:<status_w$} {:<active_w$} {}",
                                             &w.name[..w.name.len().min(name_w)],
-                                            &w.namespace[..w.namespace.len().min(proj_w)],
+                                            &proj[..proj.len().min(proj_w)],
                                             &w.queue[..w.queue.len().min(queue_w)],
                                             &w.status,
                                             w.active,

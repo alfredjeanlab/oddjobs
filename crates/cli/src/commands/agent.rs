@@ -168,7 +168,10 @@ pub async fn handle(
                         );
                         for a in &agents {
                             let name = a.agent_name.as_deref().unwrap_or("-");
-                            let project = a.namespace.as_deref().unwrap_or("-");
+                            let project = match a.namespace.as_deref() {
+                                Some(ns) if !ns.is_empty() => ns,
+                                _ => "(no project)",
+                            };
                             println!(
                                 "{:<12} {:<16} {:<16} {:<12} {:<16} {:<10} {:>5} {:>5} {:>4}",
                                 truncate(&a.agent_id, 12),

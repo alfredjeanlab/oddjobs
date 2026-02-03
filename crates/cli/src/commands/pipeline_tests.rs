@@ -412,6 +412,25 @@ fn list_with_project_column() {
 }
 
 #[test]
+fn list_mixed_namespace_shows_no_project_for_empty() {
+    let mut p1 = make_summary("abcdef123456", "api-server", "build", "test", "Running");
+    p1.namespace = "myproject".into();
+    let p2 = make_summary("999999999999", "worker", "fix", "done", "Completed");
+    // p2 has empty namespace
+    let pipelines = vec![p1, p2];
+
+    let mut buf = Vec::new();
+    format_pipeline_list(&mut buf, &pipelines);
+    let out = output_string(&buf);
+    let lines: Vec<&str> = out.lines().collect();
+
+    assert_eq!(lines.len(), 3);
+    assert!(lines[0].contains("PROJECT"));
+    assert!(lines[1].contains("myproject"));
+    assert!(lines[2].contains("(no project)"));
+}
+
+#[test]
 fn list_no_project_when_all_empty_namespace() {
     let pipelines = vec![make_summary(
         "abcdef123456",
