@@ -5,6 +5,10 @@ In progress (agents working):
   - chore(cli): add --project flag to `oj worker start` and `oj worker stop`
 
 Recently landed:
+  - feat(engine): cron entrypoint — time-driven pipeline execution (oj cron {list,start,stop,once})
+  - chore(runbooks): replace shared target-dir with sccache across all projects
+  - fix(runbooks): stage uncommitted resolver changes before rebase in merge push
+  - fix(test): clear GIT_DIR/GIT_WORK_TREE so executor tests pass inside worktrees
   - feat(cli): inline command execution — shell command.run executes locally, not via daemon
   - fix(cli): use bash with pipefail for inline shell commands
   - feat(cli): oj worker prune — remove stopped workers from state
@@ -60,14 +64,8 @@ Core pipeline
   1. Worker poll interval: optional poll_interval on worker blocks for periodic checks
 
 Crons and reliability
-  2. Cron entrypoint: time-driven pipeline execution (third entrypoint alongside commands/workers)
-      Use cases:
-        - Janitor (30m): prune stale worktrees, orphan tmux sessions, old logs (shell only)
-        - Reliability engineer (1h): review failed pipelines, dead letters, recurring errors → file bugs
-        - Security auditor (6h): review recent commits for vulnerabilities → file bugs
-        - Architect (daily): review recent changes for design drift, duplication, quality regressions
-      See: docs/future/RUNBOOKS.md, docs/future/runbooks/{janitor,reliability,security,architect}.hcl
-      CLI: docs/future/CLI.md (oj cron {list,start,stop,once})
+  2. Cron runbooks: write janitor, reliability, security, architect cron runbooks
+      See: docs/future/runbooks/{janitor,reliability,security,architect}.hcl
   3. Default error handling for agent errors (rate limit → retry, no internet → retry,
      out of credits → escalate, unauthorized → escalate). See design notes below.
 
@@ -169,6 +167,8 @@ Key features landed:
   - Inline command execution: shell commands run locally without daemon round-trip
   - Worker stop/prune: lifecycle management for workers
   - Draft-rebase command for rebasing exploratory branches
+  - Cron entrypoint: time-driven pipeline execution with auto-resume and runbook hot-reload
+  - sccache for worktree builds: eliminates shared target-dir cache poisoning
 
 Patterns that work:
   - oj run {build,fix,chore,draft} → agent → submit/push. Full loop end-to-end.
@@ -195,6 +195,10 @@ Issues discovered:
     Fixed: eager locals evaluate $() at creation, all interpolation escaped uniformly.
   - Merge push→check loop: on_fail cycle with no max attempts causes infinite retries.
     Fixed: step on_fail attempts support landed.
+  - Merge push fails when resolver leaves unstaged changes: rebase aborts on dirty worktree.
+    Fixed: push step now stages and amends before rebasing.
+  - Shared target-dir between worktrees causes cache poisoning (stale crate builds).
+    Fixed: replaced with sccache — each worktree gets own target dir, artifacts cached globally.
   - Submit step fails when local.title contains special chars (quotes, $, backticks).
     Root cause: locals launder untrusted var.* content into trusted namespace.
     Fixed by eager locals (above). Workaround: manually push + queue merge.
