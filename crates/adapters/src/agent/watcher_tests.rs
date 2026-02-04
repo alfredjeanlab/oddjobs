@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::session::FakeSessionAdapter;
-use oj_core::FakeClock;
 use tempfile::TempDir;
 
 #[test]
@@ -162,18 +161,15 @@ fn find_session_log_requires_correct_workspace_path() {
     );
 }
 
-/// Helper to set up the watcher loop with FakeClock for idle timeout tests.
+/// Helper to set up the watcher loop for testing.
 ///
-/// Returns (event_rx, file_tx, shutdown_tx, log_path, clock) so the test can
-/// drive file changes, advance time, and observe emitted events.
-async fn setup_watch_loop(
-    idle_timeout: Duration,
-) -> (
+/// Returns (event_rx, file_tx, shutdown_tx, log_path) so the test can
+/// drive file changes and observe emitted events.
+async fn setup_watch_loop() -> (
     mpsc::Receiver<Event>,
     mpsc::Sender<()>,
     oneshot::Sender<()>,
     PathBuf,
-    FakeClock,
     tokio::task::JoinHandle<()>,
 ) {
     let dir = TempDir::new().unwrap();
@@ -191,12 +187,11 @@ async fn setup_watch_loop(
     let sessions = FakeSessionAdapter::new();
     sessions.add_session("test-tmux", true);
 
-    let clock = FakeClock::new();
     let (event_tx, event_rx) = mpsc::channel(32);
     let (file_tx, file_rx) = mpsc::channel(32);
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
-    // Use a short poll interval so tests don't wait long for the idle check
+    // Use a short poll interval so tests don't wait long
     std::env::set_var("OJ_WATCHER_POLL_MS", "50");
 
     let params = WatchLoopParams {
@@ -208,9 +203,7 @@ async fn setup_watch_loop(
         event_tx,
         shutdown_rx,
         log_entry_tx: None,
-        clock: clock.clone(),
         file_rx,
-        idle_timeout: Some(idle_timeout),
     };
 
     let handle = tokio::spawn(watch_loop(params));
@@ -221,7 +214,7 @@ async fn setup_watch_loop(
         tokio::task::yield_now().await;
     }
 
-    (event_rx, file_tx, shutdown_tx, log_path, clock, handle)
+    (event_rx, file_tx, shutdown_tx, log_path, handle)
 }
 
 /// Wait for the watch_loop to process pending messages and run a poll cycle.
@@ -232,73 +225,27 @@ async fn wait_for_poll() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn idle_timeout_not_emitted_for_thinking_blocks() {
-    // Use a large idle timeout (controlled by FakeClock, not real time)
-    let (mut event_rx, file_tx, shutdown_tx, log_path, clock, _handle) =
-        setup_watch_loop(Duration::from_secs(300)).await;
+async fn watcher_emits_agent_idle_for_waiting_state() {
+    // When the log shows WaitingForInput, the watcher emits AgentIdle (the same
+    // event the Notification hook produces) instead of AgentWaiting. This provides
+    // instant idle detection without the old timeout delay.
+    let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
 
-    // Write a thinking block — should be classified as Working
-    std::fs::write(
-        &log_path,
-        r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"analyzing..."}]}}"#,
-    )
-    .unwrap();
-    file_tx.send(()).await.unwrap();
-    wait_for_poll().await;
-
-    // Advance FakeClock well past idle timeout
-    clock.advance(Duration::from_secs(600));
-    wait_for_poll().await;
-
-    // No event should be emitted — thinking block means Working, not WaitingForInput
-    assert!(
-        event_rx.try_recv().is_err(),
-        "thinking block should NOT trigger idle event"
-    );
-
-    let _ = shutdown_tx.send(());
-}
-
-#[tokio::test]
-#[serial_test::serial]
-async fn idle_timeout_respects_clock_before_emitting() {
-    let (mut event_rx, file_tx, shutdown_tx, log_path, clock, _handle) =
-        setup_watch_loop(Duration::from_secs(300)).await;
-
-    // Transition to WaitingForInput (text only, no thinking/tool_use)
+    // Write an idle state (text only, no thinking/tool_use)
     std::fs::write(
         &log_path,
         r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
     )
     .unwrap();
     file_tx.send(()).await.unwrap();
-    wait_for_poll().await;
-
-    // No event yet — WaitingForInput should NOT be emitted immediately
-    assert!(
-        event_rx.try_recv().is_err(),
-        "WaitingForInput should NOT be emitted immediately"
-    );
-
-    // Advance FakeClock but NOT past idle timeout
-    clock.advance(Duration::from_secs(200));
-    wait_for_poll().await;
-
-    assert!(
-        event_rx.try_recv().is_err(),
-        "WaitingForInput should NOT be emitted before idle timeout (200s < 300s)"
-    );
-
-    // Advance FakeClock past idle timeout
-    clock.advance(Duration::from_secs(200)); // total 400s > 300s
     wait_for_poll().await;
 
     let event = event_rx
         .try_recv()
-        .expect("idle timeout should emit AgentWaiting");
+        .expect("should emit AgentIdle when log shows waiting state");
     assert!(
-        matches!(event, Event::AgentWaiting { .. }),
-        "expected AgentWaiting, got {event:?}"
+        matches!(event, Event::AgentIdle { .. }),
+        "expected AgentIdle (not AgentWaiting), got {event:?}"
     );
 
     let _ = shutdown_tx.send(());
@@ -306,45 +253,52 @@ async fn idle_timeout_respects_clock_before_emitting() {
 
 #[tokio::test]
 #[serial_test::serial]
-async fn idle_timeout_resets_when_agent_resumes_working() {
-    let (mut event_rx, file_tx, shutdown_tx, log_path, clock, _handle) =
-        setup_watch_loop(Duration::from_secs(300)).await;
+async fn watcher_emits_working_to_failed_transition() {
+    let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
 
-    // Transition to WaitingForInput
-    std::fs::write(
-        &log_path,
-        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
-    )
-    .unwrap();
+    // Transition to Failed
+    std::fs::write(&log_path, r#"{"error":"Rate limit exceeded"}"#).unwrap();
     file_tx.send(()).await.unwrap();
     wait_for_poll().await;
 
-    // Advance close to timeout
-    clock.advance(Duration::from_secs(250));
-    wait_for_poll().await;
-
-    // No idle event yet (250s < 300s)
-    assert!(event_rx.try_recv().is_err());
-
-    // Agent resumes work (user message = tool result processing)
-    std::fs::write(
-        &log_path,
-        r#"{"type":"user","message":{"content":"tool result"}}"#,
-    )
-    .unwrap();
-    file_tx.send(()).await.unwrap();
-    wait_for_poll().await;
-
-    // Drain the AgentWorking event from the Working transition
-    let _ = event_rx.try_recv(); // AgentWorking from WaitingForInput→Working
-
-    // Advance past the original timeout point — should NOT fire because timer was reset
-    clock.advance(Duration::from_secs(100)); // 250 + 100 from original, but only 100 from reset
-    wait_for_poll().await;
-
+    let event = event_rx
+        .try_recv()
+        .expect("should emit AgentFailed on error");
     assert!(
-        event_rx.try_recv().is_err(),
-        "idle timeout should have reset when agent resumed working"
+        matches!(event, Event::AgentFailed { .. }),
+        "expected AgentFailed, got {event:?}"
+    );
+
+    let _ = shutdown_tx.send(());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_emits_working_state_on_state_change() {
+    // First go to a non-working state (failed), then back to working
+    let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
+
+    // Transition to Failed first
+    std::fs::write(&log_path, r#"{"error":"Rate limit exceeded"}"#).unwrap();
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+    let _ = event_rx.try_recv(); // drain AgentFailed
+
+    // Transition back to Working
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"retry"}}"#,
+    )
+    .unwrap();
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+
+    let event = event_rx
+        .try_recv()
+        .expect("should emit AgentWorking on recovery");
+    assert!(
+        matches!(event, Event::AgentWorking { .. }),
+        "expected AgentWorking, got {event:?}"
     );
 
     let _ = shutdown_tx.send(());

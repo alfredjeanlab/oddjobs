@@ -8,7 +8,7 @@ use super::watcher::{parse_session_log, start_watcher, WatcherConfig};
 use super::{AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
 use crate::session::SessionAdapter;
 use async_trait::async_trait;
-use oj_core::{AgentId, AgentState, Event, SystemClock};
+use oj_core::{AgentId, AgentState, Event};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fs;
@@ -479,7 +479,6 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             self.sessions.clone(),
             event_tx,
             self.log_entry_tx.clone(),
-            SystemClock,
         );
 
         // 7. Store agent info (use spawned_id for session operations like kill/send)
@@ -529,7 +528,6 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             self.sessions.clone(),
             event_tx,
             self.log_entry_tx.clone(),
-            SystemClock,
         );
 
         // Store agent info (same as spawn step 7)

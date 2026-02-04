@@ -134,6 +134,12 @@ pub enum HookCommand {
         /// Agent ID to emit prompt event for
         agent_id: String,
     },
+    /// Notification hook handler - detects idle_prompt and permission_prompt
+    Notify {
+        /// Agent ID to emit state events for
+        #[arg(long)]
+        agent_id: String,
+    },
 }
 
 /// Input from Claude Code PreToolUse hook (subset of fields we care about)
@@ -155,6 +161,13 @@ struct StopHookInput {
 struct StopHookOutput {
     decision: String,
     reason: String,
+}
+
+/// Input from Claude Code Notification hook (subset of fields we care about)
+#[derive(Debug, Deserialize)]
+struct NotificationHookInput {
+    #[serde(default)]
+    notification_type: String,
 }
 
 pub async fn handle(
@@ -460,6 +473,9 @@ pub async fn handle(
             HookCommand::Pretooluse { agent_id } => {
                 handle_pretooluse_hook(&agent_id, client).await?;
             }
+            HookCommand::Notify { agent_id } => {
+                handle_notify_hook(&agent_id, client).await?;
+            }
         },
     }
 
@@ -711,6 +727,37 @@ async fn handle_pretooluse_hook(agent_id: &str, client: &DaemonClient) -> Result
         prompt_type,
     };
     client.emit_event(event).await?;
+
+    Ok(())
+}
+
+async fn handle_notify_hook(agent_id: &str, client: &DaemonClient) -> Result<()> {
+    let mut input_json = String::new();
+    io::stdin().read_to_string(&mut input_json)?;
+
+    let input: NotificationHookInput =
+        serde_json::from_str(&input_json).unwrap_or(NotificationHookInput {
+            notification_type: String::new(),
+        });
+
+    match input.notification_type.as_str() {
+        "idle_prompt" => {
+            let event = Event::AgentIdle {
+                agent_id: AgentId::new(agent_id),
+            };
+            client.emit_event(event).await?;
+        }
+        "permission_prompt" => {
+            let event = Event::AgentPrompt {
+                agent_id: AgentId::new(agent_id),
+                prompt_type: PromptType::Permission,
+            };
+            client.emit_event(event).await?;
+        }
+        _ => {
+            // Ignore other notification types
+        }
+    }
 
     Ok(())
 }

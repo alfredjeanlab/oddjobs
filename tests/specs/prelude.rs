@@ -18,7 +18,6 @@ const OJ_TIMEOUT_IPC_MS: &str = "500";
 const OJ_CONNECT_POLL_MS: &str = "5";
 const OJ_SESSION_POLL_MS: &str = "50";
 const OJ_WATCHER_POLL_MS: &str = "500";
-const OJ_IDLE_TIMEOUT_MS: &str = "1000"; // 1s MAX test idle timeout, on_idle tests should use LOWER numbers
 const OJ_PROMPT_POLL_MS: &str = "200"; // 200ms (1 check) - tests use trusted=true so no prompt expected
 
 // Spec polling timeouts
@@ -103,7 +102,6 @@ impl CliBuilder {
                 ("OJ_CONNECT_POLL_MS".into(), OJ_CONNECT_POLL_MS.into()),
                 ("OJ_SESSION_POLL_MS".into(), OJ_SESSION_POLL_MS.into()),
                 ("OJ_WATCHER_POLL_MS".into(), OJ_WATCHER_POLL_MS.into()),
-                ("OJ_IDLE_TIMEOUT_MS".into(), OJ_IDLE_TIMEOUT_MS.into()),
                 ("OJ_PROMPT_POLL_MS".into(), OJ_PROMPT_POLL_MS.into()),
             ],
         }

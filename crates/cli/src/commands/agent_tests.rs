@@ -96,3 +96,32 @@ fn prompt_type_for_tool_returns_none_for_unknown() {
     assert_eq!(prompt_type_for_tool(Some("Bash")), None);
     assert_eq!(prompt_type_for_tool(None), None);
 }
+
+#[test]
+fn notification_hook_input_parses_idle_prompt() {
+    let json =
+        r#"{"session_id":"abc","notification_type":"idle_prompt","message":"Claude needs input"}"#;
+    let input: NotificationHookInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.notification_type, "idle_prompt");
+}
+
+#[test]
+fn notification_hook_input_parses_permission_prompt() {
+    let json = r#"{"session_id":"abc","notification_type":"permission_prompt","message":"Permission needed"}"#;
+    let input: NotificationHookInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.notification_type, "permission_prompt");
+}
+
+#[test]
+fn notification_hook_input_parses_unknown_type() {
+    let json = r#"{"session_id":"abc","notification_type":"auth_success"}"#;
+    let input: NotificationHookInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.notification_type, "auth_success");
+}
+
+#[test]
+fn notification_hook_input_handles_missing_type() {
+    let json = r#"{"session_id":"abc"}"#;
+    let input: NotificationHookInput = serde_json::from_str(json).unwrap();
+    assert_eq!(input.notification_type, "");
+}

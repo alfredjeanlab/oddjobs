@@ -50,15 +50,19 @@ The orchestrator creates, monitors, and destroys sessions. Claude Code doesn't m
 
 ## State Detection
 
-Agent state is detected from Claude's JSONL session log by a background watcher (file notifications + periodic polling, configurable via `OJ_WATCHER_POLL_MS`, default 5 seconds):
+Agent state is detected via two mechanisms:
+
+1. **Notification hook** (primary): A `Notification` hook installed in Claude's settings fires immediately when Claude signals `idle_prompt` or `permission_prompt`. The hook calls `oj agent hook notify --agent-id <id>`, which emits `AgentIdle` or `AgentPrompt` events to the daemon.
+
+2. **Session log watcher** (fallback): A background watcher monitors Claude's JSONL session log via file notifications + periodic polling (configurable via `OJ_WATCHER_POLL_MS`, default 5 seconds):
 
 | State | Log Indicator | Trigger |
 |-------|--------------|---------|
 | Working | `type: "assistant"` with `tool_use` or `thinking` content blocks, or `type: "user"` (processing tool results) | Keep monitoring |
-| Waiting for input | `type: "assistant"` with `stop_reason: null` and no `tool_use` content blocks | `on_idle` (after idle timeout) |
+| Waiting for input | `type: "assistant"` with `stop_reason: null` and no `tool_use` content blocks | `on_idle` (emitted as `AgentIdle`) |
 | API error | Error fields in log entry (unauthorized, quota, network, rate limit) | `on_error` |
 
-The watcher applies an idle timeout (default 180s, configurable via `OJ_IDLE_TIMEOUT_MS`) before emitting `AgentWaiting`, to avoid false positives from brief pauses between tool calls.
+Both mechanisms emit the same `AgentIdle` event, so the engine handles them identically. The Notification hook provides the fastest detection; the log watcher serves as a fallback.
 
 **Process exit detection:**
 
@@ -71,7 +75,7 @@ The watcher applies an idle timeout (default 180s, configurable via `OJ_IDLE_TIM
 
 ## Stuck Recovery
 
-1. **Detect**: Background watcher emits `AgentWaiting` event (after idle timeout)
+1. **Detect**: Notification hook fires `AgentIdle` event (instant), or watcher detects idle from log (fallback)
 2. **Nudge**: Engine sends follow-up message via `Effect::SendToSession`
 3. **Escalate**: If nudge doesn't help, desktop notification via `Effect::Notify`
 
@@ -120,18 +124,14 @@ When agents fail to signal completion, the `on_idle` and `on_dead` actions act a
 
 ## Hooks
 
-Claude Code hooks intercept execution. Only the **Stop** hook is automatically configured by the orchestrator:
+Claude Code hooks intercept execution. The orchestrator automatically configures these hooks in the agent's settings file (`$OJ_STATE_DIR/agents/<agent-id>/claude-settings.json`):
 
-**Stop**: Gates agent exit until it signals completion via `oj emit agent:signal`.
-
-Generated settings format:
-```json
-{
-  "hooks": {
-    "Stop": [{"matcher": "", "hooks": [{"type": "command", "command": "oj agent hook stop <agent_id>"}]}]
-  }
-}
-```
+| Hook | Matcher | Command | Purpose |
+|------|---------|---------|---------|
+| **Stop** | `""` (all) | `oj agent hook stop <id>` | Gates exit until agent signals completion |
+| **Notification** | `idle_prompt\|permission_prompt` | `oj agent hook notify --agent-id <id>` | Instant idle/permission detection |
+| **PreToolUse** | `ExitPlanMode\|AskUserQuestion\|EnterPlanMode` | `oj agent hook pretooluse <id>` | Detects plan/question tools |
+| **SessionStart** | per-source | `bash <script>` | Runs prime scripts on session start |
 
 ## Testing
 
@@ -154,6 +154,7 @@ For unit tests, use `FakeAgentAdapter` to test engine logic without any subproce
 | **SessionAdapter** | AgentAdapter → tmux | Low-level session operations |
 | **Shell commands** | Claude → Engine | Signaling, events |
 | **Stop hook** | Claude → Engine | Gate exit until agent signals completion |
+| **Notification hook** | Claude → Engine | Instant idle/permission detection |
 | **CLAUDE.md** | Static → Claude | Agent instructions |
 | **Env vars** | External → Claude | Runtime context (`OJ_STATE_DIR`, `CLAUDE_CONFIG_DIR`) |
 | **Claudeless** | Testing | Deterministic integration tests |

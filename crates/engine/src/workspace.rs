@@ -141,27 +141,16 @@ fn inject_hooks(settings: &mut Value, agent_id: &str, prime_paths: &HashMap<Stri
     // Always set the Stop hook (we control this settings file)
     hooks_obj.insert("Stop".to_string(), json!([stop_hook_entry]));
 
-    // Inject Notification hooks for instant state detection
-    let idle_hook_entry = json!({
-        "matcher": "idle_prompt",
+    // Inject Notification hook for instant idle/permission detection
+    let notification_hook_entry = json!({
+        "matcher": "idle_prompt|permission_prompt",
         "hooks": [{
             "type": "command",
-            "command": format!("oj emit agent:idle --agent {}", agent_id)
+            "command": format!("oj agent hook notify --agent-id {}", agent_id)
         }]
     });
 
-    let permission_hook_entry = json!({
-        "matcher": "permission_prompt",
-        "hooks": [{
-            "type": "command",
-            "command": format!("oj emit agent:prompt --agent {} --type permission", agent_id)
-        }]
-    });
-
-    hooks_obj.insert(
-        "Notification".to_string(),
-        json!([idle_hook_entry, permission_hook_entry]),
-    );
+    hooks_obj.insert("Notification".to_string(), json!([notification_hook_entry]));
 
     // Inject PreToolUse hook for detecting plan/question tools
     let pretooluse_hook_entry = json!({

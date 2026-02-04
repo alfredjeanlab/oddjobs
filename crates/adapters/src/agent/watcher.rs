@@ -8,7 +8,7 @@
 use crate::agent::log_entry::{self, AgentLogMessage};
 use crate::session::SessionAdapter;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use oj_core::{AgentError, AgentId, AgentState, Clock, Event};
+use oj_core::{AgentError, AgentId, AgentState, Event};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -43,12 +43,11 @@ fn watcher_poll_interval() -> Duration {
 /// process liveness checks as a fallback.
 ///
 /// Returns a shutdown sender that can be used to stop the watcher.
-pub fn start_watcher<S: SessionAdapter, C: Clock + 'static>(
+pub fn start_watcher<S: SessionAdapter>(
     config: WatcherConfig,
     sessions: S,
     event_tx: mpsc::Sender<Event>,
     log_entry_tx: Option<mpsc::Sender<AgentLogMessage>>,
-    clock: C,
 ) -> oneshot::Sender<()> {
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
@@ -58,19 +57,17 @@ pub fn start_watcher<S: SessionAdapter, C: Clock + 'static>(
         event_tx,
         shutdown_rx,
         log_entry_tx,
-        clock,
     ));
 
     shutdown_tx
 }
 
-async fn watch_agent<S: SessionAdapter, C: Clock>(
+async fn watch_agent<S: SessionAdapter>(
     config: WatcherConfig,
     sessions: S,
     event_tx: mpsc::Sender<Event>,
     shutdown_rx: oneshot::Receiver<()>,
     log_entry_tx: Option<mpsc::Sender<AgentLogMessage>>,
-    clock: C,
 ) {
     let WatcherConfig {
         agent_id,
@@ -80,7 +77,7 @@ async fn watch_agent<S: SessionAdapter, C: Clock>(
         process_name,
     } = config;
     // Track spawn-to-first-log duration
-    let spawn_time = clock.now();
+    let spawn_time = std::time::Instant::now();
 
     // Find the session log path (may take a moment to be created).
     // Also check session liveness so we detect early exits without
@@ -174,14 +171,12 @@ async fn watch_agent<S: SessionAdapter, C: Clock>(
         event_tx,
         shutdown_rx,
         log_entry_tx,
-        clock,
         file_rx,
-        idle_timeout: None,
     })
     .await;
 }
 
-struct WatchLoopParams<S, C> {
+struct WatchLoopParams<S> {
     agent_id: AgentId,
     tmux_session_id: String,
     process_name: String,
@@ -190,12 +185,10 @@ struct WatchLoopParams<S, C> {
     event_tx: mpsc::Sender<Event>,
     shutdown_rx: oneshot::Receiver<()>,
     log_entry_tx: Option<mpsc::Sender<AgentLogMessage>>,
-    clock: C,
     file_rx: mpsc::Receiver<()>,
-    idle_timeout: Option<Duration>,
 }
 
-async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) {
+async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
     let WatchLoopParams {
         agent_id,
         tmux_session_id,
@@ -205,9 +198,7 @@ async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) 
         event_tx,
         mut shutdown_rx,
         log_entry_tx,
-        clock,
         mut file_rx,
-        idle_timeout: idle_timeout_override,
     } = params;
 
     // Check initial state - agent may have become idle while daemon was down
@@ -215,8 +206,20 @@ async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) 
     let mut last_state = initial_state.clone();
     let mut last_log_offset: u64 = 0;
 
-    // Emit non-working state immediately so on_idle/on_dead fires after reconnect
-    if initial_state != AgentState::Working {
+    // Emit non-working state immediately so on_dead fires after reconnect.
+    // WaitingForInput is emitted as AgentIdle (same event the Notification
+    // hook produces) so the on_idle handler fires without a timeout delay.
+    if initial_state == AgentState::WaitingForInput {
+        tracing::info!(
+            agent_id = %agent_id,
+            "initial state is idle, emitting AgentIdle immediately"
+        );
+        let _ = event_tx
+            .send(Event::AgentIdle {
+                agent_id: agent_id.clone(),
+            })
+            .await;
+    } else if initial_state != AgentState::Working {
         tracing::info!(
             agent_id = %agent_id,
             state = ?initial_state,
@@ -227,18 +230,6 @@ async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) 
             .await;
     }
 
-    // Track last activity for idle timeout (on_idle is fallback after 3 min)
-    // Configurable via OJ_IDLE_TIMEOUT_MS for testing (default: 180s)
-    let idle_timeout = idle_timeout_override.unwrap_or_else(|| {
-        std::env::var("OJ_IDLE_TIMEOUT_MS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(Duration::from_millis)
-            .unwrap_or(Duration::from_secs(180))
-    });
-    let mut last_activity = clock.now();
-    let mut idle_emitted = false;
-
     loop {
         tokio::select! {
             // File changed
@@ -248,21 +239,20 @@ async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) 
                 if new_state != last_state {
                     last_state = new_state.clone();
 
-                    // Reset idle tracking on any state change
-                    last_activity = clock.now();
-                    idle_emitted = false;
-
-                    // Emit non-idle state changes immediately.
-                    // WaitingForInput is only emitted after idle_timeout elapses (below).
+                    // WaitingForInput is emitted as AgentIdle (same event the
+                    // Notification hook produces) for instant idle detection
+                    // without the old timeout delay.
                     if new_state == AgentState::WaitingForInput {
-                        tracing::debug!(agent_id = %agent_id, "state changed to WaitingForInput, deferring for idle timeout");
+                        let _ = event_tx
+                            .send(Event::AgentIdle {
+                                agent_id: agent_id.clone(),
+                            })
+                            .await;
                     } else {
-                        let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), new_state)).await;
+                        let _ = event_tx
+                            .send(Event::from_agent_state(agent_id.clone(), new_state))
+                            .await;
                     }
-                } else if new_state == AgentState::Working {
-                    // File changed but state didn't — still working, reset activity timer
-                    last_activity = clock.now();
-                    idle_emitted = false;
                 }
 
                 // Extract log entries
@@ -275,18 +265,11 @@ async fn watch_loop<S: SessionAdapter, C: Clock>(params: WatchLoopParams<S, C>) 
                 }
             }
 
-            // Periodic check for process death and idle timeout
+            // Periodic check for process death
             _ = tokio::time::sleep(watcher_poll_interval()) => {
                 if let Some(state) = check_liveness(&sessions, &tmux_session_id, &process_name, &agent_id).await {
                     let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state)).await;
                     break;
-                }
-
-                // Idle timeout: only if timeout passed AND last state shows idle (no pending tool)
-                if !idle_emitted && clock.now().duration_since(last_activity) >= idle_timeout && last_state == AgentState::WaitingForInput {
-                    tracing::info!(agent_id = %agent_id, "idle timeout");
-                    idle_emitted = true;
-                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), AgentState::WaitingForInput)).await;
                 }
             }
 
