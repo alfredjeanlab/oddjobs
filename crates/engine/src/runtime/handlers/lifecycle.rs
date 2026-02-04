@@ -208,7 +208,7 @@ where
                 step,
                 &format!("shell failed (exit {})", exit_code),
             );
-            self.fail_pipeline(&pipeline, &format!("shell exited with code {}", exit_code))
+            self.fail_pipeline(&pipeline, &format!("shell exit code: {}", exit_code))
                 .await
         }
     }
