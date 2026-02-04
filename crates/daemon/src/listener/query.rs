@@ -1117,7 +1117,7 @@ pub(super) fn handle_query(
                     }
                 })
                 .collect();
-            decisions.sort_by(|a, b| a.created_at_ms.cmp(&b.created_at_ms));
+            decisions.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
             Response::Decisions { decisions }
         }
 

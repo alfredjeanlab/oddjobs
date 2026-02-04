@@ -8,7 +8,10 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
-use oj_core::{AgentRun, AgentRunStatus, Pipeline, StepOutcome, StepRecord, StepStatus};
+use oj_core::{
+    AgentRun, AgentRunStatus, Decision, DecisionId, DecisionSource, Pipeline, StepOutcome,
+    StepRecord, StepStatus,
+};
 use oj_storage::{CronRecord, MaterializedState, QueueItem, QueueItemStatus, WorkerRecord};
 
 use oj_engine::breadcrumb::{Breadcrumb, BreadcrumbAgent};
@@ -1170,6 +1173,77 @@ fn get_pipeline_logs_resolves_orphan_prefix() {
                 log_path,
             );
             assert_eq!(content, "line1\nline2\nline3\n");
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
+fn make_decision(id: &str, pipeline_id: &str, created_at_ms: u64) -> Decision {
+    Decision {
+        id: DecisionId::new(id),
+        pipeline_id: pipeline_id.to_string(),
+        agent_id: None,
+        source: DecisionSource::Idle,
+        context: "test context".to_string(),
+        options: vec![],
+        chosen: None,
+        message: None,
+        created_at_ms,
+        resolved_at_ms: None,
+        namespace: "oddjobs".to_string(),
+    }
+}
+
+#[test]
+fn list_decisions_returns_most_recent_first() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    {
+        let mut s = state.lock();
+        // Insert a pipeline so the name can be resolved
+        s.pipelines.insert(
+            "p1".to_string(),
+            make_pipeline(
+                "p1",
+                "fix/bug",
+                "oddjobs",
+                "work",
+                StepStatus::Running,
+                StepOutcome::Running,
+                None,
+                1000,
+            ),
+        );
+        // Insert decisions with different timestamps
+        s.decisions
+            .insert("d-old".to_string(), make_decision("d-old", "p1", 1000));
+        s.decisions
+            .insert("d-mid".to_string(), make_decision("d-mid", "p1", 2000));
+        s.decisions
+            .insert("d-new".to_string(), make_decision("d-new", "p1", 3000));
+    }
+
+    let response = handle_query(
+        Query::ListDecisions {
+            namespace: "oddjobs".to_string(),
+        },
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::Decisions { decisions } => {
+            assert_eq!(decisions.len(), 3);
+            // Most recent first
+            assert_eq!(decisions[0].id, "d-new");
+            assert_eq!(decisions[0].created_at_ms, 3000);
+            assert_eq!(decisions[1].id, "d-mid");
+            assert_eq!(decisions[1].created_at_ms, 2000);
+            assert_eq!(decisions[2].id, "d-old");
+            assert_eq!(decisions[2].created_at_ms, 1000);
         }
         other => panic!("unexpected response: {:?}", other),
     }
