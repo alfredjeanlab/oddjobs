@@ -7,6 +7,7 @@ use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
 use crate::log_paths::cron_log_path;
+use crate::runtime::agent_run::SpawnAgentParams;
 use crate::time_fmt::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, ShortId, TimerId, UuidIdGen};
@@ -81,6 +82,31 @@ fn append_cron_log(logs_dir: &Path, cron_name: &str, namespace: &str, message: &
     }
 }
 
+/// Parameters for handling a cron started event.
+pub(crate) struct CronStartedParams<'a> {
+    pub cron_name: &'a str,
+    pub project_root: &'a Path,
+    pub runbook_hash: &'a str,
+    pub interval: &'a str,
+    pub pipeline_name: &'a str,
+    pub run_target_str: &'a str,
+    pub namespace: &'a str,
+}
+
+/// Parameters for handling a one-shot cron execution.
+pub(crate) struct CronOnceParams<'a> {
+    pub cron_name: &'a str,
+    pub pipeline_id: &'a PipelineId,
+    pub pipeline_name: &'a str,
+    pub pipeline_kind: &'a str,
+    pub agent_run_id: &'a Option<String>,
+    pub agent_name: &'a Option<String>,
+    pub runbook_hash: &'a str,
+    pub run_target: &'a str,
+    pub namespace: &'a str,
+    pub project_root: &'a Path,
+}
+
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
@@ -88,18 +114,19 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    // TODO(refactor): group cron handler parameters into a struct
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_cron_started(
         &self,
-        cron_name: &str,
-        project_root: &Path,
-        runbook_hash: &str,
-        interval: &str,
-        pipeline_name: &str,
-        run_target_str: &str,
-        namespace: &str,
+        params: CronStartedParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let CronStartedParams {
+            cron_name,
+            project_root,
+            runbook_hash,
+            interval,
+            pipeline_name,
+            run_target_str,
+            namespace,
+        } = params;
         let duration = crate::monitor::parse_duration(interval).map_err(|e| {
             RuntimeError::InvalidFormat(format!("invalid cron interval '{}': {}", interval, e))
         })?;
@@ -181,21 +208,22 @@ where
     }
 
     /// Handle a one-shot cron execution: create and start the pipeline/agent immediately.
-    // TODO(refactor): group cron handler parameters into a struct
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_cron_once(
         &self,
-        cron_name: &str,
-        pipeline_id: &PipelineId,
-        pipeline_name: &str,
-        pipeline_kind: &str,
-        agent_run_id: &Option<String>,
-        agent_name: &Option<String>,
-        runbook_hash: &str,
-        run_target: &str,
-        namespace: &str,
-        project_root: &Path,
+        params: CronOnceParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let CronOnceParams {
+            cron_name,
+            pipeline_id,
+            pipeline_name,
+            pipeline_kind,
+            agent_run_id,
+            agent_name,
+            runbook_hash,
+            run_target,
+            namespace,
+            project_root,
+        } = params;
         let runbook = self.cached_runbook(runbook_hash)?;
         let mut result_events = Vec::new();
 
@@ -234,14 +262,15 @@ where
             result_events.extend(self.executor.execute_all(creation_effects).await?);
 
             let spawn_events = self
-                .spawn_standalone_agent(
-                    &ar_id,
-                    &agent_def,
+                .spawn_standalone_agent(SpawnAgentParams {
+                    agent_run_id: &ar_id,
+                    agent_def: &agent_def,
                     agent_name,
-                    &HashMap::new(),
-                    project_root,
+                    input: &HashMap::new(),
+                    cwd: project_root,
                     namespace,
-                )
+                    resume_session_id: None,
+                })
                 .await?;
             result_events.extend(spawn_events);
 
@@ -495,14 +524,15 @@ where
 
                 // Spawn the standalone agent
                 let spawn_events = self
-                    .spawn_standalone_agent(
-                        &agent_run_id,
-                        &agent_def,
+                    .spawn_standalone_agent(SpawnAgentParams {
+                        agent_run_id: &agent_run_id,
+                        agent_def: &agent_def,
                         agent_name,
-                        &HashMap::new(),
-                        &project_root,
-                        &namespace,
-                    )
+                        input: &HashMap::new(),
+                        cwd: &project_root,
+                        namespace: &namespace,
+                        resume_session_id: None,
+                    })
                     .await?;
                 result_events.extend(spawn_events);
 
