@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use oj_core::{Event, PipelineId};
+use oj_core::{Event, PipelineId, StepOutcome, StepRecord};
 
 #[test]
 fn encode_decode_roundtrip_request() {
@@ -603,4 +603,70 @@ async fn write_message_adds_length_prefix() {
     // Length should match the data size
     assert_eq!(len, data.len());
     assert_eq!(&buffer[4..], data);
+}
+
+#[test]
+fn step_record_detail_from_running() {
+    let record = StepRecord {
+        name: "build".to_string(),
+        started_at_ms: 1000,
+        finished_at_ms: None,
+        outcome: StepOutcome::Running,
+        agent_id: Some("agent-1".to_string()),
+        agent_name: Some("coder".to_string()),
+    };
+    let detail = StepRecordDetail::from(&record);
+    assert_eq!(detail.name, "build");
+    assert_eq!(detail.started_at_ms, 1000);
+    assert_eq!(detail.finished_at_ms, None);
+    assert_eq!(detail.outcome, "running");
+    assert_eq!(detail.detail, None);
+    assert_eq!(detail.agent_id, Some("agent-1".to_string()));
+    assert_eq!(detail.agent_name, Some("coder".to_string()));
+}
+
+#[test]
+fn step_record_detail_from_completed() {
+    let record = StepRecord {
+        name: "test".to_string(),
+        started_at_ms: 2000,
+        finished_at_ms: Some(3000),
+        outcome: StepOutcome::Completed,
+        agent_id: None,
+        agent_name: None,
+    };
+    let detail = StepRecordDetail::from(&record);
+    assert_eq!(detail.outcome, "completed");
+    assert_eq!(detail.finished_at_ms, Some(3000));
+    assert_eq!(detail.detail, None);
+}
+
+#[test]
+fn step_record_detail_from_failed() {
+    let record = StepRecord {
+        name: "deploy".to_string(),
+        started_at_ms: 4000,
+        finished_at_ms: Some(5000),
+        outcome: StepOutcome::Failed("compilation error".to_string()),
+        agent_id: Some("agent-2".to_string()),
+        agent_name: None,
+    };
+    let detail = StepRecordDetail::from(&record);
+    assert_eq!(detail.outcome, "failed");
+    assert_eq!(detail.detail, Some("compilation error".to_string()));
+}
+
+#[test]
+fn step_record_detail_from_waiting() {
+    let record = StepRecord {
+        name: "gate".to_string(),
+        started_at_ms: 6000,
+        finished_at_ms: None,
+        outcome: StepOutcome::Waiting("gate check failed".to_string()),
+        agent_id: None,
+        agent_name: None,
+    };
+    let detail = StepRecordDetail::from(&record);
+    assert_eq!(detail.outcome, "waiting");
+    assert_eq!(detail.detail, Some("gate check failed".to_string()));
 }

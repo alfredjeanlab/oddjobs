@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use oj_core::{AgentSignalKind, Event};
+use oj_core::{AgentSignalKind, Event, StepOutcome, StepRecord};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 
@@ -675,6 +675,29 @@ pub struct StepRecordDetail {
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
+}
+
+impl From<&StepRecord> for StepRecordDetail {
+    fn from(r: &StepRecord) -> Self {
+        StepRecordDetail {
+            name: r.name.clone(),
+            started_at_ms: r.started_at_ms,
+            finished_at_ms: r.finished_at_ms,
+            outcome: match &r.outcome {
+                StepOutcome::Running => "running".to_string(),
+                StepOutcome::Completed => "completed".to_string(),
+                StepOutcome::Failed(_) => "failed".to_string(),
+                StepOutcome::Waiting(_) => "waiting".to_string(),
+            },
+            detail: match &r.outcome {
+                StepOutcome::Failed(e) => Some(e.clone()),
+                StepOutcome::Waiting(r) => Some(r.clone()),
+                _ => None,
+            },
+            agent_id: r.agent_id.clone(),
+            agent_name: r.agent_name.clone(),
+        }
+    }
 }
 
 /// Detailed agent information for `oj agent show`

@@ -84,28 +84,8 @@ pub(super) fn handle_query(
 
         Query::GetPipeline { id } => {
             let pipeline = state.get_pipeline(&id).map(|p| {
-                let steps: Vec<StepRecordDetail> = p
-                    .step_history
-                    .iter()
-                    .map(|r| StepRecordDetail {
-                        name: r.name.clone(),
-                        started_at_ms: r.started_at_ms,
-                        finished_at_ms: r.finished_at_ms,
-                        outcome: match &r.outcome {
-                            StepOutcome::Running => "running".to_string(),
-                            StepOutcome::Completed => "completed".to_string(),
-                            StepOutcome::Failed(_) => "failed".to_string(),
-                            StepOutcome::Waiting(_) => "waiting".to_string(),
-                        },
-                        detail: match &r.outcome {
-                            StepOutcome::Failed(e) => Some(e.clone()),
-                            StepOutcome::Waiting(r) => Some(r.clone()),
-                            _ => None,
-                        },
-                        agent_id: r.agent_id.clone(),
-                        agent_name: r.agent_name.clone(),
-                    })
-                    .collect();
+                let steps: Vec<StepRecordDetail> =
+                    p.step_history.iter().map(StepRecordDetail::from).collect();
 
                 // Compute agent summaries from log files
                 let namespace = if p.namespace.is_empty() {
@@ -140,28 +120,8 @@ pub(super) fn handle_query(
         Query::GetAgent { agent_id } => {
             // Search all pipelines for a matching agent by ID or prefix
             let agent = state.pipelines.values().find_map(|p| {
-                let steps: Vec<StepRecordDetail> = p
-                    .step_history
-                    .iter()
-                    .map(|r| StepRecordDetail {
-                        name: r.name.clone(),
-                        started_at_ms: r.started_at_ms,
-                        finished_at_ms: r.finished_at_ms,
-                        outcome: match &r.outcome {
-                            StepOutcome::Running => "running".to_string(),
-                            StepOutcome::Completed => "completed".to_string(),
-                            StepOutcome::Failed(_) => "failed".to_string(),
-                            StepOutcome::Waiting(_) => "waiting".to_string(),
-                        },
-                        detail: match &r.outcome {
-                            StepOutcome::Failed(e) => Some(e.clone()),
-                            StepOutcome::Waiting(r) => Some(r.clone()),
-                            _ => None,
-                        },
-                        agent_id: r.agent_id.clone(),
-                        agent_name: r.agent_name.clone(),
-                    })
-                    .collect();
+                let steps: Vec<StepRecordDetail> =
+                    p.step_history.iter().map(StepRecordDetail::from).collect();
 
                 let namespace = if p.namespace.is_empty() {
                     None
@@ -599,28 +559,8 @@ pub(super) fn handle_query(
                     }
                 }
 
-                let steps: Vec<StepRecordDetail> = p
-                    .step_history
-                    .iter()
-                    .map(|r| StepRecordDetail {
-                        name: r.name.clone(),
-                        started_at_ms: r.started_at_ms,
-                        finished_at_ms: r.finished_at_ms,
-                        outcome: match &r.outcome {
-                            StepOutcome::Running => "running".to_string(),
-                            StepOutcome::Completed => "completed".to_string(),
-                            StepOutcome::Failed(_) => "failed".to_string(),
-                            StepOutcome::Waiting(_) => "waiting".to_string(),
-                        },
-                        detail: match &r.outcome {
-                            StepOutcome::Failed(e) => Some(e.clone()),
-                            StepOutcome::Waiting(r) => Some(r.clone()),
-                            _ => None,
-                        },
-                        agent_id: r.agent_id.clone(),
-                        agent_name: r.agent_name.clone(),
-                    })
-                    .collect();
+                let steps: Vec<StepRecordDetail> =
+                    p.step_history.iter().map(StepRecordDetail::from).collect();
 
                 let namespace = if p.namespace.is_empty() {
                     None
