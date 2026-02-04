@@ -27,7 +27,7 @@ queue "merges" {
 worker "merge" {
   source      = { queue = "merges" }
   handler     = { pipeline = "merge" }
-  concurrency = 2
+  concurrency = 4
 }
 
 pipeline "merge" {
@@ -72,19 +72,19 @@ pipeline "merge" {
 
   step "merge" {
     run     = "git merge origin/${var.mr.branch} --no-edit"
-    on_done = { step = "check" }
-    on_fail = { step = "resolve" }
-  }
-
-  step "check" {
-    run     = "make check"
     on_done = { step = "push" }
     on_fail = { step = "resolve" }
   }
 
   step "resolve" {
     run     = { agent = "resolver" }
+    on_done = { step = "check" }
+  }
+
+  step "check" {
+    run     = "make check"
     on_done = { step = "push" }
+    on_fail = { step = "resolve" }
   }
 
   step "push" {
