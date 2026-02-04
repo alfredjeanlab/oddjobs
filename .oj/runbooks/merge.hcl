@@ -77,7 +77,7 @@ pipeline "merge" {
   }
 
   step "resolve" {
-    run     = { agent = "resolver" }
+    run     = { agent = "conflicts" }
     on_done = { step = "check" }
   }
 
@@ -116,7 +116,7 @@ pipeline "merge" {
   }
 }
 
-agent "resolver" {
+agent "conflicts" {
   run      = "claude --model opus --dangerously-skip-permissions"
   on_idle  = { action = "gate", run = "make check", attempts = 2 }
   on_dead  = { action = "escalate" }
