@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::super::pipeline_wait::{print_step_progress, StepTracker};
-use super::{format_pipeline_list, format_var_value, parse_duration};
+use super::{format_pipeline_list, format_var_value, is_var_truncated, parse_duration};
 use oj_daemon::{PipelineDetail, PipelineSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -339,6 +339,31 @@ fn format_var_newlines_and_truncation() {
     assert!(result.ends_with("..."));
     // The truncated part should be exactly 80 chars
     assert_eq!(result.chars().count(), 83); // 80 + "..."
+}
+
+#[test]
+fn is_var_truncated_short_value() {
+    let value = "hello world";
+    assert!(!is_var_truncated(value, 80));
+}
+
+#[test]
+fn is_var_truncated_long_value() {
+    let value = "a".repeat(100);
+    assert!(is_var_truncated(&value, 80));
+}
+
+#[test]
+fn is_var_truncated_exact_length() {
+    let value = "a".repeat(80);
+    assert!(!is_var_truncated(&value, 80));
+}
+
+#[test]
+fn is_var_truncated_with_newlines() {
+    // Each \n becomes \\n (2 chars), so 40 'a' + 41 newlines = 40 + 82 = 122 escaped chars
+    let value = "a\n".repeat(40);
+    assert!(is_var_truncated(&value, 80));
 }
 
 fn make_summary(id: &str, name: &str, kind: &str, step: &str, status: &str) -> PipelineSummary {
