@@ -100,6 +100,33 @@ impl PipelineLogger {
         writeln!(file, "{} [{}] {}", ts, step, message)?;
         Ok(())
     }
+
+    /// Append a spawn error to an agent's log file.
+    ///
+    /// Format: `2026-01-30T08:14:09Z error: <message>`
+    ///
+    /// This is used when agent spawn fails before the watcher is started,
+    /// so there's no other mechanism to write to the agent log.
+    pub fn append_agent_error(&self, agent_id: &str, message: &str) {
+        let path = log_paths::agent_log_path(&self.log_dir, agent_id);
+        if let Err(e) = self.write_agent_error(&path, message) {
+            tracing::warn!(
+                agent_id,
+                error = %e,
+                "failed to write agent spawn error log"
+            );
+        }
+    }
+
+    fn write_agent_error(&self, path: &Path, message: &str) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+        let ts = format_utc_now();
+        writeln!(file, "{} error: {}", ts, message)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

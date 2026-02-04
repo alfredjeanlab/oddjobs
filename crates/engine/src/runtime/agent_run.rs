@@ -93,7 +93,38 @@ where
                 .insert(aid.clone(), agent_run_id.clone());
         }
 
-        let mut result_events = self.executor.execute_all(effects).await?;
+        // Execute spawn effects, handling spawn failures gracefully
+        let mut result_events = match self.executor.execute_all(effects).await {
+            Ok(events) => events,
+            Err(e) => {
+                // Spawn failed - emit failure event and log the error
+                let error_msg = e.to_string();
+                tracing::error!(
+                    agent_run_id = %agent_run_id,
+                    error = %error_msg,
+                    "standalone agent spawn failed"
+                );
+
+                // Write error to agent log (watcher isn't started, so we write directly)
+                if let Some(ref aid) = agent_id {
+                    self.logger.append_agent_error(aid.as_str(), &error_msg);
+                }
+
+                // Emit failure event so agent_run status is updated
+                let fail_event = Event::AgentRunStatusChanged {
+                    id: agent_run_id.clone(),
+                    status: AgentRunStatus::Failed,
+                    reason: Some(error_msg.clone()),
+                };
+                let _ = self
+                    .executor
+                    .execute(Effect::Emit { event: fail_event })
+                    .await;
+
+                // Return the original error so callers know spawn failed
+                return Err(e.into());
+            }
+        };
 
         // Emit AgentRunStarted event if we have an agent_id
         if let Some(ref aid) = agent_id {
