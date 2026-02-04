@@ -232,7 +232,7 @@ Agent fields:
 - **env**: Map of environment variables to set
 - **cwd**: Working directory (supports template interpolation)
 - **prime**: Shell commands to run at session start for context injection (string or array)
-- **on_idle**: What to do when agent is waiting for input (default: `"nudge"`)
+- **on_idle**: What to do when agent is waiting for input (default: `"escalate"`)
 - **on_dead**: What to do when agent process exits (default: `"escalate"`)
 - **on_stop**: What to do when agent tries to exit via Stop hook (default: `"signal"` for pipeline, `"escalate"` for standalone)
 - **on_error**: What to do on API errors (default: `"escalate"`)
