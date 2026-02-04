@@ -336,6 +336,89 @@ async fn process_event_materializes_state() {
     );
 }
 
+#[tokio::test]
+async fn result_events_delivered_once_through_engine_loop() {
+    // Regression test for duplicate pipeline creation (oj-3faca023).
+    //
+    // process_event must NOT re-process result events locally. Result events
+    // are persisted to the WAL and processed by the engine loop on the next
+    // iteration. Previously, process_event had a pending_events loop that
+    // both persisted AND locally re-processed result events, causing handlers
+    // to fire twice — e.g., WorkerPollComplete dispatching the same queue
+    // item into two pipelines.
+    //
+    // This test simulates the engine loop: process an event, read result
+    // events from the WAL, process each, and verify the total event count
+    // matches expectations (no duplicates from local re-processing).
+    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_pipeline_and_reader().await;
+
+    // Process ShellExited — produces StepCompleted + PipelineAdvanced result events
+    daemon
+        .process_event(Event::ShellExited {
+            pipeline_id: PipelineId::new("pipe-1"),
+            step: "only-step".to_string(),
+            exit_code: 0,
+            stdout: None,
+            stderr: None,
+        })
+        .await
+        .unwrap();
+
+    daemon.event_bus.flush().unwrap();
+
+    // Simulate engine loop: read result events from WAL and process them
+    let mut total_wal_events = 0usize;
+    loop {
+        let entry =
+            match tokio::time::timeout(std::time::Duration::from_millis(50), event_reader.recv())
+                .await
+            {
+                Ok(Ok(Some(entry))) => entry,
+                _ => break,
+            };
+        event_reader.mark_processed(entry.seq);
+        total_wal_events += 1;
+
+        // Process the result event (as the engine loop would)
+        daemon.process_event(entry.event).await.unwrap();
+        daemon.event_bus.flush().unwrap();
+    }
+
+    // Read any secondary events produced by processing result events
+    let mut secondary_events = 0usize;
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(50), event_reader.recv()).await
+        {
+            Ok(Ok(Some(entry))) => {
+                event_reader.mark_processed(entry.seq);
+                secondary_events += 1;
+            }
+            _ => break,
+        }
+    }
+
+    // ShellExited → advance_pipeline produces:
+    //   1. StepCompleted (current step done)
+    //   2. PipelineAdvanced("done") (from completion_effects)
+    //   3. StepCompleted (from completion_effects)
+    assert_eq!(
+        total_wal_events, 3,
+        "ShellExited should produce exactly 3 result events in WAL"
+    );
+
+    // PipelineAdvanced("done") handler returns empty (no worker tracking this
+    // pipeline), and StepCompleted has no handler. So no secondary events.
+    assert_eq!(
+        secondary_events, 0,
+        "result event handlers should produce no secondary events (no worker)"
+    );
+
+    // Pipeline should be terminal
+    let state = daemon.state.lock();
+    let pipeline = state.pipelines.get("pipe-1").unwrap();
+    assert!(pipeline.is_terminal());
+}
+
 #[test]
 fn parking_lot_mutex_reentrant_lock_is_detected() {
     // parking_lot::Mutex does not allow re-entrant locking from the same thread.
