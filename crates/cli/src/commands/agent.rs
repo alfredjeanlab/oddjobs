@@ -348,11 +348,11 @@ pub async fn handle(
             match client.peek_session(&session_id, with_color).await {
                 Ok(output) => {
                     println!(
-                        "{}",
-                        color::header(&format!("╭──── peek: {} ────", session_id))
+                        "╭────── {} ──────",
+                        color::header(&format!("peek: {}", session_id))
                     );
                     print!("{}", output);
-                    println!("{}", color::header("╰──── end peek ────"));
+                    println!("╰────── {} ──────", color::header("end peek"));
                 }
                 Err(crate::client::ClientError::Rejected(msg))
                     if msg.starts_with("Session not found") =>
