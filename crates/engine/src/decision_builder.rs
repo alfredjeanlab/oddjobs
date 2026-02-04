@@ -182,6 +182,13 @@ impl EscalationDecisionBuilder {
                     description: Some("Cancel the pipeline".to_string()),
                     recommended: false,
                 },
+                DecisionOption {
+                    label: "Dismiss".to_string(),
+                    description: Some(
+                        "Dismiss this notification without taking action".to_string(),
+                    ),
+                    recommended: false,
+                },
             ],
             EscalationTrigger::Dead { .. } | EscalationTrigger::Error { .. } => vec![
                 DecisionOption {

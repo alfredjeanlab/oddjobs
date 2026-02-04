@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::build_resume_message;
+use super::{build_resume_message, map_decision_to_action};
+use oj_core::DecisionSource;
+
+#[test]
+fn idle_dismiss_returns_no_action() {
+    let result = map_decision_to_action(
+        &DecisionSource::Idle,
+        Some(4),
+        None,
+        "dec-123",
+        "pipe-1",
+        Some("step-1"),
+    );
+    assert!(result.is_none());
+}
 
 #[test]
 fn build_resume_message_with_choice() {
