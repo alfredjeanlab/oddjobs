@@ -325,7 +325,7 @@ pub async fn handle(
                 Err(crate::client::ClientError::Rejected(msg))
                     if msg.starts_with("Session not found") =>
                 {
-                    let short_id = truncate(&agent.agent_id, 8);
+                    let short_id = &agent.agent_id[..8.min(agent.agent_id.len())];
                     let is_terminal = agent.status == "completed"
                         || agent.status == "failed"
                         || agent.status == "cancelled";

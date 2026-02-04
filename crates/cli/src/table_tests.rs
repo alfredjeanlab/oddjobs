@@ -18,7 +18,9 @@ fn empty_table_prints_nothing() {
 }
 
 #[test]
+#[serial]
 fn single_row_single_column() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("NAME")]);
     table.row(vec!["hello".into()]);
     let out = render_to_string(&table);
@@ -29,7 +31,9 @@ fn single_row_single_column() {
 }
 
 #[test]
+#[serial]
 fn multi_column_left_alignment() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("NAME"), Column::left("KIND")]);
     table.row(vec!["alpha".into(), "build".into()]);
     table.row(vec!["b".into(), "fix".into()]);
@@ -44,7 +48,9 @@ fn multi_column_left_alignment() {
 }
 
 #[test]
+#[serial]
 fn right_alignment() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("NAME"), Column::right("COUNT")]);
     table.row(vec!["alpha".into(), "5".into()]);
     table.row(vec!["beta".into(), "123".into()]);
@@ -59,7 +65,9 @@ fn right_alignment() {
 }
 
 #[test]
+#[serial]
 fn column_width_adapts_to_widest_cell() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("ID"), Column::left("STATUS")]);
     table.row(vec!["a".into(), "ok".into()]);
     table.row(vec!["longvalue".into(), "error".into()]);
@@ -73,7 +81,9 @@ fn column_width_adapts_to_widest_cell() {
 }
 
 #[test]
+#[serial]
 fn max_width_truncates_long_values() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("ID").with_max(4), Column::left("NAME")]);
     table.row(vec!["abcdef".into(), "test".into()]);
     let out = render_to_string(&table);
@@ -83,7 +93,9 @@ fn max_width_truncates_long_values() {
 }
 
 #[test]
+#[serial]
 fn min_width_enforces_minimum() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![
         {
             let mut c = Column::left("X");
@@ -102,7 +114,9 @@ fn min_width_enforces_minimum() {
 }
 
 #[test]
+#[serial]
 fn last_column_no_trailing_padding() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![Column::left("A"), Column::left("B")]);
     table.row(vec!["short".into(), "x".into()]);
     table.row(vec!["s".into(), "longvalue".into()]);
@@ -115,7 +129,9 @@ fn last_column_no_trailing_padding() {
 }
 
 #[test]
+#[serial]
 fn double_space_column_separator() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![
         Column::left("A"),
         Column::left("B"),
@@ -189,7 +205,9 @@ fn no_ansi_when_no_color() {
 }
 
 #[test]
+#[serial]
 fn right_aligned_non_last_column() {
+    std::env::set_var("NO_COLOR", "1");
     let mut table = Table::new(vec![
         Column::left("NAME"),
         Column::right("COUNT"),

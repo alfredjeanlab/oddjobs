@@ -9,6 +9,8 @@ use std::path::Path;
 
 use oj_daemon::{Query, Request, Response};
 
+use crate::color;
+
 use crate::client::DaemonClient;
 use crate::output::{display_log, OutputFormat};
 use crate::table::{Column, Table};
