@@ -29,17 +29,42 @@ pub(super) fn handle_queue_push(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue
-    let runbook = match load_runbook_for_queue(project_root, queue_name) {
-        Ok(rb) => rb,
+    // Load runbook containing the queue.
+    // If the provided project_root doesn't contain the queue, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, effective_root) = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint =
-                suggest_for_queue(project_root, queue_name, namespace, "oj queue push", state);
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_queue(alt, queue_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_queue(
+                        project_root,
+                        queue_name,
+                        namespace,
+                        "oj queue push",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
+    let project_root = &effective_root;
 
     // Validate queue exists
     let queue_def = match runbook.get_queue(queue_name) {
@@ -330,15 +355,39 @@ pub(super) fn handle_queue_drop(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue
-    let runbook = match load_runbook_for_queue(project_root, queue_name) {
-        Ok(rb) => rb,
+    // Load runbook containing the queue.
+    // If the provided project_root doesn't contain the queue, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, _effective_root) = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint =
-                suggest_for_queue(project_root, queue_name, namespace, "oj queue drop", state);
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_queue(alt, queue_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_queue(
+                        project_root,
+                        queue_name,
+                        namespace,
+                        "oj queue drop",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
 
@@ -390,17 +439,42 @@ pub(super) fn handle_queue_retry(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue
-    let runbook = match load_runbook_for_queue(project_root, queue_name) {
-        Ok(rb) => rb,
+    // Load runbook containing the queue.
+    // If the provided project_root doesn't contain the queue, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, effective_root) = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint =
-                suggest_for_queue(project_root, queue_name, namespace, "oj queue retry", state);
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_queue(alt, queue_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_queue(
+                        project_root,
+                        queue_name,
+                        namespace,
+                        "oj queue retry",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
+    let project_root = &effective_root;
 
     // Validate queue exists
     let queue_def = match runbook.get_queue(queue_name) {
@@ -486,15 +560,39 @@ pub(super) fn handle_queue_drain(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue
-    let runbook = match load_runbook_for_queue(project_root, queue_name) {
-        Ok(rb) => rb,
+    // Load runbook containing the queue.
+    // If the provided project_root doesn't contain the queue, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, _effective_root) = match load_runbook_for_queue(project_root, queue_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint =
-                suggest_for_queue(project_root, queue_name, namespace, "oj queue drain", state);
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_queue(alt, queue_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_queue(
+                        project_root,
+                        queue_name,
+                        namespace,
+                        "oj queue drain",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
 

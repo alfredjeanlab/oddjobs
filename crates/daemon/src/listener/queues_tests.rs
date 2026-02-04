@@ -1001,3 +1001,226 @@ fn drain_unknown_queue_returns_error() {
         result
     );
 }
+
+// ── --project flag: namespace fallback tests ─────────────────────────────
+
+#[test]
+fn push_with_wrong_project_root_falls_back_to_namespace() {
+    let project = project_with_queue_and_worker();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a worker that knows the real project root,
+    // simulating `--project my-project` where the daemon already tracks the namespace.
+    let mut initial = MaterializedState::default();
+    initial.workers.insert(
+        "my-project/processor".to_string(),
+        oj_storage::WorkerRecord {
+            name: "processor".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "jobs".to_string(),
+            concurrency: 1,
+            namespace: "my-project".to_string(),
+        },
+    );
+    let state = Arc::new(Mutex::new(initial));
+
+    // Call with a wrong project_root (simulating --project from a different directory).
+    let data = serde_json::json!({ "task": "test-value" });
+    let result = handle_queue_push(
+        std::path::Path::new("/wrong/path"),
+        "my-project",
+        "jobs",
+        data,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::QueuePushed { ref queue_name, .. } if queue_name == "jobs"),
+        "expected QueuePushed from namespace fallback, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn drop_with_wrong_project_root_falls_back_to_namespace() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a cron that knows the real project root
+    let mut initial = MaterializedState::default();
+    initial.crons.insert(
+        "my-project/nightly".to_string(),
+        oj_storage::CronRecord {
+            name: "nightly".to_string(),
+            namespace: "my-project".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            interval: "24h".to_string(),
+            pipeline_name: "handle".to_string(),
+            run_target: "pipeline:handle".to_string(),
+            started_at_ms: 1_000,
+            last_fired_at_ms: None,
+        },
+    );
+    // Also add a queue item so the drop has something to find
+    initial.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "item-abc123".to_string(),
+        data: [("task".to_string(), "test".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: "my-project".to_string(),
+    });
+    let state = Arc::new(Mutex::new(initial));
+
+    let result = handle_queue_drop(
+        std::path::Path::new("/wrong/path"),
+        "my-project",
+        "jobs",
+        "item-abc123",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueDropped { ref queue_name, ref item_id }
+            if queue_name == "jobs" && item_id == "item-abc123"
+        ),
+        "expected QueueDropped from namespace fallback, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn retry_with_wrong_project_root_falls_back_to_namespace() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a worker that knows the real project root
+    let mut initial = MaterializedState::default();
+    initial.workers.insert(
+        "my-project/processor".to_string(),
+        oj_storage::WorkerRecord {
+            name: "processor".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "stopped".to_string(),
+            active_pipeline_ids: vec![],
+            queue_name: "jobs".to_string(),
+            concurrency: 1,
+            namespace: "my-project".to_string(),
+        },
+    );
+    // Add a dead queue item to retry
+    push_and_mark_dead(
+        &Arc::new(Mutex::new(MaterializedState::default())),
+        "my-project",
+        "jobs",
+        "item-dead-1",
+        &[("task", "retry-me")],
+    );
+    // Apply directly to initial state
+    initial.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "item-dead-1".to_string(),
+        data: [("task".to_string(), "retry-me".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: "my-project".to_string(),
+    });
+    initial.apply_event(&Event::QueueItemDead {
+        queue_name: "jobs".to_string(),
+        item_id: "item-dead-1".to_string(),
+        namespace: "my-project".to_string(),
+    });
+    let state = Arc::new(Mutex::new(initial));
+
+    let result = handle_queue_retry(
+        std::path::Path::new("/wrong/path"),
+        "my-project",
+        "jobs",
+        "item-dead-1",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueRetried { ref queue_name, ref item_id }
+            if queue_name == "jobs" && item_id == "item-dead-1"
+        ),
+        "expected QueueRetried from namespace fallback, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn drain_with_wrong_project_root_falls_back_to_namespace() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a cron that knows the real project root
+    let mut initial = MaterializedState::default();
+    initial.crons.insert(
+        "my-project/nightly".to_string(),
+        oj_storage::CronRecord {
+            name: "nightly".to_string(),
+            namespace: "my-project".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            interval: "24h".to_string(),
+            pipeline_name: "handle".to_string(),
+            run_target: "pipeline:handle".to_string(),
+            started_at_ms: 1_000,
+            last_fired_at_ms: None,
+        },
+    );
+    // Add pending queue items
+    initial.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "pending-1".to_string(),
+        data: [("task".to_string(), "test".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: "my-project".to_string(),
+    });
+    let state = Arc::new(Mutex::new(initial));
+
+    let result = handle_queue_drain(
+        std::path::Path::new("/wrong/path"),
+        "my-project",
+        "jobs",
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueDrained { ref queue_name, ref items }
+            if queue_name == "jobs" && items.len() == 1
+        ),
+        "expected QueueDrained from namespace fallback, got {:?}",
+        result
+    );
+}
