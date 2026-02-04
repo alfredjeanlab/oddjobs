@@ -1,0 +1,219 @@
+// SPDX-License-Identifier: BUSL-1.1
+// Copyright (c) 2026 Alfred Jean LLC
+
+//! Pipeline completion → queue item status updates
+
+use super::WorkerStatus;
+use crate::error::RuntimeError;
+use crate::runtime::Runtime;
+use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use oj_core::{scoped_name, Clock, Effect, Event, PipelineId, TimerId};
+use oj_runbook::QueueType;
+use std::time::Duration;
+
+impl<S, A, N, C> Runtime<S, A, N, C>
+where
+    S: SessionAdapter,
+    A: AgentAdapter,
+    N: NotifyAdapter,
+    C: Clock,
+{
+    /// Check if a completed pipeline belongs to a worker and trigger re-poll if so.
+    /// For persisted queues, also emits queue:completed or queue:failed events.
+    pub(crate) async fn check_worker_pipeline_complete(
+        &self,
+        pipeline_id: &PipelineId,
+        terminal_step: &str,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        // Find which worker (if any) owns this pipeline
+        let worker_info = {
+            let mut workers = self.worker_states.lock();
+            let mut found = None;
+            for (name, state) in workers.iter_mut() {
+                if state.active_pipelines.remove(pipeline_id) {
+                    let item_id = state.item_pipeline_map.remove(pipeline_id);
+                    found = Some((
+                        name.clone(),
+                        state.runbook_hash.clone(),
+                        state.queue_name.clone(),
+                        state.project_root.clone(),
+                        state.queue_type,
+                        item_id,
+                        state.namespace.clone(),
+                    ));
+                    break;
+                }
+            }
+            found
+        };
+
+        let mut result_events = Vec::new();
+
+        if let Some((
+            worker_name,
+            _old_runbook_hash,
+            queue_name,
+            project_root,
+            queue_type,
+            item_id,
+            worker_namespace,
+        )) = worker_info
+        {
+            // Log pipeline completion
+            {
+                let workers = self.worker_states.lock();
+                let active = workers
+                    .get(&worker_name)
+                    .map(|s| s.active_pipelines.len())
+                    .unwrap_or(0);
+                let concurrency = workers
+                    .get(&worker_name)
+                    .map(|s| s.concurrency)
+                    .unwrap_or(0);
+                let scoped = scoped_name(&worker_namespace, &worker_name);
+                self.worker_logger.append(
+                    &scoped,
+                    &format!(
+                        "pipeline {} completed (step={}), active={}/{}",
+                        pipeline_id.as_str(),
+                        terminal_step,
+                        active,
+                        concurrency,
+                    ),
+                );
+            }
+
+            // Refresh runbook from disk so edits after `oj worker start` are picked up
+            if let Some(loaded_event) = self.refresh_worker_runbook(&worker_name)? {
+                result_events.push(loaded_event);
+            }
+            let runbook_hash = {
+                let workers = self.worker_states.lock();
+                workers
+                    .get(&worker_name)
+                    .map(|s| s.runbook_hash.clone())
+                    .unwrap_or(_old_runbook_hash)
+            };
+
+            // For persisted queues, emit queue completion/failure event
+            if queue_type == QueueType::Persisted {
+                if let Some(ref item_id) = item_id {
+                    let queue_event = if terminal_step == "done" {
+                        Event::QueueCompleted {
+                            queue_name: queue_name.clone(),
+                            item_id: item_id.clone(),
+                            namespace: worker_namespace.clone(),
+                        }
+                    } else {
+                        Event::QueueFailed {
+                            queue_name: queue_name.clone(),
+                            item_id: item_id.clone(),
+                            error: format!("pipeline reached '{}'", terminal_step),
+                            namespace: worker_namespace.clone(),
+                        }
+                    };
+                    result_events.extend(
+                        self.executor
+                            .execute_all(vec![Effect::Emit { event: queue_event }])
+                            .await?,
+                    );
+
+                    // Retry-or-dead logic: after QueueFailed is applied, check retry config
+                    if terminal_step != "done" {
+                        let scoped_queue = scoped_name(&worker_namespace, &queue_name);
+
+                        // Read failure_count from state (QueueFailed already incremented it)
+                        let failure_count = self.lock_state(|state| {
+                            state
+                                .queue_items
+                                .get(&scoped_queue)
+                                .and_then(|items| {
+                                    items
+                                        .iter()
+                                        .find(|i| i.id == *item_id)
+                                        .map(|i| i.failure_count)
+                                })
+                                .unwrap_or(0)
+                        });
+
+                        // Look up retry config from the runbook
+                        let runbook = self.cached_runbook(&runbook_hash)?;
+                        let retry_config = runbook
+                            .get_queue(&queue_name)
+                            .and_then(|q| q.retry.as_ref());
+
+                        let max_attempts = retry_config.map(|r| r.attempts).unwrap_or(0);
+
+                        if max_attempts > 0 && failure_count < max_attempts {
+                            // Schedule retry after cooldown
+                            let cooldown_str =
+                                retry_config.map(|r| r.cooldown.as_str()).unwrap_or("0s");
+                            let duration = crate::monitor::parse_duration(cooldown_str)
+                                .unwrap_or(Duration::ZERO);
+                            let timer_id = TimerId::queue_retry(&scoped_queue, item_id);
+                            self.executor
+                                .execute(Effect::SetTimer {
+                                    id: timer_id,
+                                    duration,
+                                })
+                                .await?;
+                        } else {
+                            // Mark as dead
+                            result_events.extend(
+                                self.executor
+                                    .execute_all(vec![Effect::Emit {
+                                        event: Event::QueueItemDead {
+                                            queue_name: queue_name.clone(),
+                                            item_id: item_id.clone(),
+                                            namespace: worker_namespace.clone(),
+                                        },
+                                    }])
+                                    .await?,
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Check if worker is still running and has capacity
+            let should_poll = {
+                let workers = self.worker_states.lock();
+                workers
+                    .get(&worker_name)
+                    .map(|s| {
+                        s.status == WorkerStatus::Running
+                            && (s.active_pipelines.len() as u32) < s.concurrency
+                    })
+                    .unwrap_or(false)
+            };
+
+            if should_poll {
+                match queue_type {
+                    QueueType::External => {
+                        let runbook = self.cached_runbook(&runbook_hash)?;
+                        if let Some(queue_def) = runbook.get_queue(&queue_name) {
+                            result_events.extend(
+                                self.executor
+                                    .execute_all(vec![Effect::PollQueue {
+                                        worker_name,
+                                        list_command: queue_def.list.clone().unwrap_or_default(),
+                                        cwd: project_root,
+                                    }])
+                                    .await?,
+                            );
+                        }
+                    }
+                    QueueType::Persisted => {
+                        result_events.extend(self.poll_persisted_queue(
+                            &worker_name,
+                            &queue_name,
+                            &worker_namespace,
+                        )?);
+                    }
+                }
+            }
+        }
+
+        Ok(result_events)
+    }
+}

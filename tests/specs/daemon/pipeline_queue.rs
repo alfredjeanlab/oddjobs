@@ -258,6 +258,80 @@ fn one_pipeline_failure_does_not_affect_others() {
 // Test 5: Circuit breaker — escalation after max action attempts
 // =============================================================================
 
+// =============================================================================
+// Test 6: Queue item released after daemon crash with terminal pipeline
+// =============================================================================
+
+/// When the daemon crashes after a pipeline reaches terminal state but before
+/// the QueueCompleted event is persisted to the WAL, restarting the daemon
+/// should reconcile the queue item during worker recovery.
+///
+/// Uses a fast shell command so the pipeline completes quickly, then kills
+/// the daemon and verifies the queue item is completed after restart.
+#[test]
+fn queue_item_released_after_crash_with_terminal_pipeline() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["worker", "start", "runner"]).passes();
+
+    // Push item with a fast command so the pipeline completes quickly
+    temp.oj()
+        .args(&["queue", "push", "jobs", r#"{"cmd": "echo hello"}"#])
+        .passes();
+
+    // Wait for the pipeline to reach a terminal state
+    let pipeline_done = wait_for(SPEC_WAIT_MAX_MS, || {
+        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        out.contains("completed")
+    });
+    assert!(pipeline_done, "pipeline should complete before crash");
+
+    // Kill the daemon (simulates crash — queue event may or may not be persisted)
+    let killed = temp.daemon_kill();
+    assert!(killed, "should be able to kill daemon");
+
+    // Wait for daemon to actually die
+    let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
+        let output = temp
+            .oj()
+            .args(&["daemon", "status"])
+            .command()
+            .output()
+            .expect("command should run");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        !stdout.contains("Status: running")
+    });
+    assert!(daemon_dead, "daemon should be dead after kill");
+
+    // Restart the daemon — triggers worker recovery + reconciliation
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Queue item should be completed (either from original WAL or reconciliation)
+    let item_completed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        let out = temp.oj().args(&["queue", "show", "jobs"]).passes().stdout();
+        out.contains("completed")
+    });
+
+    if !item_completed {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+        eprintln!(
+            "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
+            temp.oj().args(&["queue", "show", "jobs"]).passes().stdout()
+        );
+        eprintln!(
+            "=== PIPELINES ===\n{}\n=== END PIPELINES ===",
+            temp.oj().args(&["pipeline", "list"]).passes().stdout()
+        );
+    }
+    assert!(
+        item_completed,
+        "queue item should be completed after daemon crash recovery with terminal pipeline"
+    );
+}
+
 /// Scenario that makes the agent exit immediately (print mode) with a response.
 const FAILING_AGENT_SCENARIO: &str = r#"
 name = "failing-agent"
