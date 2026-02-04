@@ -1,15 +1,23 @@
 .PHONY: check ci coverage fmt install lint license coverage outdated
 
-# Quick local check (skip slow steps)
+# Quick checks
+#
+# Flags:
+#   quench --no-cloc         # Don't force agents to fix LOC errors
+#   cargo test --workspace   # Unlike --all skips 'tests/specs'
+#
+# Excluded:
+#   SKIP `cargo audit`
+#   SKIP `cargo deny`
+#
 check:
 	cargo fmt --all
 	cargo clippy --all -- -D warnings
 	quench check --fix --no-cloc
 	cargo build --all
-	cargo test --all
-	cargo deny check licenses bans sources
+	cargo test --workspace
 
-# Full CI checks
+# Full pre-release checks
 ci:
 	cargo fmt --all
 	cargo clippy --all -- -D warnings
