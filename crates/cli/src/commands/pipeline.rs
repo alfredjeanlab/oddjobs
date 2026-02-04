@@ -240,8 +240,9 @@ pub async fn handle(
         } => {
             let mut pipelines = client.list_pipelines().await?;
 
-            // Filter by project namespace
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Filter by project namespace (empty OJ_NAMESPACE treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
             if let Some(ref ns) = filter_namespace {
                 pipelines.retain(|p| p.namespace == *ns);
             }

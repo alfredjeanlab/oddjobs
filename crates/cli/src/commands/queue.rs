@@ -162,8 +162,9 @@ pub async fn handle(
             };
 
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::QueuePush {
@@ -196,8 +197,10 @@ pub async fn handle(
             item_id,
             project,
         } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::QueueDrop {
@@ -231,8 +234,10 @@ pub async fn handle(
             item_id,
             project,
         } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::QueueRetry {
@@ -262,8 +267,10 @@ pub async fn handle(
             }
         }
         QueueCommand::Drain { queue, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::QueueDrain {
@@ -312,8 +319,10 @@ pub async fn handle(
             limit,
             project,
         } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let (log_path, content) = client
@@ -322,8 +331,10 @@ pub async fn handle(
             display_log(&log_path, &content, follow, format, "queue", &queue).await?;
         }
         QueueCommand::List { project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
             let request = Request::Query {
                 query: Query::ListQueues {
@@ -381,8 +392,10 @@ pub async fn handle(
             }
         }
         QueueCommand::Items { queue, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
             let request = Request::Query {
                 query: Query::ListQueueItems {

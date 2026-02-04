@@ -174,8 +174,9 @@ pub async fn handle(
                 .list_agents(pipeline.as_deref(), status.as_deref())
                 .await?;
 
-            // Filter by project namespace
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Filter by project namespace (empty OJ_NAMESPACE treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
             if let Some(ref ns) = filter_namespace {
                 agents.retain(|a| a.namespace.as_deref() == Some(ns.as_str()));
             }
