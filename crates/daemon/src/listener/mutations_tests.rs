@@ -15,7 +15,9 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::{handle_agent_prune, handle_pipeline_resume, handle_session_kill};
+use super::{
+    handle_agent_prune, handle_pipeline_cancel, handle_pipeline_resume, handle_session_kill,
+};
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
     let wal_path = dir.join("test.wal");
@@ -463,4 +465,170 @@ fn agent_prune_skips_non_terminal_pipelines() {
         s.pipelines.contains_key("pipe-active"),
         "active pipeline should remain"
     );
+}
+
+// --- handle_pipeline_cancel tests ---
+
+#[test]
+fn cancel_single_running_pipeline() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.pipelines
+            .insert("pipe-1".to_string(), make_pipeline("pipe-1", "work"));
+    }
+
+    let result = handle_pipeline_cancel(&state, &event_bus, vec!["pipe-1".to_string()]);
+
+    match result {
+        Ok(Response::PipelinesCancelled {
+            cancelled,
+            already_terminal,
+            not_found,
+        }) => {
+            assert_eq!(cancelled, vec!["pipe-1"]);
+            assert!(already_terminal.is_empty());
+            assert!(not_found.is_empty());
+        }
+        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+    }
+}
+
+#[test]
+fn cancel_nonexistent_pipeline_returns_not_found() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let result = handle_pipeline_cancel(&state, &event_bus, vec!["no-such-pipe".to_string()]);
+
+    match result {
+        Ok(Response::PipelinesCancelled {
+            cancelled,
+            already_terminal,
+            not_found,
+        }) => {
+            assert!(cancelled.is_empty());
+            assert!(already_terminal.is_empty());
+            assert_eq!(not_found, vec!["no-such-pipe"]);
+        }
+        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+    }
+}
+
+#[test]
+fn cancel_already_terminal_pipeline() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.pipelines
+            .insert("pipe-done".to_string(), make_pipeline("pipe-done", "done"));
+        s.pipelines.insert(
+            "pipe-failed".to_string(),
+            make_pipeline("pipe-failed", "failed"),
+        );
+        s.pipelines.insert(
+            "pipe-cancelled".to_string(),
+            make_pipeline("pipe-cancelled", "cancelled"),
+        );
+    }
+
+    let result = handle_pipeline_cancel(
+        &state,
+        &event_bus,
+        vec![
+            "pipe-done".to_string(),
+            "pipe-failed".to_string(),
+            "pipe-cancelled".to_string(),
+        ],
+    );
+
+    match result {
+        Ok(Response::PipelinesCancelled {
+            cancelled,
+            already_terminal,
+            not_found,
+        }) => {
+            assert!(cancelled.is_empty());
+            assert_eq!(already_terminal.len(), 3);
+            assert!(already_terminal.contains(&"pipe-done".to_string()));
+            assert!(already_terminal.contains(&"pipe-failed".to_string()));
+            assert!(already_terminal.contains(&"pipe-cancelled".to_string()));
+            assert!(not_found.is_empty());
+        }
+        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+    }
+}
+
+#[test]
+fn cancel_multiple_pipelines_mixed_results() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        // Running pipeline — should be cancelled
+        s.pipelines
+            .insert("pipe-a".to_string(), make_pipeline("pipe-a", "build"));
+        // Another running pipeline — should be cancelled
+        s.pipelines
+            .insert("pipe-b".to_string(), make_pipeline("pipe-b", "test"));
+        // Terminal pipeline — already_terminal
+        s.pipelines
+            .insert("pipe-c".to_string(), make_pipeline("pipe-c", "done"));
+        // "pipe-d" not inserted — not_found
+    }
+
+    let result = handle_pipeline_cancel(
+        &state,
+        &event_bus,
+        vec![
+            "pipe-a".to_string(),
+            "pipe-b".to_string(),
+            "pipe-c".to_string(),
+            "pipe-d".to_string(),
+        ],
+    );
+
+    match result {
+        Ok(Response::PipelinesCancelled {
+            cancelled,
+            already_terminal,
+            not_found,
+        }) => {
+            assert_eq!(cancelled, vec!["pipe-a", "pipe-b"]);
+            assert_eq!(already_terminal, vec!["pipe-c"]);
+            assert_eq!(not_found, vec!["pipe-d"]);
+        }
+        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+    }
+}
+
+#[test]
+fn cancel_empty_ids_returns_empty_response() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let result = handle_pipeline_cancel(&state, &event_bus, vec![]);
+
+    match result {
+        Ok(Response::PipelinesCancelled {
+            cancelled,
+            already_terminal,
+            not_found,
+        }) => {
+            assert!(cancelled.is_empty());
+            assert!(already_terminal.is_empty());
+            assert!(not_found.is_empty());
+        }
+        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+    }
 }
