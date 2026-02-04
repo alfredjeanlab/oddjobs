@@ -210,10 +210,12 @@ vars  = ["name"]
 [[pipeline.build.step]]
 name = "init"
 run = "mkdir -p output"
+on_done = "plan"
 
 [[pipeline.build.step]]
 name = "plan"
 run = {{ agent = "planner" }}
+on_done = "implement"
 
 [[pipeline.build.step]]
 name = "implement"

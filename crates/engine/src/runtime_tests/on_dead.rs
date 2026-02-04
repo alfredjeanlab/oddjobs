@@ -184,6 +184,7 @@ input  = ["name"]
 [[pipeline.build.step]]
 name = "init"
 run = { agent = "worker" }
+on_done = "done"
 
 [[pipeline.build.step]]
 name = "done"
@@ -352,6 +353,7 @@ input  = ["name"]
 [[pipeline.build.step]]
 name = "work"
 run = { agent = "worker" }
+on_done = "done"
 
 [[pipeline.build.step]]
 name = "done"
@@ -539,6 +541,7 @@ input  = ["name"]
 [[pipeline.build.step]]
 name = "work"
 run = { agent = "worker" }
+on_done = "done"
 
 [[pipeline.build.step]]
 name = "done"

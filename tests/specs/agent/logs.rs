@@ -49,6 +49,7 @@ vars  = ["name"]
 [[pipeline.build.step]]
 name = "plan"
 run = {{ agent = "planner" }}
+on_done = "implement"
 
 [[pipeline.build.step]]
 name = "implement"

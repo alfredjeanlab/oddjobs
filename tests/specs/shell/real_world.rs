@@ -23,10 +23,12 @@ vars  = ["name", "prompt"]
 [[pipeline.build.step]]
 name = "init"
 run = "echo 'Starting build: ${name}'"
+on_done = "merge"
 
 [[pipeline.build.step]]
 name = "merge"
 run = "git fetch origin main && git rebase origin/main && git push"
+on_done = "done"
 
 [[pipeline.build.step]]
 name = "done"

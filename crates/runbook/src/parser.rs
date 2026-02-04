@@ -615,30 +615,17 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 referenced.insert(t.step_name());
             }
         }
-        // Warn on unreachable (skip first step)
+        // Reject unreachable steps (skip first step)
         for step in pipeline.steps.iter().skip(1) {
             if !referenced.contains(step.name.as_str()) {
-                tracing::warn!(
-                    "pipeline.{}: step '{}' is unreachable \
-                     (not referenced by any on_done/on_fail/on_cancel)",
-                    pipeline_name,
-                    step.name
-                );
-            }
-        }
-    }
-
-    // 12. Warn on dead-end steps (no on_done and not the last step)
-    for (pipeline_name, pipeline) in &runbook.pipelines {
-        let last_idx = pipeline.steps.len().saturating_sub(1);
-        for (i, step) in pipeline.steps.iter().enumerate() {
-            if i < last_idx && step.on_done.is_none() && pipeline.on_done.is_none() {
-                tracing::warn!(
-                    "pipeline.{}: step '{}' has no on_done and is not the last step \
-                     (will complete the pipeline instead of advancing)",
-                    pipeline_name,
-                    step.name
-                );
+                return Err(ParseError::InvalidFormat {
+                    location: format!("pipeline.{}.step.{}", pipeline_name, step.name),
+                    message: format!(
+                        "step '{}' is unreachable \
+                         (not referenced by any on_done/on_fail/on_cancel)",
+                        step.name
+                    ),
+                });
             }
         }
     }

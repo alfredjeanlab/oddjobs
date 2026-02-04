@@ -23,6 +23,7 @@ vars  = ["name"]
 [[pipeline.conditional.step]]
 name = "execute"
 run = "true && echo 'and_success:${name}' >> ${workspace}/output.log"
+on_done = "done"
 
 [[pipeline.conditional.step]]
 name = "done"
@@ -332,14 +333,17 @@ vars  = ["name"]
 [[pipeline.test.step]]
 name = "init"
 run = "echo 'init:${name}' >> ${workspace}/output.log"
+on_done = "plan"
 
 [[pipeline.test.step]]
 name = "plan"
 run = "echo 'plan:${name}' >> ${workspace}/output.log"
+on_done = "execute"
 
 [[pipeline.test.step]]
 name = "execute"
 run = "echo 'execute:${name}' >> ${workspace}/output.log"
+on_done = "merge"
 
 [[pipeline.test.step]]
 name = "merge"
@@ -418,6 +422,7 @@ vars  = ["name"]
 [[pipeline.custom.step]]
 name = "step1"
 run = "echo 'step1'"
+on_done = "step2"
 
 [[pipeline.custom.step]]
 name = "step2"

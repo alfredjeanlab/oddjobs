@@ -24,10 +24,12 @@ vars  = ["name", "prompt"]
 [[pipeline.build.step]]
 name = "init"
 run = "git worktree add worktrees/${name} -b feature/${name}"
+on_done = "plan"
 
 [[pipeline.build.step]]
 name = "plan"
 run = { agent = "planner" }
+on_done = "execute"
 
 [[pipeline.build.step]]
 name = "execute"
@@ -525,11 +527,13 @@ const SAMPLE_JSON_RUNBOOK: &str = r#"
       "step": [
         {
           "name": "init",
-          "run": "git worktree add worktrees/${name} -b feature/${name}"
+          "run": "git worktree add worktrees/${name} -b feature/${name}",
+          "on_done": "plan"
         },
         {
           "name": "plan",
-          "run": { "agent": "planner" }
+          "run": { "agent": "planner" },
+          "on_done": "execute"
         },
         {
           "name": "execute",
@@ -635,11 +639,13 @@ pipeline "build" {
   vars  = ["name", "prompt"]
 
   step "init" {
-    run = "git worktree add worktrees/${name} -b feature/${name}"
+    run     = "git worktree add worktrees/${name} -b feature/${name}"
+    on_done = "plan"
   }
 
   step "plan" {
-    run = { agent = "planner" }
+    run     = { agent = "planner" }
+    on_done = "execute"
   }
 
   step "execute" {
@@ -733,11 +739,12 @@ pipeline "deploy" {
   vars  = ["env"]
 
   step "build" {
-    run = "make build"
+    run     = "make build"
+    on_done = "test"
   }
 
   step "test" {
-    run = "make test"
+    run     = "make test"
     on_done = "deploy"
   }
 
