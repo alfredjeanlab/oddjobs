@@ -34,12 +34,12 @@ pub async fn handle(args: StatusArgs, format: OutputFormat) -> Result<()> {
     }
 
     let is_tty = std::io::stdout().is_terminal();
+    let mut first = true;
 
     loop {
         if is_tty {
-            // Move cursor to home; overwrite previous render in-place.
-            // Avoid \x1B[2J which pushes old content into terminal scrollback.
-            print!("\x1B[H");
+            print!("{}", watch_preamble(first));
+            first = false;
         }
         handle_once(format, Some(&args.interval)).await?;
         if is_tty {
@@ -365,6 +365,19 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
         String::new()
     } else {
         format!(" {}", name)
+    }
+}
+
+/// Returns the terminal escape sequence for the beginning of a watch frame.
+///
+/// On the first frame, clears the screen (`\x1B[2J`) so existing terminal content
+/// is preserved in scrollback, then homes the cursor. On subsequent frames, only
+/// homes the cursor for in-place overwrite without polluting scrollback.
+fn watch_preamble(first: bool) -> &'static str {
+    if first {
+        "\x1B[2J\x1B[H"
+    } else {
+        "\x1B[H"
     }
 }
 

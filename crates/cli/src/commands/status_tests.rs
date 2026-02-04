@@ -1,7 +1,7 @@
 use oj_daemon::NamespaceStatus;
 use serial_test::serial;
 
-use super::{format_duration, format_text, friendly_name_label, truncate_reason};
+use super::{format_duration, format_text, friendly_name_label, truncate_reason, watch_preamble};
 
 #[test]
 #[serial]
@@ -437,5 +437,25 @@ fn orphaned_pipeline_shows_friendly_name() {
     assert!(
         output.contains("ci-main-branch-ijkl9012"),
         "output should contain friendly name:\n{output}"
+    );
+}
+
+#[test]
+fn watch_preamble_first_clears_screen_and_homes() {
+    let p = watch_preamble(true);
+    assert!(
+        p.contains("\x1B[2J"),
+        "first frame should clear screen to preserve existing content in scrollback"
+    );
+    assert!(p.contains("\x1B[H"), "first frame should home cursor");
+}
+
+#[test]
+fn watch_preamble_subsequent_only_homes() {
+    let p = watch_preamble(false);
+    assert_eq!(p, "\x1B[H");
+    assert!(
+        !p.contains("\x1B[2J"),
+        "subsequent frames should not clear screen (avoids scrollback pollution)"
     );
 }
