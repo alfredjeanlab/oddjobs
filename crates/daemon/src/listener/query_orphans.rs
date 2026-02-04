@@ -44,7 +44,7 @@ pub(super) fn handle_list_orphans(orphans: &Arc<Mutex<Vec<Breadcrumb>>>) -> Resp
     Response::Orphans { orphans: summaries }
 }
 
-/// Handle DismissOrphan query by removing the orphan from the registry and deleting its breadcrumb.
+/// Handle DismissOrphan query by removing the orphan from the registry and cleaning up its files.
 pub(super) fn handle_dismiss_orphan(
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
     id: &str,
@@ -60,9 +60,18 @@ pub(super) fn handle_dismiss_orphan(
     match idx {
         Some(i) => {
             let removed = orphans.remove(i);
-            // Delete the breadcrumb file
-            let path = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
-            let _ = std::fs::remove_file(&path);
+            // Clean up all associated files (breadcrumb, pipeline log, agent files)
+            let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
+            let _ = std::fs::remove_file(&crumb);
+            let log = oj_engine::log_paths::pipeline_log_path(logs_path, &removed.pipeline_id);
+            let _ = std::fs::remove_file(&log);
+            for agent in &removed.agents {
+                let agent_log = oj_engine::log_paths::agent_log_path(logs_path, &agent.agent_id);
+                let _ = std::fs::remove_file(&agent_log);
+                let agent_dir =
+                    oj_engine::log_paths::agent_session_log_dir(logs_path, &agent.agent_id);
+                let _ = std::fs::remove_dir_all(&agent_dir);
+            }
             Response::Ok
         }
         None => Response::Error {

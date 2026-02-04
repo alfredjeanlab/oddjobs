@@ -57,11 +57,10 @@ pub enum DaemonCommand {
         follow: bool,
     },
     /// List orphaned pipelines detected at startup
-    Orphans,
-    /// Dismiss an orphaned pipeline (delete its breadcrumb)
-    DismissOrphan {
-        /// Pipeline ID (or prefix) to dismiss
-        id: String,
+    Orphans {
+        /// Dismiss an orphaned pipeline by ID (or prefix)
+        #[arg(long)]
+        dismiss: Option<String>,
     },
 }
 
@@ -80,8 +79,8 @@ pub async fn daemon(args: DaemonArgs, format: OutputFormat) -> Result<()> {
             no_limit,
             follow,
         }) => logs(limit, no_limit, follow, format).await,
-        Some(DaemonCommand::Orphans) => orphans(format).await,
-        Some(DaemonCommand::DismissOrphan { id }) => dismiss_orphan(id, format).await,
+        Some(DaemonCommand::Orphans { dismiss: Some(id) }) => dismiss_orphan(id, format).await,
+        Some(DaemonCommand::Orphans { dismiss: None }) => orphans(format).await,
         None => {
             // No subcommand — show colorized help
             let cmd = crate::find_subcommand(crate::cli_command(), &["daemon"]);
@@ -327,10 +326,11 @@ async fn orphans(format: OutputFormat) -> Result<()> {
             }
 
             println!("\nCommands (replace <id> with an orphan ID above):");
-            println!("  oj pipeline peek <id>          # View last tmux output");
-            println!("  oj pipeline attach <id>        # Attach to tmux session");
-            println!("  oj pipeline logs <id>          # View pipeline log");
-            println!("  oj daemon dismiss-orphan <id>  # Dismiss after investigation");
+            println!("  oj pipeline peek <id>              # View last tmux output");
+            println!("  oj pipeline attach <id>            # Attach to tmux session");
+            println!("  oj pipeline logs <id>              # View pipeline log");
+            println!("  oj daemon orphans --dismiss <id>   # Dismiss after investigation");
+            println!("  oj pipeline prune --orphans        # Dismiss all orphans");
         }
         OutputFormat::Json => {
             let obj = serde_json::json!({ "orphans": orphans });
