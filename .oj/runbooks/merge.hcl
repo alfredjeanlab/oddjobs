@@ -27,7 +27,7 @@ queue "merges" {
 worker "merge" {
   source      = { queue = "merges" }
   handler     = { pipeline = "merge" }
-  concurrency = 1
+  concurrency = 2
 }
 
 pipeline "merge" {
@@ -91,9 +91,17 @@ pipeline "merge" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit --amend --no-edit
-      git -C "${local.repo}" fetch origin ${var.mr.base}
-      git merge origin/${var.mr.base} --no-edit
-      git -C "${local.repo}" push origin ${local.branch}:${var.mr.base}
+
+      # Retry loop: if push fails because main moved, re-fetch and re-merge.
+      # Only falls through to on_fail if merging new main conflicts.
+      for attempt in 1 2 3 4 5; do
+        git -C "${local.repo}" fetch origin ${var.mr.base}
+        git merge origin/${var.mr.base} --no-edit || exit 1
+        git -C "${local.repo}" push origin ${local.branch}:${var.mr.base} && break
+        echo "push race (attempt $attempt), retrying..."
+        sleep 1
+      done
+
       git -C "${local.repo}" push origin --delete ${var.mr.branch} || true
     SHELL
     on_done = { step = "cleanup" }
