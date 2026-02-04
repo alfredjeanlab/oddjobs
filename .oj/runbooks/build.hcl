@@ -23,8 +23,8 @@ pipeline "build" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "base"]
   workspace = "ephemeral"
-  on_cancel = { step = "abandon" }
-  on_fail   = { step = "abandon" }
+  on_cancel = { step = "cancel" }
+  on_fail   = { step = "reopen" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
@@ -42,6 +42,7 @@ pipeline "build" {
     run = <<-SHELL
       git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" HEAD
       mkdir -p plans
+      cd ${invoke.dir} && wok new feature "${var.instructions}" -o id > "${workspace.root}/.feature-id"
     SHELL
     on_done = { step = "plan" }
   }
@@ -66,7 +67,22 @@ pipeline "build" {
       git -C "${local.repo}" push origin "${local.branch}"
       oj queue push merges --var branch="${local.branch}" --var title="${local.title}"
     SHELL
+    on_done = { step = "done" }
+  }
+
+  step "done" {
+    run     = "cd ${invoke.dir} && wok done $(cat ${workspace.root}/.feature-id)"
     on_done = { step = "cleanup" }
+  }
+
+  step "cancel" {
+    run     = "cd ${invoke.dir} && wok close $(cat ${workspace.root}/.feature-id) --reason 'Build pipeline cancelled'"
+    on_done = { step = "abandon" }
+  }
+
+  step "reopen" {
+    run     = "cd ${invoke.dir} && wok reopen $(cat ${workspace.root}/.feature-id) --reason 'Build pipeline failed'"
+    on_done = { step = "abandon" }
   }
 
   step "abandon" {
