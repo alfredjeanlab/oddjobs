@@ -753,6 +753,240 @@ fn drain_empty_queue_returns_empty_list() {
 }
 
 #[test]
+fn push_deduplicates_pending_item_with_same_data() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a pending item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "existing-item-1".to_string(),
+        data: [("task".to_string(), "build-feature-x".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push the same data again
+    let data = serde_json::json!({ "task": "build-feature-x" });
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
+
+    // Should return the existing item ID, not create a new one
+    assert!(
+        matches!(
+            result,
+            Response::QueuePushed { ref queue_name, ref item_id }
+            if queue_name == "jobs" && item_id == "existing-item-1"
+        ),
+        "expected QueuePushed with existing item ID, got {:?}",
+        result
+    );
+
+    // No QueuePushed event should have been emitted (dedup)
+    let events = drain_events(&wal);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        "no QueuePushed event should be emitted for duplicate, got: {:?}",
+        events
+    );
+}
+
+#[test]
+fn push_deduplicates_active_item_with_same_data() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with an active item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "active-item-1".to_string(),
+        data: [("task".to_string(), "build-feature-y".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    initial_state.apply_event(&Event::QueueTaken {
+        queue_name: "jobs".to_string(),
+        item_id: "active-item-1".to_string(),
+        worker_name: "w1".to_string(),
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push the same data again
+    let data = serde_json::json!({ "task": "build-feature-y" });
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
+
+    // Should return the existing active item ID
+    assert!(
+        matches!(
+            result,
+            Response::QueuePushed { ref queue_name, ref item_id }
+            if queue_name == "jobs" && item_id == "active-item-1"
+        ),
+        "expected QueuePushed with existing active item ID, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        "no QueuePushed event should be emitted for duplicate active item",
+    );
+}
+
+#[test]
+fn push_allows_duplicate_data_when_previous_is_completed() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a completed item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "completed-item-1".to_string(),
+        data: [("task".to_string(), "build-feature-z".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    initial_state.apply_event(&Event::QueueCompleted {
+        queue_name: "jobs".to_string(),
+        item_id: "completed-item-1".to_string(),
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push the same data again — should succeed since the previous item is completed
+    let data = serde_json::json!({ "task": "build-feature-z" });
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
+
+    // Should create a new item (different ID from completed one)
+    match result {
+        Response::QueuePushed {
+            ref queue_name,
+            ref item_id,
+        } => {
+            assert_eq!(queue_name, "jobs");
+            assert_ne!(item_id, "completed-item-1", "should be a new item ID");
+        }
+        other => panic!("expected QueuePushed, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        "QueuePushed event should be emitted for re-push after completion",
+    );
+}
+
+#[test]
+fn push_allows_duplicate_data_when_previous_is_dead() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a dead item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "dead-item-1".to_string(),
+        data: [("task".to_string(), "build-feature-w".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    initial_state.apply_event(&Event::QueueItemDead {
+        queue_name: "jobs".to_string(),
+        item_id: "dead-item-1".to_string(),
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push the same data again — should succeed since the previous item is dead
+    let data = serde_json::json!({ "task": "build-feature-w" });
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
+
+    match result {
+        Response::QueuePushed {
+            ref queue_name,
+            ref item_id,
+        } => {
+            assert_eq!(queue_name, "jobs");
+            assert_ne!(item_id, "dead-item-1", "should be a new item ID");
+        }
+        other => panic!("expected QueuePushed, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        "QueuePushed event should be emitted for re-push after dead",
+    );
+}
+
+#[test]
+fn push_different_data_is_not_deduplicated() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a pending item
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "jobs".to_string(),
+        item_id: "existing-item-1".to_string(),
+        data: [("task".to_string(), "build-feature-x".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Push different data — should create a new item
+    let data = serde_json::json!({ "task": "build-feature-y" });
+    let result = handle_queue_push(project.path(), "", "jobs", data, &event_bus, &state).unwrap();
+
+    match result {
+        Response::QueuePushed {
+            ref queue_name,
+            ref item_id,
+        } => {
+            assert_eq!(queue_name, "jobs");
+            assert_ne!(item_id, "existing-item-1", "should be a new item ID");
+        }
+        other => panic!("expected QueuePushed, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        "QueuePushed event should be emitted for different data",
+    );
+}
+
+#[test]
 fn drain_unknown_queue_returns_error() {
     let project = project_with_queue_only();
     let wal_dir = tempdir().unwrap();

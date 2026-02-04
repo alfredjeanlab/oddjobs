@@ -106,6 +106,41 @@ pub(super) fn handle_queue_push(
         }
     }
 
+    // Deduplicate: if a pending or active item with the same data already exists, return it
+    {
+        let st = state.lock();
+        let key = if namespace.is_empty() {
+            queue_name.to_string()
+        } else {
+            format!("{}/{}", namespace, queue_name)
+        };
+        if let Some(items) = st.queue_items.get(&key) {
+            if let Some(existing) = items.iter().find(|i| {
+                (i.status == oj_storage::QueueItemStatus::Pending
+                    || i.status == oj_storage::QueueItemStatus::Active)
+                    && i.data == final_data
+            }) {
+                let existing_id = existing.id.clone();
+                drop(st);
+
+                // Still wake workers so they can pick up pending work
+                wake_attached_workers(
+                    project_root,
+                    namespace,
+                    queue_name,
+                    &runbook,
+                    event_bus,
+                    state,
+                )?;
+
+                return Ok(Response::QueuePushed {
+                    queue_name: queue_name.to_string(),
+                    item_id: existing_id,
+                });
+            }
+        }
+    }
+
     // Generate item ID
     let item_id = uuid::Uuid::new_v4().to_string();
 
