@@ -256,36 +256,65 @@ async fn handle_request(
             orphans: prune_orphans,
             dry_run,
             namespace,
-        } => mutations::handle_pipeline_prune(
-            state,
-            event_bus,
-            logs_path,
-            orphans,
-            all,
-            failed,
-            prune_orphans,
-            dry_run,
-            namespace.as_deref(),
-        ),
+        } => {
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: namespace.as_deref(),
+            };
+            mutations::handle_pipeline_prune(
+                state,
+                event_bus,
+                logs_path,
+                orphans,
+                &flags,
+                failed,
+                prune_orphans,
+            )
+        }
 
         Request::AgentPrune { all, dry_run } => {
-            mutations::handle_agent_prune(state, event_bus, logs_path, all, dry_run)
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: None,
+            };
+            mutations::handle_agent_prune(state, event_bus, logs_path, &flags)
         }
 
         Request::WorkspacePrune {
             all,
             dry_run,
             namespace,
-        } => mutations::handle_workspace_prune(state, all, dry_run, namespace.as_deref()).await,
+        } => {
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: namespace.as_deref(),
+            };
+            mutations::handle_workspace_prune(state, &flags).await
+        }
 
         Request::WorkerPrune {
             all,
             dry_run,
             namespace,
-        } => mutations::handle_worker_prune(state, event_bus, all, dry_run, namespace.as_deref()),
+        } => {
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: namespace.as_deref(),
+            };
+            mutations::handle_worker_prune(state, event_bus, &flags)
+        }
 
         Request::CronPrune { all, dry_run } => {
-            mutations::handle_cron_prune(state, event_bus, all, dry_run)
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: None,
+            };
+            mutations::handle_cron_prune(state, event_bus, &flags)
         }
 
         Request::WorkerStart {

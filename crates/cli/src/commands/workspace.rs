@@ -10,7 +10,7 @@ use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
 use crate::color;
-use crate::output::OutputFormat;
+use crate::output::{print_prune_results, OutputFormat};
 
 #[derive(Args)]
 pub struct WorkspaceArgs {
@@ -257,39 +257,21 @@ pub async fn handle(
             };
             let (pruned, skipped) = client.workspace_prune(all, dry_run, ns).await?;
 
-            match format {
-                OutputFormat::Text => {
-                    if dry_run {
-                        println!("Dry run — no changes made\n");
-                    }
-
-                    for ws in &pruned {
-                        let label = if dry_run { "Would prune" } else { "Pruned" };
-                        println!(
-                            "{} {} ({})",
-                            label,
-                            ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
-                            ws.path.display()
-                        );
-                    }
-
-                    let verb = if dry_run { "would be pruned" } else { "pruned" };
-                    println!(
-                        "\n{} workspace(s) {}, {} active workspace(s) skipped",
-                        pruned.len(),
-                        verb,
-                        skipped
-                    );
-                }
-                OutputFormat::Json => {
-                    let obj = serde_json::json!({
-                        "dry_run": dry_run,
-                        "pruned": pruned,
-                        "skipped": skipped,
-                    });
-                    println!("{}", serde_json::to_string_pretty(&obj)?);
-                }
-            }
+            print_prune_results(
+                &pruned,
+                skipped,
+                dry_run,
+                format,
+                "workspace",
+                "active workspace(s) skipped",
+                |ws| {
+                    format!(
+                        "{} ({})",
+                        ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
+                        ws.path.display()
+                    )
+                },
+            )?;
         }
     }
 

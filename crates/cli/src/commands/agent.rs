@@ -16,7 +16,7 @@ use oj_core::{AgentId, Event, PromptType, QuestionData};
 use crate::client::DaemonClient;
 use crate::color;
 use crate::exit_error::ExitError;
-use crate::output::{display_log, should_use_color, OutputFormat};
+use crate::output::{display_log, print_prune_results, should_use_color, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 use super::pipeline::parse_duration;
@@ -401,38 +401,21 @@ pub async fn handle(
         AgentCommand::Prune { all, dry_run } => {
             let (pruned, skipped) = client.agent_prune(all, dry_run).await?;
 
-            match format {
-                OutputFormat::Text => {
-                    if dry_run {
-                        println!("Dry run — no changes made\n");
-                    }
-
-                    for entry in &pruned {
-                        let label = if dry_run { "Would prune" } else { "Pruned" };
-                        let short_pid = &entry.pipeline_id[..8.min(entry.pipeline_id.len())];
-                        println!(
-                            "{} agent {} ({}, {})",
-                            label, entry.agent_id, short_pid, entry.step_name
-                        );
-                    }
-
-                    let verb = if dry_run { "would be pruned" } else { "pruned" };
-                    println!(
-                        "\n{} agent(s) {}, {} pipeline(s) skipped",
-                        pruned.len(),
-                        verb,
-                        skipped
-                    );
-                }
-                OutputFormat::Json => {
-                    let obj = serde_json::json!({
-                        "dry_run": dry_run,
-                        "pruned": pruned,
-                        "skipped": skipped,
-                    });
-                    println!("{}", serde_json::to_string_pretty(&obj)?);
-                }
-            }
+            print_prune_results(
+                &pruned,
+                skipped,
+                dry_run,
+                format,
+                "agent",
+                "pipeline(s) skipped",
+                |entry| {
+                    let short_pid = &entry.pipeline_id[..8.min(entry.pipeline_id.len())];
+                    format!(
+                        "agent {} ({}, {})",
+                        entry.agent_id, short_pid, entry.step_name
+                    )
+                },
+            )?;
         }
         AgentCommand::Resume { id, kill, all } => {
             if !all && id.is_none() {

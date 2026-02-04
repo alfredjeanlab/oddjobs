@@ -12,7 +12,9 @@ use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
 use crate::color;
-use crate::output::{display_log, format_time_ago, should_use_color, OutputFormat};
+use crate::output::{
+    display_log, format_time_ago, print_prune_results, should_use_color, OutputFormat,
+};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -523,35 +525,18 @@ pub async fn handle(
                 .pipeline_prune(all, failed, orphans, dry_run, ns)
                 .await?;
 
-            match format {
-                OutputFormat::Text => {
-                    if dry_run {
-                        println!("Dry run — no changes made\n");
-                    }
-
-                    for entry in &pruned {
-                        let label = if dry_run { "Would prune" } else { "Pruned" };
-                        let short_id = &entry.id[..8.min(entry.id.len())];
-                        println!("{} {} ({}, {})", label, entry.name, short_id, entry.step);
-                    }
-
-                    let verb = if dry_run { "would be pruned" } else { "pruned" };
-                    println!(
-                        "\n{} pipeline(s) {}, {} skipped",
-                        pruned.len(),
-                        verb,
-                        skipped
-                    );
-                }
-                OutputFormat::Json => {
-                    let obj = serde_json::json!({
-                        "dry_run": dry_run,
-                        "pruned": pruned,
-                        "skipped": skipped,
-                    });
-                    println!("{}", serde_json::to_string_pretty(&obj)?);
-                }
-            }
+            print_prune_results(
+                &pruned,
+                skipped,
+                dry_run,
+                format,
+                "pipeline",
+                "skipped",
+                |entry| {
+                    let short_id = &entry.id[..8.min(entry.id.len())];
+                    format!("{} ({}, {})", entry.name, short_id, entry.step)
+                },
+            )?;
         }
         PipelineCommand::Wait { ids, all, timeout } => {
             super::pipeline_wait::handle(ids, all, timeout, client).await?;

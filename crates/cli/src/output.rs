@@ -39,6 +39,58 @@ pub fn format_time_ago(epoch_ms: u64) -> String {
     }
 }
 
+/// Print prune results in text or JSON format.
+///
+/// Handles the dry-run header, per-entry formatting, and summary line that is
+/// shared across all `oj <entity> prune` commands.
+///
+/// - `entity` — singular name shown in the summary, e.g. `"pipeline"`.
+/// - `skipped_label` — suffix after the skipped count, e.g. `"skipped"` or
+///   `"active workspace(s) skipped"`.
+/// - `format_entry` — returns the text to print after "Pruned" / "Would prune"
+///   for each entry.
+pub fn print_prune_results<T: serde::Serialize>(
+    pruned: &[T],
+    skipped: usize,
+    dry_run: bool,
+    format: OutputFormat,
+    entity: &str,
+    skipped_label: &str,
+    format_entry: impl Fn(&T) -> String,
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::Text => {
+            if dry_run {
+                println!("Dry run — no changes made\n");
+            }
+
+            let label = if dry_run { "Would prune" } else { "Pruned" };
+            for entry in pruned {
+                println!("{} {}", label, format_entry(entry));
+            }
+
+            let verb = if dry_run { "would be pruned" } else { "pruned" };
+            println!(
+                "\n{} {}(s) {}, {} {}",
+                pruned.len(),
+                entity,
+                verb,
+                skipped,
+                skipped_label
+            );
+        }
+        OutputFormat::Json => {
+            let obj = serde_json::json!({
+                "dry_run": dry_run,
+                "pruned": pruned,
+                "skipped": skipped,
+            });
+            println!("{}", serde_json::to_string_pretty(&obj)?);
+        }
+    }
+    Ok(())
+}
+
 /// Display log content with optional follow mode, handling text/json output.
 pub async fn display_log(
     log_path: &std::path::Path,
