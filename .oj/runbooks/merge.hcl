@@ -27,7 +27,7 @@ queue "merges" {
 worker "merge" {
   source      = { queue = "merges" }
   handler     = { pipeline = "merge" }
-  concurrency = 3
+  concurrency = 1
 }
 
 pipeline "merge" {
