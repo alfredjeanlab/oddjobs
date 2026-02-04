@@ -138,8 +138,11 @@ pub struct ReconcileContext {
 impl DaemonState {
     /// Process an event through the runtime.
     ///
-    /// Any events produced by the runtime (e.g., ShellExited) are fed back
-    /// into the event loop iteratively.
+    /// Result events are persisted to the WAL and will be processed by the
+    /// engine loop on the next iteration. We deliberately do NOT process them
+    /// locally to avoid double-delivery: the engine loop already reads every
+    /// WAL entry exactly once, so processing here as well would cause handlers
+    /// to fire twice (e.g. duplicate pipeline creation from WorkerPollComplete).
     pub async fn process_event(&mut self, event: Event) -> Result<(), LifecycleError> {
         // Apply the incoming event to materialized state so queries see it.
         // (Effect::Emit events are also applied in the executor for immediate
@@ -150,21 +153,17 @@ impl DaemonState {
             state.apply_event(&event);
         }
 
-        let mut pending_events = vec![event];
+        let result_events = self
+            .runtime
+            .handle_event(event)
+            .await
+            .map_err(|e| LifecycleError::Runtime(e.to_string()))?;
 
-        while let Some(event) = pending_events.pop() {
-            let result_events = self
-                .runtime
-                .handle_event(event)
-                .await
-                .map_err(|e| LifecycleError::Runtime(e.to_string()))?;
-
-            // Persist result events to WAL for crash recovery, then queue locally
-            for result_event in result_events {
-                if let Err(e) = self.event_bus.send(result_event.clone()) {
-                    warn!("Failed to persist runtime result event to WAL: {}", e);
-                }
-                pending_events.push(result_event);
+        // Persist result events to WAL — the engine loop will read and process
+        // them on the next iteration, ensuring single delivery.
+        for result_event in result_events {
+            if let Err(e) = self.event_bus.send(result_event) {
+                warn!("Failed to persist runtime result event to WAL: {}", e);
             }
         }
 
