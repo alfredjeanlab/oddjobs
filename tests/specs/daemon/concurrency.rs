@@ -22,10 +22,6 @@ vars = ["cmd"]
 [[pipeline.process.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.process.step]]
-name = "done"
-run = "echo done"
 "#;
 
 /// Runbook with two independent queue/worker/pipeline sets.
@@ -55,20 +51,12 @@ vars = ["cmd"]
 name = "work"
 run = "${var.cmd}"
 
-[[pipeline.alpha_job.step]]
-name = "done"
-run = "echo done"
-
 [pipeline.beta_job]
 vars = ["cmd"]
 
 [[pipeline.beta_job.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.beta_job.step]]
-name = "done"
-run = "echo done"
 "#;
 
 // =============================================================================
@@ -191,10 +179,6 @@ vars = ["cmd"]
 [[pipeline.process.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.process.step]]
-name = "done"
-run = "echo done"
 "#;
 
 #[test]
