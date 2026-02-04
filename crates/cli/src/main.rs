@@ -463,7 +463,7 @@ async fn run() -> Result<()> {
 
         // Status - top-level dashboard (query, graceful when daemon down)
         Commands::Status(args) => {
-            status::handle(args, format).await?;
+            status::handle(args, format, project_filter).await?;
         }
 
         // Convenience commands - resolve entity type automatically (query)

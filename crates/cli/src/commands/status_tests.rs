@@ -2,8 +2,8 @@ use oj_daemon::NamespaceStatus;
 use serial_test::serial;
 
 use super::{
-    format_duration, format_text, friendly_name_label, render_frame, truncate_reason, CLEAR_TO_END,
-    CURSOR_HOME,
+    filter_namespaces, format_duration, format_text, friendly_name_label, render_frame,
+    truncate_reason, CLEAR_TO_END, CURSOR_HOME,
 };
 
 #[test]
@@ -1206,5 +1206,70 @@ fn agent_columns_are_aligned_across_rows() {
         st_pos_0, st_pos_1,
         "status columns should be aligned:\n  {}\n  {}",
         lines[0], lines[1]
+    );
+}
+
+// ── filter_namespaces tests ─────────────────────────────────────────
+
+fn make_ns(name: &str) -> NamespaceStatus {
+    NamespaceStatus {
+        namespace: name.to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "abc12345".to_string(),
+            name: "build".to_string(),
+            kind: "pipeline".to_string(),
+            step: "compile".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 5000,
+            waiting_reason: None,
+            escalate_source: None,
+        }],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    }
+}
+
+#[test]
+fn filter_namespaces_none_returns_all() {
+    let namespaces = vec![make_ns("alpha"), make_ns("beta"), make_ns("gamma")];
+    let filtered = filter_namespaces(namespaces, None);
+    assert_eq!(filtered.len(), 3);
+}
+
+#[test]
+fn filter_namespaces_matches_project() {
+    let namespaces = vec![make_ns("alpha"), make_ns("beta"), make_ns("gamma")];
+    let filtered = filter_namespaces(namespaces, Some("beta"));
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].namespace, "beta");
+}
+
+#[test]
+fn filter_namespaces_no_match_returns_empty() {
+    let namespaces = vec![make_ns("alpha"), make_ns("beta")];
+    let filtered = filter_namespaces(namespaces, Some("nonexistent"));
+    assert!(filtered.is_empty());
+}
+
+#[test]
+#[serial]
+fn project_filter_restricts_text_output() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let namespaces = vec![make_ns("alpha"), make_ns("beta")];
+    let filtered = filter_namespaces(namespaces, Some("alpha"));
+    let output = format_text(60, &filtered, None);
+
+    assert!(
+        output.contains("alpha"),
+        "output should contain the filtered project:\n{output}"
+    );
+    assert!(
+        !output.contains("beta"),
+        "output should not contain other projects:\n{output}"
     );
 }

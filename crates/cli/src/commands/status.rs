@@ -34,9 +34,13 @@ pub struct StatusArgs {
     pub interval: String,
 }
 
-pub async fn handle(args: StatusArgs, format: OutputFormat) -> Result<()> {
+pub async fn handle(
+    args: StatusArgs,
+    format: OutputFormat,
+    project_filter: Option<&str>,
+) -> Result<()> {
     if !args.watch {
-        return handle_once(format, None).await;
+        return handle_once(format, None, project_filter).await;
     }
 
     let interval = crate::commands::pipeline::parse_duration(&args.interval)?;
@@ -47,7 +51,7 @@ pub async fn handle(args: StatusArgs, format: OutputFormat) -> Result<()> {
     let is_tty = std::io::stdout().is_terminal();
 
     loop {
-        handle_watch_frame(format, &args.interval, is_tty).await?;
+        handle_watch_frame(format, &args.interval, is_tty, project_filter).await?;
         {
             use std::io::Write as _;
             std::io::stdout().flush()?;
@@ -56,7 +60,12 @@ pub async fn handle(args: StatusArgs, format: OutputFormat) -> Result<()> {
     }
 }
 
-async fn handle_watch_frame(format: OutputFormat, interval: &str, is_tty: bool) -> Result<()> {
+async fn handle_watch_frame(
+    format: OutputFormat,
+    interval: &str,
+    is_tty: bool,
+    project_filter: Option<&str>,
+) -> Result<()> {
     let client = match DaemonClient::connect() {
         Ok(c) => c,
         Err(_) => {
@@ -86,6 +95,7 @@ async fn handle_watch_frame(format: OutputFormat, interval: &str, is_tty: bool) 
         Err(e) => return Err(e.into()),
     };
 
+    let namespaces = filter_namespaces(namespaces, project_filter);
     let content = match format {
         OutputFormat::Text => format_text(uptime_secs, &namespaces, Some(interval)),
         OutputFormat::Json => {
@@ -122,7 +132,11 @@ fn format_not_running(format: OutputFormat) -> String {
     }
 }
 
-async fn handle_once(format: OutputFormat, watch_interval: Option<&str>) -> Result<()> {
+async fn handle_once(
+    format: OutputFormat,
+    watch_interval: Option<&str>,
+    project_filter: Option<&str>,
+) -> Result<()> {
     let client = match DaemonClient::connect() {
         Ok(c) => c,
         Err(_) => {
@@ -146,6 +160,7 @@ async fn handle_once(format: OutputFormat, watch_interval: Option<&str>) -> Resu
         Err(e) => return Err(e.into()),
     };
 
+    let namespaces = filter_namespaces(namespaces, project_filter);
     match format {
         OutputFormat::Text => print!("{}", format_text(uptime_secs, &namespaces, watch_interval)),
         OutputFormat::Json => {
@@ -168,6 +183,20 @@ fn handle_not_running(format: OutputFormat) -> Result<()> {
         OutputFormat::Json => println!(r#"{{ "status": "not_running" }}"#),
     }
     Ok(())
+}
+
+/// Filter namespaces to only the specified project when `--project` is given.
+fn filter_namespaces(
+    namespaces: Vec<oj_daemon::NamespaceStatus>,
+    project_filter: Option<&str>,
+) -> Vec<oj_daemon::NamespaceStatus> {
+    match project_filter {
+        Some(project) => namespaces
+            .into_iter()
+            .filter(|ns| ns.namespace == project)
+            .collect(),
+        None => namespaces,
+    }
 }
 
 fn format_text(
