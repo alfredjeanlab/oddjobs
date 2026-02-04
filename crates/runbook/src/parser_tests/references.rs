@@ -342,14 +342,11 @@ pipeline "b" {
 }
 
 // ============================================================================
-// Phase 5: Unreachable and Dead-End Warnings (structural tests)
+// Phase 5: Unreachable Step Errors
 // ============================================================================
 
-/// Helper that collects warning messages by running validation on a runbook.
-/// Uses the validation logic indirectly — unreachable/dead-end are warnings
-/// emitted via tracing, so we test the structural conditions directly.
 #[test]
-fn unreachable_step_detection_logic() {
+fn unreachable_step_is_rejected() {
     // The second step "orphan" is not referenced by any transition
     let hcl = r#"
 pipeline "test" {
@@ -367,72 +364,31 @@ pipeline "test" {
   }
 }
 "#;
-    // This should parse successfully (warnings don't cause errors)
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = &runbook.pipelines["test"];
-
-    // Verify the structural condition: "orphan" is not referenced
-    let mut referenced = std::collections::HashSet::new();
-    for t in [&pipeline.on_done, &pipeline.on_fail, &pipeline.on_cancel]
-        .into_iter()
-        .flatten()
-    {
-        referenced.insert(t.step_name());
-    }
-    for step in &pipeline.steps {
-        for t in [&step.on_done, &step.on_fail, &step.on_cancel]
-            .into_iter()
-            .flatten()
-        {
-            referenced.insert(t.step_name());
-        }
-    }
-
+    let err = parse_runbook_with_format(hcl, Format::Hcl).unwrap_err();
+    let msg = err.to_string();
     assert!(
-        !referenced.contains("orphan"),
-        "orphan should not be referenced"
+        msg.contains("unreachable"),
+        "error should mention unreachable: {msg}"
     );
-    assert!(referenced.contains("finish"), "finish should be referenced");
+    assert!(
+        msg.contains("orphan"),
+        "error should mention the step name: {msg}"
+    );
 }
 
 #[test]
-fn dead_end_step_detection_logic() {
-    // "build" has no on_done and is not the last step, no pipeline-level on_done
+fn reachable_steps_parse_ok() {
+    // All steps are referenced — should parse successfully
     let hcl = r#"
 pipeline "test" {
-  step "build" {
-    run = "echo build"
+  step "start" {
+    run = "echo start"
+    on_done = "middle"
   }
 
-  step "deploy" {
-    run = "echo deploy"
-  }
-}
-"#;
-    // Parses successfully (warnings only)
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = &runbook.pipelines["test"];
-    let last_idx = pipeline.steps.len() - 1;
-
-    // Verify structural condition: step 0 has no on_done and is not the last
-    assert!(pipeline.steps[0].on_done.is_none());
-    assert!(pipeline.on_done.is_none());
-    assert!(0 < last_idx, "build is not the last step");
-}
-
-#[test]
-fn dead_end_not_warned_when_pipeline_has_on_done() {
-    // Pipeline-level on_done catches steps without step-level on_done
-    let hcl = r#"
-pipeline "test" {
-  on_done = "finish"
-
-  step "build" {
-    run = "echo build"
-  }
-
-  step "deploy" {
-    run = "echo deploy"
+  step "middle" {
+    run = "echo middle"
+    on_done = "finish"
   }
 
   step "finish" {
@@ -440,9 +396,5 @@ pipeline "test" {
   }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = &runbook.pipelines["test"];
-
-    // When pipeline has on_done, individual steps without on_done are not dead-ends
-    assert!(pipeline.on_done.is_some());
+    parse_runbook_with_format(hcl, Format::Hcl).unwrap();
 }

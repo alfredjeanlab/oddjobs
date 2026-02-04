@@ -20,10 +20,12 @@ run = { pipeline = "build" }
 [[pipeline.build.step]]
 name = "prep"
 run = "echo preparing"
+on_done = "work"
 
 [[pipeline.build.step]]
 name = "work"
 run = "echo building"
+on_done = "done"
 
 [[pipeline.build.step]]
 name = "done"
