@@ -43,7 +43,6 @@ fn shell_inline_runs_command_successfully() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -71,7 +70,6 @@ fn shell_inline_interpolates_args() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -98,7 +96,6 @@ fn shell_inline_interpolates_invoke_dir() {
         &HashMap::new(),
         dir.path(),
         &invoke,
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -123,7 +120,6 @@ fn shell_inline_interpolates_workspace() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -136,12 +132,15 @@ fn shell_inline_does_not_inject_oj_namespace() {
     let dir = tempfile::tempdir().unwrap();
     let output_file = dir.path().join("namespace.txt");
 
-    // Ensure OJ_NAMESPACE is not inherited from this test process
-    std::env::remove_var("OJ_NAMESPACE");
-
+    // Use printenv so we get empty output (exit 1) when the var is unset,
+    // rather than an empty line from `echo $OJ_NAMESPACE`.
     let cmd_def = make_shell_command(
         "check-ns",
-        &format!("echo ${{OJ_NAMESPACE:-unset}} > {}", output_file.display()),
+        &format!(
+            "printenv OJ_NAMESPACE > {} 2>/dev/null || echo __UNSET__ > {}",
+            output_file.display(),
+            output_file.display()
+        ),
     );
 
     let result = execute_shell_inline(
@@ -151,15 +150,19 @@ fn shell_inline_does_not_inject_oj_namespace() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "my-project",
     );
 
     assert!(result.is_ok());
     let content = std::fs::read_to_string(&output_file).unwrap();
+
+    // The child should inherit OJ_NAMESPACE from the parent environment (if set)
+    // rather than having it explicitly injected. Verify the child sees the same
+    // value as the parent process.
+    let expected = std::env::var("OJ_NAMESPACE").unwrap_or("__UNSET__".to_string());
     assert_eq!(
         content.trim(),
-        "unset",
-        "OJ_NAMESPACE should not be injected by shell-inline (only engine-managed workspaces)"
+        expected,
+        "OJ_NAMESPACE should be inherited from parent env, not explicitly injected"
     );
 }
 
@@ -177,7 +180,6 @@ fn shell_inline_runs_in_project_root() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -207,7 +209,6 @@ fn shell_inline_leaves_unknown_vars_uninterpolated() {
         &HashMap::new(),
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());
@@ -239,7 +240,6 @@ fn shell_inline_with_named_args() {
         &named,
         dir.path(),
         dir.path(),
-        "test-ns",
     );
 
     assert!(result.is_ok());

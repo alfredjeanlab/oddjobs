@@ -170,15 +170,7 @@ pub async fn handle(
 
     // Shell directives execute locally
     if let RunDirective::Shell(ref cmd) = cmd_def.run {
-        return execute_shell_inline(
-            cmd,
-            cmd_def,
-            &positional,
-            &named,
-            project_root,
-            invoke_dir,
-            namespace,
-        );
+        return execute_shell_inline(cmd, cmd_def, &positional, &named, project_root, invoke_dir);
     }
 
     // Resolve attach preference: CLI override > runbook default > false
@@ -226,7 +218,6 @@ fn execute_shell_inline(
     named: &HashMap<String, String>,
     project_root: &Path,
     invoke_dir: &Path,
-    _namespace: &str,
 ) -> Result<()> {
     let parsed_args = cmd_def.parse_args(positional, named);
     let mut vars: HashMap<String, String> = parsed_args
