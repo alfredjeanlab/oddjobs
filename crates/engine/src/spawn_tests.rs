@@ -64,6 +64,7 @@ fn build_spawn_effects_creates_agent_and_timer() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -95,6 +96,7 @@ fn build_spawn_effects_interpolates_variables() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -125,6 +127,7 @@ fn build_spawn_effects_uses_absolute_cwd() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -151,6 +154,7 @@ fn build_spawn_effects_uses_relative_cwd() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -176,6 +180,7 @@ fn build_spawn_effects_prepares_workspace() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -204,6 +209,7 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     );
 
     // Should fail due to missing prompt file
@@ -229,6 +235,7 @@ fn build_spawn_effects_carries_full_config() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -281,6 +288,7 @@ fn build_spawn_effects_timer_uses_liveness_interval() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -316,6 +324,7 @@ fn build_spawn_effects_namespaces_pipeline_inputs() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -369,6 +378,7 @@ fn build_spawn_effects_inputs_namespace_in_prompt() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -421,6 +431,7 @@ fn build_spawn_effects_escapes_backticks_in_prompt() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -455,6 +466,7 @@ fn build_spawn_effects_with_prime_succeeds() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -479,6 +491,7 @@ fn build_spawn_effects_with_prime_script_succeeds() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -515,6 +528,7 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -557,6 +571,7 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
         &input,
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -610,6 +625,7 @@ fn build_spawn_effects_includes_default_status() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -675,6 +691,7 @@ fn build_spawn_effects_explicit_session_overrides_defaults() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 
@@ -720,6 +737,7 @@ fn build_spawn_effects_always_passes_oj_state_dir() {
         &HashMap::new(),
         workspace.path(),
         state_dir.path(),
+        None,
     )
     .unwrap();
 
@@ -754,6 +772,7 @@ fn build_spawn_effects_no_session_block_gets_defaults() {
         &HashMap::new(),
         workspace.path(),
         workspace.path(),
+        None,
     )
     .unwrap();
 

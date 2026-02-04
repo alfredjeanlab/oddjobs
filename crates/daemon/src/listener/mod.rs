@@ -418,6 +418,12 @@ async fn handle_request(
             chosen,
             message,
         } => decisions::handle_decision_resolve(&id, chosen, message, event_bus, state),
+
+        Request::AgentResume {
+            agent_id,
+            kill,
+            all,
+        } => mutations::handle_agent_resume(state, event_bus, agent_id, kill, all),
     }
 }
 

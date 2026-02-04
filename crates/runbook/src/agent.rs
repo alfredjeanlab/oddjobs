@@ -241,7 +241,7 @@ pub enum ActionConfig {
         action: AgentAction,
         #[serde(default)]
         message: Option<String>,
-        /// For recover: false = replace prompt (default), true = append to prompt
+        /// For resume: false = replace prompt (default), true = append to prompt
         #[serde(default)]
         append: bool,
         /// For check: shell command to run
@@ -349,11 +349,12 @@ pub enum ActionTrigger {
 pub enum AgentAction {
     #[default]
     Nudge, // Send message prompting to continue
-    Done,     // Treat as success, advance pipeline
-    Fail,     // Mark pipeline as failed
-    Recover,  // Re-spawn with modified prompt
+    Done, // Treat as success, advance pipeline
+    Fail, // Mark pipeline as failed
+    #[serde(alias = "recover")]
+    Resume, // Re-spawn with --resume, preserving conversation history
     Escalate, // Notify human
-    Gate,     // Run a shell command; advance if it passes, escalate if it fails
+    Gate, // Run a shell command; advance if it passes, escalate if it fails
 }
 
 impl AgentAction {
@@ -363,7 +364,7 @@ impl AgentAction {
             AgentAction::Nudge => "nudge",
             AgentAction::Done => "done",
             AgentAction::Fail => "fail",
-            AgentAction::Recover => "recover",
+            AgentAction::Resume => "resume",
             AgentAction::Escalate => "escalate",
             AgentAction::Gate => "gate",
         }
@@ -372,7 +373,7 @@ impl AgentAction {
     /// Returns whether this action is valid for the given trigger context.
     pub fn is_valid_for_trigger(&self, trigger: ActionTrigger) -> bool {
         match trigger {
-            // on_idle: agent is still running, can't restart/recover
+            // on_idle: agent is still running, can't restart/resume
             ActionTrigger::OnIdle => matches!(
                 self,
                 AgentAction::Nudge
@@ -385,17 +386,17 @@ impl AgentAction {
             ActionTrigger::OnDead => matches!(
                 self,
                 AgentAction::Done
-                    | AgentAction::Recover
+                    | AgentAction::Resume
                     | AgentAction::Escalate
                     | AgentAction::Fail
                     | AgentAction::Gate
             ),
-            // on_error: API error, recover is for clean exits, can't nudge
+            // on_error: API error, resume is valid for transient errors (rate limits, etc.)
             ActionTrigger::OnError => matches!(
                 self,
-                AgentAction::Fail | AgentAction::Escalate | AgentAction::Gate
+                AgentAction::Fail | AgentAction::Resume | AgentAction::Escalate | AgentAction::Gate
             ),
-            // on_prompt: agent at a prompt, can't nudge or recover
+            // on_prompt: agent at a prompt, can't nudge or resume
             ActionTrigger::OnPrompt => matches!(
                 self,
                 AgentAction::Done | AgentAction::Escalate | AgentAction::Fail | AgentAction::Gate
@@ -406,8 +407,8 @@ impl AgentAction {
     /// Returns a human-readable reason why this action is invalid for the trigger.
     pub fn invalid_reason(&self, trigger: ActionTrigger) -> &'static str {
         match (self, trigger) {
-            (AgentAction::Recover, ActionTrigger::OnIdle) => {
-                "recover is for re-spawning after exit; agent is still running"
+            (AgentAction::Resume, ActionTrigger::OnIdle) => {
+                "resume is for re-spawning after exit; agent is still running"
             }
             (AgentAction::Nudge, ActionTrigger::OnDead) => {
                 "nudge sends a message to a running agent; agent has exited"
@@ -415,17 +416,14 @@ impl AgentAction {
             (AgentAction::Nudge, ActionTrigger::OnError) => {
                 "nudge sends a message to a running agent; use escalate instead"
             }
-            (AgentAction::Recover, ActionTrigger::OnError) => {
-                "recover is for clean exits; use escalate for error handling"
-            }
             (AgentAction::Done, ActionTrigger::OnError) => {
                 "done marks success; API errors are not success states"
             }
             (AgentAction::Nudge, ActionTrigger::OnPrompt) => {
                 "nudge sends a message; agent is at a prompt, not idle"
             }
-            (AgentAction::Recover, ActionTrigger::OnPrompt) => {
-                "recover is for re-spawning after exit; agent is still running"
+            (AgentAction::Resume, ActionTrigger::OnPrompt) => {
+                "resume is for re-spawning after exit; agent is still running"
             }
             _ => "action not allowed for this trigger",
         }

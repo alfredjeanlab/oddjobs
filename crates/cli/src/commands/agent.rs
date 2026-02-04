@@ -104,6 +104,17 @@ pub enum AgentCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Resume a dead agent's session (re-spawn with --resume to preserve conversation)
+    Resume {
+        /// Agent ID (or prefix). Required unless --all is used.
+        id: Option<String>,
+        /// Force kill the current tmux session before resuming
+        #[arg(long)]
+        kill: bool,
+        /// Resume all agents that have dead sessions
+        #[arg(long)]
+        all: bool,
+    },
     /// Hook subcommands for Claude Code integration
     Hook {
         #[command(subcommand)]
@@ -405,6 +416,36 @@ pub async fn handle(
                     let obj = serde_json::json!({
                         "dry_run": dry_run,
                         "pruned": pruned,
+                        "skipped": skipped,
+                    });
+                    println!("{}", serde_json::to_string_pretty(&obj)?);
+                }
+            }
+        }
+        AgentCommand::Resume { id, kill, all } => {
+            if !all && id.is_none() {
+                return Err(anyhow::anyhow!("Either provide an agent ID or use --all"));
+            }
+            let agent_id = id.unwrap_or_default();
+            let (resumed, skipped) = client.agent_resume(&agent_id, kill, all).await?;
+
+            match format {
+                OutputFormat::Text => {
+                    for aid in &resumed {
+                        let short = &aid[..8.min(aid.len())];
+                        println!("Resumed agent {}", short);
+                    }
+                    for (aid, reason) in &skipped {
+                        let short = &aid[..8.min(aid.len())];
+                        println!("Skipped agent {}: {}", short, reason);
+                    }
+                    if resumed.is_empty() && skipped.is_empty() {
+                        println!("No agents to resume");
+                    }
+                }
+                OutputFormat::Json => {
+                    let obj = serde_json::json!({
+                        "resumed": resumed,
                         "skipped": skipped,
                     });
                     println!("{}", serde_json::to_string_pretty(&obj)?);

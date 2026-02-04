@@ -4,7 +4,7 @@
 //! Session monitoring for agent pipelines.
 //!
 //! Handles detection of agent state from session logs and triggers
-//! appropriate actions (nudge, recover, escalate, etc.).
+//! appropriate actions (nudge, resume, escalate, etc.).
 
 use crate::RuntimeError;
 use oj_core::{
@@ -167,22 +167,34 @@ pub fn build_action_effects(
             error: trigger.to_string(),
         }),
 
-        AgentAction::Recover => {
+        AgentAction::Resume => {
             // Build modified input for re-spawn
             let mut new_inputs = input.clone();
+            // Determine whether to use --resume: yes when no message or append mode
+            let use_resume = message.is_none() || action_config.append();
+
             if let Some(msg) = message {
-                if action_config.append() {
-                    let existing = new_inputs.get("prompt").cloned().unwrap_or_default();
-                    new_inputs.insert("prompt".to_string(), format!("{}\n\n{}", existing, msg));
+                if action_config.append() && use_resume {
+                    // Message will be passed as argument to --resume
+                    new_inputs.insert("resume_message".to_string(), msg.to_string());
                 } else {
+                    // Replace mode: full prompt replacement, no --resume
                     new_inputs.insert("prompt".to_string(), msg.to_string());
                 }
             }
 
-            Ok(ActionEffects::Recover {
+            // Look up previous Claude session ID from step history
+            let resume_session_id = pipeline
+                .step_history
+                .iter()
+                .rfind(|r| r.name == pipeline.step)
+                .and_then(|r| r.agent_id.clone());
+
+            Ok(ActionEffects::Resume {
                 kill_session: pipeline.session_id.clone(),
                 agent_name: agent_def.name.clone(),
                 input: new_inputs,
+                resume_session_id: if use_resume { resume_session_id } else { None },
             })
         }
 
@@ -273,21 +285,26 @@ pub fn build_action_effects_for_agent_run(
             error: trigger.to_string(),
         }),
 
-        AgentAction::Recover => {
+        AgentAction::Resume => {
             let mut new_inputs = input.clone();
+            let use_resume = message.is_none() || action_config.append();
+
             if let Some(msg) = message {
-                if action_config.append() {
-                    let existing = new_inputs.get("prompt").cloned().unwrap_or_default();
-                    new_inputs.insert("prompt".to_string(), format!("{}\n\n{}", existing, msg));
+                if action_config.append() && use_resume {
+                    new_inputs.insert("resume_message".to_string(), msg.to_string());
                 } else {
                     new_inputs.insert("prompt".to_string(), msg.to_string());
                 }
             }
 
-            Ok(ActionEffects::Recover {
+            // Look up previous Claude session ID from agent run
+            let resume_session_id = agent_run.agent_id.clone();
+
+            Ok(ActionEffects::Resume {
                 kill_session: agent_run.session_id.clone(),
                 agent_name: agent_def.name.clone(),
                 input: new_inputs,
+                resume_session_id: if use_resume { resume_session_id } else { None },
             })
         }
 
@@ -396,11 +413,14 @@ pub enum ActionEffects {
     AdvancePipeline,
     /// Fail the pipeline with an error
     FailPipeline { error: String },
-    /// Recover by re-spawning agent (keeps workspace)
-    Recover {
+    /// Resume by re-spawning agent with --resume (keeps workspace, preserves conversation)
+    Resume {
         kill_session: Option<String>,
         agent_name: String,
         input: HashMap<String, String>,
+        /// Claude --session-id from the previous run (for --resume).
+        /// `None` when the prompt is being fully replaced (no `--resume`).
+        resume_session_id: Option<String>,
     },
     /// Escalate to human
     Escalate { effects: Vec<Effect> },

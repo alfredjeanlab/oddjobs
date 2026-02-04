@@ -536,6 +536,24 @@ impl DaemonClient {
         }
     }
 
+    /// Resume an agent (re-spawn with --resume to preserve conversation)
+    pub async fn agent_resume(
+        &self,
+        agent_id: &str,
+        kill: bool,
+        all: bool,
+    ) -> Result<(Vec<String>, Vec<(String, String)>), ClientError> {
+        let request = Request::AgentResume {
+            agent_id: agent_id.to_string(),
+            kill,
+            all,
+        };
+        match self.send(&request).await? {
+            Response::AgentResumed { resumed, skipped } => Ok((resumed, skipped)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Dismiss an orphaned pipeline by deleting its breadcrumb
     pub async fn dismiss_orphan(&self, id: &str) -> Result<(), ClientError> {
         let request = Request::Query {
