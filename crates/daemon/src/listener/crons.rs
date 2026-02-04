@@ -382,40 +382,31 @@ fn suggest_for_cron(
     command_prefix: &str,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> String {
-    // 1. Collect all cron names from runbooks (if project_root available)
-    if let Some(root) = project_root {
-        let runbook_dir = root.join(".oj/runbooks");
-        let all_crons = oj_runbook::collect_all_crons(&runbook_dir).unwrap_or_default();
-        let candidates: Vec<&str> = all_crons.iter().map(|(name, _)| name.as_str()).collect();
-
-        let similar = suggest::find_similar(cron_name, &candidates);
-        if !similar.is_empty() {
-            return suggest::format_suggestion(&similar);
-        }
-    }
-
-    // 2. Try suggestions from daemon state (active/stopped crons in current namespace)
-    {
-        let state = state.lock();
-        let state_candidates: Vec<&str> = state
-            .crons
-            .values()
-            .filter(|c| c.namespace == namespace)
-            .map(|c| c.name.as_str())
-            .collect();
-        let similar = suggest::find_similar(cron_name, &state_candidates);
-        if !similar.is_empty() {
-            return suggest::format_suggestion(&similar);
-        }
-    }
-
-    // 3. Check for wrong project (cross-namespace)
-    let state = state.lock();
-    if let Some(other_ns) =
-        suggest::find_in_other_namespaces(suggest::ResourceType::Cron, cron_name, namespace, &state)
-    {
-        return suggest::format_cross_project_suggestion(command_prefix, cron_name, &other_ns);
-    }
-
-    String::new()
+    let ns = namespace.to_string();
+    let root = project_root.map(|r| r.to_path_buf());
+    suggest::suggest_for_resource(
+        cron_name,
+        namespace,
+        command_prefix,
+        state,
+        suggest::ResourceType::Cron,
+        || {
+            root.map(|r| {
+                oj_runbook::collect_all_crons(&r.join(".oj/runbooks"))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect()
+            })
+            .unwrap_or_default()
+        },
+        |state| {
+            state
+                .crons
+                .values()
+                .filter(|c| c.namespace == ns)
+                .map(|c| c.name.clone())
+                .collect()
+        },
+    )
 }

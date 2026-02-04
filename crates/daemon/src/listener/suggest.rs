@@ -3,6 +3,10 @@
 
 //! "Did you mean?" suggestion helpers for resource-lookup error messages.
 
+use std::sync::Arc;
+
+use parking_lot::Mutex;
+
 use oj_storage::MaterializedState;
 
 /// Levenshtein edit distance between two strings.
@@ -60,7 +64,7 @@ pub(super) fn format_suggestion(similar: &[String]) -> String {
 
 /// Parse a scoped key like "namespace/name" into (namespace, name).
 /// Returns ("", key) when no slash is present.
-fn parse_scoped_key(scoped_key: &str) -> (String, String) {
+pub(super) fn parse_scoped_key(scoped_key: &str) -> (String, String) {
     if let Some(pos) = scoped_key.find('/') {
         (
             scoped_key[..pos].to_string(),
@@ -76,6 +80,7 @@ pub(super) enum ResourceType {
     Queue,
     Worker,
     Cron,
+    Command,
 }
 
 /// Check if a resource name exists in another namespace's active state.
@@ -109,6 +114,8 @@ pub(super) fn find_in_other_namespaces(
             .values()
             .find(|c| c.name == name && c.namespace != current_namespace)
             .map(|c| c.namespace.clone()),
+        // Commands are stateless definitions; no cross-namespace tracking.
+        ResourceType::Command => None,
     }
 }
 
@@ -123,6 +130,81 @@ pub(super) fn format_cross_project_suggestion(
         "\n\n  did you mean: {} {} --project {}?",
         command_prefix, name, namespace
     )
+}
+
+/// Generate a "did you mean" suggestion for a resource name.
+///
+/// Three-phase lookup:
+/// 1. Fuzzy-match against names from runbooks on disk.
+/// 2. Fuzzy-match against names from daemon state (current namespace).
+/// 3. Cross-namespace exact match (suggests `--project`).
+///
+/// The two closures let callers specify how to collect candidate names:
+/// - `collect_runbook_names()` → names from `.oj/runbooks/` (caller captures project root)
+/// - `collect_state_names(state)` → names from materialized state
+pub(super) fn suggest_for_resource(
+    name: &str,
+    namespace: &str,
+    command_prefix: &str,
+    state: &Arc<Mutex<MaterializedState>>,
+    resource_type: ResourceType,
+    collect_runbook_names: impl FnOnce() -> Vec<String>,
+    collect_state_names: impl FnOnce(&MaterializedState) -> Vec<String>,
+) -> String {
+    // 1. Collect from runbooks
+    {
+        let names = collect_runbook_names();
+        let candidates: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let similar = find_similar(name, &candidates);
+        if !similar.is_empty() {
+            return format_suggestion(&similar);
+        }
+    }
+
+    // 2. Try suggestions from daemon state
+    {
+        let state = state.lock();
+        let names = collect_state_names(&state);
+        let candidates: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let similar = find_similar(name, &candidates);
+        if !similar.is_empty() {
+            return format_suggestion(&similar);
+        }
+    }
+
+    // 3. Check for wrong project (cross-namespace)
+    let state = state.lock();
+    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, namespace, &state) {
+        return format_cross_project_suggestion(command_prefix, name, &other_ns);
+    }
+
+    String::new()
+}
+
+/// Generate a "did you mean" suggestion from pre-collected candidates.
+///
+/// Use this variant when the state lock is already held (e.g., in query handlers).
+pub(super) fn suggest_from_candidates(
+    name: &str,
+    namespace: &str,
+    command_prefix: &str,
+    state: &MaterializedState,
+    resource_type: ResourceType,
+    candidates: &[String],
+) -> String {
+    let candidate_refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
+    let similar = find_similar(name, &candidate_refs);
+    let hint = format_suggestion(&similar);
+
+    if !hint.is_empty() {
+        return hint;
+    }
+
+    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, namespace, state) {
+        return format_cross_project_suggestion(command_prefix, name, &other_ns);
+    }
+
+    String::new()
 }
 
 #[cfg(test)]

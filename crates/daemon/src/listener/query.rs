@@ -421,6 +421,7 @@ pub(super) fn handle_query(
                         Response::QueueItems { items: vec![] }
                     } else {
                         // Queue truly not found — suggest
+                        use super::suggest;
                         let mut candidates: Vec<String> = state
                             .queue_items
                             .keys()
@@ -433,7 +434,6 @@ pub(super) fn handle_query(
                                 }
                             })
                             .collect();
-                        // Also check runbook definitions
                         if let Some(ref root) = project_root {
                             let runbook_queues =
                                 oj_runbook::collect_all_queues(&root.join(".oj/runbooks"))
@@ -445,40 +445,20 @@ pub(super) fn handle_query(
                             }
                         }
 
-                        use super::suggest;
-                        let candidate_refs: Vec<&str> =
-                            candidates.iter().map(|s| s.as_str()).collect();
-                        let similar = suggest::find_similar(&queue_name, &candidate_refs);
-                        let hint = suggest::format_suggestion(&similar);
+                        let hint = suggest::suggest_from_candidates(
+                            &queue_name,
+                            &namespace,
+                            "oj queue show",
+                            &state,
+                            suggest::ResourceType::Queue,
+                            &candidates,
+                        );
 
-                        // Cross-namespace check
-                        let cross_hint = if hint.is_empty() {
-                            suggest::find_in_other_namespaces(
-                                suggest::ResourceType::Queue,
-                                &queue_name,
-                                &namespace,
-                                &state,
-                            )
-                            .map(|ns| {
-                                suggest::format_cross_project_suggestion(
-                                    "oj queue show",
-                                    &queue_name,
-                                    &ns,
-                                )
-                            })
-                            .unwrap_or_default()
-                        } else {
-                            String::new()
-                        };
-
-                        let combined_hint = if !hint.is_empty() { hint } else { cross_hint };
-
-                        if combined_hint.is_empty() {
-                            // No suggestions — return empty items (backwards compatible)
+                        if hint.is_empty() {
                             Response::QueueItems { items: vec![] }
                         } else {
                             Response::Error {
-                                message: format!("unknown queue: {}{}", queue_name, combined_hint),
+                                message: format!("unknown queue: {}{}", queue_name, hint),
                             }
                         }
                     }
@@ -668,36 +648,23 @@ pub(super) fn handle_query(
                     }
                 }
 
-                let candidate_refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
-                let similar = suggest::find_similar(&name, &candidate_refs);
-                let hint = suggest::format_suggestion(&similar);
+                let hint = suggest::suggest_from_candidates(
+                    &name,
+                    &namespace,
+                    "oj worker logs",
+                    &state,
+                    suggest::ResourceType::Worker,
+                    &candidates,
+                );
 
-                let cross_hint = if hint.is_empty() {
-                    suggest::find_in_other_namespaces(
-                        suggest::ResourceType::Worker,
-                        &name,
-                        &namespace,
-                        &state,
-                    )
-                    .map(|ns| {
-                        suggest::format_cross_project_suggestion("oj worker logs", &name, &ns)
-                    })
-                    .unwrap_or_default()
-                } else {
-                    String::new()
-                };
-
-                let combined_hint = if !hint.is_empty() { hint } else { cross_hint };
-
-                if combined_hint.is_empty() {
-                    // No suggestions — return empty log (backwards compatible)
+                if hint.is_empty() {
                     Response::WorkerLogs {
                         log_path,
                         content: String::new(),
                     }
                 } else {
                     Response::Error {
-                        message: format!("unknown worker: {}{}", name, combined_hint),
+                        message: format!("unknown worker: {}{}", name, hint),
                     }
                 }
             }
@@ -770,6 +737,7 @@ pub(super) fn handle_query(
                     content: String::new(),
                 }
             } else {
+                // Cron not found — suggest
                 use super::suggest;
                 let mut candidates: Vec<String> =
                     state.crons.values().map(|c| c.name.clone()).collect();
@@ -783,33 +751,23 @@ pub(super) fn handle_query(
                     }
                 }
 
-                let candidate_refs: Vec<&str> = candidates.iter().map(|s| s.as_str()).collect();
-                let similar = suggest::find_similar(&name, &candidate_refs);
-                let hint = suggest::format_suggestion(&similar);
+                let hint = suggest::suggest_from_candidates(
+                    &name,
+                    "",
+                    "oj cron logs",
+                    &state,
+                    suggest::ResourceType::Cron,
+                    &candidates,
+                );
 
-                let cross_hint = if hint.is_empty() {
-                    suggest::find_in_other_namespaces(
-                        suggest::ResourceType::Cron,
-                        &name,
-                        "",
-                        &state,
-                    )
-                    .map(|ns| suggest::format_cross_project_suggestion("oj cron logs", &name, &ns))
-                    .unwrap_or_default()
-                } else {
-                    String::new()
-                };
-
-                let combined_hint = if !hint.is_empty() { hint } else { cross_hint };
-
-                if combined_hint.is_empty() {
+                if hint.is_empty() {
                     Response::CronLogs {
                         log_path,
                         content: String::new(),
                     }
                 } else {
                     Response::Error {
-                        message: format!("unknown cron: {}{}", name, combined_hint),
+                        message: format!("unknown cron: {}{}", name, hint),
                     }
                 }
             }

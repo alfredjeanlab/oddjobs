@@ -586,27 +586,34 @@ fn suggest_for_queue(
     command_prefix: &str,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> String {
-    // 1. Collect all queue names from runbooks
+    let ns = namespace.to_string();
     let runbook_dir = project_root.join(".oj/runbooks");
-    let all_queues = oj_runbook::collect_all_queues(&runbook_dir).unwrap_or_default();
-    let candidates: Vec<&str> = all_queues.iter().map(|(name, _)| name.as_str()).collect();
-
-    // 2. Check for typo (fuzzy match)
-    let similar = suggest::find_similar(queue_name, &candidates);
-    if !similar.is_empty() {
-        return suggest::format_suggestion(&similar);
-    }
-
-    // 3. Check for wrong project (cross-namespace)
-    let state = state.lock();
-    if let Some(other_ns) = suggest::find_in_other_namespaces(
-        suggest::ResourceType::Queue,
+    suggest::suggest_for_resource(
         queue_name,
         namespace,
-        &state,
-    ) {
-        return suggest::format_cross_project_suggestion(command_prefix, queue_name, &other_ns);
-    }
-
-    String::new()
+        command_prefix,
+        state,
+        suggest::ResourceType::Queue,
+        || {
+            oj_runbook::collect_all_queues(&runbook_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        },
+        |state| {
+            state
+                .queue_items
+                .keys()
+                .filter_map(|k| {
+                    let (item_ns, name) = suggest::parse_scoped_key(k);
+                    if item_ns == ns {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        },
+    )
 }

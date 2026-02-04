@@ -105,3 +105,62 @@ run = "make"
         other => panic!("expected CommandStarted, got {:?}", other),
     }
 }
+
+#[tokio::test]
+async fn unknown_command_suggests_similar_name() {
+    let project = project_with_runbook(
+        r#"
+[command.deploy]
+run = "echo deploying"
+"#,
+    );
+
+    let wal_dir = tempdir().unwrap();
+    let event_bus = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_run_command(
+        project.path(),
+        project.path(),
+        "",
+        "deploj",
+        &[],
+        &HashMap::new(),
+        &event_bus,
+        &state,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("did you mean: deploy?")),
+        "expected suggestion for 'deploy', got {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn unknown_command_returns_error_without_hint_when_no_match() {
+    let wal_dir = tempdir().unwrap();
+    let event_bus = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_run_command(
+        std::path::Path::new("/nonexistent"),
+        std::path::Path::new("/nonexistent"),
+        "",
+        "xyz",
+        &[],
+        &HashMap::new(),
+        &event_bus,
+        &state,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("unknown command: xyz")),
+        "expected unknown command error, got {:?}",
+        result
+    );
+}

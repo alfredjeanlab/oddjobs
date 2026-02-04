@@ -15,6 +15,7 @@ use oj_storage::MaterializedState;
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
+use super::suggest;
 use super::ConnectionError;
 
 /// Handle a RunCommand request.
@@ -28,17 +29,37 @@ pub(super) async fn handle_run_command(
     args: &[String],
     named_args: &HashMap<String, String>,
     event_bus: &EventBus,
-    _state: &Arc<Mutex<MaterializedState>>,
+    state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook from project
-    let runbook: oj_runbook::Runbook = match load_runbook(project_root, command) {
-        Ok(rb) => rb,
-        Err(e) => {
-            return Ok(Response::Error {
-                message: format!("failed to load runbook: {}", e),
-            })
-        }
+    // Load runbook from project (with --project fallback and suggest hints)
+    let (runbook, effective_root) = match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        state,
+        |root| load_runbook(root, command),
+        || {
+            let runbook_dir = project_root.join(".oj/runbooks");
+            suggest::suggest_for_resource(
+                command,
+                namespace,
+                "oj run",
+                state,
+                suggest::ResourceType::Command,
+                || {
+                    oj_runbook::collect_all_commands(&runbook_dir)
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(name, _)| name)
+                        .collect()
+                },
+                |_| Vec::new(),
+            )
+        },
+    ) {
+        Ok(result) => result,
+        Err(resp) => return Ok(resp),
     };
+    let project_root = &effective_root;
 
     // Get command definition
     let cmd_def: &oj_runbook::CommandDef = match runbook.get_command(command) {
