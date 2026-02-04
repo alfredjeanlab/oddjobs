@@ -10,6 +10,7 @@
 
 mod agent_logger;
 pub mod breadcrumb;
+mod decision_builder;
 pub mod env;
 mod error;
 mod executor;
@@ -26,6 +27,7 @@ mod worker_logger;
 mod workspace;
 
 pub use agent_logger::AgentLogger;
+pub use decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 pub use error::RuntimeError;
 pub use executor::{ExecuteError, Executor};
 pub use pipeline_logger::PipelineLogger;

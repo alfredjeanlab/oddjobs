@@ -199,7 +199,7 @@ fn escalate_returns_escalate_effects() {
 }
 
 #[test]
-fn escalate_step_waiting_has_no_reason() {
+fn escalate_emits_decision_created() {
     let pipeline = test_pipeline();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
@@ -207,22 +207,32 @@ fn escalate_step_waiting_has_no_reason() {
     let result =
         build_action_effects(&pipeline, &agent, &config, "gate_failed", &HashMap::new()).unwrap();
     if let ActionEffects::Escalate { effects } = result {
-        let step_waiting = effects.iter().find(|e| {
+        let decision_created = effects.iter().find(|e| {
             matches!(
                 e,
                 oj_core::Effect::Emit {
-                    event: oj_core::Event::StepWaiting { .. }
+                    event: oj_core::Event::DecisionCreated { .. }
                 }
             )
         });
-        assert!(step_waiting.is_some(), "should emit StepWaiting");
+        assert!(decision_created.is_some(), "should emit DecisionCreated");
+
+        // Verify the decision has the correct source for gate_failed trigger
+        // (gate_failed ends with _exhausted pattern, so it maps to Idle as fallback)
         if let Some(oj_core::Effect::Emit {
-            event: oj_core::Event::StepWaiting { reason, .. },
-        }) = step_waiting
+            event:
+                oj_core::Event::DecisionCreated {
+                    source, options, ..
+                },
+        }) = decision_created
         {
+            // Escalation from gate_failed trigger should create a decision with options
+            assert!(!options.is_empty(), "should have options");
+            // The source depends on how the trigger is parsed
             assert!(
-                reason.is_none(),
-                "escalate without gate should have no reason"
+                matches!(source, oj_core::DecisionSource::Idle),
+                "gate_failed trigger maps to Idle source, got {:?}",
+                source
             );
         }
     } else {

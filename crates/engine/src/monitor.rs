@@ -6,6 +6,7 @@
 //! Handles detection of agent state from session logs and triggers
 //! appropriate actions (nudge, resume, escalate, etc.).
 
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::RuntimeError;
 use oj_core::{
     AgentError, AgentState, Effect, Event, Pipeline, PipelineId, PromptType, SessionId, TimerId,
@@ -203,25 +204,57 @@ pub fn build_action_effects(
                 pipeline_id = %pipeline.id,
                 trigger = trigger,
                 message = ?message,
-                "escalating to human"
+                "escalating to human — creating decision"
             );
 
+            // Determine escalation trigger type from the trigger string
+            let escalation_trigger = match trigger {
+                "idle" | "on_idle" => EscalationTrigger::Idle,
+                "dead" | "on_dead" | "exit" | "exited" => {
+                    EscalationTrigger::Dead { exit_code: None }
+                }
+                "error" | "on_error" => EscalationTrigger::Error {
+                    error_type: "unknown".to_string(),
+                    message: message.unwrap_or("").to_string(),
+                },
+                "prompt" | "on_prompt" => EscalationTrigger::Prompt {
+                    prompt_type: "permission".to_string(),
+                },
+                t if t.ends_with("_exhausted") => {
+                    // Handle "idle_exhausted", "error_exhausted" etc.
+                    let base = t.trim_end_matches("_exhausted");
+                    match base {
+                        "idle" => EscalationTrigger::Idle,
+                        "error" => EscalationTrigger::Error {
+                            error_type: "exhausted".to_string(),
+                            message: message.unwrap_or("").to_string(),
+                        },
+                        _ => EscalationTrigger::Dead { exit_code: None },
+                    }
+                }
+                _ => EscalationTrigger::Idle, // fallback
+            };
+
+            let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
+                pipeline_id.clone(),
+                pipeline.name.clone(),
+                escalation_trigger,
+            )
+            .agent_id(pipeline.session_id.clone().unwrap_or_default())
+            .namespace(pipeline.namespace.clone())
+            .build();
+
             let effects = vec![
-                // Desktop notification
-                Effect::Notify {
-                    title: format!("Pipeline needs attention: {}", pipeline.name),
-                    message: trigger.to_string(),
-                },
-                // Update pipeline status to Waiting
+                // Emit DecisionCreated (this also sets pipeline to Waiting)
                 Effect::Emit {
-                    event: Event::StepWaiting {
-                        pipeline_id: pipeline_id.clone(),
-                        step: pipeline.step.clone(),
-                        reason: None,
-                        decision_id: None,
-                    },
+                    event: decision_event,
                 },
-                // Cancel exit-deferred timer (agent is still alive; liveness continues)
+                // Desktop notification on decision created
+                Effect::Notify {
+                    title: format!("Decision needed: {}", pipeline.name),
+                    message: format!("Pipeline requires attention ({})", trigger),
+                },
+                // Cancel exit-deferred timer (agent may still be alive)
                 Effect::CancelTimer {
                     id: TimerId::exit_deferred(&pipeline_id),
                 },

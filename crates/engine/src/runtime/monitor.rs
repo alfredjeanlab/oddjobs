@@ -4,6 +4,7 @@
 //! Agent monitoring and lifecycle
 
 use super::Runtime;
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
 use crate::monitor::{self, ActionEffects, MonitorState};
 use oj_adapters::agent::find_session_log;
@@ -532,47 +533,38 @@ where
                             &pipeline.step,
                             &format!("gate failed: {}", gate_error),
                         );
-                        // Gate failed — fall back to escalate with error context
-                        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-                        let agent_def = monitor::get_agent_def(&runbook, pipeline)?;
-                        let escalate_config =
-                            oj_runbook::ActionConfig::simple(oj_runbook::AgentAction::Escalate);
-                        let escalate_effects = monitor::build_action_effects(
-                            pipeline,
-                            agent_def,
-                            &escalate_config,
-                            "gate_failed",
-                            &pipeline.vars,
-                        )?;
-                        // Inline escalate execution, injecting the gate error
-                        // into the StepWaiting event so pipeline.error gets set
-                        match escalate_effects {
-                            ActionEffects::Escalate { effects } => {
-                                let effects: Vec<_> = effects
-                                    .into_iter()
-                                    .map(|effect| match effect {
-                                        Effect::Emit {
-                                            event:
-                                                Event::StepWaiting {
-                                                    pipeline_id, step, ..
-                                                },
-                                        } => Effect::Emit {
-                                            event: Event::StepWaiting {
-                                                pipeline_id,
-                                                step,
-                                                reason: Some(gate_error.clone()),
-                                                decision_id: None,
-                                            },
-                                        },
-                                        other => other,
-                                    })
-                                    .collect();
-                                Ok(self.executor.execute_all(effects).await?)
-                            }
-                            _ => {
-                                unreachable!("escalate action always produces Escalate effects")
-                            }
-                        }
+
+                        // Parse gate error for structured context
+                        let (exit_code, stderr) = parse_gate_error(&gate_error);
+
+                        // Create decision with gate failure context
+                        let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
+                            pipeline_id.clone(),
+                            pipeline.name.clone(),
+                            EscalationTrigger::GateFailed {
+                                command: command.clone(),
+                                exit_code,
+                                stderr,
+                            },
+                        )
+                        .agent_id(pipeline.session_id.clone().unwrap_or_default())
+                        .namespace(pipeline.namespace.clone())
+                        .build();
+
+                        let effects = vec![
+                            Effect::Emit {
+                                event: decision_event,
+                            },
+                            Effect::Notify {
+                                title: format!("Gate failed: {}", pipeline.name),
+                                message: format!("Command '{}' failed", command),
+                            },
+                            Effect::CancelTimer {
+                                id: TimerId::exit_deferred(&pipeline_id),
+                            },
+                        ];
+
+                        Ok(self.executor.execute_all(effects).await?)
                     }
                 }
             }
@@ -745,4 +737,31 @@ where
             }
         }
     }
+}
+
+/// Parse a gate error string into exit code and stderr.
+///
+/// The `run_gate_command` function produces errors in the format:
+/// - `"gate `cmd` failed (exit N)"` - without stderr
+/// - `"gate `cmd` failed (exit N): stderr_content"` - with stderr
+/// - `"gate `cmd` execution error: msg"` - for spawn failures
+fn parse_gate_error(error: &str) -> (i32, String) {
+    // Try to extract exit code from "(exit N)" pattern
+    if let Some(exit_start) = error.find("(exit ") {
+        let after_exit = &error[exit_start + 6..];
+        if let Some(paren_end) = after_exit.find(')') {
+            if let Ok(code) = after_exit[..paren_end].trim().parse::<i32>() {
+                // Check if there's stderr after the closing paren
+                let rest = &after_exit[paren_end + 1..];
+                let stderr = if let Some(colon_pos) = rest.find(':') {
+                    rest[colon_pos + 1..].trim().to_string()
+                } else {
+                    String::new()
+                };
+                return (code, stderr);
+            }
+        }
+    }
+    // Fallback: unknown exit code, full string as stderr
+    (1, error.to_string())
 }
