@@ -560,7 +560,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
                 .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))?
         };
 
-        let pause = Duration::from_millis(50);
+        let key_pause = Duration::from_millis(50);
 
         // Clear current input: Esc, pause, Esc
         self.sessions
@@ -568,14 +568,14 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             .await
             .map_err(|e| AgentError::SendFailed(e.to_string()))?;
 
-        tokio::time::sleep(pause).await;
+        tokio::time::sleep(key_pause).await;
 
         self.sessions
             .send(&session_id, "Escape")
             .await
             .map_err(|e| AgentError::SendFailed(e.to_string()))?;
 
-        tokio::time::sleep(pause).await;
+        tokio::time::sleep(key_pause).await;
 
         // Send literal text
         self.sessions
@@ -583,7 +583,11 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             .await
             .map_err(|e| AgentError::SendFailed(e.to_string()))?;
 
-        tokio::time::sleep(pause).await;
+        // Wait for the TUI to process all characters before pressing Enter.
+        // Scale the delay with input length: the TUI re-renders per keystroke,
+        // so longer messages need more time. Base 100ms, +1ms per char, cap 2s.
+        let text_settle = Duration::from_millis((100 + input.len() as u64).min(2000));
+        tokio::time::sleep(text_settle).await;
 
         // Send Enter to submit
         self.sessions
