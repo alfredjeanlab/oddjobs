@@ -10,6 +10,7 @@ A runbook is a file that defines **commands** (user-facing entrypoints) and the 
 │                                                             │
 │   command ──► user invokes, runs pipeline or shell command  │
 │   worker ───► polls a queue, dispatches items to pipelines  │
+│   cron ─────► runs a pipeline on a recurring schedule       │
 └─────────────────────────────────────────────────────────────┘
                            │
                            ▼
@@ -395,6 +396,33 @@ Workers are started via `oj worker start <name>`. The command is idempotent — 
 
 When a worker takes an item from the queue, the item's fields are mapped into the pipeline's first declared var as a namespace. For example, if the pipeline declares `vars = ["mr"]` and the queue item has `{"branch": "fix-123"}`, the pipeline receives `var.mr.branch = "fix-123"`.
 
+## Cron
+
+Time-driven entrypoint. Runs a pipeline on a recurring schedule.
+
+```hcl
+cron "janitor" {
+  interval    = "30m"
+  run         = { pipeline = "cleanup" }
+  concurrency = 1
+}
+```
+
+Cron fields:
+- **interval**: How often to run (e.g., `"30m"`, `"6h"`, `"24h"`)
+- **run**: What to execute (`{ pipeline = "name" }`)
+- **concurrency**: Maximum concurrent pipeline instances (default: 1 — singleton)
+
+Crons are the third entrypoint type alongside commands and workers:
+
+```text
+User ─── oj run ───► Command ───► Pipeline (direct)
+Queue ──────────────► Worker ────► Pipeline (background)
+Timer ──────────────► Cron ──────► Pipeline (scheduled)
+```
+
+Managed via `oj cron start <name>`, `oj cron stop <name>`, `oj cron once <name>`. Use cases range from simple shell-step cleanup (janitor) to agent-driven periodic analysis.
+
 ## Recovery
 
 Agent lifecycle actions handle different states:
@@ -418,5 +446,6 @@ Each runbook file defines related primitives:
 | `bugfix.hcl` | command, pipeline, queue, worker, agent | Bug fix workflow with worker pool |
 | `merge/local.hcl` | queue, worker, pipeline, agent | Local merge queue with conflict resolution |
 | `merge/github.hcl` | queue, worker, pipeline | GitHub PR merge queue |
+| `maintenance.hcl` | cron, pipeline | Scheduled cleanup and maintenance tasks |
 
 Primitives are referenced by name within a runbook.

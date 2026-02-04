@@ -77,7 +77,7 @@ On Linux, ensure a notification daemon is running (most desktop environments inc
 
 ## tmux Integration
 
-Agents run in tmux sessions for persistence and observability. Session names follow the format `oj-{pipeline}-{step}-{random}`, where the `oj-` prefix is added by `TmuxAdapter`, the pipeline and step names are sanitized (invalid characters replaced with hyphens, truncated to 20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness.
+Agents run in tmux sessions for persistence and observability. Session names follow the format `oj-{pipeline}-{agent_name}-{random}`, where the `oj-` prefix is added by `TmuxAdapter`, the pipeline and agent names are sanitized (invalid characters replaced with hyphens, truncated to 20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness.
 
 ```bash
 # List all oj sessions

@@ -151,6 +151,40 @@ oj worker list -o json               # JSON output
 
 Workers poll their source queue and dispatch items to their handler pipeline. `oj worker start` is idempotent — it loads the runbook, validates definitions, and begins the poll-dispatch loop. If the worker is already running, it triggers an immediate poll instead.
 
+### oj cron
+
+Manage time-driven daemons defined in runbooks.
+
+```bash
+oj cron list                         # List all crons and their status
+oj cron list --project <name>        # Filter by project namespace
+oj cron start <name>                 # Start a cron (begins interval timer)
+oj cron stop <name>                  # Stop a cron (cancels interval timer)
+oj cron restart <name>               # Stop, reload runbook, and start
+oj cron once <name>                  # Run once now (ignores interval)
+oj cron logs <name>                  # View cron activity log
+oj cron logs <name> --follow         # Stream logs (alias: -f)
+oj cron logs <name> -n 100           # Limit lines (default: 50)
+oj cron prune                        # Remove stopped crons from daemon state
+```
+
+Crons run their associated pipeline on a recurring schedule. `oj cron start` is idempotent — it loads the runbook, validates the cron definition, and begins the interval timer.
+
+### oj decision
+
+Manage human-in-the-loop decisions.
+
+```bash
+oj decision list                     # List pending decisions
+oj decision list --project <name>    # Filter by project namespace
+oj decision show <id>                # Show details of a decision
+oj decision resolve <id>             # Resolve interactively
+oj decision resolve <id> 1           # Pick option #1
+oj decision resolve <id> -m "msg"    # Resolve with freeform message
+```
+
+Decisions are created when pipelines escalate (via `on_idle`, `on_dead`, or `on_error` with `escalate` action) and require human input to continue. Each decision has a context message and optional numbered choices.
+
 ## Events
 
 ### oj emit

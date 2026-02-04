@@ -1,17 +1,10 @@
 # CLI — Future Additions
 
-Additions to the CLI described in `docs/02-interface/CLI.md`.
+Additions to the CLI described in `docs/interface/CLI.md`.
 
-## oj cron
+## ~~oj cron~~ (Implemented)
 
-Manage time-driven daemons defined in runbooks.
-
-```bash
-oj cron list                     # List all crons and their status
-oj cron start <name>             # Start a cron (begins interval timer)
-oj cron stop <name>              # Stop a cron (cancels interval timer)
-oj cron once <name>              # Run once now (ignores interval)
-```
+See [CLI — oj cron](../interface/CLI.md#oj-cron). The implemented command also includes `restart`, `logs`, and `prune` subcommands.
 
 ## oj worker stop
 

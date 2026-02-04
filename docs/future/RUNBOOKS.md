@@ -1,33 +1,10 @@
 # Runbook Concepts — Future Additions
 
-Additions to the runbook primitives described in `docs/01-concepts/RUNBOOKS.md`.
+Additions to the runbook primitives described in `docs/concepts/RUNBOOKS.md`.
 
-## Cron Entrypoint
+## ~~Cron Entrypoint~~ (Implemented)
 
-Time-driven daemon. Runs a pipeline on a schedule.
-
-```hcl
-cron "janitor" {
-  interval = "30m"
-  run      = { pipeline = "cleanup" }
-}
-```
-
-Lifecycle: `oj cron start janitor`, `oj cron stop janitor`, `oj cron once janitor`
-
-Cron fields:
-- **interval**: How often to run (e.g., `"30m"`, `"6h"`, `"24h"`)
-- **run**: What to execute (`{ pipeline = "name" }`)
-
-Crons are the third entrypoint type alongside commands and workers:
-
-```text
-User ─── oj run ───► Command ───► Pipeline (direct)
-Queue ──────────────► Worker ────► Pipeline (background)
-Timer ──────────────► Cron ──────► Pipeline (scheduled)
-```
-
-Use cases range from simple shell-step cleanup (janitor) to agent-driven periodic analysis (security auditor, reliability engineer). See `docs/future/10-runbooks/` for examples.
+Cron is now implemented. See [Runbook Concepts — Cron](../concepts/RUNBOOKS.md#cron) and [CLI — oj cron](../interface/CLI.md#oj-cron).
 
 ## ~~Dead Letter Queue~~ (Implemented)
 

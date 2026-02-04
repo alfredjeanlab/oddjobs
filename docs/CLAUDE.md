@@ -5,7 +5,7 @@ docs/
 ├── GUIDE.md                  # Runbook patterns, best practices, examples
 │
 ├── concepts/                 # What things are
-│   ├── RUNBOOKS.md           # Primitives: command, pipeline, agent
+│   ├── RUNBOOKS.md           # Primitives: command, pipeline, agent, cron
 │   └── EXECUTION.md          # Workspace and session abstractions
 │
 ├── interface/                # User-facing
@@ -22,7 +22,7 @@ docs/
 │   └── 06-adapter-claude.md  # How Claude Code runs in sessions
 │
 └── future/                   # Planned additions (not yet implemented)
-    ├── RUNBOOKS.md           # Adds: cron entrypoint, nested pipeline vars
-    ├── CLI.md                # Adds: oj cron, worker stop, session prune
-    └── runbooks/             # Example HCL runbooks (crons)
+    ├── RUNBOOKS.md           # Adds: nested pipeline vars
+    ├── CLI.md                # Adds: worker stop, session prune
+    └── runbooks/             # Example HCL runbooks
 ```
