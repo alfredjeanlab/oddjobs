@@ -771,3 +771,129 @@ fn build_spawn_effects_no_session_block_gets_defaults() {
         panic!("Expected SpawnAgent effect");
     }
 }
+
+// =============================================================================
+// User Env File Injection Tests
+// =============================================================================
+
+#[test]
+fn build_spawn_effects_injects_user_env_vars() {
+    let workspace = TempDir::new().unwrap();
+    let state_dir = TempDir::new().unwrap();
+
+    // Write a global env file
+    let mut global = std::collections::BTreeMap::new();
+    global.insert("MY_TOKEN".to_string(), "secret123".to_string());
+    global.insert("MY_URL".to_string(), "https://example.com".to_string());
+    crate::env::write_env_file(&crate::env::global_env_path(state_dir.path()), &global).unwrap();
+
+    let agent = test_agent_def();
+    let mut pipeline = test_pipeline();
+    pipeline.namespace = "testproject".to_string();
+
+    let pid = PipelineId::new("pipe-1");
+    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "worker",
+        &HashMap::new(),
+        workspace.path(),
+        state_dir.path(),
+    )
+    .unwrap();
+
+    if let Effect::SpawnAgent { env, .. } = &effects[0] {
+        let env_map: HashMap<&str, &str> =
+            env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(env_map.get("MY_TOKEN"), Some(&"secret123"));
+        assert_eq!(env_map.get("MY_URL"), Some(&"https://example.com"));
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}
+
+#[test]
+fn build_spawn_effects_user_env_does_not_override_system_vars() {
+    let workspace = TempDir::new().unwrap();
+    let state_dir = TempDir::new().unwrap();
+
+    // Write a global env file that tries to override OJ_NAMESPACE
+    let mut global = std::collections::BTreeMap::new();
+    global.insert("OJ_NAMESPACE".to_string(), "hacked".to_string());
+    global.insert("MY_VAR".to_string(), "ok".to_string());
+    crate::env::write_env_file(&crate::env::global_env_path(state_dir.path()), &global).unwrap();
+
+    let agent = test_agent_def();
+    let mut pipeline = test_pipeline();
+    pipeline.namespace = "real-ns".to_string();
+
+    let pid = PipelineId::new("pipe-1");
+    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "worker",
+        &HashMap::new(),
+        workspace.path(),
+        state_dir.path(),
+    )
+    .unwrap();
+
+    if let Effect::SpawnAgent { env, .. } = &effects[0] {
+        let env_map: HashMap<&str, &str> =
+            env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        // System var should NOT be overridden by user env file
+        assert_eq!(env_map.get("OJ_NAMESPACE"), Some(&"real-ns"));
+        // Regular user var should be present
+        assert_eq!(env_map.get("MY_VAR"), Some(&"ok"));
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}
+
+#[test]
+fn build_spawn_effects_project_env_overrides_global() {
+    let workspace = TempDir::new().unwrap();
+    let state_dir = TempDir::new().unwrap();
+
+    // Global env
+    let mut global = std::collections::BTreeMap::new();
+    global.insert("TOKEN".to_string(), "global-val".to_string());
+    global.insert("GLOBAL_ONLY".to_string(), "here".to_string());
+    crate::env::write_env_file(&crate::env::global_env_path(state_dir.path()), &global).unwrap();
+
+    // Project env overrides TOKEN
+    let mut project = std::collections::BTreeMap::new();
+    project.insert("TOKEN".to_string(), "project-val".to_string());
+    crate::env::write_env_file(
+        &crate::env::project_env_path(state_dir.path(), "myns"),
+        &project,
+    )
+    .unwrap();
+
+    let agent = test_agent_def();
+    let mut pipeline = test_pipeline();
+    pipeline.namespace = "myns".to_string();
+
+    let pid = PipelineId::new("pipe-1");
+    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "worker",
+        &HashMap::new(),
+        workspace.path(),
+        state_dir.path(),
+    )
+    .unwrap();
+
+    if let Effect::SpawnAgent { env, .. } = &effects[0] {
+        let env_map: HashMap<&str, &str> =
+            env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(env_map.get("TOKEN"), Some(&"project-val"));
+        assert_eq!(env_map.get("GLOBAL_ONLY"), Some(&"here"));
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}

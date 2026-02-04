@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 oj-core = { path = "../core", version = "0.1.0" }
 oj-daemon = { path = "../daemon", version = "0.1.0" }
+oj-engine = { path = "../engine", version = "0.1.0" }
 oj-runbook = { path = "../runbook", version = "0.1.0" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

@@ -119,6 +119,12 @@ where
                     shell_env.insert("OJ_NAMESPACE".to_string(), pipeline.namespace.clone());
                 }
 
+                // Inject user-managed env vars (global + per-project)
+                let user_env = crate::env::load_merged_env(&self.state_dir, &pipeline.namespace);
+                for (key, value) in user_env {
+                    shell_env.entry(key).or_insert(value);
+                }
+
                 let effects = vec![Effect::Shell {
                     pipeline_id: pipeline_id.clone(),
                     step: step_name.to_string(),

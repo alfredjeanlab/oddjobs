@@ -224,6 +224,18 @@ pub fn build_spawn_effects(
         }
     }
 
+    // Inject user-managed env vars (global + per-project).
+    // Read fresh on every spawn so changes take effect immediately.
+    let user_env = crate::env::load_merged_env(state_dir, ctx.namespace);
+    for (key, value) in user_env {
+        // Don't override env vars already set by the agent definition or system.
+        // Agent-defined and system vars (OJ_NAMESPACE, OJ_STATE_DIR, etc.)
+        // take precedence over user env files.
+        if !env.iter().any(|(k, _)| k == &key) {
+            env.push((key, value));
+        }
+    }
+
     // Determine effective working directory from agent cwd config
     // Default to workspace_path if no cwd specified
     let effective_cwd = agent_def.cwd.as_ref().map_or_else(

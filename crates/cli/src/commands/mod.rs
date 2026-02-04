@@ -8,6 +8,7 @@ pub mod cron;
 pub mod daemon;
 pub mod decision;
 pub mod emit;
+pub mod env;
 pub mod pipeline;
 mod pipeline_wait;
 pub mod project;

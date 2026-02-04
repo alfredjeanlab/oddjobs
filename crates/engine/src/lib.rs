@@ -10,6 +10,7 @@
 
 mod agent_logger;
 pub mod breadcrumb;
+pub mod env;
 mod error;
 mod executor;
 pub mod log_paths;

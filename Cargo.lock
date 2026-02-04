@@ -1099,6 +1099,7 @@ dependencies = [
  "notify",
  "oj-core",
  "oj-daemon",
+ "oj-engine",
  "oj-runbook",
  "serde",
  "serde_json",

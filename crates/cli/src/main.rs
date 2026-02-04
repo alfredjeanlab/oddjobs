@@ -17,8 +17,8 @@ use output::OutputFormat;
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{
-    agent, cron, daemon, decision, emit, pipeline, project, queue, resolve, run, session, status,
-    worker, workspace,
+    agent, cron, daemon, decision, emit, env, pipeline, project, queue, resolve, run, session,
+    status, worker, workspace,
 };
 use std::path::{Path, PathBuf};
 
@@ -60,6 +60,8 @@ enum Commands {
     Workspace(workspace::WorkspaceArgs),
     /// Daemon management
     Daemon(daemon::DaemonArgs),
+    /// Environment variable management
+    Env(env::EnvArgs),
     /// Queue management
     Queue(queue::QueueArgs),
     /// Worker management
@@ -185,6 +187,11 @@ async fn run() -> Result<()> {
     // Handle daemon command separately (doesn't need client connection)
     if let Commands::Daemon(args) = command {
         return daemon::daemon(args, format).await;
+    }
+
+    // Handle env command separately (doesn't need client connection)
+    if let Commands::Env(args) = command {
+        return env::handle(args.command, format);
     }
 
     // Find project root for runbook loading
@@ -375,7 +382,7 @@ async fn run() -> Result<()> {
             resolve::handle_show(&client, &id, verbose, format).await?
         }
 
-        Commands::Daemon(_) => unreachable!(),
+        Commands::Daemon(_) | Commands::Env(_) => unreachable!(),
     }
 
     Ok(())
