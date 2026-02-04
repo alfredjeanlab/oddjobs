@@ -97,6 +97,7 @@ pipeline "merge" {
     run = <<-SHELL
       git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+      git -C "${local.repo}" branch -D "${var.mr.branch}" 2>/dev/null || true
     SHELL
   }
 }
