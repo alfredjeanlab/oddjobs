@@ -223,33 +223,25 @@ fn one_pipeline_failure_does_not_affect_others() {
         .args(&["queue", "push", "jobs", r#"{"cmd": "echo ok-2"}"#])
         .passes();
 
-    // Wait for all 3 items to reach terminal status.
-    // Check for 3 terminal items (not just absence of non-terminal) to avoid
-    // passing vacuously before the daemon has processed all pushes.
+    // Wait for all 3 items to reach expected terminal status:
+    // 2 completed (the successful ones) + 1 dead/failed (the `exit 1`).
+    // Capture the output from within the wait_for to avoid TOCTOU races
+    // from a separate query seeing a different snapshot.
+    let mut items_output = String::new();
     let all_terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["queue", "show", "jobs"]).passes().stdout();
-        let terminal = out.matches("completed").count()
-            + out.matches("dead").count()
-            + out.matches("failed").count();
-        terminal >= 3
+        items_output = temp.oj().args(&["queue", "show", "jobs"]).passes().stdout();
+        let completed = items_output.matches("completed").count();
+        let dead_or_failed =
+            items_output.matches("dead").count() + items_output.matches("failed").count();
+        completed >= 2 && dead_or_failed >= 1
     });
 
     if !all_terminal {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(all_terminal, "all queue items should reach terminal status");
-
-    // Verify: 1 dead (the failed one), 2 completed
-    let items_output = temp.oj().args(&["queue", "show", "jobs"]).passes().stdout();
-    assert_eq!(
-        items_output.matches("completed").count(),
-        2,
-        "two items should be completed, got: {}",
-        items_output
-    );
     assert!(
-        items_output.contains("dead") || items_output.contains("failed"),
-        "the failing item should be dead or failed, got: {}",
+        all_terminal,
+        "should have 2 completed and 1 dead/failed, got: {}",
         items_output
     );
 }

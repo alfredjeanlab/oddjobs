@@ -594,7 +594,9 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     }
 
     // 11. Warn on unreachable steps
-    for (pipeline_name, pipeline) in &runbook.pipelines {
+    let mut sorted_pipelines: Vec<_> = runbook.pipelines.iter().collect();
+    sorted_pipelines.sort_by_key(|(name, _)| *name);
+    for (pipeline_name, pipeline) in sorted_pipelines {
         if pipeline.steps.len() <= 1 {
             continue;
         }

@@ -515,6 +515,7 @@ fn collect_runbook_files(dir: &Path) -> Result<Vec<(PathBuf, Format)>, std::io::
             }
         }
     }
+    files.sort_by(|(a, _), (b, _)| a.cmp(b));
     Ok(files)
 }
 
