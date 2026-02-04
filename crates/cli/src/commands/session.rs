@@ -123,9 +123,9 @@ pub async fn handle(
             let with_color = should_use_color();
             match client.peek_session(&id, with_color).await {
                 Ok(output) => {
-                    println!("╭──── peek: {} ────", id);
+                    println!("{}", color::header(&format!("╭──── peek: {} ────", id)));
                     print!("{}", output);
-                    println!("╰──── end peek ────");
+                    println!("{}", color::header("╰──── end peek ────"));
                 }
                 Err(_) => {
                     anyhow::bail!("Session {} not found", id);

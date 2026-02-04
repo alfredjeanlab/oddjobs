@@ -484,9 +484,12 @@ pub async fn handle(
 
             match peek_output {
                 Some((session_id, output)) => {
-                    println!("╭──── peek: {} ────", session_id);
+                    println!(
+                        "{}",
+                        color::header(&format!("╭──── peek: {} ────", session_id))
+                    );
                     print!("{}", output);
-                    println!("╰──── end peek ────");
+                    println!("{}", color::header("╰──── end peek ────"));
                 }
                 None => {
                     let short_id = pipeline.id.short(8);
