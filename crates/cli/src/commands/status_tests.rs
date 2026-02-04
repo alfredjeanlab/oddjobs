@@ -2,8 +2,8 @@ use oj_daemon::NamespaceStatus;
 use serial_test::serial;
 
 use super::{
-    format_duration, format_text, friendly_name_label, render_frame, truncate_reason,
-    watch_preamble, CLEAR_SCREEN,
+    format_duration, format_text, friendly_name_label, render_frame, truncate_reason, CLEAR_TO_END,
+    CURSOR_HOME,
 };
 
 #[test]
@@ -331,207 +331,6 @@ fn friendly_name_label_shown_when_meaningful() {
     );
 }
 
-// ── render_frame tests ──────────────────────────────────────────────
-
-#[test]
-fn render_frame_first_tty_prepends_clear_sequence() {
-    let content = "oj daemon: running 2m\n";
-    let frame = render_frame(content, true, true);
-    assert!(
-        frame.starts_with(CLEAR_SCREEN),
-        "first TTY frame must start with clear-screen sequence"
-    );
-    assert!(
-        frame.contains(content),
-        "TTY frame must contain the content"
-    );
-}
-
-#[test]
-fn render_frame_non_tty_no_escape_codes() {
-    let content = "oj daemon: running 2m\n";
-    let frame = render_frame(content, false, true);
-    assert_eq!(frame, content, "non-TTY frame should be the raw content");
-    assert!(
-        !frame.contains('\x1B'),
-        "non-TTY frame must not contain any ANSI escape codes"
-    );
-}
-
-#[test]
-#[serial]
-fn render_frame_content_identical_across_tty_modes() {
-    std::env::set_var("NO_COLOR", "1");
-    std::env::remove_var("COLOR");
-
-    let ns = NamespaceStatus {
-        namespace: "proj".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
-            id: "aaaa1111".to_string(),
-            name: "build".to_string(),
-            kind: "pipeline".to_string(),
-            step: "compile".to_string(),
-            step_status: "running".to_string(),
-            elapsed_ms: 5000,
-            waiting_reason: None,
-        }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![],
-    };
-    let text = format_text(60, &[ns], Some("5s"));
-
-    let tty_frame = render_frame(&text, true, true);
-    let non_tty_frame = render_frame(&text, false, true);
-
-    // Strip the preamble prefix and trailing \x1B[J from TTY frame; remainder must match non-TTY
-    let stripped = &tty_frame[CLEAR_SCREEN.len()..tty_frame.len() - "\x1B[J".len()];
-    assert_eq!(stripped, non_tty_frame);
-}
-
-#[test]
-#[serial]
-fn consecutive_frames_tty_first_clears_subsequent_homes() {
-    std::env::set_var("NO_COLOR", "1");
-    std::env::remove_var("COLOR");
-
-    let frame1_content = format_text(60, &[], Some("5s"));
-    let frame2_content = format_text(120, &[], Some("5s"));
-
-    let frame1 = render_frame(&frame1_content, true, true);
-    let frame2 = render_frame(&frame2_content, true, false);
-
-    // First frame clears screen (preserves scrollback), second only homes cursor
-    assert!(
-        frame1.starts_with(CLEAR_SCREEN),
-        "first frame must clear screen"
-    );
-    assert!(
-        frame2.starts_with("\x1B[H"),
-        "subsequent frame must home cursor"
-    );
-    assert!(
-        !frame2.starts_with(CLEAR_SCREEN),
-        "subsequent frame must not clear screen"
-    );
-}
-
-#[test]
-#[serial]
-fn consecutive_frames_non_tty_no_clear_codes() {
-    std::env::set_var("NO_COLOR", "1");
-    std::env::remove_var("COLOR");
-
-    let frame1_content = format_text(60, &[], Some("5s"));
-    let frame2_content = format_text(120, &[], Some("5s"));
-
-    let frame1 = render_frame(&frame1_content, false, true);
-    let frame2 = render_frame(&frame2_content, false, false);
-
-    let combined = format!("{frame1}{frame2}");
-
-    assert!(
-        !combined.contains(CLEAR_SCREEN),
-        "non-TTY output must never contain clear sequence"
-    );
-    // Both frames appear in order
-    assert!(combined.contains("1m")); // 60s
-    assert!(combined.contains("2m")); // 120s
-}
-
-#[test]
-fn clear_screen_constant_is_correct_ansi() {
-    assert_eq!(CLEAR_SCREEN, "\x1B[2J\x1B[H");
-    assert_eq!(CLEAR_SCREEN.len(), 7);
-}
-
-#[test]
-#[serial]
-fn format_text_never_contains_clear_sequence() {
-    std::env::set_var("NO_COLOR", "1");
-    std::env::remove_var("COLOR");
-
-    // With watch interval
-    let with_watch = format_text(300, &[], Some("3s"));
-    assert!(
-        !with_watch.contains(CLEAR_SCREEN),
-        "format_text must not inject clear codes"
-    );
-
-    // Without watch interval
-    let without_watch = format_text(300, &[], None);
-    assert!(
-        !without_watch.contains(CLEAR_SCREEN),
-        "format_text must not inject clear codes"
-    );
-}
-
-#[test]
-#[serial]
-fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
-    std::env::set_var("NO_COLOR", "1");
-    std::env::remove_var("COLOR");
-
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
-            id: "abcd1234".to_string(),
-            name: "build".to_string(),
-            kind: "pipeline".to_string(),
-            step: "compile".to_string(),
-            step_status: "running".to_string(),
-            elapsed_ms: 60_000,
-            waiting_reason: None,
-        }],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
-            id: "efgh5678".to_string(),
-            name: "deploy".to_string(),
-            kind: "deploy".to_string(),
-            step: "approve".to_string(),
-            step_status: "waiting".to_string(),
-            elapsed_ms: 120_000,
-            waiting_reason: Some("needs manual approval".to_string()),
-        }],
-        orphaned_pipelines: vec![],
-        workers: vec![oj_daemon::WorkerSummary {
-            name: "builder".to_string(),
-            namespace: "myproject".to_string(),
-            queue: "default".to_string(),
-            status: "running".to_string(),
-            active: 1,
-            concurrency: 4,
-            updated_at_ms: 0,
-        }],
-        queues: vec![oj_daemon::QueueStatus {
-            name: "tasks".to_string(),
-            pending: 3,
-            active: 1,
-            dead: 0,
-        }],
-        active_agents: vec![oj_daemon::AgentStatusEntry {
-            pipeline_name: "build".to_string(),
-            step_name: "code".to_string(),
-            agent_id: "agent-001".to_string(),
-            status: "running".to_string(),
-        }],
-    };
-
-    let text = format_text(600, &[ns], Some("5s"));
-    let frame = render_frame(&text, false, true);
-
-    assert!(
-        !frame.contains('\x1B'),
-        "no ANSI escapes in non-TTY + NO_COLOR frame"
-    );
-    assert!(frame.contains("myproject"));
-    assert!(frame.contains("pipeline"));
-    assert!(frame.contains("builder"));
-    assert!(frame.contains("tasks"));
-    assert!(frame.contains("agent-001"));
-}
-
 #[test]
 #[serial]
 fn active_pipeline_shows_friendly_name() {
@@ -644,6 +443,215 @@ fn orphaned_pipeline_shows_friendly_name() {
     );
 }
 
+// ── render_frame tests ──────────────────────────────────────────────
+
+#[test]
+fn render_frame_tty_wraps_with_cursor_home_and_clear() {
+    let content = "oj daemon: running 2m\n";
+    let frame = render_frame(content, true);
+    assert!(
+        frame.starts_with(CURSOR_HOME),
+        "TTY frame must start with cursor-home sequence"
+    );
+    assert!(
+        frame.ends_with(CLEAR_TO_END),
+        "TTY frame must end with clear-to-end sequence"
+    );
+    // Content is sandwiched between the escape codes
+    let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
+    assert_eq!(inner, content);
+}
+
+#[test]
+fn render_frame_non_tty_no_escape_codes() {
+    let content = "oj daemon: running 2m\n";
+    let frame = render_frame(content, false);
+    assert_eq!(frame, content, "non-TTY frame should be the raw content");
+    assert!(
+        !frame.contains('\x1B'),
+        "non-TTY frame must not contain any ANSI escape codes"
+    );
+}
+
+#[test]
+#[serial]
+fn render_frame_content_identical_across_tty_modes() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "proj".to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "aaaa1111".to_string(),
+            name: "build".to_string(),
+            kind: "pipeline".to_string(),
+            step: "compile".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 5000,
+            waiting_reason: None,
+        }],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+    let text = format_text(60, &[ns], Some("5s"));
+
+    let tty_frame = render_frame(&text, true);
+    let non_tty_frame = render_frame(&text, false);
+
+    // Strip the wrapping escape codes from TTY frame; remainder must match non-TTY
+    let inner = &tty_frame[CURSOR_HOME.len()..tty_frame.len() - CLEAR_TO_END.len()];
+    assert_eq!(inner, non_tty_frame);
+}
+
+#[test]
+#[serial]
+fn consecutive_frames_tty_each_have_escape_codes() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let frame1_content = format_text(60, &[], Some("5s"));
+    let frame2_content = format_text(120, &[], Some("5s"));
+
+    let frame1 = render_frame(&frame1_content, true);
+    let frame2 = render_frame(&frame2_content, true);
+
+    let combined = format!("{frame1}{frame2}");
+
+    // Count occurrences of the cursor-home sequence
+    let home_count = combined.matches(CURSOR_HOME).count();
+    assert_eq!(
+        home_count, 2,
+        "each TTY frame must have its own cursor-home"
+    );
+
+    let clear_count = combined.matches(CLEAR_TO_END).count();
+    assert_eq!(
+        clear_count, 2,
+        "each TTY frame must have its own clear-to-end"
+    );
+}
+
+#[test]
+#[serial]
+fn consecutive_frames_non_tty_no_escape_codes() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let frame1_content = format_text(60, &[], Some("5s"));
+    let frame2_content = format_text(120, &[], Some("5s"));
+
+    let frame1 = render_frame(&frame1_content, false);
+    let frame2 = render_frame(&frame2_content, false);
+
+    let combined = format!("{frame1}{frame2}");
+
+    assert!(
+        !combined.contains('\x1B'),
+        "non-TTY output must never contain escape sequences"
+    );
+    // Both frames appear in order
+    assert!(combined.contains("1m")); // 60s
+    assert!(combined.contains("2m")); // 120s
+}
+
+#[test]
+fn cursor_home_constant_is_correct_ansi() {
+    assert_eq!(CURSOR_HOME, "\x1B[H");
+    assert_eq!(CURSOR_HOME.len(), 3);
+}
+
+#[test]
+fn clear_to_end_constant_is_correct_ansi() {
+    assert_eq!(CLEAR_TO_END, "\x1B[J");
+    assert_eq!(CLEAR_TO_END.len(), 3);
+}
+
+#[test]
+#[serial]
+fn format_text_never_contains_escape_sequences() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let with_watch = format_text(300, &[], Some("3s"));
+    assert!(
+        !with_watch.contains('\x1B'),
+        "format_text must not inject escape codes"
+    );
+
+    let without_watch = format_text(300, &[], None);
+    assert!(
+        !without_watch.contains('\x1B'),
+        "format_text must not inject escape codes"
+    );
+}
+
+#[test]
+#[serial]
+fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "abcd1234".to_string(),
+            name: "build".to_string(),
+            kind: "pipeline".to_string(),
+            step: "compile".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: None,
+        }],
+        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "efgh5678".to_string(),
+            name: "deploy".to_string(),
+            kind: "deploy".to_string(),
+            step: "approve".to_string(),
+            step_status: "waiting".to_string(),
+            elapsed_ms: 120_000,
+            waiting_reason: Some("needs manual approval".to_string()),
+        }],
+        orphaned_pipelines: vec![],
+        workers: vec![oj_daemon::WorkerSummary {
+            name: "builder".to_string(),
+            namespace: "myproject".to_string(),
+            queue: "default".to_string(),
+            status: "running".to_string(),
+            active: 1,
+            concurrency: 4,
+            updated_at_ms: 0,
+        }],
+        queues: vec![oj_daemon::QueueStatus {
+            name: "tasks".to_string(),
+            pending: 3,
+            active: 1,
+            dead: 0,
+        }],
+        active_agents: vec![oj_daemon::AgentStatusEntry {
+            pipeline_name: "build".to_string(),
+            step_name: "code".to_string(),
+            agent_id: "agent-001".to_string(),
+            status: "running".to_string(),
+        }],
+    };
+
+    let text = format_text(600, &[ns], Some("5s"));
+    let frame = render_frame(&text, false);
+
+    assert!(
+        !frame.contains('\x1B'),
+        "no ANSI escapes in non-TTY + NO_COLOR frame"
+    );
+    assert!(frame.contains("myproject"));
+    assert!(frame.contains("pipeline"));
+    assert!(frame.contains("builder"));
+    assert!(frame.contains("tasks"));
+    assert!(frame.contains("agent-001"));
+}
+
 #[test]
 #[serial]
 fn tty_frame_preserves_color_codes_in_content() {
@@ -651,35 +659,18 @@ fn tty_frame_preserves_color_codes_in_content() {
     std::env::set_var("COLOR", "1");
 
     let text = format_text(120, &[], Some("5s"));
-    let frame = render_frame(&text, true, true);
+    let frame = render_frame(&text, true);
 
-    // Starts with clear sequence
-    assert!(frame.starts_with(CLEAR_SCREEN));
+    // Starts with cursor-home sequence
+    assert!(frame.starts_with(CURSOR_HOME));
+
+    // Ends with clear-to-end sequence
+    assert!(frame.ends_with(CLEAR_TO_END));
 
     // Contains color codes from format_text (header coloring)
-    let after_clear = &frame[CLEAR_SCREEN.len()..];
+    let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
     assert!(
-        after_clear.contains("\x1b[38;5;"),
+        inner.contains("\x1b[38;5;"),
         "TTY frame should preserve color codes from content"
-    );
-}
-
-#[test]
-fn watch_preamble_first_clears_screen_and_homes() {
-    let p = watch_preamble(true);
-    assert!(
-        p.contains("\x1B[2J"),
-        "first frame should clear screen to preserve existing content in scrollback"
-    );
-    assert!(p.contains("\x1B[H"), "first frame should home cursor");
-}
-
-#[test]
-fn watch_preamble_subsequent_only_homes() {
-    let p = watch_preamble(false);
-    assert_eq!(p, "\x1B[H");
-    assert!(
-        !p.contains("\x1B[2J"),
-        "subsequent frames should not clear screen (avoids scrollback pollution)"
     );
 }

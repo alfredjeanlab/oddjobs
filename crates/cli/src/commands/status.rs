@@ -12,8 +12,14 @@ use crate::client::DaemonClient;
 use crate::color;
 use crate::output::OutputFormat;
 
-/// ANSI sequence: clear entire screen + move cursor to top-left.
-const CLEAR_SCREEN: &str = "\x1B[2J\x1B[H";
+/// ANSI sequence: move cursor to top-left (home position).
+/// Used instead of \x1B[2J (clear screen) to avoid pushing old content
+/// into terminal scrollback.
+const CURSOR_HOME: &str = "\x1B[H";
+
+/// ANSI sequence: clear from cursor position to end of screen.
+/// Removes leftover lines from a previous (longer) render.
+const CLEAR_TO_END: &str = "\x1B[J";
 
 #[derive(clap::Args)]
 pub struct StatusArgs {
@@ -37,26 +43,23 @@ pub async fn handle(args: StatusArgs, format: OutputFormat) -> Result<()> {
     }
 
     let is_tty = std::io::stdout().is_terminal();
-    let mut first = true;
 
     loop {
-        handle_watch_frame(format, &args.interval, is_tty, first).await?;
-        first = false;
+        handle_watch_frame(format, &args.interval, is_tty).await?;
+        {
+            use std::io::Write as _;
+            std::io::stdout().flush()?;
+        }
         tokio::time::sleep(interval).await;
     }
 }
 
-async fn handle_watch_frame(
-    format: OutputFormat,
-    interval: &str,
-    is_tty: bool,
-    first: bool,
-) -> Result<()> {
+async fn handle_watch_frame(format: OutputFormat, interval: &str, is_tty: bool) -> Result<()> {
     let client = match DaemonClient::connect() {
         Ok(c) => c,
         Err(_) => {
             let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty, first));
+            print!("{}", render_frame(&content, is_tty));
             return Ok(());
         }
     };
@@ -65,7 +68,7 @@ async fn handle_watch_frame(
         Ok(data) => data,
         Err(crate::client::ClientError::DaemonNotRunning) => {
             let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty, first));
+            print!("{}", render_frame(&content, is_tty));
             return Ok(());
         }
         Err(crate::client::ClientError::Io(ref e))
@@ -75,7 +78,7 @@ async fn handle_watch_frame(
             ) =>
         {
             let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty, first));
+            print!("{}", render_frame(&content, is_tty));
             return Ok(());
         }
         Err(e) => return Err(e.into()),
@@ -91,9 +94,30 @@ async fn handle_watch_frame(
             format!("{}\n", serde_json::to_string_pretty(&obj)?)
         }
     };
-    print!("{}", render_frame(&content, is_tty, first));
+    print!("{}", render_frame(&content, is_tty));
 
     Ok(())
+}
+
+/// Build one watch-mode frame.
+///
+/// When `is_tty` is true the frame is wrapped with ANSI cursor-home
+/// before and clear-to-end after, so the terminal redraws in place
+/// without polluting scrollback.  When false the content is returned
+/// as-is (suitable for piped / redirected output).
+fn render_frame(content: &str, is_tty: bool) -> String {
+    if is_tty {
+        format!("{CURSOR_HOME}{content}{CLEAR_TO_END}")
+    } else {
+        content.to_string()
+    }
+}
+
+fn format_not_running(format: OutputFormat) -> String {
+    match format {
+        OutputFormat::Text => format!("{} not running\n", color::header("oj daemon:")),
+        OutputFormat::Json => r#"{ "status": "not_running" }"#.to_string() + "\n",
+    }
 }
 
 async fn handle_once(format: OutputFormat, watch_interval: Option<&str>) -> Result<()> {
@@ -132,29 +156,6 @@ async fn handle_once(format: OutputFormat, watch_interval: Option<&str>) -> Resu
     }
 
     Ok(())
-}
-
-/// Build one watch-mode frame.
-///
-/// When `is_tty` is true the frame starts with a preamble escape sequence
-/// and ends with `\x1B[J` to clear any leftover lines from a previous
-/// (longer) render.  The first frame uses `\x1B[2J\x1B[H` so existing
-/// terminal content is preserved in scrollback; subsequent frames use
-/// `\x1B[H` for in-place overwrite.  When false the content is returned
-/// as-is (suitable for piped / redirected output).
-fn render_frame(content: &str, is_tty: bool, first: bool) -> String {
-    if is_tty {
-        format!("{}{content}\x1B[J", watch_preamble(first))
-    } else {
-        content.to_string()
-    }
-}
-
-fn format_not_running(format: OutputFormat) -> String {
-    match format {
-        OutputFormat::Text => format!("{} not running\n", color::header("oj daemon:")),
-        OutputFormat::Json => r#"{ "status": "not_running" }"#.to_string() + "\n",
-    }
 }
 
 fn handle_not_running(format: OutputFormat) -> Result<()> {
@@ -433,19 +434,6 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
         String::new()
     } else {
         format!(" {}", name)
-    }
-}
-
-/// Returns the terminal escape sequence for the beginning of a watch frame.
-///
-/// On the first frame, clears the screen (`\x1B[2J`) so existing terminal content
-/// is preserved in scrollback, then homes the cursor. On subsequent frames, only
-/// homes the cursor for in-place overwrite without polluting scrollback.
-fn watch_preamble(first: bool) -> &'static str {
-    if first {
-        CLEAR_SCREEN
-    } else {
-        "\x1B[H"
     }
 }
 
