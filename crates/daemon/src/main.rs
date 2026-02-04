@@ -392,12 +392,19 @@ fn write_startup_marker(config: &Config) -> Result<(), LifecycleError> {
         std::fs::create_dir_all(parent)?;
     }
 
-    // Append marker to log file with PID
+    // Append marker to log file with PID, followed by a blank line so the
+    // marker and any subsequent ERROR line appear on non-consecutive lines
+    // for legibility when scanning the log.
     let mut file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&config.log_path)?;
-    writeln!(file, "{}{})", STARTUP_MARKER_PREFIX, std::process::id())?;
+    writeln!(
+        file,
+        "{}{}) ---\n",
+        STARTUP_MARKER_PREFIX,
+        std::process::id()
+    )?;
 
     Ok(())
 }

@@ -185,6 +185,11 @@ pub fn read_startup_error() -> Option<String> {
     let log_path = dir.join("daemon.log");
 
     let content = std::fs::read_to_string(&log_path).ok()?;
+    parse_startup_error(&content)
+}
+
+/// Parse startup errors from log content (pure logic, no I/O).
+fn parse_startup_error(content: &str) -> Option<String> {
     let start_pos = content.rfind(STARTUP_MARKER_PREFIX)?;
     let startup_log = &content[start_pos..];
 
@@ -255,3 +260,7 @@ pub fn cleanup_stale_socket() -> Result<(), ClientError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "daemon_process_tests.rs"]
+mod tests;
