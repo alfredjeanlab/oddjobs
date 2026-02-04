@@ -674,3 +674,70 @@ fn tty_frame_preserves_color_codes_in_content() {
         "TTY frame should preserve color codes from content"
     );
 }
+
+#[test]
+#[serial]
+fn namespace_with_only_empty_queues_is_hidden() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    // A namespace with only queues that have all-zero counts should not be displayed
+    let ns = NamespaceStatus {
+        namespace: "empty-project".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![oj_daemon::QueueStatus {
+            name: "tasks".to_string(),
+            pending: 0,
+            active: 0,
+            dead: 0,
+        }],
+        active_agents: vec![],
+    };
+
+    let output = format_text(60, &[ns], None);
+
+    // The namespace header should not appear since there's no displayable content
+    assert!(
+        !output.contains("empty-project"),
+        "namespace with only empty queues should be hidden:\n{output}"
+    );
+    // Only the daemon header should appear
+    assert_eq!(output, "oj daemon: running 1m\n");
+}
+
+#[test]
+#[serial]
+fn namespace_with_non_empty_queue_is_shown() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    // A namespace with at least one queue with non-zero counts should be displayed
+    let ns = NamespaceStatus {
+        namespace: "active-project".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![oj_daemon::QueueStatus {
+            name: "tasks".to_string(),
+            pending: 1,
+            active: 0,
+            dead: 0,
+        }],
+        active_agents: vec![],
+    };
+
+    let output = format_text(60, &[ns], None);
+
+    assert!(
+        output.contains("active-project"),
+        "namespace with non-empty queue should be shown:\n{output}"
+    );
+    assert!(
+        output.contains("tasks"),
+        "queue should be displayed:\n{output}"
+    );
+}

@@ -225,11 +225,16 @@ fn format_text(
         };
 
         // Check if this namespace has any content to show
+        // Note: queues need at least one non-zero count to be displayed
+        let has_non_empty_queues = ns
+            .queues
+            .iter()
+            .any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
         let has_content = !ns.active_pipelines.is_empty()
             || !ns.escalated_pipelines.is_empty()
             || !ns.orphaned_pipelines.is_empty()
             || !ns.workers.is_empty()
-            || !ns.queues.is_empty()
+            || has_non_empty_queues
             || !ns.active_agents.is_empty();
 
         if !has_content {
