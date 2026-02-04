@@ -9,8 +9,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::color;
 use crate::output::{format_time_ago, should_use_color, OutputFormat};
+use crate::table::{project_cell, should_show_project, Column, Table};
 use oj_daemon::protocol::SessionSummary;
 
 #[derive(Args)]
@@ -112,87 +112,27 @@ pub async fn handle(
 }
 
 fn format_session_list(w: &mut impl Write, sessions: &[SessionSummary]) {
-    // Determine whether to show PROJECT column
-    let namespaces: std::collections::HashSet<&str> =
-        sessions.iter().map(|s| s.namespace.as_str()).collect();
-    let show_project = namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+    let show_project = should_show_project(sessions.iter().map(|s| s.namespace.as_str()));
 
-    // Calculate column widths based on data
-    let session_w = sessions
-        .iter()
-        .map(|s| s.id.len())
-        .max()
-        .unwrap_or(0)
-        .max("SESSION".len());
-    let no_project = "(no project)";
-    let proj_w = if show_project {
-        sessions
-            .iter()
-            .map(|s| {
-                if s.namespace.is_empty() {
-                    no_project.len()
-                } else {
-                    s.namespace.len()
-                }
-            })
-            .max()
-            .unwrap_or(7)
-            .max(7)
-    } else {
-        0
-    };
-    let pipeline_w = sessions
-        .iter()
-        .map(|s| s.pipeline_id.as_ref().map(|p| p.len()).unwrap_or(1))
-        .max()
-        .unwrap_or(0)
-        .max("PIPELINE".len());
-
+    let mut cols = vec![Column::muted("SESSION")];
     if show_project {
-        let _ = writeln!(
-            w,
-            "{} {} {} {}",
-            color::header(&format!("{:<session_w$}", "SESSION")),
-            color::header(&format!("{:<proj_w$}", "PROJECT")),
-            color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
-            color::header("UPDATED"),
-        );
-    } else {
-        let _ = writeln!(
-            w,
-            "{} {} {}",
-            color::header(&format!("{:<session_w$}", "SESSION")),
-            color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
-            color::header("UPDATED"),
-        );
+        cols.push(Column::left("PROJECT"));
     }
+    cols.extend([Column::left("PIPELINE"), Column::left("UPDATED")]);
+    let mut table = Table::new(cols);
+
     for s in sessions {
-        let updated_ago = format_time_ago(s.updated_at_ms);
-        let pipeline = s.pipeline_id.as_deref().unwrap_or("-");
+        let pipeline = s.pipeline_id.as_deref().unwrap_or("-").to_string();
+        let updated = format_time_ago(s.updated_at_ms);
+        let mut cells = vec![s.id.clone()];
         if show_project {
-            let proj = if s.namespace.is_empty() {
-                no_project
-            } else {
-                &s.namespace
-            };
-            let _ = writeln!(
-                w,
-                "{} {:<proj_w$} {:<pipeline_w$} {}",
-                color::muted(&format!("{:<session_w$}", &s.id)),
-                proj,
-                pipeline,
-                updated_ago
-            );
-        } else {
-            let _ = writeln!(
-                w,
-                "{} {:<pipeline_w$} {}",
-                color::muted(&format!("{:<session_w$}", &s.id)),
-                pipeline,
-                updated_ago
-            );
+            cells.push(project_cell(&s.namespace));
         }
+        cells.extend([pipeline, updated]);
+        table.row(cells);
     }
+
+    table.render(w);
 }
 
 #[cfg(test)]

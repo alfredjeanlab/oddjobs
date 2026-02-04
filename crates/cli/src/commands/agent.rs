@@ -17,7 +17,7 @@ use crate::client::DaemonClient;
 use crate::color;
 use crate::exit_error::ExitError;
 use crate::output::{display_log, should_use_color, OutputFormat};
-use crate::table::{Column, Table};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 use super::pipeline::parse_duration;
 
@@ -198,10 +198,15 @@ pub async fn handle(
                     if agents.is_empty() {
                         println!("No agents found");
                     } else {
-                        let mut table = Table::new(vec![
-                            Column::muted("ID").with_max(8),
-                            Column::left("KIND"),
-                            Column::left("PROJECT"),
+                        let show_project = should_show_project(
+                            agents.iter().map(|a| a.namespace.as_deref().unwrap_or("")),
+                        );
+
+                        let mut cols = vec![Column::muted("ID").with_max(8), Column::left("KIND")];
+                        if show_project {
+                            cols.push(Column::left("PROJECT"));
+                        }
+                        cols.extend([
                             Column::left("PIPELINE").with_max(8),
                             Column::left("STEP"),
                             Column::status("STATUS"),
@@ -209,12 +214,10 @@ pub async fn handle(
                             Column::right("WRITE"),
                             Column::right("CMDS"),
                         ]);
+                        let mut table = Table::new(cols);
+
                         for a in &agents {
                             let name = a.agent_name.as_deref().unwrap_or("-").to_string();
-                            let project = match a.namespace.as_deref() {
-                                Some(ns) if !ns.is_empty() => ns.to_string(),
-                                _ => "(no project)".to_string(),
-                            };
                             let pipeline_col = if a.pipeline_id.is_empty() {
                                 "-".to_string()
                             } else {
@@ -225,10 +228,11 @@ pub async fn handle(
                             } else {
                                 a.step_name.clone()
                             };
-                            table.row(vec![
-                                a.agent_id.clone(),
-                                name,
-                                project,
+                            let mut cells = vec![a.agent_id.clone(), name];
+                            if show_project {
+                                cells.push(project_cell(a.namespace.as_deref().unwrap_or("")));
+                            }
+                            cells.extend([
                                 pipeline_col,
                                 step_col,
                                 a.status.clone(),
@@ -236,6 +240,7 @@ pub async fn handle(
                                 a.files_written.to_string(),
                                 a.commands_run.to_string(),
                             ]);
+                            table.row(cells);
                         }
                         table.render(&mut std::io::stdout());
                     }

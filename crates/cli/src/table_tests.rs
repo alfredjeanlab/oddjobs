@@ -187,3 +187,42 @@ fn right_aligned_non_last_column() {
     assert_eq!(lines[1], "alpha      5  ok");
     assert_eq!(lines[2], "beta     123  err");
 }
+
+#[test]
+fn should_show_project_multiple_namespaces() {
+    assert!(super::should_show_project(
+        ["alpha", "beta"].iter().copied()
+    ));
+}
+
+#[test]
+fn should_show_project_single_non_empty() {
+    assert!(super::should_show_project(["myproject"].iter().copied()));
+}
+
+#[test]
+fn should_show_project_all_empty() {
+    assert!(!super::should_show_project(["", ""].iter().copied()));
+}
+
+#[test]
+fn should_show_project_empty_iterator() {
+    assert!(!super::should_show_project(std::iter::empty()));
+}
+
+#[test]
+fn should_show_project_mixed_empty_and_non_empty() {
+    assert!(super::should_show_project(
+        ["", "myproject"].iter().copied()
+    ));
+}
+
+#[test]
+fn project_cell_non_empty() {
+    assert_eq!(super::project_cell("myproject"), "myproject");
+}
+
+#[test]
+fn project_cell_empty() {
+    assert_eq!(super::project_cell(""), "(no project)");
+}

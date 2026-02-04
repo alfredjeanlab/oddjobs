@@ -8,7 +8,7 @@ use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
 use crate::output::{display_log, OutputFormat};
-use crate::table::{Column, Table};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 use oj_daemon::{Query, Request, Response};
 
@@ -210,11 +210,8 @@ pub async fn handle(
                             if crons.is_empty() {
                                 println!("No crons found");
                             } else {
-                                // Determine whether to show PROJECT column
-                                let namespaces: std::collections::HashSet<&str> =
-                                    crons.iter().map(|c| c.namespace.as_str()).collect();
-                                let show_project = namespaces.len() > 1
-                                    || namespaces.iter().any(|n| !n.is_empty());
+                                let show_project =
+                                    should_show_project(crons.iter().map(|c| c.namespace.as_str()));
 
                                 let mut cols = vec![Column::left("KIND")];
                                 if show_project {
@@ -231,12 +228,7 @@ pub async fn handle(
                                 for c in &crons {
                                     let mut cells = vec![c.name.clone()];
                                     if show_project {
-                                        let proj = if c.namespace.is_empty() {
-                                            "(no project)".to_string()
-                                        } else {
-                                            c.namespace.clone()
-                                        };
-                                        cells.push(proj);
+                                        cells.push(project_cell(&c.namespace));
                                     }
                                     cells.extend([
                                         c.interval.clone(),

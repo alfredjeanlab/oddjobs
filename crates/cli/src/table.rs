@@ -6,6 +6,7 @@
 //! Provides consistent column alignment, color application, and truncation
 //! across all `oj * list` commands.
 
+use std::collections::HashSet;
 use std::io::Write;
 
 use crate::color;
@@ -214,6 +215,23 @@ impl Table {
                 min.max(max_data)
             })
             .collect()
+    }
+}
+
+/// Determines if a PROJECT column should be shown based on namespace diversity.
+///
+/// Returns `true` when items span multiple namespaces OR any namespace is non-empty.
+pub fn should_show_project<'a>(namespaces: impl Iterator<Item = &'a str>) -> bool {
+    let set: HashSet<&str> = namespaces.collect();
+    set.len() > 1 || set.iter().any(|n| !n.is_empty())
+}
+
+/// Formats a namespace for display in a PROJECT column.
+pub fn project_cell(namespace: &str) -> String {
+    if namespace.is_empty() {
+        "(no project)".to_string()
+    } else {
+        namespace.to_string()
     }
 }
 

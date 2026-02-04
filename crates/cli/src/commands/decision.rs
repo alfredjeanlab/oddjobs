@@ -3,6 +3,8 @@
 
 //! Decision command handlers
 
+use std::io::Write;
+
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
@@ -11,6 +13,7 @@ use oj_daemon::{Query, Request, Response};
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{format_time_ago, OutputFormat};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
 pub struct DecisionArgs {
@@ -63,41 +66,7 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&decisions)?);
                         }
                         _ => {
-                            println!(
-                                "{} {} {} {} {}",
-                                color::header(&format!("{:<10}", "ID")),
-                                color::header(&format!("{:<20}", "PIPELINE")),
-                                color::header(&format!("{:<8}", "AGE")),
-                                color::header(&format!("{:<8}", "SOURCE")),
-                                color::header("SUMMARY"),
-                            );
-                            for d in &decisions {
-                                let short_id = if d.id.len() > 8 { &d.id[..8] } else { &d.id };
-                                let age = format_time_ago(d.created_at_ms);
-                                let pipeline = if d.pipeline_name.is_empty() {
-                                    &d.pipeline_id
-                                } else {
-                                    &d.pipeline_name
-                                };
-                                let pipeline_display = if pipeline.len() > 18 {
-                                    format!("{}...", &pipeline[..15])
-                                } else {
-                                    pipeline.to_string()
-                                };
-                                let summary = if d.summary.len() > 50 {
-                                    format!("{}...", &d.summary[..47])
-                                } else {
-                                    d.summary.clone()
-                                };
-                                println!(
-                                    "{} {:<20} {:<8} {:<8} {}",
-                                    color::muted(&format!("{:<10}", short_id)),
-                                    pipeline_display,
-                                    age,
-                                    d.source,
-                                    summary
-                                );
-                            }
+                            format_decision_list(&mut std::io::stdout(), &decisions);
                         }
                     }
                 }
@@ -249,6 +218,46 @@ pub async fn handle(
         }
     }
     Ok(())
+}
+
+pub(crate) fn format_decision_list(
+    out: &mut impl Write,
+    decisions: &[oj_daemon::protocol::DecisionSummary],
+) {
+    let show_project = should_show_project(decisions.iter().map(|d| d.namespace.as_str()));
+
+    let mut cols = vec![Column::muted("ID").with_max(8)];
+    if show_project {
+        cols.push(Column::left("PROJECT"));
+    }
+    cols.extend([
+        Column::left("PIPELINE").with_max(18),
+        Column::left("AGE"),
+        Column::left("SOURCE"),
+        Column::left("SUMMARY").with_max(50),
+    ]);
+    let mut table = Table::new(cols);
+
+    for d in decisions {
+        let pipeline = if d.pipeline_name.is_empty() {
+            &d.pipeline_id
+        } else {
+            &d.pipeline_name
+        };
+        let mut cells = vec![d.id.clone()];
+        if show_project {
+            cells.push(project_cell(&d.namespace));
+        }
+        cells.extend([
+            pipeline.to_string(),
+            format_time_ago(d.created_at_ms),
+            d.source.clone(),
+            d.summary.clone(),
+        ]);
+        table.row(cells);
+    }
+
+    table.render(out);
 }
 
 #[cfg(test)]

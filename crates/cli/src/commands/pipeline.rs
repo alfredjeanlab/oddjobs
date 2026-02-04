@@ -13,7 +13,7 @@ use clap::{Args, Subcommand};
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{display_log, format_time_ago, should_use_color, OutputFormat};
-use crate::table::{Column, Table};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
 pub struct PipelineArgs {
@@ -169,9 +169,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
     }
 
     // Show PROJECT column only when multiple namespaces present
-    let namespaces: std::collections::HashSet<&str> =
-        pipelines.iter().map(|p| p.namespace.as_str()).collect();
-    let show_project = namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+    let show_project = should_show_project(pipelines.iter().map(|p| p.namespace.as_str()));
 
     // Show RETRIES column only when any pipeline has retries
     let show_retries = pipelines.iter().any(|p| p.retry_count > 0);
@@ -200,12 +198,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
 
         let mut cells = vec![id];
         if show_project {
-            let proj = if p.namespace.is_empty() {
-                "(no project)".to_string()
-            } else {
-                p.namespace.clone()
-            };
-            cells.push(proj);
+            cells.push(project_cell(&p.namespace));
         }
         cells.extend([p.name.clone(), p.kind.clone(), p.step.clone(), updated]);
         if show_retries {

@@ -13,7 +13,7 @@ use crate::color;
 
 use crate::client::DaemonClient;
 use crate::output::{display_log, OutputFormat};
-use crate::table::{Column, Table};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
 pub struct QueueArgs {
@@ -280,31 +280,38 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&queues)?);
                         }
                         _ => {
-                            let mut table = Table::new(vec![
-                                Column::left("PROJECT"),
+                            let show_project =
+                                should_show_project(queues.iter().map(|q| q.namespace.as_str()));
+
+                            let mut cols = Vec::new();
+                            if show_project {
+                                cols.push(Column::left("PROJECT"));
+                            }
+                            cols.extend([
                                 Column::left("NAME"),
                                 Column::left("TYPE"),
                                 Column::right("ITEMS"),
                                 Column::left("WORKERS"),
                             ]);
+                            let mut table = Table::new(cols);
+
                             for q in &queues {
                                 let workers_str = if q.workers.is_empty() {
                                     "-".to_string()
                                 } else {
                                     q.workers.join(", ")
                                 };
-                                let ns_label = if q.namespace.is_empty() {
-                                    "(no project)".to_string()
-                                } else {
-                                    q.namespace.clone()
-                                };
-                                table.row(vec![
-                                    ns_label,
+                                let mut cells = Vec::new();
+                                if show_project {
+                                    cells.push(project_cell(&q.namespace));
+                                }
+                                cells.extend([
                                     q.name.clone(),
                                     q.queue_type.clone(),
                                     q.item_count.to_string(),
                                     workers_str,
                                 ]);
+                                table.row(cells);
                             }
                             table.render(&mut std::io::stdout());
                         }
