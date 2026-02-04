@@ -19,6 +19,13 @@ use crate::protocol::{
 
 use super::ConnectionError;
 
+/// Shared flags for prune operations.
+pub(super) struct PruneFlags<'a> {
+    pub all: bool,
+    pub dry_run: bool,
+    pub namespace: Option<&'a str>,
+}
+
 /// Handle a status request.
 pub(super) fn handle_status(
     state: &Arc<Mutex<MaterializedState>>,
@@ -509,18 +516,14 @@ pub(super) async fn handle_agent_send(
 /// Removes terminal pipelines (failed/cancelled/done) from state and
 /// cleans up their log files. By default only prunes pipelines older
 /// than 12 hours; use `--all` to prune all terminal pipelines.
-// TODO(refactor): group prune flags into a shared struct with handle_agent_prune/handle_workspace_prune
-#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_pipeline_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     logs_path: &std::path::Path,
     orphans_registry: &Arc<Mutex<Vec<oj_engine::breadcrumb::Breadcrumb>>>,
-    all: bool,
+    flags: &PruneFlags<'_>,
     failed: bool,
     orphans: bool,
-    dry_run: bool,
-    namespace: Option<&str>,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -533,13 +536,13 @@ pub(super) fn handle_pipeline_prune(
 
     // When --orphans is used alone, skip the normal terminal-pipeline loop.
     // When combined with --all or --failed, run both.
-    let prune_terminal = all || failed || !orphans;
+    let prune_terminal = flags.all || failed || !orphans;
 
     if prune_terminal {
         let state_guard = state.lock();
         for pipeline in state_guard.pipelines.values() {
             // Filter by namespace when --project is specified
-            if let Some(ns) = namespace {
+            if let Some(ns) = flags.namespace {
                 if pipeline.namespace != ns {
                     continue;
                 }
@@ -561,7 +564,7 @@ pub(super) fn handle_pipeline_prune(
             // - --failed: failed pipelines skip age check
             // - cancelled pipelines always skip age check (default behavior)
             let skip_age_check =
-                all || (failed && pipeline.step == "failed") || pipeline.step == "cancelled";
+                flags.all || (failed && pipeline.step == "failed") || pipeline.step == "cancelled";
 
             if !skip_age_check {
                 let created_at_ms = pipeline
@@ -583,7 +586,7 @@ pub(super) fn handle_pipeline_prune(
         }
     }
 
-    if !dry_run {
+    if !flags.dry_run {
         for entry in &to_prune {
             // Emit PipelineDeleted event to remove from state
             let event = Event::PipelineDeleted {
@@ -620,7 +623,7 @@ pub(super) fn handle_pipeline_prune(
                 name: bc.name.clone(),
                 step: "orphaned".to_string(),
             });
-            if !dry_run {
+            if !flags.dry_run {
                 let removed = orphan_guard.remove(i);
                 // Delete breadcrumb file
                 let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
@@ -655,8 +658,7 @@ pub(super) fn handle_agent_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     logs_path: &std::path::Path,
-    all: bool,
-    dry_run: bool,
+    flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -677,7 +679,7 @@ pub(super) fn handle_agent_prune(
             }
 
             // Check age via step history
-            if !all {
+            if !flags.all {
                 let created_at_ms = pipeline
                     .step_history
                     .first()
@@ -704,7 +706,7 @@ pub(super) fn handle_agent_prune(
         }
     }
 
-    if !dry_run {
+    if !flags.dry_run {
         // Delete the terminal pipelines from state so agents no longer appear in `agent list`
         for pipeline_id in &pipeline_ids_to_delete {
             let event = Event::PipelineDeleted {
@@ -747,9 +749,7 @@ pub(super) fn handle_agent_prune(
 /// best-effort `git worktree remove`; then `rm -rf` regardless.
 pub(super) async fn handle_workspace_prune(
     state: &Arc<Mutex<MaterializedState>>,
-    all: bool,
-    dry_run: bool,
-    namespace: Option<&str>,
+    flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let state_dir = std::env::var("OJ_STATE_DIR").unwrap_or_else(|_| {
         format!(
@@ -761,7 +761,7 @@ pub(super) async fn handle_workspace_prune(
 
     // When filtering by namespace, build a set of workspace IDs that match.
     // Namespace is derived from the workspace's owner (pipeline or worker).
-    let namespace_filter: Option<std::collections::HashSet<String>> = namespace.map(|ns| {
+    let namespace_filter: Option<std::collections::HashSet<String>> = flags.namespace.map(|ns| {
         let state_guard = state.lock();
         state_guard
             .workspaces
@@ -823,7 +823,7 @@ pub(super) async fn handle_workspace_prune(
         }
 
         // Check age via directory mtime (skip if < 12h unless --all)
-        if !all {
+        if !flags.all {
             if let Ok(metadata) = tokio::fs::metadata(&path).await {
                 if let Ok(modified) = metadata.modified() {
                     if let Ok(age) = now.duration_since(modified) {
@@ -843,7 +843,7 @@ pub(super) async fn handle_workspace_prune(
         });
     }
 
-    if !dry_run {
+    if !flags.dry_run {
         for ws in &to_prune {
             // If the directory has a .git file (not directory), it's a git worktree
             let dot_git = ws.path.join(".git");
@@ -883,9 +883,7 @@ pub(super) async fn handle_workspace_prune(
 pub(super) fn handle_worker_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
-    _all: bool,
-    dry_run: bool,
-    namespace: Option<&str>,
+    flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
@@ -894,7 +892,7 @@ pub(super) fn handle_worker_prune(
         let state_guard = state.lock();
         for record in state_guard.workers.values() {
             // Filter by namespace if specified
-            if let Some(ns) = namespace {
+            if let Some(ns) = flags.namespace {
                 if record.namespace != ns {
                     continue;
                 }
@@ -910,7 +908,7 @@ pub(super) fn handle_worker_prune(
         }
     }
 
-    if !dry_run {
+    if !flags.dry_run {
         for entry in &to_prune {
             let event = Event::WorkerDeleted {
                 worker_name: entry.name.clone(),
@@ -936,8 +934,7 @@ pub(super) fn handle_worker_prune(
 pub(super) fn handle_cron_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
-    _all: bool,
-    dry_run: bool,
+    flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
@@ -956,7 +953,7 @@ pub(super) fn handle_cron_prune(
         }
     }
 
-    if !dry_run {
+    if !flags.dry_run {
         for entry in &to_prune {
             let event = Event::CronDeleted {
                 cron_name: entry.name.clone(),

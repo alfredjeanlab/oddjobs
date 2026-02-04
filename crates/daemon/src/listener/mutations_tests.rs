@@ -17,7 +17,7 @@ use crate::protocol::Response;
 
 use super::{
     handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_resume,
-    handle_session_kill,
+    handle_session_kill, PruneFlags,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -369,7 +369,12 @@ fn agent_prune_all_removes_terminal_pipelines_from_state() {
         );
     }
 
-    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, false);
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
 
     match result {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
@@ -418,7 +423,12 @@ fn agent_prune_dry_run_does_not_delete() {
         );
     }
 
-    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, true);
+    let flags = PruneFlags {
+        all: true,
+        dry_run: true,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
 
     match result {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
@@ -453,7 +463,12 @@ fn agent_prune_skips_non_terminal_pipelines() {
         );
     }
 
-    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, false);
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
 
     match result {
         Ok(Response::AgentsPruned { pruned, skipped }) => {

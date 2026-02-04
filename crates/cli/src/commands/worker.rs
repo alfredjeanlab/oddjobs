@@ -7,7 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::output::{display_log, OutputFormat};
+use crate::output::{display_log, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 use oj_daemon::{Query, Request, Response};
@@ -193,34 +193,22 @@ pub async fn handle(
             };
             let (pruned, skipped) = client.worker_prune(all, dry_run, filter_namespace).await?;
 
-            match format {
-                OutputFormat::Text => {
-                    if dry_run {
-                        println!("Dry run — no changes made\n");
-                    }
-
-                    for entry in &pruned {
-                        let label = if dry_run { "Would prune" } else { "Pruned" };
-                        let ns = if entry.namespace.is_empty() {
-                            "(no project)".to_string()
-                        } else {
-                            entry.namespace.clone()
-                        };
-                        println!("{} worker '{}' ({})", label, entry.name, ns);
-                    }
-
-                    let verb = if dry_run { "would be pruned" } else { "pruned" };
-                    println!("\n{} worker(s) {}, {} skipped", pruned.len(), verb, skipped);
-                }
-                OutputFormat::Json => {
-                    let obj = serde_json::json!({
-                        "dry_run": dry_run,
-                        "pruned": pruned,
-                        "skipped": skipped,
-                    });
-                    println!("{}", serde_json::to_string_pretty(&obj)?);
-                }
-            }
+            print_prune_results(
+                &pruned,
+                skipped,
+                dry_run,
+                format,
+                "worker",
+                "skipped",
+                |entry| {
+                    let ns = if entry.namespace.is_empty() {
+                        "(no project)"
+                    } else {
+                        &entry.namespace
+                    };
+                    format!("worker '{}' ({})", entry.name, ns)
+                },
+            )?;
         }
     }
     Ok(())
