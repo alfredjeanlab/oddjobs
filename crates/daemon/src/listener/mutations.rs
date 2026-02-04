@@ -873,6 +873,113 @@ pub(super) fn handle_cron_prune(
     })
 }
 
+/// Handle an agent resume request.
+///
+/// Finds the agent by ID/prefix (or all dead agents when `all` is true),
+/// optionally kills the tmux session, then emits PipelineResume to trigger
+/// the engine's resume flow (which uses `--resume` to preserve conversation).
+pub(super) fn handle_agent_resume(
+    state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
+    agent_id: String,
+    kill: bool,
+    all: bool,
+) -> Result<Response, ConnectionError> {
+    let state_guard = state.lock();
+
+    // Collect (pipeline_id, agent_id) tuples to resume
+    let mut targets: Vec<(String, String)> = Vec::new();
+    let mut skipped: Vec<(String, String)> = Vec::new();
+
+    if all {
+        // Iterate all non-terminal pipelines, find ones with agents
+        for pipeline in state_guard.pipelines.values() {
+            if pipeline.is_terminal() {
+                continue;
+            }
+            // Get the current step's agent
+            if let Some(record) = pipeline
+                .step_history
+                .iter()
+                .rfind(|r| r.name == pipeline.step)
+            {
+                if let Some(ref aid) = record.agent_id {
+                    if !kill {
+                        // Without --kill, only resume agents that are
+                        // escalated/waiting (dead session scenario)
+                        if !pipeline.step_status.is_waiting()
+                            && !matches!(
+                                pipeline.step_status,
+                                oj_core::StepStatus::Failed | oj_core::StepStatus::Pending
+                            )
+                        {
+                            skipped.push((
+                                aid.clone(),
+                                format!(
+                                    "agent is {:?} (use --kill to force)",
+                                    pipeline.step_status
+                                ),
+                            ));
+                            continue;
+                        }
+                    }
+                    targets.push((pipeline.id.clone(), aid.clone()));
+                }
+            }
+        }
+    } else {
+        // Find specific agent by ID or prefix
+        let mut found = false;
+        for pipeline in state_guard.pipelines.values() {
+            for record in &pipeline.step_history {
+                if let Some(ref aid) = record.agent_id {
+                    if aid == &agent_id || aid.starts_with(&agent_id) {
+                        if pipeline.is_terminal() {
+                            return Ok(Response::Error {
+                                message: format!(
+                                    "pipeline {} is already {} — cannot resume agent",
+                                    pipeline.id, pipeline.step
+                                ),
+                            });
+                        }
+                        targets.push((pipeline.id.clone(), aid.clone()));
+                        found = true;
+                        break;
+                    }
+                }
+            }
+            if found {
+                break;
+            }
+        }
+
+        if !found {
+            return Ok(Response::Error {
+                message: format!("agent not found: {}", agent_id),
+            });
+        }
+    }
+
+    // Drop the lock before emitting events
+    drop(state_guard);
+
+    let mut resumed = Vec::new();
+
+    for (pipeline_id, aid) in targets {
+        let event = Event::PipelineResume {
+            id: PipelineId::new(&pipeline_id),
+            message: None,
+            vars: std::collections::HashMap::new(),
+        };
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+        resumed.push(aid);
+    }
+
+    Ok(Response::AgentResumed { resumed, skipped })
+}
+
 #[cfg(test)]
 #[path = "mutations_tests.rs"]
 mod tests;

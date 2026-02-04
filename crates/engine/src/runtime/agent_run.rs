@@ -36,6 +36,31 @@ where
         cwd: &Path,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        self.spawn_standalone_agent_with_resume(
+            agent_run_id,
+            agent_def,
+            agent_name,
+            input,
+            cwd,
+            namespace,
+            None,
+        )
+        .await
+    }
+
+    /// Spawn a standalone agent with optional resume support.
+    // TODO(refactor): group spawn parameters into a struct
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn spawn_standalone_agent_with_resume(
+        &self,
+        agent_run_id: &AgentRunId,
+        agent_def: &AgentDef,
+        agent_name: &str,
+        input: &HashMap<String, String>,
+        cwd: &Path,
+        namespace: &str,
+        resume_session_id: Option<&str>,
+    ) -> Result<Vec<Event>, RuntimeError> {
         // Build a SpawnContext for standalone agent
         let sentinel_pipeline_id = PipelineId::new("");
         let ctx = crate::spawn::SpawnContext {
@@ -52,6 +77,7 @@ where
             input,
             cwd,
             &self.state_dir,
+            resume_session_id,
         )?;
 
         // Extract agent_id from SpawnAgent effect
@@ -330,10 +356,12 @@ where
                 ];
                 Ok(self.executor.execute_all(events).await?)
             }
-            ActionEffects::Recover {
+            ActionEffects::Resume {
                 kill_session,
                 agent_name,
                 input,
+                resume_session_id,
+                ..
             } => {
                 // Kill old session if present
                 if let Some(sid) = kill_session {
@@ -344,14 +372,15 @@ where
                         })
                         .await;
                 }
-                // Re-spawn agent in same directory
-                self.spawn_standalone_agent(
+                // Re-spawn agent in same directory with resume support
+                self.spawn_standalone_agent_with_resume(
                     &agent_run_id,
                     agent_def,
                     &agent_name,
                     &input,
                     &agent_run.cwd,
                     &agent_run.namespace,
+                    resume_session_id.as_deref(),
                 )
                 .await
             }

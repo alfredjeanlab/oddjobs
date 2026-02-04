@@ -75,48 +75,115 @@ fn fail_returns_fail_pipeline() {
 }
 
 #[test]
-fn recover_returns_recover_effects() {
+fn resume_returns_resume_effects() {
     let pipeline = test_pipeline();
     let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Recover);
+    let config = ActionConfig::simple(AgentAction::Resume);
 
     let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new());
-    assert!(matches!(result, Ok(ActionEffects::Recover { .. })));
+    assert!(matches!(result, Ok(ActionEffects::Resume { .. })));
 }
 
 #[test]
-fn recover_with_message_replaces_prompt() {
+fn resume_with_message_replaces_prompt() {
     let pipeline = test_pipeline();
     let agent = test_agent_def();
-    let config = ActionConfig::with_message(AgentAction::Recover, "New prompt.");
+    let config = ActionConfig::with_message(AgentAction::Resume, "New prompt.");
     let input = [("prompt".to_string(), "Original".to_string())]
         .into_iter()
         .collect();
 
     let result = build_action_effects(&pipeline, &agent, &config, "exit", &input).unwrap();
-    if let ActionEffects::Recover { input, .. } = result {
+    if let ActionEffects::Resume {
+        input,
+        resume_session_id,
+        ..
+    } = result
+    {
         assert_eq!(input.get("prompt"), Some(&"New prompt.".to_string()));
+        assert!(
+            resume_session_id.is_none(),
+            "replace mode should not use --resume"
+        );
     } else {
-        panic!("Expected Recover");
+        panic!("Expected Resume");
     }
 }
 
 #[test]
-fn recover_with_append_appends_to_prompt() {
+fn resume_with_append_sets_resume_message() {
     let pipeline = test_pipeline();
     let agent = test_agent_def();
-    let config = ActionConfig::with_append(AgentAction::Recover, "Try again.");
+    let config = ActionConfig::with_append(AgentAction::Resume, "Try again.");
     let input = [("prompt".to_string(), "Original".to_string())]
         .into_iter()
         .collect();
 
     let result = build_action_effects(&pipeline, &agent, &config, "exit", &input).unwrap();
-    if let ActionEffects::Recover { input, .. } = result {
-        let prompt = input.get("prompt").unwrap();
-        assert!(prompt.contains("Original"));
-        assert!(prompt.contains("Try again."));
+    if let ActionEffects::Resume {
+        input,
+        resume_session_id,
+        ..
+    } = result
+    {
+        // In append+resume mode, message goes to resume_message, not prompt
+        assert_eq!(input.get("resume_message"), Some(&"Try again.".to_string()));
+        // Original prompt should not be modified
+        assert_eq!(input.get("prompt"), Some(&"Original".to_string()));
+        // resume_session_id is None here because test_pipeline() has no step_history,
+        // but the code path for append mode does set use_resume=true internally
+        assert!(
+            resume_session_id.is_none(),
+            "no prior session in test fixture"
+        );
     } else {
-        panic!("Expected Recover");
+        panic!("Expected Resume");
+    }
+}
+
+#[test]
+fn resume_without_message_uses_resume_session() {
+    let mut pipeline = test_pipeline();
+    // Add a step history record with an agent_id to simulate previous run
+    pipeline.step_history.push(oj_core::StepRecord {
+        name: "execute".to_string(),
+        started_at_ms: 0,
+        finished_at_ms: None,
+        outcome: oj_core::StepOutcome::Running,
+        agent_id: Some("prev-session-uuid".to_string()),
+        agent_name: Some("worker".to_string()),
+    });
+    let agent = test_agent_def();
+    let config = ActionConfig::simple(AgentAction::Resume);
+
+    let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new()).unwrap();
+    if let ActionEffects::Resume {
+        resume_session_id, ..
+    } = result
+    {
+        assert_eq!(resume_session_id, Some("prev-session-uuid".to_string()));
+    } else {
+        panic!("Expected Resume");
+    }
+}
+
+#[test]
+fn resume_with_no_prior_session_falls_back() {
+    let pipeline = test_pipeline(); // no step_history
+    let agent = test_agent_def();
+    let config = ActionConfig::simple(AgentAction::Resume);
+
+    let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new()).unwrap();
+    if let ActionEffects::Resume {
+        resume_session_id, ..
+    } = result
+    {
+        assert!(
+            resume_session_id.is_none(),
+            "should be None when no step history"
+        );
+    } else {
+        panic!("Expected Resume");
     }
 }
 

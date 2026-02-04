@@ -323,7 +323,7 @@ where
                     .start_step(&pipeline_id, &pipeline.step, &new_inputs, &execution_dir)
                     .await?;
 
-                tracing::info!(pipeline_id = %pipeline.id, "recovered agent");
+                tracing::info!(pipeline_id = %pipeline.id, "resumed agent");
                 Ok(result)
             }
         }

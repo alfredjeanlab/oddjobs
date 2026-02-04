@@ -450,7 +450,7 @@ fn parses_action_with_append() {
         on_dead = { action = "recover", message = "Previous attempt exited.", append = true }
     "#;
     let config: TestConfig = toml::from_str(toml).unwrap();
-    assert_eq!(config.on_dead.action(), &AgentAction::Recover);
+    assert_eq!(config.on_dead.action(), &AgentAction::Resume);
     assert_eq!(config.on_dead.message(), Some("Previous attempt exited."));
     assert!(config.on_dead.append());
 }
@@ -476,7 +476,7 @@ fn parses_per_error_actions() {
 
     // Match specific error type
     let action = config.on_error.action_for(Some(&ErrorType::NoInternet));
-    assert_eq!(action.action(), &AgentAction::Recover);
+    assert_eq!(action.action(), &AgentAction::Resume);
     assert_eq!(action.message(), Some("Network restored"));
 
     // Fall through to catch-all
@@ -806,7 +806,7 @@ fn on_prompt_trigger_validation() {
 
     // Invalid actions for OnPrompt
     assert!(!AgentAction::Nudge.is_valid_for_trigger(ActionTrigger::OnPrompt));
-    assert!(!AgentAction::Recover.is_valid_for_trigger(ActionTrigger::OnPrompt));
+    assert!(!AgentAction::Resume.is_valid_for_trigger(ActionTrigger::OnPrompt));
 }
 
 // =============================================================================

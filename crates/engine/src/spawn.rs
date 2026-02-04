@@ -42,6 +42,8 @@ impl<'a> SpawnContext<'a> {
 /// Spawn an agent for a pipeline or standalone run.
 ///
 /// Returns the effects to execute for spawning the agent.
+/// When `resume_session_id` is `Some`, the agent is spawned with `--resume <id>`
+/// to preserve conversation history from a previous run.
 pub fn build_spawn_effects(
     agent_def: &AgentDef,
     ctx: &SpawnContext<'_>,
@@ -49,6 +51,7 @@ pub fn build_spawn_effects(
     input: &HashMap<String, String>,
     workspace_path: &Path,
     state_dir: &Path,
+    resume_session_id: Option<&str>,
 ) -> Result<Vec<Effect>, RuntimeError> {
     // Use workspace_path as project root for settings lookup
     // After the workspace refactor, the runbook's init step clones the project
@@ -142,7 +145,28 @@ pub fn build_spawn_effects(
 
     // Build base command and append session-id, settings, and prompt (if not inline)
     let base_command = agent_def.build_command(&vars);
-    let command = if agent_def.run.contains("${prompt}") {
+    let command = if let Some(resume_id) = resume_session_id {
+        // Resume mode: use --resume instead of passing prompt
+        let resume_msg = input.get("resume_message").cloned().unwrap_or_default();
+        if resume_msg.is_empty() {
+            format!(
+                "{} --resume {} --session-id {} --settings {}",
+                base_command,
+                resume_id,
+                agent_id,
+                settings_path.display()
+            )
+        } else {
+            format!(
+                "{} --resume {} --session-id {} --settings {} \"{}\"",
+                base_command,
+                resume_id,
+                agent_id,
+                settings_path.display(),
+                oj_runbook::escape_for_shell(&resume_msg)
+            )
+        }
+    } else if agent_def.run.contains("${prompt}") {
         // Prompt is inline in the command, add session-id and settings
         format!(
             "{} --session-id {} --settings {}",

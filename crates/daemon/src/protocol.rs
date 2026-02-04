@@ -266,6 +266,18 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
     },
+
+    /// Resume an agent (re-spawn with --resume to preserve conversation)
+    AgentResume {
+        /// Agent ID (full or prefix). Empty string for --all mode.
+        agent_id: String,
+        /// Force kill session before resuming
+        #[serde(default)]
+        kill: bool,
+        /// Resume all dead agents
+        #[serde(default)]
+        all: bool,
+    },
 }
 
 /// Query types for reading daemon state
@@ -602,6 +614,14 @@ pub enum Response {
 
     /// Decision resolved successfully
     DecisionResolved { id: String },
+
+    /// Result of agent resume
+    AgentResumed {
+        /// Agents that were resumed (agent_id list)
+        resumed: Vec<String>,
+        /// Agents that were skipped with reasons
+        skipped: Vec<(String, String)>,
+    },
 }
 
 /// Summary of a pipeline for listing

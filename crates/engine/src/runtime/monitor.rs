@@ -98,6 +98,17 @@ where
         agent_name: &str,
         input: &HashMap<String, String>,
     ) -> Result<Vec<Event>, RuntimeError> {
+        self.spawn_agent_with_resume(pipeline_id, agent_name, input, None)
+            .await
+    }
+
+    pub(crate) async fn spawn_agent_with_resume(
+        &self,
+        pipeline_id: &PipelineId,
+        agent_name: &str,
+        input: &HashMap<String, String>,
+        resume_session_id: Option<&str>,
+    ) -> Result<Vec<Event>, RuntimeError> {
         let pipeline = self.require_pipeline(pipeline_id.as_str())?;
         let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
         let agent_def = runbook
@@ -113,6 +124,7 @@ where
             input,
             &execution_dir,
             &self.state_dir,
+            resume_session_id,
         )?;
 
         // Extract agent_id from SpawnAgent effect
@@ -454,15 +466,23 @@ where
                 }
                 self.fail_pipeline(pipeline, &error).await
             }
-            ActionEffects::Recover {
+            ActionEffects::Resume {
                 kill_session,
                 agent_name,
                 input,
+                resume_session_id,
+                ..
             } => {
                 let pipeline_id = PipelineId::new(&pipeline.id);
                 let session_id = kill_session.map(SessionId::new);
-                self.kill_and_respawn(session_id, &pipeline_id, &agent_name, &input)
-                    .await
+                self.kill_and_resume(
+                    session_id,
+                    &pipeline_id,
+                    &agent_name,
+                    &input,
+                    resume_session_id.as_deref(),
+                )
+                .await
             }
             ActionEffects::Escalate { effects } => Ok(self.executor.execute_all(effects).await?),
             ActionEffects::Gate { command } => {
@@ -569,19 +589,21 @@ where
         }
     }
 
-    async fn kill_and_respawn(
+    async fn kill_and_resume(
         &self,
         kill_session: Option<SessionId>,
         pipeline_id: &PipelineId,
         agent_name: &str,
         input: &HashMap<String, String>,
+        resume_session_id: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
         if let Some(sid) = kill_session {
             self.executor
                 .execute(Effect::KillSession { session_id: sid })
                 .await?;
         }
-        self.spawn_agent(pipeline_id, agent_name, input).await
+        self.spawn_agent_with_resume(pipeline_id, agent_name, input, resume_session_id)
+            .await
     }
 
     /// Copy the agent's session.jsonl to the logs directory on exit.
