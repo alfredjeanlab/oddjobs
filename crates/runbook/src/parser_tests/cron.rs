@@ -81,8 +81,97 @@ cron "janitor" {
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("cron run must reference a pipeline"),
-        "error should mention pipeline requirement: {}",
+        msg.contains("cron run must reference a pipeline or agent"),
+        "error should mention pipeline/agent requirement: {}",
+        msg
+    );
+}
+
+#[test]
+fn parse_hcl_cron_agent_valid() {
+    let hcl = r#"
+agent "doctor" {
+  run     = "claude --model sonnet"
+  on_idle = "done"
+  prompt  = "Run diagnostics..."
+}
+
+cron "health_check" {
+  interval = "30m"
+  run      = { agent = "doctor" }
+}
+"#;
+    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+    assert!(runbook.crons.contains_key("health_check"));
+    let cron = &runbook.crons["health_check"];
+    assert_eq!(cron.name, "health_check");
+    assert_eq!(cron.interval, "30m");
+    assert_eq!(cron.run.agent_name(), Some("doctor"));
+}
+
+#[test]
+fn error_cron_unknown_agent() {
+    let hcl = r#"
+cron "health_check" {
+  interval = "30m"
+  run      = { agent = "nonexistent" }
+}
+"#;
+    let err = parse_runbook_with_format(hcl, Format::Hcl).unwrap_err();
+    assert!(matches!(err, ParseError::InvalidFormat { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("references unknown agent 'nonexistent'"),
+        "error should mention unknown agent: {}",
+        msg
+    );
+}
+
+#[test]
+fn parse_agent_max_concurrency() {
+    let hcl = r#"
+agent "doctor" {
+  run             = "claude --model sonnet"
+  on_idle         = "done"
+  max_concurrency = 1
+  prompt          = "Run diagnostics..."
+}
+"#;
+    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+    let agent = &runbook.agents["doctor"];
+    assert_eq!(agent.max_concurrency, Some(1));
+}
+
+#[test]
+fn parse_agent_max_concurrency_default() {
+    let hcl = r#"
+agent "doctor" {
+  run     = "claude --model sonnet"
+  on_idle = "done"
+  prompt  = "Run diagnostics..."
+}
+"#;
+    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+    let agent = &runbook.agents["doctor"];
+    assert_eq!(agent.max_concurrency, None);
+}
+
+#[test]
+fn error_agent_max_concurrency_zero() {
+    let hcl = r#"
+agent "doctor" {
+  run             = "claude --model sonnet"
+  on_idle         = "done"
+  max_concurrency = 0
+  prompt          = "Run diagnostics..."
+}
+"#;
+    let err = parse_runbook_with_format(hcl, Format::Hcl).unwrap_err();
+    assert!(matches!(err, ParseError::InvalidFormat { .. }));
+    let msg = err.to_string();
+    assert!(
+        msg.contains("max_concurrency must be >= 1"),
+        "error should mention min value: {}",
         msg
     );
 }

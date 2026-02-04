@@ -142,6 +142,7 @@ where
                 runbook_hash,
                 interval,
                 pipeline_name,
+                run_target,
                 namespace,
             } => {
                 result_events.extend(
@@ -151,6 +152,7 @@ where
                         runbook_hash,
                         interval,
                         pipeline_name,
+                        run_target,
                         namespace,
                     )
                     .await?,
@@ -169,9 +171,12 @@ where
                 pipeline_id,
                 pipeline_name,
                 pipeline_kind,
+                agent_run_id,
+                agent_name,
+                project_root,
                 runbook_hash,
+                run_target,
                 namespace,
-                ..
             } => {
                 result_events.extend(
                     self.handle_cron_once(
@@ -179,8 +184,12 @@ where
                         pipeline_id,
                         pipeline_name,
                         pipeline_kind,
+                        agent_run_id,
+                        agent_name,
                         runbook_hash,
+                        run_target,
                         namespace,
+                        project_root,
                     )
                     .await?,
                 );

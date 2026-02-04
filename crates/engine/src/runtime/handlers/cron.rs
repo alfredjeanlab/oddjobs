@@ -13,12 +13,41 @@ use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// What a cron targets when it fires.
+#[derive(Debug, Clone)]
+pub(crate) enum CronRunTarget {
+    Pipeline(String),
+    Agent(String),
+}
+
+impl CronRunTarget {
+    /// Parse a "pipeline:name" or "agent:name" string.
+    pub(crate) fn from_run_target_str(s: &str) -> Self {
+        if let Some(name) = s.strip_prefix("agent:") {
+            CronRunTarget::Agent(name.to_string())
+        } else if let Some(name) = s.strip_prefix("pipeline:") {
+            CronRunTarget::Pipeline(name.to_string())
+        } else {
+            // Backward compat: bare name = pipeline
+            CronRunTarget::Pipeline(s.to_string())
+        }
+    }
+
+    /// Get the display name for logging.
+    pub(crate) fn display_name(&self) -> String {
+        match self {
+            CronRunTarget::Pipeline(name) => format!("pipeline={}", name),
+            CronRunTarget::Agent(name) => format!("agent={}", name),
+        }
+    }
+}
+
 /// In-memory state for a running cron
 pub(crate) struct CronState {
     pub project_root: PathBuf,
     pub runbook_hash: String,
     pub interval: String,
-    pub pipeline_name: String,
+    pub run_target: CronRunTarget,
     pub status: CronStatus,
     pub namespace: String,
 }
@@ -66,6 +95,8 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
+    // TODO(refactor): group cron handler parameters into a struct
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_cron_started(
         &self,
         cron_name: &str,
@@ -73,18 +104,26 @@ where
         runbook_hash: &str,
         interval: &str,
         pipeline_name: &str,
+        run_target_str: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         let duration = crate::monitor::parse_duration(interval).map_err(|e| {
             RuntimeError::InvalidFormat(format!("invalid cron interval '{}': {}", interval, e))
         })?;
 
+        // Resolve run target from run_target string, falling back to pipeline_name
+        let run_target = if run_target_str.is_empty() {
+            CronRunTarget::Pipeline(pipeline_name.to_string())
+        } else {
+            CronRunTarget::from_run_target_str(run_target_str)
+        };
+
         // Store cron state
         let state = CronState {
             project_root: project_root.to_path_buf(),
             runbook_hash: runbook_hash.to_string(),
             interval: interval.to_string(),
-            pipeline_name: pipeline_name.to_string(),
+            run_target: run_target.clone(),
             status: CronStatus::Running,
             namespace: namespace.to_string(),
         };
@@ -108,8 +147,9 @@ where
             cron_name,
             namespace,
             &format!(
-                "started (interval={}, pipeline={})",
-                interval, pipeline_name
+                "started (interval={}, {})",
+                interval,
+                run_target.display_name()
             ),
         );
 
@@ -139,52 +179,119 @@ where
         Ok(vec![])
     }
 
-    /// Handle a one-shot cron execution: create and start the pipeline immediately.
+    /// Handle a one-shot cron execution: create and start the pipeline/agent immediately.
+    // TODO(refactor): group cron handler parameters into a struct
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_cron_once(
         &self,
         cron_name: &str,
         pipeline_id: &PipelineId,
         pipeline_name: &str,
         pipeline_kind: &str,
+        agent_run_id: &Option<String>,
+        agent_name: &Option<String>,
         runbook_hash: &str,
+        run_target: &str,
         namespace: &str,
+        project_root: &Path,
     ) -> Result<Vec<Event>, RuntimeError> {
         let runbook = self.cached_runbook(runbook_hash)?;
-
         let mut result_events = Vec::new();
 
-        // Create and start pipeline (same path as handle_cron_timer_fired)
-        result_events.extend(
-            self.create_and_start_pipeline(CreatePipelineParams {
-                pipeline_id: pipeline_id.clone(),
-                pipeline_name: pipeline_name.to_string(),
-                pipeline_kind: pipeline_kind.to_string(),
-                vars: HashMap::new(),
-                runbook_hash: runbook_hash.to_string(),
-                runbook_json: None,
-                runbook,
-                namespace: namespace.to_string(),
-            })
-            .await?,
-        );
+        // Determine target: prefer run_target, fall back to pipeline fields
+        let is_agent = if !run_target.is_empty() {
+            run_target.starts_with("agent:")
+        } else {
+            agent_name.is_some()
+        };
 
-        // Emit CronFired tracking event
-        result_events.extend(
-            self.executor
-                .execute_all(vec![Effect::Emit {
-                    event: Event::CronFired {
-                        cron_name: cron_name.to_string(),
-                        pipeline_id: pipeline_id.clone(),
-                        namespace: namespace.to_string(),
-                    },
-                }])
+        if is_agent {
+            let agent_name = agent_name
+                .as_deref()
+                .unwrap_or_else(|| run_target.strip_prefix("agent:").unwrap_or(""));
+            let agent_def = runbook
+                .get_agent(agent_name)
+                .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.to_string()))?
+                .clone();
+
+            let ar_id =
+                oj_core::AgentRunId::new(agent_run_id.as_deref().unwrap_or(&UuidIdGen.next()));
+
+            // Emit AgentRunCreated
+            let creation_effects = vec![Effect::Emit {
+                event: Event::AgentRunCreated {
+                    id: ar_id.clone(),
+                    agent_name: agent_name.to_string(),
+                    command_name: format!("cron:{}", cron_name),
+                    namespace: namespace.to_string(),
+                    cwd: project_root.to_path_buf(),
+                    runbook_hash: runbook_hash.to_string(),
+                    vars: HashMap::new(),
+                    created_at_epoch_ms: self.clock().epoch_ms(),
+                },
+            }];
+            result_events.extend(self.executor.execute_all(creation_effects).await?);
+
+            let spawn_events = self
+                .spawn_standalone_agent(
+                    &ar_id,
+                    &agent_def,
+                    agent_name,
+                    &HashMap::new(),
+                    project_root,
+                    namespace,
+                )
+                .await?;
+            result_events.extend(spawn_events);
+
+            // Emit CronFired tracking event
+            result_events.extend(
+                self.executor
+                    .execute_all(vec![Effect::Emit {
+                        event: Event::CronFired {
+                            cron_name: cron_name.to_string(),
+                            pipeline_id: PipelineId::new(""),
+                            agent_run_id: Some(ar_id.as_str().to_string()),
+                            namespace: namespace.to_string(),
+                        },
+                    }])
+                    .await?,
+            );
+        } else {
+            // Pipeline target (original behavior)
+            result_events.extend(
+                self.create_and_start_pipeline(CreatePipelineParams {
+                    pipeline_id: pipeline_id.clone(),
+                    pipeline_name: pipeline_name.to_string(),
+                    pipeline_kind: pipeline_kind.to_string(),
+                    vars: HashMap::new(),
+                    runbook_hash: runbook_hash.to_string(),
+                    runbook_json: None,
+                    runbook,
+                    namespace: namespace.to_string(),
+                })
                 .await?,
-        );
+            );
+
+            // Emit CronFired tracking event
+            result_events.extend(
+                self.executor
+                    .execute_all(vec![Effect::Emit {
+                        event: Event::CronFired {
+                            cron_name: cron_name.to_string(),
+                            pipeline_id: pipeline_id.clone(),
+                            agent_run_id: None,
+                            namespace: namespace.to_string(),
+                        },
+                    }])
+                    .await?,
+            );
+        }
 
         Ok(result_events)
     }
 
-    /// Handle a cron timer firing: spawn pipeline and reschedule timer.
+    /// Handle a cron timer firing: spawn pipeline/agent and reschedule timer.
     pub(crate) async fn handle_cron_timer_fired(
         &self,
         rest: &str,
@@ -194,13 +301,13 @@ where
         let cron_name = rest.rsplit('/').next().unwrap_or(rest);
         let timer_namespace = rest.strip_suffix(&format!("/{}", cron_name)).unwrap_or("");
 
-        let (_project_root, runbook_hash, pipeline_name, interval, namespace) = {
+        let (project_root, runbook_hash, run_target, interval, namespace) = {
             let crons = self.cron_states.lock();
             match crons.get(cron_name) {
                 Some(s) if s.status == CronStatus::Running => (
                     s.project_root.clone(),
                     s.runbook_hash.clone(),
-                    s.pipeline_name.clone(),
+                    s.run_target.clone(),
                     s.interval.clone(),
                     s.namespace.clone(),
                 ),
@@ -239,54 +346,151 @@ where
 
         let runbook = self.cached_runbook(&runbook_hash)?;
 
-        // Generate pipeline ID
-        let pipeline_id = PipelineId::new(UuidIdGen.next());
-        let display_name = oj_runbook::pipeline_display_name(
-            &pipeline_name,
-            &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
-            &namespace,
-        );
-
         let mut result_events = Vec::new();
 
-        // Create and start pipeline
-        result_events.extend(
-            self.create_and_start_pipeline(CreatePipelineParams {
-                pipeline_id: pipeline_id.clone(),
-                pipeline_name: display_name,
-                pipeline_kind: pipeline_name.clone(),
-                vars: HashMap::new(),
-                runbook_hash: runbook_hash.clone(),
-                runbook_json: None,
-                runbook,
-                namespace: namespace.clone(),
-            })
-            .await?,
-        );
+        match &run_target {
+            CronRunTarget::Pipeline(pipeline_name) => {
+                // Generate pipeline ID
+                let pipeline_id = PipelineId::new(UuidIdGen.next());
+                let display_name = oj_runbook::pipeline_display_name(
+                    pipeline_name,
+                    &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
+                    &namespace,
+                );
 
-        append_cron_log(
-            self.logger.log_dir(),
-            cron_name,
-            &namespace,
-            &format!(
-                "tick: triggered pipeline {} ({})",
-                pipeline_name,
-                &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())]
-            ),
-        );
-
-        // Emit CronFired tracking event
-        result_events.extend(
-            self.executor
-                .execute_all(vec![Effect::Emit {
-                    event: Event::CronFired {
-                        cron_name: cron_name.to_string(),
-                        pipeline_id,
+                // Create and start pipeline
+                result_events.extend(
+                    self.create_and_start_pipeline(CreatePipelineParams {
+                        pipeline_id: pipeline_id.clone(),
+                        pipeline_name: display_name,
+                        pipeline_kind: pipeline_name.clone(),
+                        vars: HashMap::new(),
+                        runbook_hash: runbook_hash.clone(),
+                        runbook_json: None,
+                        runbook,
                         namespace: namespace.clone(),
+                    })
+                    .await?,
+                );
+
+                append_cron_log(
+                    self.logger.log_dir(),
+                    cron_name,
+                    &namespace,
+                    &format!(
+                        "tick: triggered pipeline {} ({})",
+                        pipeline_name,
+                        &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())]
+                    ),
+                );
+
+                // Emit CronFired tracking event
+                result_events.extend(
+                    self.executor
+                        .execute_all(vec![Effect::Emit {
+                            event: Event::CronFired {
+                                cron_name: cron_name.to_string(),
+                                pipeline_id,
+                                agent_run_id: None,
+                                namespace: namespace.clone(),
+                            },
+                        }])
+                        .await?,
+                );
+            }
+            CronRunTarget::Agent(agent_name) => {
+                let agent_def = runbook
+                    .get_agent(agent_name)
+                    .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.clone()))?
+                    .clone();
+
+                // Check max_concurrency before spawning
+                if let Some(max) = agent_def.max_concurrency {
+                    let running = self.count_running_agents(agent_name, &namespace);
+                    if running >= max as usize {
+                        append_cron_log(
+                            self.logger.log_dir(),
+                            cron_name,
+                            &namespace,
+                            &format!(
+                                "skip: agent '{}' at max concurrency ({}/{})",
+                                agent_name, running, max
+                            ),
+                        );
+                        // Reschedule timer but don't spawn
+                        let duration = crate::monitor::parse_duration(&interval).map_err(|e| {
+                            RuntimeError::InvalidFormat(format!(
+                                "invalid cron interval '{}': {}",
+                                interval, e
+                            ))
+                        })?;
+                        let timer_id = TimerId::cron(cron_name, &namespace);
+                        self.executor
+                            .execute(Effect::SetTimer {
+                                id: timer_id,
+                                duration,
+                            })
+                            .await?;
+                        return Ok(result_events);
+                    }
+                }
+
+                let agent_run_id = oj_core::AgentRunId::new(UuidIdGen.next());
+
+                // Emit AgentRunCreated
+                let creation_effects = vec![Effect::Emit {
+                    event: Event::AgentRunCreated {
+                        id: agent_run_id.clone(),
+                        agent_name: agent_name.clone(),
+                        command_name: format!("cron:{}", cron_name),
+                        namespace: namespace.clone(),
+                        cwd: project_root.clone(),
+                        runbook_hash: runbook_hash.clone(),
+                        vars: HashMap::new(),
+                        created_at_epoch_ms: self.clock().epoch_ms(),
                     },
-                }])
-                .await?,
-        );
+                }];
+                result_events.extend(self.executor.execute_all(creation_effects).await?);
+
+                // Spawn the standalone agent
+                let spawn_events = self
+                    .spawn_standalone_agent(
+                        &agent_run_id,
+                        &agent_def,
+                        agent_name,
+                        &HashMap::new(),
+                        &project_root,
+                        &namespace,
+                    )
+                    .await?;
+                result_events.extend(spawn_events);
+
+                append_cron_log(
+                    self.logger.log_dir(),
+                    cron_name,
+                    &namespace,
+                    &format!(
+                        "tick: triggered agent {} ({})",
+                        agent_name,
+                        &agent_run_id.as_str()[..8.min(agent_run_id.as_str().len())]
+                    ),
+                );
+
+                // Emit CronFired tracking event
+                result_events.extend(
+                    self.executor
+                        .execute_all(vec![Effect::Emit {
+                            event: Event::CronFired {
+                                cron_name: cron_name.to_string(),
+                                pipeline_id: PipelineId::new(""),
+                                agent_run_id: Some(agent_run_id.as_str().to_string()),
+                                namespace: namespace.clone(),
+                            },
+                        }])
+                        .await?,
+                );
+            }
+        }
 
         // Reschedule timer for next interval
         let duration = crate::monitor::parse_duration(&interval).map_err(|e| {

@@ -77,25 +77,36 @@ pub(super) fn handle_cron_start(
         }
     };
 
-    // Validate run is a pipeline reference
-    let pipeline_name = match cron_def.run.pipeline_name() {
-        Some(p) => p.to_string(),
-        None => {
+    // Validate run is a pipeline or agent reference
+    let (pipeline_name, run_target) = match &cron_def.run {
+        oj_runbook::RunDirective::Pipeline { pipeline } => {
+            if runbook.get_pipeline(pipeline).is_none() {
+                return Ok(Response::Error {
+                    message: format!(
+                        "cron '{}' references unknown pipeline '{}'",
+                        cron_name, pipeline
+                    ),
+                });
+            }
+            (pipeline.clone(), format!("pipeline:{}", pipeline))
+        }
+        oj_runbook::RunDirective::Agent { agent, .. } => {
+            if runbook.get_agent(agent).is_none() {
+                return Ok(Response::Error {
+                    message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
+                });
+            }
+            (String::new(), format!("agent:{}", agent))
+        }
+        _ => {
             return Ok(Response::Error {
-                message: format!("cron '{}' run must reference a pipeline", cron_name),
+                message: format!(
+                    "cron '{}' run must reference a pipeline or agent",
+                    cron_name
+                ),
             })
         }
     };
-
-    // Validate referenced pipeline exists
-    if runbook.get_pipeline(&pipeline_name).is_none() {
-        return Ok(Response::Error {
-            message: format!(
-                "cron '{}' references unknown pipeline '{}'",
-                cron_name, pipeline_name
-            ),
-        });
-    }
 
     // Serialize and hash the runbook for WAL storage
     let (runbook_json, runbook_hash) = match hash_runbook(&runbook) {
@@ -120,6 +131,7 @@ pub(super) fn handle_cron_start(
         runbook_hash,
         interval: cron_def.interval.clone(),
         pipeline_name,
+        run_target,
         namespace: namespace.to_string(),
     };
 
@@ -219,25 +231,36 @@ pub(super) async fn handle_cron_once(
         }
     };
 
-    // Validate run is a pipeline reference
-    let pipeline_name = match cron_def.run.pipeline_name() {
-        Some(p) => p.to_string(),
-        None => {
+    // Validate run is a pipeline or agent reference and build event
+    let (pipeline_name, run_target) = match &cron_def.run {
+        oj_runbook::RunDirective::Pipeline { pipeline } => {
+            if runbook.get_pipeline(pipeline).is_none() {
+                return Ok(Response::Error {
+                    message: format!(
+                        "cron '{}' references unknown pipeline '{}'",
+                        cron_name, pipeline
+                    ),
+                });
+            }
+            (pipeline.clone(), format!("pipeline:{}", pipeline))
+        }
+        oj_runbook::RunDirective::Agent { agent, .. } => {
+            if runbook.get_agent(agent).is_none() {
+                return Ok(Response::Error {
+                    message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
+                });
+            }
+            (String::new(), format!("agent:{}", agent))
+        }
+        _ => {
             return Ok(Response::Error {
-                message: format!("cron '{}' run must reference a pipeline", cron_name),
+                message: format!(
+                    "cron '{}' run must reference a pipeline or agent",
+                    cron_name
+                ),
             })
         }
     };
-
-    // Validate referenced pipeline exists
-    if runbook.get_pipeline(&pipeline_name).is_none() {
-        return Ok(Response::Error {
-            message: format!(
-                "cron '{}' references unknown pipeline '{}'",
-                cron_name, pipeline_name
-            ),
-        });
-    }
 
     // Serialize and hash the runbook for WAL storage
     let (runbook_json, runbook_hash) = match hash_runbook(&runbook) {
@@ -255,33 +278,65 @@ pub(super) async fn handle_cron_once(
         .send(runbook_event)
         .map_err(|_| ConnectionError::WalError)?;
 
-    // Generate pipeline ID
-    let pipeline_id = PipelineId::new(UuidIdGen.next());
-    let pipeline_display_name = oj_runbook::pipeline_display_name(
-        &pipeline_name,
-        &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
-        namespace,
-    );
+    let is_agent = run_target.starts_with("agent:");
 
-    // Emit CronOnce event to create pipeline via the cron code path
-    let event = Event::CronOnce {
-        cron_name: cron_name.to_string(),
-        pipeline_id: pipeline_id.clone(),
-        pipeline_name: pipeline_display_name.clone(),
-        pipeline_kind: pipeline_name.clone(),
-        project_root: project_root.to_path_buf(),
-        runbook_hash: runbook_hash.clone(),
-        namespace: namespace.to_string(),
-    };
+    if is_agent {
+        let agent_name = run_target.strip_prefix("agent:").unwrap_or("").to_string();
+        let agent_run_id = UuidIdGen.next();
 
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+        let event = Event::CronOnce {
+            cron_name: cron_name.to_string(),
+            pipeline_id: PipelineId::new(""),
+            pipeline_name: String::new(),
+            pipeline_kind: String::new(),
+            agent_run_id: Some(agent_run_id.clone()),
+            agent_name: Some(agent_name.clone()),
+            project_root: project_root.to_path_buf(),
+            runbook_hash: runbook_hash.clone(),
+            run_target,
+            namespace: namespace.to_string(),
+        };
 
-    Ok(Response::CommandStarted {
-        pipeline_id: pipeline_id.to_string(),
-        pipeline_name: pipeline_display_name,
-    })
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+
+        Ok(Response::CommandStarted {
+            pipeline_id: agent_run_id,
+            pipeline_name: format!("agent:{}", agent_name),
+        })
+    } else {
+        // Generate pipeline ID
+        let pipeline_id = PipelineId::new(UuidIdGen.next());
+        let pipeline_display_name = oj_runbook::pipeline_display_name(
+            &pipeline_name,
+            &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
+            namespace,
+        );
+
+        // Emit CronOnce event to create pipeline via the cron code path
+        let event = Event::CronOnce {
+            cron_name: cron_name.to_string(),
+            pipeline_id: pipeline_id.clone(),
+            pipeline_name: pipeline_display_name.clone(),
+            pipeline_kind: pipeline_name.clone(),
+            agent_run_id: None,
+            agent_name: None,
+            project_root: project_root.to_path_buf(),
+            runbook_hash: runbook_hash.clone(),
+            run_target,
+            namespace: namespace.to_string(),
+        };
+
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+
+        Ok(Response::CommandStarted {
+            pipeline_id: pipeline_id.to_string(),
+            pipeline_name: pipeline_display_name,
+        })
+    }
 }
 
 /// Handle a CronRestart request: stop (if running), reload runbook, start.
