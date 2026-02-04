@@ -868,6 +868,236 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
 }
 
 // =============================================================================
+// Duplicate idle/prompt decision prevention
+// =============================================================================
+
+/// Runbook with pipeline agent that escalates on idle
+const RUNBOOK_PIPELINE_ESCALATE: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = { agent = "worker" }
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[agent.worker]
+run = 'claude'
+prompt = "Do the work"
+on_idle = "escalate"
+"#;
+
+#[tokio::test]
+async fn duplicate_idle_creates_only_one_decision() {
+    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // First idle → escalate → creates decision, sets step to Waiting
+    ctx.runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.step_status.is_waiting(), "step should be waiting after first idle");
+    let decisions_after_first = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(decisions_after_first, 1, "should have exactly 1 decision after first idle");
+
+    // Second idle → should be dropped (step already waiting)
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty(), "second idle should produce no events");
+    let decisions_after_second = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(
+        decisions_after_second, 1,
+        "should still have exactly 1 decision after duplicate idle"
+    );
+
+    // Pipeline should still be at work step, waiting
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "work");
+    assert!(pipeline.step_status.is_waiting());
+}
+
+#[tokio::test]
+async fn prompt_hook_noop_when_step_already_waiting() {
+    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // First idle → escalate → step waiting
+    ctx.runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.step_status.is_waiting());
+
+    // Prompt event while step is already waiting → should be dropped
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentPrompt {
+            agent_id: agent_id.clone(),
+            prompt_type: oj_core::PromptType::Permission,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty(), "prompt should be dropped when step is already waiting");
+    let decisions = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(decisions, 1, "no additional decision should be created");
+}
+
+#[tokio::test]
+async fn standalone_duplicate_idle_creates_only_one_escalation() {
+    let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "run-1",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
+        let ar = state.agent_runs.values().next().unwrap();
+        (ar.id.clone(), AgentId::new(ar.agent_id.clone().unwrap()))
+    });
+
+    // First idle → escalated
+    ctx.runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+
+    // Second idle → should be dropped (already escalated)
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty(), "second idle should produce no events for escalated agent");
+
+    // Status should still be Escalated (not double-escalated)
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+}
+
+#[tokio::test]
+async fn standalone_prompt_noop_when_agent_escalated() {
+    let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "run-1",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
+        let ar = state.agent_runs.values().next().unwrap();
+        (ar.id.clone(), AgentId::new(ar.agent_id.clone().unwrap()))
+    });
+
+    // First idle → escalated
+    ctx.runtime
+        .handle_event(Event::AgentIdle {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+
+    // Prompt while escalated → should be dropped
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentPrompt {
+            agent_id: agent_id.clone(),
+            prompt_type: oj_core::PromptType::Permission,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_empty(), "prompt should be dropped when agent is escalated");
+}
+
+// =============================================================================
 // Stale agent event filtering
 // =============================================================================
 
