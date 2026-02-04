@@ -78,9 +78,10 @@ where
 
         // Restore active pipelines from persisted state (survives daemon restart)
         let (persisted_active, persisted_item_map) = self.lock_state(|state| {
+            let scoped = scoped_worker_name(namespace, worker_name);
             let active: HashSet<PipelineId> = state
                 .workers
-                .get(worker_name)
+                .get(&scoped)
                 .map(|w| w.active_pipeline_ids.iter().map(PipelineId::new).collect())
                 .unwrap_or_default();
 

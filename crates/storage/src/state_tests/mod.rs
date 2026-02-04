@@ -584,6 +584,40 @@ fn worker_started_preserves_active_pipeline_ids_on_restart() {
     assert!(worker.active_pipeline_ids.contains(&"pipe-2".to_string()));
 }
 
+#[test]
+fn worker_started_preserves_active_pipeline_ids_with_namespace() {
+    let mut state = MaterializedState::default();
+
+    // Simulate pre-restart state: namespaced worker with active pipelines
+    state.apply_event(&worker_start_event("fixer", "myproject"));
+    state.apply_event(&Event::WorkerItemDispatched {
+        worker_name: "fixer".to_string(),
+        item_id: "item-1".to_string(),
+        pipeline_id: PipelineId::new("pipe-1"),
+        namespace: "myproject".to_string(),
+    });
+    state.apply_event(&Event::WorkerItemDispatched {
+        worker_name: "fixer".to_string(),
+        item_id: "item-2".to_string(),
+        pipeline_id: PipelineId::new("pipe-2"),
+        namespace: "myproject".to_string(),
+    });
+
+    assert_eq!(
+        state.workers["myproject/fixer"].active_pipeline_ids.len(),
+        2
+    );
+
+    // Simulate daemon restart: WorkerStarted replayed from WAL
+    state.apply_event(&worker_start_event("fixer", "myproject"));
+
+    // Active pipeline IDs must be preserved under the scoped key
+    let worker = &state.workers["myproject/fixer"];
+    assert_eq!(worker.active_pipeline_ids.len(), 2);
+    assert!(worker.active_pipeline_ids.contains(&"pipe-1".to_string()));
+    assert!(worker.active_pipeline_ids.contains(&"pipe-2".to_string()));
+}
+
 // === Idempotency tests ===
 
 #[test]

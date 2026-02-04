@@ -178,6 +178,88 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
     );
 }
 
+/// After daemon restart with a namespaced worker, WorkerStarted must restore
+/// active_pipelines using the scoped key (namespace/worker_name) from
+/// MaterializedState. Regression test for queue items stuck in Active status
+/// when namespace scoping was missing from the persisted state lookup.
+#[tokio::test]
+async fn worker_restart_restores_active_pipelines_with_namespace() {
+    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+
+    let runbook = oj_runbook::parse_runbook(WORKER_RUNBOOK).unwrap();
+    let runbook_json = serde_json::to_value(&runbook).unwrap();
+    let runbook_hash = {
+        use sha2::{Digest, Sha256};
+        let canonical = serde_json::to_string(&runbook_json).unwrap();
+        let digest = Sha256::digest(canonical.as_bytes());
+        format!("{:x}", digest)
+    };
+
+    let namespace = "myproject";
+
+    // Populate MaterializedState as if WAL replay already ran:
+    // a namespaced worker with one active pipeline dispatched before restart.
+    ctx.runtime.lock_state_mut(|state| {
+        state.apply_event(&Event::RunbookLoaded {
+            hash: runbook_hash.clone(),
+            version: 1,
+            runbook: runbook_json.clone(),
+        });
+        state.apply_event(&Event::WorkerStarted {
+            worker_name: "fixer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            queue_name: "bugs".to_string(),
+            concurrency: 1,
+            namespace: namespace.to_string(),
+        });
+        state.apply_event(&Event::WorkerItemDispatched {
+            worker_name: "fixer".to_string(),
+            item_id: "item-1".to_string(),
+            pipeline_id: oj_core::PipelineId::new("pipe-running"),
+            namespace: namespace.to_string(),
+        });
+    });
+
+    // Also cache the runbook so handle_worker_started can find it
+    ctx.runtime
+        .handle_event(Event::RunbookLoaded {
+            hash: runbook_hash.clone(),
+            version: 1,
+            runbook: runbook_json,
+        })
+        .await
+        .unwrap();
+
+    // Now simulate the daemon re-processing WorkerStarted after restart
+    ctx.runtime
+        .handle_event(Event::WorkerStarted {
+            worker_name: "fixer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            queue_name: "bugs".to_string(),
+            concurrency: 1,
+            namespace: namespace.to_string(),
+        })
+        .await
+        .unwrap();
+
+    // Verify in-memory WorkerState has the active pipeline restored
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").expect("worker state should exist");
+    assert_eq!(
+        state.active_pipelines.len(),
+        1,
+        "active_pipelines should be restored from persisted state with namespace"
+    );
+    assert!(
+        state
+            .active_pipelines
+            .contains(&oj_core::PipelineId::new("pipe-running")),
+        "should contain the pipeline that was running before restart"
+    );
+}
+
 /// Editing the runbook on disk after `oj worker start` should be picked up
 /// on the next poll, not use the stale cached version.
 #[tokio::test]
