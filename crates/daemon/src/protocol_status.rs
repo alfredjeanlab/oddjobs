@@ -39,6 +39,9 @@ pub struct NamespaceStatus {
     pub queues: Vec<QueueStatus>,
     /// Currently running agents
     pub active_agents: Vec<AgentStatusEntry>,
+    /// Number of unresolved decisions in this namespace
+    #[serde(default)]
+    pub pending_decisions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

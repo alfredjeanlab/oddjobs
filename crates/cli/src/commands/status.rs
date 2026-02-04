@@ -242,6 +242,19 @@ fn format_text(
     if total_orphaned > 0 {
         let _ = write!(out, " | {} {}", total_orphaned, color::status("orphaned"));
     }
+    let total_pending_decisions: usize = namespaces.iter().map(|ns| ns.pending_decisions).sum();
+    if total_pending_decisions > 0 {
+        let _ = write!(
+            out,
+            " | {} decision{} pending",
+            total_pending_decisions,
+            if total_pending_decisions == 1 {
+                ""
+            } else {
+                "s"
+            }
+        );
+    }
     out.push('\n');
 
     if namespaces.is_empty() {

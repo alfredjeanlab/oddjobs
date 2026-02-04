@@ -901,6 +901,14 @@ pub(super) fn handle_query(
                     });
             }
 
+            // Count pending decisions grouped by namespace
+            let mut ns_pending_decisions: BTreeMap<String, usize> = BTreeMap::new();
+            for d in state.decisions.values() {
+                if !d.is_resolved() {
+                    *ns_pending_decisions.entry(d.namespace.clone()).or_insert(0) += 1;
+                }
+            }
+
             // Collect orphaned pipelines grouped by namespace
             let mut ns_orphaned = query_orphans::collect_orphan_status_entries(orphans, now_ms);
 
@@ -924,6 +932,9 @@ pub(super) fn handle_query(
             for ns in ns_agents.keys() {
                 all_namespaces.insert(ns.clone());
             }
+            for ns in ns_pending_decisions.keys() {
+                all_namespaces.insert(ns.clone());
+            }
 
             let mut namespaces: Vec<NamespaceStatus> = all_namespaces
                 .into_iter()
@@ -934,6 +945,7 @@ pub(super) fn handle_query(
                     workers: ns_workers.remove(&ns).unwrap_or_default(),
                     queues: ns_queues.remove(&ns).unwrap_or_default(),
                     active_agents: ns_agents.remove(&ns).unwrap_or_default(),
+                    pending_decisions: ns_pending_decisions.remove(&ns).unwrap_or_default(),
                     namespace: ns,
                 })
                 .collect();

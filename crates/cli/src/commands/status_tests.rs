@@ -59,6 +59,7 @@ fn header_with_active_pipelines_and_watch() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
     let out = format_text(60, &[ns], Some("2s"));
     let first_line = out.lines().next().unwrap();
@@ -91,6 +92,7 @@ fn header_without_watch_has_no_every() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
     let out = format_text(60, &[ns], None);
     let first_line = out.lines().next().unwrap();
@@ -132,6 +134,7 @@ fn active_pipeline_shows_kind_not_name() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -177,6 +180,7 @@ fn active_pipeline_hides_nonce_only_name() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -221,6 +225,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -267,6 +272,7 @@ fn orphaned_pipeline_hides_name_when_same_as_id() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -345,6 +351,7 @@ fn escalated_pipeline_truncates_long_reason() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -418,6 +425,7 @@ fn active_pipeline_shows_friendly_name() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -459,6 +467,7 @@ fn escalated_pipeline_shows_friendly_name() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -496,6 +505,7 @@ fn orphaned_pipeline_shows_friendly_name() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -563,6 +573,7 @@ fn render_frame_content_identical_across_tty_modes() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
     let text = format_text(60, &[ns], Some("5s"));
 
@@ -706,6 +717,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             agent_id: "agent-001".to_string(),
             status: "running".to_string(),
         }],
+        pending_decisions: 0,
     };
 
     let text = format_text(600, &[ns], Some("5s"));
@@ -765,6 +777,7 @@ fn namespace_with_only_empty_queues_is_hidden() {
             dead: 0,
         }],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(60, &[ns], None);
@@ -798,6 +811,7 @@ fn namespace_with_non_empty_queue_is_shown() {
             dead: 0,
         }],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(60, &[ns], None);
@@ -835,6 +849,7 @@ fn escalated_pipeline_shows_source_label() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -868,6 +883,7 @@ fn escalated_pipeline_no_source_label_when_none() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -901,6 +917,7 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -968,6 +985,7 @@ fn columns_are_aligned_across_rows() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -1032,6 +1050,7 @@ fn name_column_omitted_when_all_names_hidden() {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -1085,6 +1104,7 @@ fn worker_columns_are_aligned_across_rows() {
         ],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -1129,6 +1149,7 @@ fn queue_columns_are_aligned_across_rows() {
             },
         ],
         active_agents: vec![],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -1183,6 +1204,7 @@ fn agent_columns_are_aligned_across_rows() {
                 status: "idle".to_string(),
             },
         ],
+        pending_decisions: 0,
     };
 
     let output = format_text(30, &[ns], None);
@@ -1229,6 +1251,7 @@ fn make_ns(name: &str) -> NamespaceStatus {
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
+        pending_decisions: 0,
     }
 }
 
@@ -1271,5 +1294,90 @@ fn project_filter_restricts_text_output() {
     assert!(
         !output.contains("beta"),
         "output should not contain other projects:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn header_shows_decisions_pending_singular() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "test".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 1,
+    };
+    let out = format_text(60, &[ns], None);
+    let first_line = out.lines().next().unwrap();
+    assert!(
+        first_line.contains("| 1 decision pending"),
+        "header should show singular decision pending: {first_line}"
+    );
+    assert!(
+        !first_line.contains("decisions"),
+        "singular should not have trailing 's': {first_line}"
+    );
+}
+
+#[test]
+#[serial]
+fn header_shows_decisions_pending_plural() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns1 = NamespaceStatus {
+        namespace: "proj-a".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 2,
+    };
+    let ns2 = NamespaceStatus {
+        namespace: "proj-b".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 1,
+    };
+    let out = format_text(60, &[ns1, ns2], None);
+    let first_line = out.lines().next().unwrap();
+    assert!(
+        first_line.contains("| 3 decisions pending"),
+        "header should show total decisions pending across namespaces: {first_line}"
+    );
+}
+
+#[test]
+#[serial]
+fn header_hides_decisions_when_zero() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "test".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 0,
+    };
+    let out = format_text(60, &[ns], None);
+    assert!(
+        !out.contains("decision"),
+        "header should not mention decisions when count is zero: {out}"
     );
 }
