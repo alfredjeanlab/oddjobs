@@ -192,7 +192,11 @@ where
                 ref message,
                 ref error_type,
             } => {
-                tracing::error!(agent_run_id = %agent_run.id, error = %message, "standalone agent error");
+                tracing::warn!(agent_run_id = %agent_run.id, error = %message, "standalone agent error");
+                // Write error to agent log so it's visible in `oj logs <agent>`
+                if let Some(agent_id) = agent_run.agent_id.as_deref() {
+                    self.logger.append_agent_error(agent_id, message);
+                }
                 let error_action = agent_def.on_error.action_for(error_type.as_ref());
                 return self
                     .execute_standalone_action_with_attempts(
