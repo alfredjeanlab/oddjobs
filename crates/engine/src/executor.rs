@@ -7,7 +7,7 @@ use crate::{RuntimeDeps, Scheduler};
 use oj_adapters::{
     AgentAdapter, AgentReconnectConfig, AgentSpawnConfig, NotifyAdapter, SessionAdapter,
 };
-use oj_core::{Clock, Effect, Event, TracedEffect};
+use oj_core::{Clock, Effect, Event};
 use oj_storage::MaterializedState;
 use std::sync::Arc;
 

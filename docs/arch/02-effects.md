@@ -108,18 +108,7 @@ Use **Session effects** (`SendToSession`, `KillSession`) for low-level terminal 
 
 ## Instrumentation
 
-Effects implement `TracedEffect` for consistent observability:
-
-```rust
-pub trait TracedEffect {
-    /// Effect name for log spans (e.g., "spawn_agent", "shell")
-    fn name(&self) -> &'static str;
-
-    /// Key-value pairs for structured logging
-    fn fields(&self) -> Vec<(&'static str, String)>;
-}
-```
-
+`Effect` provides `name()` and `fields()` methods for consistent observability.
 The executor wraps all effect execution with tracing:
 
 ```rust

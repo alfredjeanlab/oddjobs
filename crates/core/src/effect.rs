@@ -134,8 +134,9 @@ pub enum Effect {
     },
 }
 
-impl crate::traced::TracedEffect for Effect {
-    fn name(&self) -> &'static str {
+impl Effect {
+    /// Effect name for log spans (e.g., "spawn_agent", "shell")
+    pub fn name(&self) -> &'static str {
         match self {
             Effect::Emit { .. } => "emit",
             Effect::SpawnAgent { .. } => "spawn_agent",
@@ -154,7 +155,8 @@ impl crate::traced::TracedEffect for Effect {
         }
     }
 
-    fn fields(&self) -> Vec<(&'static str, String)> {
+    /// Key-value pairs for structured logging
+    pub fn fields(&self) -> Vec<(&'static str, String)> {
         match self {
             Effect::Emit { event } => {
                 vec![("event", event.log_summary())]

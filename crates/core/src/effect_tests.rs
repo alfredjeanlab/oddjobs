@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use crate::traced::TracedEffect;
 
 #[test]
 fn effect_serialization_roundtrip() {
