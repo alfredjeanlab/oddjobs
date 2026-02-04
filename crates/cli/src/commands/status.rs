@@ -340,16 +340,10 @@ fn format_text(
         if !ns.workers.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Workers:"));
             for w in &ns.workers {
-                let indicator = if w.status == "running" {
-                    color::green("●")
-                } else {
-                    color::muted("○")
-                };
                 let _ = writeln!(
                     out,
-                    "    {}  {} {}  {}/{} active",
+                    "    {}  {}  {}/{} active",
                     w.name,
-                    indicator,
                     color::status(&w.status),
                     w.active,
                     w.concurrency,
