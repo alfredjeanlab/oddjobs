@@ -268,7 +268,7 @@ async fn handle_request(
         ),
 
         Request::AgentPrune { all, dry_run } => {
-            mutations::handle_agent_prune(state, logs_path, all, dry_run)
+            mutations::handle_agent_prune(state, event_bus, logs_path, all, dry_run)
         }
 
         Request::WorkspacePrune {
