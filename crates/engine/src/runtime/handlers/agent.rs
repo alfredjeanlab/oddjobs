@@ -109,7 +109,11 @@ where
         if let Some(agent_run_id) = maybe_run_id {
             let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
             if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal() || agent_run.agent_signal.is_some() {
+                if agent_run.status.is_terminal()
+                    || agent_run.agent_signal.is_some()
+                    || agent_run.status == AgentRunStatus::Waiting
+                    || agent_run.status == AgentRunStatus::Escalated
+                {
                     return Ok(vec![]);
                 }
                 if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
@@ -137,8 +141,11 @@ where
 
         let pipeline = self.require_pipeline(&pipeline_id)?;
 
-        // If pipeline already advanced or has a signal, ignore
-        if pipeline.is_terminal() || pipeline.agent_signal.is_some() {
+        // If pipeline already advanced, has a signal, or is already waiting for a decision, ignore
+        if pipeline.is_terminal()
+            || pipeline.agent_signal.is_some()
+            || pipeline.step_status.is_waiting()
+        {
             return Ok(vec![]);
         }
 
@@ -174,7 +181,11 @@ where
         if let Some(agent_run_id) = maybe_run_id {
             let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
             if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal() || agent_run.agent_signal.is_some() {
+                if agent_run.status.is_terminal()
+                    || agent_run.agent_signal.is_some()
+                    || agent_run.status == AgentRunStatus::Waiting
+                    || agent_run.status == AgentRunStatus::Escalated
+                {
                     return Ok(vec![]);
                 }
                 if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
@@ -204,8 +215,11 @@ where
 
         let pipeline = self.require_pipeline(&pipeline_id)?;
 
-        // If pipeline already advanced or has a signal, ignore
-        if pipeline.is_terminal() || pipeline.agent_signal.is_some() {
+        // If pipeline already advanced, has a signal, or is already waiting for a decision, ignore
+        if pipeline.is_terminal()
+            || pipeline.agent_signal.is_some()
+            || pipeline.step_status.is_waiting()
+        {
             return Ok(vec![]);
         }
 
