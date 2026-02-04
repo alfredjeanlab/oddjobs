@@ -148,11 +148,16 @@ pub fn slugify(input: &str, max_len: usize) -> String {
         }
     }
 
-    // 3. Split on hyphens, filter out stop words, rejoin
-    let filtered: Vec<&str> = slug
-        .split('-')
-        .filter(|word| !word.is_empty() && !STOP_WORDS.contains(word))
-        .collect();
+    // 3. Split on hyphens, filter out stop words, deduplicate consecutive repeats, rejoin
+    let mut filtered: Vec<&str> = Vec::new();
+    for word in slug.split('-') {
+        if word.is_empty() || STOP_WORDS.contains(&word) {
+            continue;
+        }
+        if filtered.last() != Some(&word) {
+            filtered.push(word);
+        }
+    }
     let mut result = filtered.join("-");
 
     // 4. Trim leading/trailing hyphens

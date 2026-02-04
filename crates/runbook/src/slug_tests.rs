@@ -116,6 +116,29 @@ fn contraction_all_stop_words() {
     assert_eq!(slugify("they're not", 28), "");
 }
 
+#[test]
+fn consecutive_duplicates_after_stop_word_removal() {
+    // "peek" repeated three times should collapse to one
+    assert_eq!(slugify("make end peek peek peek", 28), "make-end-peek");
+}
+
+#[test]
+fn duplicates_separated_by_stop_words_collapsed() {
+    // "fix the fix" → stop word "the" removed → "fix fix" → deduplicated → "fix"
+    assert_eq!(slugify("fix the fix", 28), "fix");
+}
+
+#[test]
+fn consecutive_duplicates_only() {
+    assert_eq!(slugify("test test test", 28), "test");
+}
+
+#[test]
+fn non_consecutive_duplicates_preserved() {
+    // "foo bar foo" — duplicates are not consecutive, both should remain
+    assert_eq!(slugify("foo bar foo", 28), "foo-bar-foo");
+}
+
 // pipeline_display_name tests
 
 #[test]
