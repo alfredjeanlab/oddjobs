@@ -22,8 +22,8 @@ command "build" {
 pipeline "build" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "base"]
-  on_cancel = { step = "cancel" }
   on_fail   = { step = "reopen" }
+  on_cancel = { step = "cancel" }
 
   workspace {
     git = "worktree"
@@ -39,11 +39,6 @@ pipeline "build" {
     on_start = "Building: ${var.name}"
     on_done  = "Build landed: ${var.name}"
     on_fail  = "Build failed: ${var.name}"
-  }
-
-  step "init" {
-    run     = "mkdir -p plans"
-    on_done = { step = "plan" }
   }
 
   # Ask agent to create plan
@@ -85,11 +80,13 @@ pipeline "build" {
 
 agent "plan" {
   run      = "claude --model opus --dangerously-skip-permissions"
-  on_idle  = { action = "nudge", message = "Keep working. Write the plan to plans/${var.name}.md and say 'I'm done' when finished." }
+  on_idle  = { action = "nudge", message = "Keep working. Write the plan to plans/${var.name}.md." }
   on_dead  = { action = "gate", run = "test -f plans/${var.name}.md" }
 
+  prime = ["cd ${invoke.dir} && wok show ${local.issue}"]
+
   prompt = <<-PROMPT
-    Create an implementation plan for the given instructions.
+    Create an implementation plan for: ${local.issue} - ${var.instructions}
 
     ## Output
 
@@ -120,6 +117,7 @@ agent "plan" {
     - When you are done, say "I'm done" and wait.
 
     Instructions:
+
     ${var.instructions}
 
     ---
@@ -132,6 +130,8 @@ agent "implement" {
   run      = "claude --model opus --dangerously-skip-permissions"
   on_idle  = { action = "nudge", message = "Keep working. Follow the plan in plans/${var.name}.md, implement all phases, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
+
+  prime = ["cd ${invoke.dir} && wok show ${local.issue}"]
 
   prompt = <<-PROMPT
     Implement the plan in `plans/${var.name}.md`.
@@ -146,8 +146,11 @@ agent "implement" {
 
     ## Context
 
-    Feature request (for reference):
-    > ${var.instructions}
+    Issue: ${local.issue}
+
+    Instructions:
+
+    ${var.instructions}
 
     Follow the plan carefully. Ensure all phases are completed and tests pass.
   PROMPT

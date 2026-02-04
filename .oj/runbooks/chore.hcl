@@ -65,12 +65,12 @@ pipeline "chore" {
     SHELL
   }
 
-  step "cancel" {
-    run = "cd ${invoke.dir} && wok close ${var.task.id} --reason 'Chore pipeline cancelled'"
-  }
-
   step "reopen" {
     run = "cd ${invoke.dir} && wok reopen ${var.task.id} --reason 'Chore pipeline failed'"
+  }
+
+  step "cancel" {
+    run = "cd ${invoke.dir} && wok close ${var.task.id} --reason 'Chore pipeline cancelled'"
   }
 }
 
@@ -80,10 +80,10 @@ agent "chores" {
   on_idle  = { action = "nudge", message = "Keep working. Complete the task, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
 
-  prompt = <<-PROMPT
-    Complete the following task:
+  prime = ["cd ${invoke.dir} && wok show ${var.task.id}"]
 
-    ${var.task.title}
+  prompt = <<-PROMPT
+    Complete the following task: ${var.task.id} - ${var.task.title}
 
     ## Steps
 

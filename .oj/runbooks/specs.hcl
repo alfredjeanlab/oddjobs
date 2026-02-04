@@ -24,12 +24,7 @@ pipeline "specs" {
     on_fail = "Specs fix failed"
   }
 
-  step "init" {
-    run     = "true"
-    on_done = { step = "check" }
-  }
-
-  step "check" {
+  step "run" {
     run     = "cargo test -p oj-specs"
     on_fail = { step = "fix" }
   }

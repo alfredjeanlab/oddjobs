@@ -34,13 +34,12 @@ pipeline "merge" {
   name      = "${var.mr.title}"
   vars      = ["mr"]
   workspace = "folder"
+  on_cancel = { step = "cleanup" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
     branch = "merge-${workspace.nonce}"
   }
-
-  on_cancel = { step = "cleanup" }
 
   notify {
     on_start = "Merging: ${var.mr.title}"
@@ -75,7 +74,7 @@ pipeline "merge" {
   step "push" {
     run = <<-SHELL
       git add -A
-      git diff --cached --quiet || git commit --amend --no-edit
+      git diff --cached --quiet || git commit --amend --no-edit || git commit --no-edit
 
       # Retry loop: if push fails because main moved, re-fetch and re-merge.
       # Only falls through to on_fail if merging new main conflicts.
@@ -104,7 +103,7 @@ pipeline "merge" {
 
 agent "conflicts" {
   run      = "claude --model opus --dangerously-skip-permissions"
-  on_idle  = "done"
+  on_idle  = { action = "gate", command = "test ! -f $(git rev-parse --git-dir)/MERGE_HEAD" }
   on_dead  = { action = "escalate" }
 
   prime = [

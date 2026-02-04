@@ -29,8 +29,8 @@ worker "fix" {
 pipeline "fix" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
-  on_cancel = { step = "cancel" }
   on_fail   = { step = "reopen" }
+  on_cancel = { step = "cancel" }
 
   workspace {
     git = "worktree"
@@ -65,12 +65,12 @@ pipeline "fix" {
     SHELL
   }
 
-  step "cancel" {
-    run = "cd ${invoke.dir} && wok close ${var.bug.id} --reason 'Fix pipeline cancelled'"
-  }
-
   step "reopen" {
     run = "cd ${invoke.dir} && wok reopen ${var.bug.id} --reason 'Fix pipeline failed'"
+  }
+
+  step "cancel" {
+    run = "cd ${invoke.dir} && wok close ${var.bug.id} --reason 'Fix pipeline cancelled'"
   }
 }
 
@@ -80,10 +80,10 @@ agent "bugs" {
   on_idle  = { action = "nudge", message = "Keep working. Fix the bug, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
 
-  prompt = <<-PROMPT
-    Fix the following bug:
+  prime = ["cd ${invoke.dir} && wok show ${var.bug.id}"]
 
-    ${var.bug.title}
+  prompt = <<-PROMPT
+    Fix the following bug: ${var.bug.id} - ${var.bug.title}
 
     ## Steps
 
