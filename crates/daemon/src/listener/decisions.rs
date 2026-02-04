@@ -109,7 +109,7 @@ pub(super) fn handle_decision_resolve(
 /// Map a decision resolution to the appropriate pipeline action event.
 ///
 /// Option numbering (1-indexed):
-/// - Idle: 1=Nudge, 2=Done, 3=Cancel
+/// - Idle: 1=Nudge, 2=Done, 3=Cancel, 4=Dismiss
 /// - Error/Gate: 1=Retry, 2=Skip, 3=Cancel
 /// - Approval: 1=Approve, 2=Deny, 3=Cancel
 fn map_decision_to_action(
@@ -153,6 +153,8 @@ fn map_decision_to_action(
                 pipeline_id: pid,
                 step: step.to_string(),
             }),
+            // 4 = Dismiss: resolve without action
+            4 => None,
             _ => None,
         },
         DecisionSource::Error | DecisionSource::Gate => match choice {

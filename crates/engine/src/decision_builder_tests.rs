@@ -20,13 +20,15 @@ fn test_idle_trigger_builds_correct_options() {
             options, source, ..
         } => {
             assert_eq!(source, DecisionSource::Idle);
-            assert_eq!(options.len(), 3);
+            assert_eq!(options.len(), 4);
             assert_eq!(options[0].label, "Nudge");
             assert!(options[0].recommended);
             assert_eq!(options[1].label, "Done");
             assert!(!options[1].recommended);
             assert_eq!(options[2].label, "Cancel");
             assert!(!options[2].recommended);
+            assert_eq!(options[3].label, "Dismiss");
+            assert!(!options[3].recommended);
         }
         _ => panic!("expected DecisionCreated"),
     }
