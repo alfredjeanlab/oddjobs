@@ -917,26 +917,23 @@ pub(super) fn handle_query(
                 } else {
                     ns_active.entry(ns).or_default().push(entry);
                 }
+            }
 
-                // Extract active agents from this pipeline's step history
-                if let Some(last_step) = p.step_history.last() {
-                    if let Some(ref agent_id) = last_step.agent_id {
-                        let status = match &last_step.outcome {
-                            StepOutcome::Running => "running",
-                            StepOutcome::Waiting(_) => "waiting",
-                            _ => continue,
-                        };
-                        ns_agents
-                            .entry(p.namespace.clone())
-                            .or_default()
-                            .push(AgentStatusEntry {
-                                agent_id: agent_id.clone(),
-                                pipeline_name: p.name.clone(),
-                                step_name: last_step.name.clone(),
-                                status: status.to_string(),
-                            });
-                    }
+            // Collect standalone agents
+            for ar in state.agent_runs.values() {
+                if ar.status.is_terminal() {
+                    continue;
                 }
+                let agent_id = ar.agent_id.clone().unwrap_or_else(|| ar.id.clone());
+                ns_agents
+                    .entry(ar.namespace.clone())
+                    .or_default()
+                    .push(AgentStatusEntry {
+                        agent_id,
+                        agent_name: ar.agent_name.clone(),
+                        command_name: ar.command_name.clone(),
+                        status: ar.status.to_string(),
+                    });
             }
 
             // Collect workers grouped by namespace

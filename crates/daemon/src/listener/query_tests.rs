@@ -8,7 +8,7 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
-use oj_core::{Pipeline, StepOutcome, StepRecord, StepStatus};
+use oj_core::{AgentRun, AgentRunStatus, Pipeline, StepOutcome, StepRecord, StepStatus};
 use oj_storage::{CronRecord, MaterializedState, QueueItem, QueueItemStatus, WorkerRecord};
 
 use oj_engine::breadcrumb::{Breadcrumb, BreadcrumbAgent};
@@ -353,18 +353,25 @@ fn status_overview_includes_active_agents() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
-            "p1".to_string(),
-            make_pipeline(
-                "p1",
-                "fix/login",
-                "oddjobs",
-                "work",
-                StepStatus::Running,
-                StepOutcome::Running,
-                Some("claude-abc"),
-                1000,
-            ),
+        s.agent_runs.insert(
+            "ar-1".to_string(),
+            AgentRun {
+                id: "ar-1".to_string(),
+                agent_name: "coder".to_string(),
+                command_name: "fix/login".to_string(),
+                namespace: "oddjobs".to_string(),
+                cwd: temp.path().to_path_buf(),
+                runbook_hash: "hash123".to_string(),
+                status: AgentRunStatus::Running,
+                agent_id: Some("claude-abc".to_string()),
+                session_id: Some("tmux-session".to_string()),
+                error: None,
+                created_at_ms: 1000,
+                updated_at_ms: 2000,
+                action_attempts: HashMap::new(),
+                agent_signal: None,
+                vars: HashMap::new(),
+            },
         );
     }
 
@@ -381,8 +388,8 @@ fn status_overview_includes_active_agents() {
             let ns = &namespaces[0];
             assert_eq!(ns.active_agents.len(), 1);
             assert_eq!(ns.active_agents[0].agent_id, "claude-abc");
-            assert_eq!(ns.active_agents[0].pipeline_name, "fix/login");
-            assert_eq!(ns.active_agents[0].step_name, "work");
+            assert_eq!(ns.active_agents[0].agent_name, "coder");
+            assert_eq!(ns.active_agents[0].command_name, "fix/login");
             assert_eq!(ns.active_agents[0].status, "running");
         }
         other => panic!("unexpected response: {:?}", other),

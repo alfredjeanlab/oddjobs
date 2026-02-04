@@ -383,9 +383,9 @@ fn format_text(
             for a in &ns.active_agents {
                 let _ = writeln!(
                     out,
-                    "    {}/{}  {}  {}",
-                    a.pipeline_name,
-                    a.step_name,
+                    "    {} ({})  {}  {}",
+                    a.agent_name,
+                    a.command_name,
                     color::muted(&a.agent_id),
                     color::status(&a.status),
                 );

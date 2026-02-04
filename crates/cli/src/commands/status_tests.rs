@@ -631,8 +631,8 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             dead: 0,
         }],
         active_agents: vec![oj_daemon::AgentStatusEntry {
-            pipeline_name: "build".to_string(),
-            step_name: "code".to_string(),
+            agent_name: "coder".to_string(),
+            command_name: "build".to_string(),
             agent_id: "agent-001".to_string(),
             status: "running".to_string(),
         }],

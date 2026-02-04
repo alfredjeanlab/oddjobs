@@ -65,8 +65,8 @@ pub struct QueueStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentStatusEntry {
     pub agent_id: String,
-    pub pipeline_name: String,
-    pub step_name: String,
+    pub agent_name: String,
+    pub command_name: String,
     pub status: String,
 }
 
