@@ -52,6 +52,7 @@ fn header_with_active_pipelines_and_watch() {
             step_status: "running".to_string(),
             elapsed_ms: 5000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -83,6 +84,7 @@ fn header_without_watch_has_no_every() {
             step_status: "running".to_string(),
             elapsed_ms: 5000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -123,6 +125,7 @@ fn active_pipeline_shows_kind_not_name() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -167,6 +170,7 @@ fn active_pipeline_hides_nonce_only_name() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -211,6 +215,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: Some("gate check failed".to_string()),
+            escalate_source: None,
         }],
         orphaned_pipelines: vec![],
         workers: vec![],
@@ -257,6 +262,7 @@ fn orphaned_pipeline_hides_name_when_same_as_id() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         workers: vec![],
         queues: vec![],
@@ -333,6 +339,7 @@ fn escalated_pipeline_truncates_long_reason() {
             step_status: "Waiting".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: Some(long_reason.clone()),
+            escalate_source: None,
         }],
         orphaned_pipelines: vec![],
         workers: vec![],
@@ -404,6 +411,7 @@ fn active_pipeline_shows_friendly_name() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -445,6 +453,7 @@ fn escalated_pipeline_shows_friendly_name() {
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: Some("gate check failed".to_string()),
+            escalate_source: None,
         }],
         orphaned_pipelines: vec![],
         workers: vec![],
@@ -482,6 +491,7 @@ fn orphaned_pipeline_shows_friendly_name() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         workers: vec![],
         queues: vec![],
@@ -546,6 +556,7 @@ fn render_frame_content_identical_across_tty_modes() {
             step_status: "running".to_string(),
             elapsed_ms: 5000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![],
         orphaned_pipelines: vec![],
@@ -661,6 +672,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
             waiting_reason: None,
+            escalate_source: None,
         }],
         escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
             id: "efgh5678".to_string(),
@@ -670,6 +682,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             step_status: "waiting".to_string(),
             elapsed_ms: 120_000,
             waiting_reason: Some("needs manual approval".to_string()),
+            escalate_source: None,
         }],
         orphaned_pipelines: vec![],
         workers: vec![oj_daemon::WorkerSummary {
@@ -796,5 +809,71 @@ fn namespace_with_non_empty_queue_is_shown() {
     assert!(
         output.contains("tasks"),
         "queue should be displayed:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn escalated_pipeline_shows_source_label() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "efgh5678-0000-0000-0000".to_string(),
+            name: "deploy-staging-efgh5678".to_string(),
+            kind: "deploy".to_string(),
+            step: "test".to_string(),
+            step_status: "waiting".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: Some("Agent is idle".to_string()),
+            escalate_source: Some("idle".to_string()),
+        }],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        output.contains("[idle]"),
+        "output should contain source label '[idle]':\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn escalated_pipeline_no_source_label_when_none() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "efgh5678-0000-0000-0000".to_string(),
+            name: "deploy-staging-efgh5678".to_string(),
+            kind: "deploy".to_string(),
+            step: "test".to_string(),
+            step_status: "waiting".to_string(),
+            elapsed_ms: 60_000,
+            waiting_reason: Some("gate check failed".to_string()),
+            escalate_source: None,
+        }],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    assert!(
+        !output.contains('['),
+        "output should not contain bracket source label when source is None:\n{output}"
     );
 }

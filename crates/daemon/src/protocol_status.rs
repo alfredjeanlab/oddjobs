@@ -52,6 +52,9 @@ pub struct PipelineStatusEntry {
     pub elapsed_ms: u64,
     /// Reason pipeline is waiting (from StepOutcome::Waiting)
     pub waiting_reason: Option<String>,
+    /// Escalation source category (e.g., "idle", "error", "gate", "approval")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escalate_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

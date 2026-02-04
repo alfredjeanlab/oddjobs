@@ -289,15 +289,21 @@ fn format_text(
                 let short_id = truncate_id(&p.id, 8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
+                let source_label = p
+                    .escalate_source
+                    .as_deref()
+                    .map(|s| format!("[{}]  ", s))
+                    .unwrap_or_default();
                 let _ = writeln!(
                     out,
-                    "    {} {}  {}{}  {}  {}  {}",
+                    "    {} {}  {}{}  {}  {}  {}{}",
                     color::yellow("⚠"),
                     color::muted(short_id),
                     p.kind,
                     friendly,
                     p.step,
                     color::status(&p.step_status),
+                    source_label,
                     elapsed,
                 );
                 if let Some(ref reason) = p.waiting_reason {

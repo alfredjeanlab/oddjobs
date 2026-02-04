@@ -929,6 +929,14 @@ pub(super) fn handle_query(
                     _ => None,
                 };
 
+                let escalate_source = match &p.step_status {
+                    oj_core::StepStatus::Waiting(Some(decision_id)) => state
+                        .decisions
+                        .get(decision_id.as_str())
+                        .map(|d| format!("{:?}", d.source).to_lowercase()),
+                    _ => None,
+                };
+
                 let entry = PipelineStatusEntry {
                     id: p.id.clone(),
                     name: p.name.clone(),
@@ -937,6 +945,7 @@ pub(super) fn handle_query(
                     step_status: p.step_status.to_string(),
                     elapsed_ms,
                     waiting_reason,
+                    escalate_source,
                 };
 
                 let ns = p.namespace.clone();

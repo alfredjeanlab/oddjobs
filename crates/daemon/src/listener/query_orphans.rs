@@ -166,6 +166,7 @@ pub(super) fn collect_orphan_status_entries(
                 step_status: "orphaned".to_string(),
                 elapsed_ms,
                 waiting_reason: None,
+                escalate_source: None,
             });
     }
     ns_orphaned
