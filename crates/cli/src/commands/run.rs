@@ -226,7 +226,7 @@ fn execute_shell_inline(
     named: &HashMap<String, String>,
     project_root: &Path,
     invoke_dir: &Path,
-    namespace: &str,
+    _namespace: &str,
 ) -> Result<()> {
     let parsed_args = cmd_def.parse_args(positional, named);
     let mut vars: HashMap<String, String> = parsed_args
@@ -238,6 +238,10 @@ fn execute_shell_inline(
 
     let interpolated = oj_runbook::interpolate_shell(cmd, &vars);
 
+    // OJ_NAMESPACE is NOT injected here — the CLI shell-inline path runs
+    // outside engine-managed workspaces.  If OJ_NAMESPACE is already set
+    // in the parent environment (e.g. from a parent workspace), the child
+    // process inherits it automatically via std::process::Command.
     let wrapped = format!("set -euo pipefail\n{interpolated}");
     let status = std::process::Command::new("bash")
         .arg("-c")
@@ -246,7 +250,6 @@ fn execute_shell_inline(
         .stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
-        .env("OJ_NAMESPACE", namespace)
         .status()?;
 
     if !status.success() {

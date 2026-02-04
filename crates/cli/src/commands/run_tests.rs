@@ -132,13 +132,16 @@ fn shell_inline_interpolates_workspace() {
 }
 
 #[test]
-fn shell_inline_sets_oj_namespace_env() {
+fn shell_inline_does_not_inject_oj_namespace() {
     let dir = tempfile::tempdir().unwrap();
     let output_file = dir.path().join("namespace.txt");
 
+    // Ensure OJ_NAMESPACE is not inherited from this test process
+    std::env::remove_var("OJ_NAMESPACE");
+
     let cmd_def = make_shell_command(
         "check-ns",
-        &format!("echo $OJ_NAMESPACE > {}", output_file.display()),
+        &format!("echo ${{OJ_NAMESPACE:-unset}} > {}", output_file.display()),
     );
 
     let result = execute_shell_inline(
@@ -153,7 +156,11 @@ fn shell_inline_sets_oj_namespace_env() {
 
     assert!(result.is_ok());
     let content = std::fs::read_to_string(&output_file).unwrap();
-    assert_eq!(content.trim(), "my-project");
+    assert_eq!(
+        content.trim(),
+        "unset",
+        "OJ_NAMESPACE should not be injected by shell-inline (only engine-managed workspaces)"
+    );
 }
 
 #[test]
