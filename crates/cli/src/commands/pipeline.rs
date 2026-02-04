@@ -290,6 +290,16 @@ pub async fn handle(
                             color::context("Status:"),
                             color::status(&p.step_status)
                         );
+                        if let Some(session) = &p.session_id {
+                            println!("  {} {}", color::context("Session:"), session);
+                        }
+                        if let Some(ws) = &p.workspace_path {
+                            println!("  {} {}", color::context("Workspace:"), ws.display());
+                        }
+                        if let Some(error) = &p.error {
+                            println!();
+                            println!("  {} {}", color::context("Error:"), error);
+                        }
 
                         if !p.steps.is_empty() {
                             println!();
@@ -350,19 +360,8 @@ pub async fn handle(
                             }
                         }
 
-                        println!();
-                        if let Some(session) = &p.session_id {
-                            println!("  {} {}", color::context("Session:"), session);
-                        }
-                        if let Some(ws) = &p.workspace_path {
-                            println!("  {} {}", color::context("Workspace:"), ws.display());
-                        }
-                        if let Some(error) = &p.error {
-                            println!();
-                            println!("  {} {}", color::context("Error:"), error);
-                        }
                         if !p.vars.is_empty() {
-                            println!("  {}", color::header("Vars:"));
+                            println!("  {}", color::header("Variables:"));
                             if verbose {
                                 for (k, v) in &p.vars {
                                     if v.contains('\n') {
