@@ -16,8 +16,8 @@ use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::{
-    handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_resume,
-    handle_session_kill, PruneFlags,
+    handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_prune,
+    handle_pipeline_resume, handle_session_kill, PruneFlags,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -1187,4 +1187,159 @@ async fn agent_send_prefers_latest_step_history_entry() {
     )
     .await;
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+// --- handle_pipeline_prune tests ---
+
+fn make_pipeline_ns(id: &str, step: &str, namespace: &str) -> Pipeline {
+    let mut p = make_pipeline(id, step);
+    p.namespace = namespace.to_string();
+    p
+}
+
+#[test]
+fn pipeline_prune_all_without_namespace_prunes_across_all_projects() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(&logs_path).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Insert terminal pipelines from different namespaces
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-a".to_string(),
+            make_pipeline_ns("pipe-a", "done", "proj-alpha"),
+        );
+        s.pipelines.insert(
+            "pipe-b".to_string(),
+            make_pipeline_ns("pipe-b", "failed", "proj-beta"),
+        );
+        s.pipelines.insert(
+            "pipe-c".to_string(),
+            make_pipeline_ns("pipe-c", "cancelled", "proj-gamma"),
+        );
+        // Non-terminal pipeline should be skipped
+        s.pipelines.insert(
+            "pipe-d".to_string(),
+            make_pipeline_ns("pipe-d", "work", "proj-alpha"),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None, // No namespace filter
+    };
+    let result = handle_pipeline_prune(
+        &state, &event_bus, &logs_path, &orphans, &flags, false, false,
+    );
+
+    match result {
+        Ok(Response::PipelinesPruned { pruned, skipped }) => {
+            assert_eq!(
+                pruned.len(),
+                3,
+                "should prune all 3 terminal pipelines across namespaces"
+            );
+            let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
+            assert!(pruned_ids.contains(&"pipe-a"));
+            assert!(pruned_ids.contains(&"pipe-b"));
+            assert!(pruned_ids.contains(&"pipe-c"));
+            assert_eq!(skipped, 1, "should skip non-terminal pipeline");
+        }
+        other => panic!("expected PipelinesPruned, got: {:?}", other),
+    }
+}
+
+#[test]
+fn pipeline_prune_all_with_namespace_only_prunes_matching_project() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(&logs_path).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Insert terminal pipelines from different namespaces
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-a".to_string(),
+            make_pipeline_ns("pipe-a", "done", "proj-alpha"),
+        );
+        s.pipelines.insert(
+            "pipe-b".to_string(),
+            make_pipeline_ns("pipe-b", "failed", "proj-beta"),
+        );
+        s.pipelines.insert(
+            "pipe-c".to_string(),
+            make_pipeline_ns("pipe-c", "cancelled", "proj-alpha"),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: Some("proj-alpha"), // Only prune proj-alpha
+    };
+    let result = handle_pipeline_prune(
+        &state, &event_bus, &logs_path, &orphans, &flags, false, false,
+    );
+
+    match result {
+        Ok(Response::PipelinesPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 2, "should prune only proj-alpha pipelines");
+            let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
+            assert!(pruned_ids.contains(&"pipe-a"));
+            assert!(pruned_ids.contains(&"pipe-c"));
+            // Namespace-filtered pipelines don't count as "skipped" —
+            // only non-terminal pipelines within the namespace do.
+            assert_eq!(skipped, 0);
+        }
+        other => panic!("expected PipelinesPruned, got: {:?}", other),
+    }
+}
+
+#[test]
+fn pipeline_prune_skips_non_terminal_steps() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(&logs_path).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    {
+        let mut s = state.lock();
+        // Non-terminal steps should never be pruned
+        s.pipelines.insert(
+            "pipe-running".to_string(),
+            make_pipeline("pipe-running", "implement"),
+        );
+        s.pipelines
+            .insert("pipe-work".to_string(), make_pipeline("pipe-work", "work"));
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = handle_pipeline_prune(
+        &state, &event_bus, &logs_path, &orphans, &flags, false, false,
+    );
+
+    match result {
+        Ok(Response::PipelinesPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 0, "should not prune non-terminal pipelines");
+            assert_eq!(skipped, 2, "should skip both non-terminal pipelines");
+        }
+        other => panic!("expected PipelinesPruned, got: {:?}", other),
+    }
 }
