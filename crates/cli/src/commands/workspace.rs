@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+use oj_core::ShortId;
+
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{print_prune_results, OutputFormat};
@@ -156,7 +158,7 @@ pub async fn handle(
                                 };
                                 println!(
                                     "{} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
-                                    color::muted(&format!("{:<id_w$}", &w.id[..8.min(w.id.len())])),
+                                    color::muted(&format!("{:<id_w$}", w.id.short(8))),
                                     &proj[..proj_w.min(proj.len())],
                                     path_str,
                                     branch,
@@ -165,7 +167,7 @@ pub async fn handle(
                             } else {
                                 println!(
                                     "{} {:<path_w$} {:<branch_w$} {}",
-                                    color::muted(&format!("{:<id_w$}", &w.id[..8.min(w.id.len())])),
+                                    color::muted(&format!("{:<id_w$}", w.id.short(8))),
                                     path_str,
                                     branch,
                                     color::status(&w.status),
@@ -236,7 +238,7 @@ pub async fn handle(
                     for ws in &dropped {
                         println!(
                             "Dropping {} ({})",
-                            ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
+                            ws.branch.as_deref().unwrap_or(ws.id.short(8)),
                             ws.path.display()
                         );
                     }
@@ -267,7 +269,7 @@ pub async fn handle(
                 |ws| {
                     format!(
                         "{} ({})",
-                        ws.branch.as_deref().unwrap_or(&ws.id[..8.min(ws.id.len())]),
+                        ws.branch.as_deref().unwrap_or(ws.id.short(8)),
                         ws.path.display()
                     )
                 },

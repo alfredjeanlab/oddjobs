@@ -8,6 +8,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use oj_core::ShortId;
+
 use crate::log_paths;
 
 /// Append-only logger for per-queue activity logs.
@@ -49,7 +51,7 @@ impl QueueLogger {
         }
         let mut file = OpenOptions::new().create(true).append(true).open(path)?;
         let ts = format_utc_now();
-        let prefix = &item_id[..8.min(item_id.len())];
+        let prefix = item_id.short(8);
         writeln!(file, "{} [{}] {}", ts, prefix, message)?;
         Ok(())
     }

@@ -9,7 +9,7 @@ use crate::error::RuntimeError;
 use crate::log_paths::cron_log_path;
 use crate::time_fmt::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, ShortId, TimerId, UuidIdGen};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -390,7 +390,7 @@ where
                 let pipeline_id = PipelineId::new(UuidIdGen.next());
                 let display_name = oj_runbook::pipeline_display_name(
                     pipeline_name,
-                    &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
+                    pipeline_id.short(8),
                     &namespace,
                 );
 
@@ -421,7 +421,7 @@ where
                     &format!(
                         "tick: triggered pipeline {} ({})",
                         pipeline_name,
-                        &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())]
+                        pipeline_id.short(8)
                     ),
                 );
 
@@ -513,7 +513,7 @@ where
                     &format!(
                         "tick: triggered agent {} ({})",
                         agent_name,
-                        &agent_run_id.as_str()[..8.min(agent_run_id.as_str().len())]
+                        agent_run_id.short(8)
                     ),
                 );
 
@@ -616,8 +616,8 @@ where
 
         tracing::info!(
             cron = cron_name,
-            old_hash = &old_hash[..12.min(old_hash.len())],
-            new_hash = &runbook_hash[..12.min(runbook_hash.len())],
+            old_hash = old_hash.short(12),
+            new_hash = runbook_hash.short(12),
             "runbook changed on disk, refreshing"
         );
 

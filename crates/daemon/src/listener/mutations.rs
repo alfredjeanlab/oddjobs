@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{AgentId, Event, PipelineId, SessionId, WorkspaceId};
+use oj_core::{AgentId, Event, PipelineId, SessionId, ShortId, WorkspaceId};
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
@@ -1124,7 +1124,7 @@ fn validate_resume_message(
 
     // Check if it's an agent step
     if step_def.is_agent() {
-        let short_id = &pipeline_id[..12.min(pipeline_id.len())];
+        let short_id = pipeline_id.short(12);
         return Err(format!(
             "agent steps require --message for resume. Example:\n  \
              oj pipeline resume {} -m \"I fixed the import, try again\"",

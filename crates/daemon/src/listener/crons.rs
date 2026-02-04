@@ -292,11 +292,8 @@ pub(super) async fn handle_cron_once(
     } else {
         // Generate pipeline ID
         let pipeline_id = PipelineId::new(UuidIdGen.next());
-        let pipeline_display_name = oj_runbook::pipeline_display_name(
-            &pipeline_name,
-            &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())],
-            namespace,
-        );
+        let pipeline_display_name =
+            oj_runbook::pipeline_display_name(&pipeline_name, pipeline_id.short(8), namespace);
 
         // Emit CronOnce event to create pipeline via the cron code path
         let event = Event::CronOnce {

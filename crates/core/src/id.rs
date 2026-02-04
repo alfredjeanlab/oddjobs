@@ -6,9 +6,25 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+/// Trait for truncating identifiers to a short prefix.
+pub trait ShortId {
+    /// Returns a string slice truncated to at most `n` characters.
+    fn short(&self, n: usize) -> &str;
+}
+
+impl ShortId for str {
+    fn short(&self, n: usize) -> &str {
+        if self.len() <= n {
+            self
+        } else {
+            &self[..n]
+        }
+    }
+}
+
 /// Define a newtype ID wrapper around `String`.
 ///
-/// Generates `new()`, `as_str()`, `Display`, `From<String>`, `From<&str>`,
+/// Generates `new()`, `as_str()`, `short()`, `Display`, `From<String>`, `From<&str>`,
 /// `PartialEq<str>`, `PartialEq<&str>`, and `Borrow<str>` implementations.
 ///
 /// ```ignore
@@ -40,6 +56,15 @@ macro_rules! define_id {
 
             pub fn as_str(&self) -> &str {
                 &self.0
+            }
+
+            /// Returns a string slice truncated to at most `n` characters.
+            pub fn short(&self, n: usize) -> &str {
+                if self.0.len() <= n {
+                    &self.0
+                } else {
+                    &self.0[..n]
+                }
             }
         }
 

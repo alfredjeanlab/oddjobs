@@ -8,6 +8,8 @@ use std::io::IsTerminal;
 
 use anyhow::Result;
 
+use oj_core::ShortId;
+
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::OutputFormat;
@@ -261,7 +263,7 @@ fn format_text(
                 ))
             );
             for p in &ns.active_pipelines {
-                let short_id = truncate_id(&p.id, 8);
+                let short_id = p.id.short(8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let _ = writeln!(
@@ -286,7 +288,7 @@ fn format_text(
                 color::header(&format!("Escalated ({}):", ns.escalated_pipelines.len()))
             );
             for p in &ns.escalated_pipelines {
-                let short_id = truncate_id(&p.id, 8);
+                let short_id = p.id.short(8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let source_label = p
@@ -321,7 +323,7 @@ fn format_text(
                 color::header(&format!("Orphaned ({}):", ns.orphaned_pipelines.len()))
             );
             for p in &ns.orphaned_pipelines {
-                let short_id = truncate_id(&p.id, 8);
+                let short_id = p.id.short(8);
                 let elapsed = format_duration_ms(p.elapsed_ms);
                 let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
                 let _ = writeln!(
@@ -430,14 +432,6 @@ fn format_duration_ms(ms: u64) -> String {
     format_duration(ms / 1000)
 }
 
-fn truncate_id(id: &str, max_len: usize) -> &str {
-    if id.len() <= max_len {
-        id
-    } else {
-        &id[..max_len]
-    }
-}
-
 /// Returns ` name` when the pipeline name is a meaningful friendly name,
 /// or an empty string when it would be redundant (same as kind) or opaque (same as id).
 fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
@@ -445,7 +439,7 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     // When the name template produces an empty slug, pipeline_display_name() returns
     // just the nonce (first 8 chars of the ID), which would be redundant with the
     // truncated ID shown in the status output.
-    let truncated_id = truncate_id(id, 8);
+    let truncated_id = id.short(8);
     if name.is_empty() || name == kind || name == id || name == truncated_id {
         String::new()
     } else {

@@ -6,7 +6,7 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, PipelineId, SessionId, StepOutcome, WorkspaceId};
+use oj_core::{Clock, Effect, Event, PipelineId, SessionId, ShortId, StepOutcome, WorkspaceId};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -94,7 +94,7 @@ where
                 RuntimeError::InvalidRequest(format!(
                     "agent steps require --message for resume. Example:\n  \
                      oj pipeline resume {} -m \"I fixed the import, try again\"",
-                    &pipeline.id[..12.min(pipeline.id.len())]
+                    pipeline.id.short(12)
                 ))
             })?;
 

@@ -74,6 +74,35 @@ fn define_id_serde_roundtrip() {
     assert_eq!(deserialized, id);
 }
 
+// --- short() tests ---
+
+#[test]
+fn define_id_short_truncates() {
+    let id = TestId::new("abcdefghijklmnop");
+    assert_eq!(id.short(8), "abcdefgh");
+}
+
+#[test]
+fn define_id_short_returns_full_when_shorter() {
+    let id = TestId::new("abc");
+    assert_eq!(id.short(8), "abc");
+}
+
+#[test]
+fn define_id_short_returns_full_when_exact() {
+    let id = TestId::new("abcdefgh");
+    assert_eq!(id.short(8), "abcdefgh");
+}
+
+#[test]
+fn short_id_trait_on_str() {
+    use crate::id::ShortId;
+    let s = "abcdefghijklmnop";
+    assert_eq!(s.short(8), "abcdefgh");
+    assert_eq!(s.short(100), s);
+    assert_eq!("abc".short(8), "abc");
+}
+
 // --- IdGen tests ---
 
 #[test]

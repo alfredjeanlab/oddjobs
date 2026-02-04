@@ -54,8 +54,7 @@ where
 
         // Resolve pipeline display name from template (if set)
         let pipeline_name = if let Some(name_template) = &pipeline_def.name {
-            let pipeline_id_str = pipeline_id.as_str();
-            let nonce = &pipeline_id_str[..8.min(pipeline_id_str.len())];
+            let nonce = pipeline_id.short(8);
             let lookup: HashMap<String, String> = vars
                 .iter()
                 .flat_map(|(k, v)| vec![(k.clone(), v.clone()), (format!("var.{}", k), v.clone())])
@@ -81,8 +80,7 @@ where
             }
             (Some(_), Some(_)) | (None, Some(_)) => {
                 // Create workspace directory
-                let pipeline_id_str = pipeline_id.as_str();
-                let nonce = &pipeline_id_str[..8.min(pipeline_id_str.len())];
+                let nonce = pipeline_id.short(8);
                 let ws_name = pipeline_name.strip_prefix("oj-").unwrap_or(&pipeline_name);
                 let ws_id = if ws_name.ends_with(nonce) {
                     format!("ws-{}", ws_name)
@@ -131,8 +129,7 @@ where
         };
 
         if is_worktree {
-            let pipeline_id_str = pipeline_id.as_str();
-            let nonce = &pipeline_id_str[..8.min(pipeline_id_str.len())];
+            let nonce = pipeline_id.short(8);
 
             // Build lookup for interpolation (same pattern as locals)
             let lookup: HashMap<String, String> = vars
@@ -272,12 +269,10 @@ where
                 );
 
                 // Safety: workspace.branch is always injected above when is_worktree
-                let branch_name = vars.get("workspace.branch").cloned().unwrap_or_else(|| {
-                    format!(
-                        "ws-{}",
-                        &pipeline_id.as_str()[..8.min(pipeline_id.as_str().len())]
-                    )
-                });
+                let branch_name = vars
+                    .get("workspace.branch")
+                    .cloned()
+                    .unwrap_or_else(|| format!("ws-{}", pipeline_id.short(8)));
                 let start_point = vars
                     .get("workspace.ref")
                     .cloned()

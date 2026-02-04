@@ -660,7 +660,7 @@ fn build_spawn_effects_includes_default_status() {
         // Default right: first 8 chars of agent_id
         let right = status.get("right").unwrap().as_str().unwrap();
         assert_eq!(right.len(), 8);
-        assert_eq!(right, &agent_id.as_str()[..8]);
+        assert_eq!(right, agent_id.short(8));
     } else {
         panic!("Expected SpawnAgent effect");
     }

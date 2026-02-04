@@ -5,7 +5,7 @@
 
 use crate::error::RuntimeError;
 use crate::ExecuteError;
-use oj_core::{AgentId, AgentRunId, Effect, Pipeline, PipelineId, TimerId};
+use oj_core::{AgentId, AgentRunId, Effect, Pipeline, PipelineId, ShortId, TimerId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -319,7 +319,7 @@ pub fn build_spawn_effects(
         if let serde_json::Value::Object(ref mut map) = tmux_value {
             let status = map.entry("status").or_insert_with(|| serde_json::json!({}));
             if let serde_json::Value::Object(ref mut status_map) = status {
-                let short_id = &agent_id[..8];
+                let short_id = agent_id.short(8);
                 status_map.entry("left").or_insert_with(|| {
                     serde_json::json!(format!("{} {}/{}", ctx.namespace, ctx.name, agent_name))
                 });

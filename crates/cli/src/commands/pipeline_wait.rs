@@ -8,6 +8,8 @@ use std::time::Instant;
 
 use anyhow::Result;
 
+use oj_core::ShortId;
+
 use crate::client::DaemonClient;
 use crate::exit_error::ExitError;
 
@@ -82,7 +84,7 @@ pub async fn handle(
                         _ => None,
                     };
                     if let Some(outcome) = outcome {
-                        let short_id = &canonical_ids[input_id][..8];
+                        let short_id = canonical_ids[input_id].short(8);
                         match &outcome {
                             PipelineOutcome::Done => {
                                 println!("Pipeline {} ({}) completed", p.name, short_id);

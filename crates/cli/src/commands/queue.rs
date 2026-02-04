@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::path::Path;
 
+use oj_core::ShortId;
 use oj_daemon::{Query, Request, Response};
 
 use crate::color;
@@ -174,7 +175,7 @@ pub async fn handle(
                 } => {
                     println!(
                         "Dropped item {} from queue {}",
-                        &item_id[..8.min(item_id.len())],
+                        item_id.short(8),
                         queue_name
                     );
                 }
@@ -199,11 +200,7 @@ pub async fn handle(
                     queue_name,
                     item_id,
                 } => {
-                    println!(
-                        "Retrying item {} in queue {}",
-                        &item_id[..8.min(item_id.len())],
-                        queue_name
-                    );
+                    println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -237,11 +234,7 @@ pub async fn handle(
                             );
                             for item in &items {
                                 let data_str = format_item_data(&item.data);
-                                println!(
-                                    "  {} {}",
-                                    color::muted(&item.id[..8.min(item.id.len())]),
-                                    data_str,
-                                );
+                                println!("  {} {}", color::muted(item.id.short(8)), data_str,);
                             }
                         }
                     }
@@ -355,7 +348,7 @@ pub async fn handle(
                                 let data_str = format_item_data(&item.data);
                                 let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
                                 table.row(vec![
-                                    item.id[..8.min(item.id.len())].to_string(),
+                                    item.id.short(8).to_string(),
                                     item.status.clone(),
                                     worker,
                                     data_str,

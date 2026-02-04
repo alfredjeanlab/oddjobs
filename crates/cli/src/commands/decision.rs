@@ -8,6 +8,7 @@ use std::io::Write;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+use oj_core::ShortId;
 use oj_daemon::{Query, Request, Response};
 
 use crate::client::DaemonClient;
@@ -91,15 +92,11 @@ pub async fn handle(
                                 println!("{}", serde_json::to_string_pretty(&*d)?);
                             }
                             _ => {
-                                let short_id = if d.id.len() > 8 { &d.id[..8] } else { &d.id };
+                                let short_id = d.id.short(8);
                                 let pipeline_display = if d.pipeline_name.is_empty() {
                                     d.pipeline_id.clone()
                                 } else {
-                                    format!(
-                                        "{} ({})",
-                                        d.pipeline_name,
-                                        &d.pipeline_id[..8.min(d.pipeline_id.len())]
-                                    )
+                                    format!("{} ({})", d.pipeline_name, d.pipeline_id.short(8))
                                 };
                                 let age = format_time_ago(d.created_at_ms);
 
@@ -115,7 +112,7 @@ pub async fn handle(
                                     println!(
                                         "{} {}",
                                         color::context("Agent:  "),
-                                        color::muted(&aid[..8.min(aid.len())])
+                                        color::muted(aid.short(8))
                                     );
                                 }
 
@@ -201,12 +198,7 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::DecisionResolved { id: resolved_id } => {
-                    let short_id = if resolved_id.len() > 8 {
-                        &resolved_id[..8]
-                    } else {
-                        &resolved_id
-                    };
-                    println!("Resolved decision {}", short_id);
+                    println!("Resolved decision {}", resolved_id.short(8));
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

@@ -10,6 +10,8 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
+use oj_core::ShortId;
+
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{
@@ -195,7 +197,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
     let mut table = Table::new(cols);
 
     for p in pipelines {
-        let id = p.id[..8.min(p.id.len())].to_string();
+        let id = p.id.short(8).to_string();
         let updated = format_time_ago(p.updated_at_ms);
 
         let mut cells = vec![id];
@@ -483,7 +485,7 @@ pub async fn handle(
                     println!("╰──── end peek ────");
                 }
                 None => {
-                    let short_id = &pipeline.id[..8.min(pipeline.id.len())];
+                    let short_id = pipeline.id.short(8);
                     let is_terminal = pipeline.step == "done"
                         || pipeline.step == "failed"
                         || pipeline.step == "cancelled";
@@ -533,7 +535,7 @@ pub async fn handle(
                 "pipeline",
                 "skipped",
                 |entry| {
-                    let short_id = &entry.id[..8.min(entry.id.len())];
+                    let short_id = entry.id.short(8);
                     format!("{} ({}, {})", entry.name, short_id, entry.step)
                 },
             )?;

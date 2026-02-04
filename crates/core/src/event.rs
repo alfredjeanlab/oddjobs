@@ -6,6 +6,7 @@
 use crate::agent::{AgentError, AgentId, AgentState};
 use crate::agent_run::{AgentRunId, AgentRunStatus};
 use crate::decision::{DecisionOption, DecisionSource};
+use crate::id::ShortId;
 use crate::pipeline::PipelineId;
 use crate::session::SessionId;
 use crate::timer::TimerId;
@@ -712,7 +713,7 @@ impl Event {
                     .unwrap_or(0);
                 format!(
                     "{t} hash={} v={version} agents={agents} pipelines={pipelines}",
-                    &hash[..12]
+                    hash.short(12)
                 )
             }
             Event::SessionCreated {

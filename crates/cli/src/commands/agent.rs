@@ -11,7 +11,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use serde::{Deserialize, Serialize};
 
-use oj_core::{AgentId, Event, PromptType, QuestionData};
+use oj_core::{AgentId, Event, PromptType, QuestionData, ShortId};
 
 use crate::client::DaemonClient;
 use crate::color;
@@ -348,7 +348,7 @@ pub async fn handle(
                 Err(crate::client::ClientError::Rejected(msg))
                     if msg.starts_with("Session not found") =>
                 {
-                    let short_id = &agent.agent_id[..8.min(agent.agent_id.len())];
+                    let short_id = agent.agent_id.short(8);
                     let is_terminal = agent.status == "completed"
                         || agent.status == "failed"
                         || agent.status == "cancelled";
@@ -409,7 +409,7 @@ pub async fn handle(
                 "agent",
                 "pipeline(s) skipped",
                 |entry| {
-                    let short_pid = &entry.pipeline_id[..8.min(entry.pipeline_id.len())];
+                    let short_pid = entry.pipeline_id.short(8);
                     format!(
                         "agent {} ({}, {})",
                         entry.agent_id, short_pid, entry.step_name
@@ -427,12 +427,10 @@ pub async fn handle(
             match format {
                 OutputFormat::Text => {
                     for aid in &resumed {
-                        let short = &aid[..8.min(aid.len())];
-                        println!("Resumed agent {}", short);
+                        println!("Resumed agent {}", aid.short(8));
                     }
                     for (aid, reason) in &skipped {
-                        let short = &aid[..8.min(aid.len())];
-                        println!("Skipped agent {}: {}", short, reason);
+                        println!("Skipped agent {}: {}", aid.short(8), reason);
                     }
                     if resumed.is_empty() && skipped.is_empty() {
                         println!("No agents to resume");

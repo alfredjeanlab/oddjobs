@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Result};
 use clap::Args;
+use oj_core::ShortId;
 use oj_runbook::RunDirective;
 
 use crate::client::DaemonClient;
@@ -259,7 +260,7 @@ async fn dispatch_pipeline(
     pipeline_id: &str,
     pipeline_name: &str,
 ) -> Result<()> {
-    let short_id = &pipeline_id[..8.min(pipeline_id.len())];
+    let short_id = pipeline_id.short(8);
     println!("{} {namespace}", color::context("Project:"));
     println!("{} {command}", color::context("Command:"));
     println!(
@@ -322,7 +323,7 @@ async fn dispatch_agent_run(
     agent_name: &str,
     should_attach: bool,
 ) -> Result<()> {
-    let short_id = &agent_run_id[..8.min(agent_run_id.len())];
+    let short_id = agent_run_id.short(8);
     println!("{} {namespace}", color::context("Project:"));
     println!("{} {command}", color::context("Command:"));
     println!(

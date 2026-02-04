@@ -8,6 +8,7 @@ use crate::client_lifecycle::daemon_stop;
 use crate::output::{display_log, OutputFormat};
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
+use oj_core::ShortId;
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -256,11 +257,7 @@ async fn orphans(format: OutputFormat) -> Result<()> {
             );
 
             for o in &orphans {
-                let short_id = if o.pipeline_id.len() > 8 {
-                    &o.pipeline_id[..8]
-                } else {
-                    &o.pipeline_id
-                };
+                let short_id = o.pipeline_id.short(8);
                 println!(
                     "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} {}",
                     short_id,

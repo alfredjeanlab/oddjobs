@@ -17,7 +17,7 @@ use handlers::worker::WorkerState;
 #[cfg(test)]
 use handlers::worker::WorkerStatus;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentRunId, Clock, Pipeline};
+use oj_core::{AgentId, AgentRunId, Clock, Pipeline, ShortId};
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 use std::collections::HashMap;
@@ -252,8 +252,8 @@ where
 
         tracing::info!(
             worker = worker_name,
-            old_hash = &old_hash[..12.min(old_hash.len())],
-            new_hash = &runbook_hash[..12.min(runbook_hash.len())],
+            old_hash = old_hash.short(12),
+            new_hash = runbook_hash.short(12),
             "runbook changed on disk, refreshing"
         );
 
