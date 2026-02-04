@@ -14,8 +14,12 @@ use std::process::Command;
 
 #[derive(Args)]
 pub struct DaemonArgs {
+    /// Print daemon version
+    #[arg(short = 'v', long = "version")]
+    pub version: bool,
+
     #[command(subcommand)]
-    pub command: DaemonCommand,
+    pub command: Option<DaemonCommand>,
 }
 
 #[derive(Subcommand)]
@@ -62,19 +66,71 @@ pub enum DaemonCommand {
 }
 
 pub async fn daemon(args: DaemonArgs, format: OutputFormat) -> Result<()> {
+    if args.version {
+        return version(format).await;
+    }
+
     match args.command {
-        DaemonCommand::Start { foreground } => start(foreground).await,
-        DaemonCommand::Stop { kill } => stop(kill).await,
-        DaemonCommand::Restart { kill } => restart(kill).await,
-        DaemonCommand::Status => status(format).await,
-        DaemonCommand::Logs {
+        Some(DaemonCommand::Start { foreground }) => start(foreground).await,
+        Some(DaemonCommand::Stop { kill }) => stop(kill).await,
+        Some(DaemonCommand::Restart { kill }) => restart(kill).await,
+        Some(DaemonCommand::Status) => status(format).await,
+        Some(DaemonCommand::Logs {
             limit,
             no_limit,
             follow,
-        } => logs(limit, no_limit, follow, format).await,
-        DaemonCommand::Orphans => orphans(format).await,
-        DaemonCommand::DismissOrphan { id } => dismiss_orphan(id, format).await,
+        }) => logs(limit, no_limit, follow, format).await,
+        Some(DaemonCommand::Orphans) => orphans(format).await,
+        Some(DaemonCommand::DismissOrphan { id }) => dismiss_orphan(id, format).await,
+        None => {
+            // No subcommand — show colorized help
+            let cmd = crate::find_subcommand(crate::cli_command(), &["daemon"]);
+            crate::help::print_help(cmd);
+            Ok(())
+        }
     }
+}
+
+async fn version(format: OutputFormat) -> Result<()> {
+    let not_running = || match format {
+        OutputFormat::Text => {
+            println!("Daemon not running");
+            Ok(())
+        }
+        OutputFormat::Json => {
+            println!(r#"{{ "status": "not_running" }}"#);
+            Ok(())
+        }
+    };
+
+    let client = match DaemonClient::connect() {
+        Ok(c) => c,
+        Err(_) => return not_running(),
+    };
+
+    let version = match client.hello().await {
+        Ok(v) => v,
+        Err(crate::client::ClientError::DaemonNotRunning) => return not_running(),
+        Err(crate::client::ClientError::Io(ref e))
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ) =>
+        {
+            return not_running();
+        }
+        Err(_) => "unknown".to_string(),
+    };
+
+    match format {
+        OutputFormat::Text => println!("ojd {}", version),
+        OutputFormat::Json => {
+            let obj = serde_json::json!({ "version": version });
+            println!("{}", serde_json::to_string_pretty(&obj)?);
+        }
+    }
+
+    Ok(())
 }
 
 async fn start(foreground: bool) -> Result<()> {
@@ -374,6 +430,10 @@ fn find_ojd_binary() -> Result<PathBuf> {
     // Fall back to PATH lookup
     Ok(PathBuf::from("ojd"))
 }
+
+#[cfg(test)]
+#[path = "daemon_tests.rs"]
+mod tests;
 
 fn get_log_path() -> Result<PathBuf> {
     // OJ_STATE_DIR takes priority (used by tests for isolation)

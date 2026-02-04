@@ -178,7 +178,7 @@ fn format_error(err: &anyhow::Error) -> String {
     buf
 }
 
-fn cli_command() -> clap::Command {
+pub(crate) fn cli_command() -> clap::Command {
     // Check for -C in raw args to discover correct project root for help text
     let project_root = find_project_root_from_args();
     let run_help = commands::run::available_commands_help(&project_root);
@@ -196,6 +196,9 @@ fn cli_command() -> clap::Command {
                 .action(clap::ArgAction::Version)
                 .help("Print version"),
         )
+        .mut_subcommand("daemon", |sub| {
+            sub.mut_arg("version", |arg| arg.short_alias('V'))
+        })
         .mut_subcommand("run", |sub| sub.override_help(run_help))
 }
 
