@@ -391,7 +391,7 @@ fn friendly_name_label_empty_when_name_is_empty() {
 fn friendly_name_label_shown_when_meaningful() {
     assert_eq!(
         friendly_name_label("fix-login-button-a1b2c3d4", "build", "abc123"),
-        " fix-login-button-a1b2c3d4"
+        "fix-login-button-a1b2c3d4"
     );
 }
 
@@ -875,5 +875,179 @@ fn escalated_pipeline_no_source_label_when_none() {
     assert!(
         !output.contains('['),
         "output should not contain bracket source label when source is None:\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn column_order_is_id_name_kindstep_status_elapsed() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+            id: "abcd1234-0000-0000-0000".to_string(),
+            name: "fix-login-abcd1234".to_string(),
+            kind: "build".to_string(),
+            step: "check".to_string(),
+            step_status: "running".to_string(),
+            elapsed_ms: 420_000,
+            waiting_reason: None,
+            escalate_source: None,
+        }],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    // Find the pipeline row line
+    let line = output
+        .lines()
+        .find(|l| l.contains("abcd1234"))
+        .expect("should find pipeline row");
+
+    // Verify column order: id, then name, then kind/step, then status, then elapsed
+    let id_pos = line.find("abcd1234").unwrap();
+    let name_pos = line.find("fix-login-abcd1234").unwrap();
+    let kind_step_pos = line.find("build/check").unwrap();
+    let status_pos = line.find("running").unwrap();
+    let elapsed_pos = line.find("7m").unwrap();
+
+    assert!(id_pos < name_pos, "id should come before name: {line}");
+    assert!(
+        name_pos < kind_step_pos,
+        "name should come before kind/step: {line}"
+    );
+    assert!(
+        kind_step_pos < status_pos,
+        "kind/step should come before status: {line}"
+    );
+    assert!(
+        status_pos < elapsed_pos,
+        "status should come before elapsed: {line}"
+    );
+}
+
+#[test]
+#[serial]
+fn columns_are_aligned_across_rows() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![
+            oj_daemon::PipelineStatusEntry {
+                id: "aaaa1111-0000".to_string(),
+                name: "short-aaaa1111".to_string(),
+                kind: "build".to_string(),
+                step: "check".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 60_000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+            oj_daemon::PipelineStatusEntry {
+                id: "bbbb2222-0000".to_string(),
+                name: "much-longer-name-bbbb2222".to_string(),
+                kind: "deploy".to_string(),
+                step: "implement".to_string(),
+                step_status: "waiting".to_string(),
+                elapsed_ms: 120_000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+        ],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|l| l.contains("aaaa1111") || l.contains("bbbb2222"))
+        .collect();
+    assert_eq!(lines.len(), 2, "should find exactly 2 pipeline rows");
+
+    // The kind/step column should start at the same position in both lines
+    let ks_pos_0 = lines[0].find("build/check").unwrap();
+    let ks_pos_1 = lines[1].find("deploy/implement").unwrap();
+    assert_eq!(
+        ks_pos_0, ks_pos_1,
+        "kind/step columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+
+    // The status column should also be aligned
+    let st_pos_0 = lines[0].find("running").unwrap();
+    let st_pos_1 = lines[1].find("waiting").unwrap();
+    assert_eq!(
+        st_pos_0, st_pos_1,
+        "status columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+}
+
+#[test]
+#[serial]
+fn name_column_omitted_when_all_names_hidden() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![
+            oj_daemon::PipelineStatusEntry {
+                id: "aaaa1111-0000-0000-0000".to_string(),
+                name: "aaaa1111-0000-0000-0000".to_string(), // same as id → hidden
+                kind: "build".to_string(),
+                step: "check".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 60_000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+            oj_daemon::PipelineStatusEntry {
+                id: "bbbb2222-0000-0000-0000".to_string(),
+                name: "build".to_string(), // same as kind → hidden
+                kind: "build".to_string(),
+                step: "test".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 120_000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+        ],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let line = output
+        .lines()
+        .find(|l| l.contains("aaaa1111"))
+        .expect("should find first pipeline row");
+
+    // With all names hidden, the kind/step should follow closely after the id
+    // (just 2 spaces separator, no extra name column padding)
+    let id_end = line.find("aaaa1111").unwrap() + "aaaa1111".len();
+    let ks_start = line.find("build/check").unwrap();
+    assert_eq!(
+        ks_start - id_end,
+        2,
+        "kind/step should follow id with just 2-space separator when names are hidden:\n  {line}"
     );
 }

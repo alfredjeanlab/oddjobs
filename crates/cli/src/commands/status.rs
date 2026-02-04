@@ -262,21 +262,20 @@ fn format_text(
                     ns.active_pipelines.len()
                 ))
             );
-            for p in &ns.active_pipelines {
-                let short_id = p.id.short(8);
-                let elapsed = format_duration_ms(p.elapsed_ms);
-                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
-                let _ = writeln!(
-                    out,
-                    "    {}  {}{}  {}  {}  {}",
-                    color::muted(short_id),
-                    p.kind,
-                    friendly,
-                    p.step,
-                    color::status(&p.step_status),
-                    elapsed,
-                );
-            }
+            let rows: Vec<PipelineRow> = ns
+                .active_pipelines
+                .iter()
+                .map(|p| PipelineRow {
+                    prefix: "    ".to_string(),
+                    id: truncate_id(&p.id, 8).to_string(),
+                    name: friendly_name_label(&p.name, &p.kind, &p.id),
+                    kind_step: format!("{}/{}", p.kind, p.step),
+                    status: p.step_status.clone(),
+                    suffix: format_duration_ms(p.elapsed_ms),
+                    reason: None,
+                })
+                .collect();
+            write_aligned_pipeline_rows(&mut out, &rows);
             out.push('\n');
         }
 
@@ -287,31 +286,28 @@ fn format_text(
                 "  {}",
                 color::header(&format!("Escalated ({}):", ns.escalated_pipelines.len()))
             );
-            for p in &ns.escalated_pipelines {
-                let short_id = p.id.short(8);
-                let elapsed = format_duration_ms(p.elapsed_ms);
-                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
-                let source_label = p
-                    .escalate_source
-                    .as_deref()
-                    .map(|s| format!("[{}]  ", s))
-                    .unwrap_or_default();
-                let _ = writeln!(
-                    out,
-                    "    {} {}  {}{}  {}  {}  {}{}",
-                    color::yellow("⚠"),
-                    color::muted(short_id),
-                    p.kind,
-                    friendly,
-                    p.step,
-                    color::status(&p.step_status),
-                    source_label,
-                    elapsed,
-                );
-                if let Some(ref reason) = p.waiting_reason {
-                    let _ = writeln!(out, "      → {}", truncate_reason(reason, 72));
-                }
-            }
+            let rows: Vec<PipelineRow> = ns
+                .escalated_pipelines
+                .iter()
+                .map(|p| {
+                    let source_label = p
+                        .escalate_source
+                        .as_deref()
+                        .map(|s| format!("[{}]  ", s))
+                        .unwrap_or_default();
+                    let elapsed = format_duration_ms(p.elapsed_ms);
+                    PipelineRow {
+                        prefix: format!("    {} ", color::yellow("⚠")),
+                        id: truncate_id(&p.id, 8).to_string(),
+                        name: friendly_name_label(&p.name, &p.kind, &p.id),
+                        kind_step: format!("{}/{}", p.kind, p.step),
+                        status: p.step_status.clone(),
+                        suffix: format!("{}{}", source_label, elapsed),
+                        reason: p.waiting_reason.clone(),
+                    }
+                })
+                .collect();
+            write_aligned_pipeline_rows(&mut out, &rows);
             out.push('\n');
         }
 
@@ -322,22 +318,20 @@ fn format_text(
                 "  {}",
                 color::header(&format!("Orphaned ({}):", ns.orphaned_pipelines.len()))
             );
-            for p in &ns.orphaned_pipelines {
-                let short_id = p.id.short(8);
-                let elapsed = format_duration_ms(p.elapsed_ms);
-                let friendly = friendly_name_label(&p.name, &p.kind, &p.id);
-                let _ = writeln!(
-                    out,
-                    "    {} {}  {}{}  {}  {}  {}",
-                    color::yellow("⚠"),
-                    color::muted(short_id),
-                    p.kind,
-                    friendly,
-                    p.step,
-                    color::status("orphaned"),
-                    elapsed,
-                );
-            }
+            let rows: Vec<PipelineRow> = ns
+                .orphaned_pipelines
+                .iter()
+                .map(|p| PipelineRow {
+                    prefix: format!("    {} ", color::yellow("⚠")),
+                    id: truncate_id(&p.id, 8).to_string(),
+                    name: friendly_name_label(&p.name, &p.kind, &p.id),
+                    kind_step: format!("{}/{}", p.kind, p.step),
+                    status: "orphaned".to_string(),
+                    suffix: format_duration_ms(p.elapsed_ms),
+                    reason: None,
+                })
+                .collect();
+            write_aligned_pipeline_rows(&mut out, &rows);
             let _ = writeln!(out, "    Run `oj daemon orphans` for recovery details");
             out.push('\n');
         }
@@ -432,7 +426,15 @@ fn format_duration_ms(ms: u64) -> String {
     format_duration(ms / 1000)
 }
 
-/// Returns ` name` when the pipeline name is a meaningful friendly name,
+fn truncate_id(id: &str, max_len: usize) -> &str {
+    if id.len() <= max_len {
+        id
+    } else {
+        &id[..max_len]
+    }
+}
+
+/// Returns the pipeline name when it is a meaningful friendly name,
 /// or an empty string when it would be redundant (same as kind) or opaque (same as id).
 fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     // Hide name when it's empty, matches the kind, or matches the full/truncated ID.
@@ -443,7 +445,49 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     if name.is_empty() || name == kind || name == id || name == truncated_id {
         String::new()
     } else {
-        format!(" {}", name)
+        name.to_string()
+    }
+}
+
+/// A row of pipeline data for aligned rendering.
+struct PipelineRow {
+    prefix: String,
+    id: String,
+    name: String,
+    kind_step: String,
+    status: String,
+    suffix: String,
+    reason: Option<String>,
+}
+
+/// Render pipeline rows with aligned columns.
+///
+/// Columns: `{prefix}{id}  [{name}  ]{kind/step}  {status}  {suffix}`
+/// The name column is omitted entirely when all names are empty.
+fn write_aligned_pipeline_rows(out: &mut String, rows: &[PipelineRow]) {
+    if rows.is_empty() {
+        return;
+    }
+
+    let w_name = rows.iter().map(|r| r.name.len()).max().unwrap_or(0);
+    let w_ks = rows.iter().map(|r| r.kind_step.len()).max().unwrap_or(0);
+    let w_st = rows.iter().map(|r| r.status.len()).max().unwrap_or(0);
+
+    for r in rows {
+        let _ = write!(out, "{}{}", r.prefix, color::muted(&r.id));
+        if w_name > 0 {
+            let _ = write!(out, "  {:<w_name$}", r.name);
+        }
+        let _ = write!(
+            out,
+            "  {}",
+            color::context(&format!("{:<w_ks$}", r.kind_step))
+        );
+        let _ = write!(out, "  {}", color::status(&format!("{:<w_st$}", r.status)));
+        let _ = writeln!(out, "  {}", r.suffix);
+        if let Some(ref reason) = r.reason {
+            let _ = writeln!(out, "      → {}", truncate_reason(reason, 72));
+        }
     }
 }
 
