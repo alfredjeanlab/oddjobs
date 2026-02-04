@@ -20,13 +20,13 @@ queue "bugs" {
   take = "wok start ${item.id}"
 }
 
-worker "fix" {
+worker "bug" {
   source      = { queue = "bugs" }
-  handler     = { pipeline = "fix" }
+  handler     = { pipeline = "bug" }
   concurrency = 3
 }
 
-pipeline "fix" {
+pipeline "bug" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
   on_fail   = { step = "reopen" }
