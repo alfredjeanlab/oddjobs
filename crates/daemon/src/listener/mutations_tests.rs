@@ -632,3 +632,209 @@ fn cancel_empty_ids_returns_empty_response() {
         other => panic!("expected PipelinesCancelled, got: {:?}", other),
     }
 }
+
+/// Helper to create a runbook JSON with an agent step
+fn make_agent_runbook_json(pipeline_kind: &str, step_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "pipelines": {
+            pipeline_kind: {
+                "kind": pipeline_kind,
+                "steps": [
+                    {
+                        "name": step_name,
+                        "run": { "agent": "test-agent" }
+                    }
+                ]
+            }
+        }
+    })
+}
+
+/// Helper to create a runbook JSON with a shell step
+fn make_shell_runbook_json(pipeline_kind: &str, step_name: &str) -> serde_json::Value {
+    serde_json::json!({
+        "pipelines": {
+            pipeline_kind: {
+                "kind": pipeline_kind,
+                "steps": [
+                    {
+                        "name": step_name,
+                        "run": "echo hello"
+                    }
+                ]
+            }
+        }
+    })
+}
+
+/// Load a runbook JSON into state with a specific hash
+fn load_runbook_json_into_state(
+    state: &Arc<Mutex<MaterializedState>>,
+    hash: &str,
+    runbook_json: serde_json::Value,
+) {
+    let event = Event::RunbookLoaded {
+        hash: hash.to_string(),
+        version: 1,
+        runbook: runbook_json,
+    };
+    state.lock().apply_event(&event);
+}
+
+#[test]
+fn resume_agent_step_without_message_returns_error() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Create a runbook with an agent step
+    let runbook_hash = "agent-runbook-hash";
+    load_runbook_json_into_state(
+        &state,
+        runbook_hash,
+        make_agent_runbook_json("test", "work"),
+    );
+
+    // Create a pipeline at the agent step
+    let mut pipeline = make_pipeline("pipe-agent", "work");
+    pipeline.runbook_hash = runbook_hash.to_string();
+    {
+        let mut s = state.lock();
+        s.pipelines.insert("pipe-agent".to_string(), pipeline);
+    }
+
+    // Try to resume without a message
+    let result = handle_pipeline_resume(
+        &state,
+        &orphans,
+        &event_bus,
+        "pipe-agent".to_string(),
+        None, // No message provided
+        HashMap::new(),
+    );
+
+    match result {
+        Ok(Response::Error { message }) => {
+            assert!(
+                message.contains("--message") || message.contains("agent steps require"),
+                "expected error about --message, got: {}",
+                message
+            );
+        }
+        other => panic!("expected Response::Error about --message, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_agent_step_with_message_succeeds() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Create a runbook with an agent step
+    let runbook_hash = "agent-runbook-hash";
+    load_runbook_json_into_state(
+        &state,
+        runbook_hash,
+        make_agent_runbook_json("test", "work"),
+    );
+
+    // Create a pipeline at the agent step
+    let mut pipeline = make_pipeline("pipe-agent-2", "work");
+    pipeline.runbook_hash = runbook_hash.to_string();
+    {
+        let mut s = state.lock();
+        s.pipelines.insert("pipe-agent-2".to_string(), pipeline);
+    }
+
+    // Resume with a message should succeed
+    let result = handle_pipeline_resume(
+        &state,
+        &orphans,
+        &event_bus,
+        "pipe-agent-2".to_string(),
+        Some("I fixed the issue".to_string()),
+        HashMap::new(),
+    );
+
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[test]
+fn resume_shell_step_without_message_succeeds() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Create a runbook with a shell step
+    let runbook_hash = "shell-runbook-hash";
+    load_runbook_json_into_state(
+        &state,
+        runbook_hash,
+        make_shell_runbook_json("test", "build"),
+    );
+
+    // Create a pipeline at the shell step
+    let mut pipeline = make_pipeline("pipe-shell", "build");
+    pipeline.runbook_hash = runbook_hash.to_string();
+    {
+        let mut s = state.lock();
+        s.pipelines.insert("pipe-shell".to_string(), pipeline);
+    }
+
+    // Resume without a message should succeed for shell steps
+    let result = handle_pipeline_resume(
+        &state,
+        &orphans,
+        &event_bus,
+        "pipe-shell".to_string(),
+        None,
+        HashMap::new(),
+    );
+
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[test]
+fn resume_failed_pipeline_without_message_succeeds() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+    let orphans = empty_orphans();
+
+    // Create a runbook with an agent step
+    let runbook_hash = "agent-runbook-hash";
+    load_runbook_json_into_state(
+        &state,
+        runbook_hash,
+        make_agent_runbook_json("test", "work"),
+    );
+
+    // Create a pipeline in "failed" state (terminal failure)
+    // Even though the last step was an agent step, resuming from "failed"
+    // doesn't require a message at the daemon level - the engine handles
+    // resetting to the failed step
+    let mut pipeline = make_pipeline("pipe-failed-agent", "failed");
+    pipeline.runbook_hash = runbook_hash.to_string();
+    {
+        let mut s = state.lock();
+        s.pipelines
+            .insert("pipe-failed-agent".to_string(), pipeline);
+    }
+
+    // Resume without message should be allowed for "failed" state
+    // (the engine will reset to the actual failed step and validate there)
+    let result = handle_pipeline_resume(
+        &state,
+        &orphans,
+        &event_bus,
+        "pipe-failed-agent".to_string(),
+        None,
+        HashMap::new(),
+    );
+
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
