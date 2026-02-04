@@ -390,11 +390,13 @@ pub(super) async fn handle_workspace_drop(
 
 /// Handle an agent send request.
 ///
-/// Resolves agent_id via:
-/// 1. Direct match on pipeline agent_id (from step_history)
-/// 2. Pipeline ID lookup → current step's agent_id
-/// 3. Prefix match on either
-pub(super) fn handle_agent_send(
+/// Resolves agent_id via (in order, first match wins):
+/// 1. Exact agent_id match across ALL step_history entries (prefer latest)
+/// 2. Pipeline ID lookup → latest agent from ALL step_history entries
+/// 3. Prefix match on agent_id across ALL step_history entries (prefer latest)
+/// 4. Standalone agent_runs match
+/// 5. Session liveness check (tmux has-session) before returning 'not found'
+pub(super) async fn handle_agent_send(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     agent_id: String,
@@ -403,12 +405,27 @@ pub(super) fn handle_agent_send(
     let resolved_agent_id = {
         let state_guard = state.lock();
 
-        // 1. Check if any pipeline has an agent with this exact ID or prefix
+        // (1) Exact agent_id match across ALL step history, prefer latest
         let mut found: Option<String> = None;
         for pipeline in state_guard.pipelines.values() {
-            if let Some(record) = pipeline.step_history.last() {
+            for record in pipeline.step_history.iter().rev() {
                 if let Some(aid) = &record.agent_id {
-                    if aid == &agent_id || aid.starts_with(&agent_id) {
+                    if aid == &agent_id {
+                        found = Some(aid.clone());
+                        break;
+                    }
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+
+        // (2) Pipeline ID lookup → latest agent from ALL step history
+        if found.is_none() {
+            if let Some(pipeline) = state_guard.get_pipeline(&agent_id) {
+                for record in pipeline.step_history.iter().rev() {
+                    if let Some(aid) = &record.agent_id {
                         found = Some(aid.clone());
                         break;
                     }
@@ -416,11 +433,34 @@ pub(super) fn handle_agent_send(
             }
         }
 
-        // 2. If not found by agent_id, try as pipeline ID → active agent
+        // (3) Prefix match across ALL step history entries, prefer latest
         if found.is_none() {
-            if let Some(pipeline) = state_guard.get_pipeline(&agent_id) {
-                if let Some(record) = pipeline.step_history.last() {
-                    found = record.agent_id.clone();
+            for pipeline in state_guard.pipelines.values() {
+                for record in pipeline.step_history.iter().rev() {
+                    if let Some(aid) = &record.agent_id {
+                        if aid.starts_with(&agent_id) {
+                            found = Some(aid.clone());
+                            break;
+                        }
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+        }
+
+        // (4) Standalone agent_runs match
+        if found.is_none() {
+            for ar in state_guard.agent_runs.values() {
+                let ar_agent_id = ar.agent_id.as_deref().unwrap_or(&ar.id);
+                if ar_agent_id == agent_id
+                    || ar.id == agent_id
+                    || ar_agent_id.starts_with(&agent_id)
+                    || ar.id.starts_with(&agent_id)
+                {
+                    found = Some(ar_agent_id.to_string());
+                    break;
                 }
             }
         }
@@ -428,21 +468,40 @@ pub(super) fn handle_agent_send(
         found
     };
 
-    match resolved_agent_id {
-        Some(aid) => {
-            let event = Event::AgentInput {
-                agent_id: AgentId::new(aid),
-                input: message,
-            };
-            event_bus
-                .send(event)
-                .map_err(|_| ConnectionError::WalError)?;
-            Ok(Response::Ok)
-        }
-        None => Ok(Response::Error {
-            message: format!("Agent not found: {}", agent_id),
-        }),
+    if let Some(aid) = resolved_agent_id {
+        let event = Event::AgentInput {
+            agent_id: AgentId::new(aid),
+            input: message,
+        };
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+        return Ok(Response::Ok);
     }
+
+    // (5) Session liveness check: before returning 'not found', verify the
+    // tmux session isn't still alive (recovery scenario where state is stale)
+    let session_alive = tokio::process::Command::new("tmux")
+        .args(["has-session", "-t", &agent_id])
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if session_alive {
+        let event = Event::AgentInput {
+            agent_id: AgentId::new(&agent_id),
+            input: message,
+        };
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+        return Ok(Response::Ok);
+    }
+
+    Ok(Response::Error {
+        message: format!("Agent not found: {}", agent_id),
+    })
 }
 
 /// Handle pipeline prune requests.

@@ -200,7 +200,7 @@ async fn handle_request(
         Request::SessionKill { id } => mutations::handle_session_kill(state, event_bus, &id).await,
 
         Request::AgentSend { agent_id, message } => {
-            mutations::handle_agent_send(state, event_bus, agent_id, message)
+            mutations::handle_agent_send(state, event_bus, agent_id, message).await
         }
 
         Request::PipelineResume { id, message, vars } => {

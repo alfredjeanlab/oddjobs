@@ -16,7 +16,8 @@ use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::{
-    handle_agent_prune, handle_pipeline_cancel, handle_pipeline_resume, handle_session_kill,
+    handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_resume,
+    handle_session_kill,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -834,5 +835,281 @@ fn resume_failed_pipeline_without_message_succeeds() {
         HashMap::new(),
     );
 
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+// --- handle_agent_send tests ---
+
+/// Helper: build a pipeline where the agent step is NOT the last step.
+/// This simulates a pipeline that has advanced past the agent step.
+fn make_pipeline_agent_in_history(
+    id: &str,
+    current_step: &str,
+    agent_step: &str,
+    agent_id: &str,
+) -> Pipeline {
+    Pipeline {
+        id: id.to_string(),
+        name: "test-pipeline".to_string(),
+        kind: "test".to_string(),
+        namespace: "proj".to_string(),
+        step: current_step.to_string(),
+        step_status: StepStatus::Running,
+        step_started_at: Instant::now(),
+        step_history: vec![
+            StepRecord {
+                name: agent_step.to_string(),
+                started_at_ms: 1000,
+                finished_at_ms: Some(2000),
+                outcome: StepOutcome::Completed,
+                agent_id: Some(agent_id.to_string()),
+                agent_name: Some("test-agent".to_string()),
+            },
+            StepRecord {
+                name: current_step.to_string(),
+                started_at_ms: 2000,
+                finished_at_ms: None,
+                outcome: StepOutcome::Running,
+                agent_id: None,
+                agent_name: None,
+            },
+        ],
+        vars: HashMap::new(),
+        runbook_hash: "abc123".to_string(),
+        cwd: std::path::PathBuf::from("/tmp/project"),
+        workspace_id: None,
+        workspace_path: None,
+        session_id: None,
+        created_at: Instant::now(),
+        error: None,
+        action_attempts: HashMap::new(),
+        agent_signal: None,
+        cancelling: false,
+        total_retries: 0,
+        step_visits: HashMap::new(),
+        cron_name: None,
+    }
+}
+
+#[tokio::test]
+async fn agent_send_finds_agent_in_last_step() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-1".to_string(),
+            make_pipeline_with_agent("pipe-1", "work", "agent-abc"),
+        );
+    }
+
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "agent-abc".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[tokio::test]
+async fn agent_send_finds_agent_in_earlier_step() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Agent step is NOT the last step — pipeline has advanced to "review"
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-1".to_string(),
+            make_pipeline_agent_in_history("pipe-1", "review", "work", "agent-xyz"),
+        );
+    }
+
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "agent-xyz".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[tokio::test]
+async fn agent_send_via_pipeline_id_finds_agent_in_earlier_step() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Pipeline has advanced past the agent step
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-abc123".to_string(),
+            make_pipeline_agent_in_history("pipe-abc123", "review", "work", "agent-inner"),
+        );
+    }
+
+    // Look up by pipeline ID — should search all history and find the agent
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "pipe-abc123".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[tokio::test]
+async fn agent_send_prefix_match_across_all_history() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Agent ID in a non-last step, matched by prefix
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-1".to_string(),
+            make_pipeline_agent_in_history(
+                "pipe-1",
+                "review",
+                "work",
+                "agent-long-uuid-string-12345",
+            ),
+        );
+    }
+
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "agent-long".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[tokio::test]
+async fn agent_send_finds_standalone_agent_run() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Insert a standalone agent run (no pipeline)
+    {
+        let mut s = state.lock();
+        s.agent_runs.insert(
+            "run-1".to_string(),
+            oj_core::AgentRun {
+                id: "run-1".to_string(),
+                agent_name: "my-agent".to_string(),
+                command_name: "oj agent run".to_string(),
+                namespace: "proj".to_string(),
+                cwd: std::path::PathBuf::from("/tmp"),
+                runbook_hash: "hash".to_string(),
+                status: oj_core::AgentRunStatus::Running,
+                agent_id: Some("standalone-agent-42".to_string()),
+                session_id: Some("oj-standalone-42".to_string()),
+                error: None,
+                created_at_ms: 1000,
+                updated_at_ms: 2000,
+                action_attempts: HashMap::new(),
+                agent_signal: None,
+                vars: HashMap::new(),
+            },
+        );
+    }
+
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "standalone-agent-42".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+#[tokio::test]
+async fn agent_send_not_found_returns_error() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "nonexistent-agent".to_string(),
+        "hello".to_string(),
+    )
+    .await;
+
+    match result {
+        Ok(Response::Error { message }) => {
+            assert!(
+                message.contains("not found"),
+                "expected 'not found' in message, got: {}",
+                message
+            );
+        }
+        other => panic!("expected Response::Error, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn agent_send_prefers_latest_step_history_entry() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Pipeline with two agent steps — should prefer the latest (second) one
+    // when looking up by pipeline ID
+    {
+        let mut s = state.lock();
+        let mut pipeline = make_pipeline("pipe-multi", "done");
+        pipeline.step_history = vec![
+            StepRecord {
+                name: "work-1".to_string(),
+                started_at_ms: 1000,
+                finished_at_ms: Some(2000),
+                outcome: StepOutcome::Completed,
+                agent_id: Some("agent-old".to_string()),
+                agent_name: Some("agent-v1".to_string()),
+            },
+            StepRecord {
+                name: "work-2".to_string(),
+                started_at_ms: 2000,
+                finished_at_ms: Some(3000),
+                outcome: StepOutcome::Completed,
+                agent_id: Some("agent-new".to_string()),
+                agent_name: Some("agent-v2".to_string()),
+            },
+            StepRecord {
+                name: "done".to_string(),
+                started_at_ms: 3000,
+                finished_at_ms: None,
+                outcome: StepOutcome::Running,
+                agent_id: None,
+                agent_name: None,
+            },
+        ];
+        s.pipelines.insert("pipe-multi".to_string(), pipeline);
+    }
+
+    // Look up by pipeline ID — should resolve to the latest agent (agent-new)
+    let result = handle_agent_send(
+        &state,
+        &event_bus,
+        "pipe-multi".to_string(),
+        "hello".to_string(),
+    )
+    .await;
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }
