@@ -9,6 +9,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{format_time_ago, should_use_color, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 use oj_daemon::protocol::SessionSummary;
@@ -37,6 +38,11 @@ pub enum SessionCommand {
     },
     /// Kill a session
     Kill {
+        /// Session ID
+        id: String,
+    },
+    /// Show session details
+    Show {
         /// Session ID
         id: String,
     },
@@ -79,6 +85,31 @@ pub async fn handle(
                 }
                 OutputFormat::Json => {
                     println!("{}", serde_json::to_string_pretty(&sessions)?);
+                }
+            }
+        }
+        SessionCommand::Show { id } => {
+            let session = client.get_session(&id).await?;
+
+            match format {
+                OutputFormat::Text => {
+                    if let Some(s) = session {
+                        println!("{} {}", color::header("Session:"), s.id);
+                        if let Some(ref pid) = s.pipeline_id {
+                            println!("  {} {}", color::context("Pipeline:"), pid);
+                        }
+                        println!(
+                            "  {} {}",
+                            color::context("Updated:"),
+                            format_time_ago(s.updated_at_ms)
+                        );
+                    } else {
+                        eprintln!("Session not found: {}", id);
+                        std::process::exit(1);
+                    }
+                }
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&session)?);
                 }
             }
         }

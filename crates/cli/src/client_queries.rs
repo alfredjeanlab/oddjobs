@@ -208,6 +208,20 @@ impl DaemonClient {
         }
     }
 
+    /// Query for a specific session by ID (or prefix)
+    pub async fn get_session(
+        &self,
+        id: &str,
+    ) -> Result<Option<oj_daemon::SessionSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::GetSession { id: id.to_string() },
+        };
+        match self.send(&request).await? {
+            Response::Session { session } => Ok(session.map(|b| *b)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Peek at a session's tmux pane output
     pub async fn peek_session(
         &self,
