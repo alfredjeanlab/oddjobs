@@ -40,6 +40,7 @@ fn make_cron_record(
         status: status.to_string(),
         interval: interval.to_string(),
         pipeline_name: pipeline_name.to_string(),
+        run_target: format!("pipeline:{}", pipeline_name),
         started_at_ms: clock.epoch_ms(),
         last_fired_at_ms: None,
     }
@@ -316,6 +317,7 @@ fn restart_stops_existing_then_starts() {
             status: "running".to_string(),
             interval: "1h".to_string(),
             pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
             started_at_ms: 0,
             last_fired_at_ms: None,
         },
@@ -359,6 +361,7 @@ fn restart_with_valid_runbook_returns_started() {
             status: "running".to_string(),
             interval: "24h".to_string(),
             pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
             started_at_ms: 0,
             last_fired_at_ms: None,
         },

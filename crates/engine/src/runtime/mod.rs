@@ -134,6 +134,21 @@ where
         f(&mut guard)
     }
 
+    /// Count currently running (non-terminal) instances of an agent by name.
+    pub(crate) fn count_running_agents(&self, agent_name: &str, namespace: &str) -> usize {
+        self.lock_state(|state| {
+            state
+                .agent_runs
+                .values()
+                .filter(|ar| {
+                    ar.agent_name == agent_name
+                        && ar.namespace == namespace
+                        && !ar.status.is_terminal()
+                })
+                .count()
+        })
+    }
+
     /// Create InvalidRunDirective error
     pub(crate) fn invalid_directive(context: &str, directive: &str, value: &str) -> RuntimeError {
         RuntimeError::InvalidRunDirective {

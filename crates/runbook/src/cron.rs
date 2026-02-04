@@ -6,7 +6,7 @@
 use crate::RunDirective;
 use serde::{Deserialize, Serialize};
 
-/// A cron definition that runs a pipeline on a timer interval.
+/// A cron definition that runs a pipeline or agent on a timer interval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronDef {
     /// Cron name (injected from map key)

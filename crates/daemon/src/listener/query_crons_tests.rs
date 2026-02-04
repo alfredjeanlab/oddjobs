@@ -20,6 +20,7 @@ fn make_cron_record(
         status: status.to_string(),
         interval: interval.to_string(),
         pipeline_name: "cleanup".to_string(),
+        run_target: "pipeline:cleanup".to_string(),
         started_at_ms,
         last_fired_at_ms,
     }
