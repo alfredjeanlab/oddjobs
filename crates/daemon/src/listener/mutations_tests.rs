@@ -15,7 +15,7 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::{handle_pipeline_resume, handle_session_kill};
+use super::{handle_agent_prune, handle_pipeline_resume, handle_session_kill};
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
     let wal_path = dir.join("test.wal");
@@ -304,4 +304,161 @@ async fn session_kill_existing_returns_ok() {
     // Should succeed (tmux kill-session will fail since no real tmux session,
     // but that's fine - we still emit the event)
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+}
+
+fn make_pipeline_with_agent(id: &str, step: &str, agent_id: &str) -> Pipeline {
+    Pipeline {
+        id: id.to_string(),
+        name: "test-pipeline".to_string(),
+        kind: "test".to_string(),
+        namespace: "proj".to_string(),
+        step: step.to_string(),
+        step_status: StepStatus::Running,
+        step_started_at: Instant::now(),
+        step_history: vec![StepRecord {
+            name: "work".to_string(),
+            started_at_ms: 1000,
+            finished_at_ms: Some(2000),
+            outcome: StepOutcome::Completed,
+            agent_id: Some(agent_id.to_string()),
+            agent_name: Some("test-agent".to_string()),
+        }],
+        vars: HashMap::new(),
+        runbook_hash: "abc123".to_string(),
+        cwd: std::path::PathBuf::from("/tmp/project"),
+        workspace_id: None,
+        workspace_path: None,
+        session_id: None,
+        created_at: Instant::now(),
+        error: None,
+        action_attempts: HashMap::new(),
+        agent_signal: None,
+        cancelling: false,
+        total_retries: 0,
+        step_visits: HashMap::new(),
+    }
+}
+
+#[test]
+fn agent_prune_all_removes_terminal_pipelines_from_state() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Insert a terminal pipeline with an agent
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-done".to_string(),
+            make_pipeline_with_agent("pipe-done", "done", "agent-1"),
+        );
+        // Insert a non-terminal pipeline (should be skipped)
+        s.pipelines.insert(
+            "pipe-running".to_string(),
+            make_pipeline_with_agent("pipe-running", "work", "agent-2"),
+        );
+    }
+
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, false);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 1, "should prune 1 agent");
+            assert_eq!(pruned[0].agent_id, "agent-1");
+            assert_eq!(pruned[0].pipeline_id, "pipe-done");
+            assert_eq!(skipped, 1, "should skip 1 non-terminal pipeline");
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    // After processing events, the terminal pipeline should be removed from state
+    {
+        let mut s = state.lock();
+        // Apply the PipelineDeleted event that was emitted
+        let event = Event::PipelineDeleted {
+            id: oj_core::PipelineId::new("pipe-done".to_string()),
+        };
+        s.apply_event(&event);
+
+        assert!(
+            !s.pipelines.contains_key("pipe-done"),
+            "terminal pipeline should be removed after prune"
+        );
+        assert!(
+            s.pipelines.contains_key("pipe-running"),
+            "non-terminal pipeline should remain"
+        );
+    }
+}
+
+#[test]
+fn agent_prune_dry_run_does_not_delete() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-failed".to_string(),
+            make_pipeline_with_agent("pipe-failed", "failed", "agent-3"),
+        );
+    }
+
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, true);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 1, "should report 1 agent");
+            assert_eq!(skipped, 0);
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    // Pipeline should still be in state after dry run
+    let s = state.lock();
+    assert!(
+        s.pipelines.contains_key("pipe-failed"),
+        "pipeline should remain after dry run"
+    );
+}
+
+#[test]
+fn agent_prune_skips_non_terminal_pipelines() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.pipelines.insert(
+            "pipe-active".to_string(),
+            make_pipeline_with_agent("pipe-active", "build", "agent-4"),
+        );
+    }
+
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, true, false);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 0, "should not prune active agents");
+            assert_eq!(skipped, 1, "should skip the active pipeline");
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    let s = state.lock();
+    assert!(
+        s.pipelines.contains_key("pipe-active"),
+        "active pipeline should remain"
+    );
 }
