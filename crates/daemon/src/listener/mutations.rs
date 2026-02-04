@@ -9,6 +9,7 @@ use parking_lot::Mutex;
 
 use oj_core::{AgentId, Event, PipelineId, SessionId, WorkspaceId};
 use oj_engine::breadcrumb::Breadcrumb;
+use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
@@ -135,15 +136,35 @@ pub(super) fn handle_pipeline_resume(
     message: Option<String>,
     vars: std::collections::HashMap<String, String>,
 ) -> Result<Response, ConnectionError> {
-    // Check if pipeline exists in state
-    let found_in_state = {
+    // Check if pipeline exists in state and get relevant info for validation
+    let pipeline_info = {
         let state_guard = state.lock();
-        state_guard.get_pipeline(&id).is_some()
+        state_guard.get_pipeline(&id).map(|p| {
+            (
+                p.id.clone(),
+                p.kind.clone(),
+                p.step.clone(),
+                p.runbook_hash.clone(),
+            )
+        })
     };
 
-    if found_in_state {
+    if let Some((pipeline_id, pipeline_kind, current_step, runbook_hash)) = pipeline_info {
+        // Validate agent steps require --message before emitting event
+        if message.is_none() && current_step != "failed" {
+            if let Err(err_msg) = validate_resume_message(
+                state,
+                &pipeline_id,
+                &pipeline_kind,
+                &current_step,
+                &runbook_hash,
+            ) {
+                return Ok(Response::Error { message: err_msg });
+            }
+        }
+
         let event = Event::PipelineResume {
-            id: PipelineId::new(id),
+            id: PipelineId::new(pipeline_id),
             message,
             vars,
         };
@@ -1027,6 +1048,58 @@ pub(super) async fn handle_agent_resume(
     }
 
     Ok(Response::AgentResumed { resumed, skipped })
+}
+
+/// Validate that agent steps have a message for resume.
+///
+/// Returns `Ok(())` if validation passes, or `Err(message)` with an error message
+/// if the step is an agent step and no message was provided.
+fn validate_resume_message(
+    state: &Arc<Mutex<MaterializedState>>,
+    pipeline_id: &str,
+    pipeline_kind: &str,
+    current_step: &str,
+    runbook_hash: &str,
+) -> Result<(), String> {
+    // Get the stored runbook
+    let stored = {
+        let state_guard = state.lock();
+        state_guard.runbooks.get(runbook_hash).cloned()
+    };
+
+    let Some(stored) = stored else {
+        // If runbook is not found, let the engine handle it
+        return Ok(());
+    };
+
+    // Parse the runbook
+    let runbook: Runbook = match serde_json::from_value(stored.data) {
+        Ok(rb) => rb,
+        Err(_) => {
+            // If we can't parse, let the engine handle it
+            return Ok(());
+        }
+    };
+
+    // Get the pipeline and step definitions
+    let Some(pipeline_def) = runbook.get_pipeline(pipeline_kind) else {
+        return Ok(());
+    };
+    let Some(step_def) = pipeline_def.get_step(current_step) else {
+        return Ok(());
+    };
+
+    // Check if it's an agent step
+    if step_def.is_agent() {
+        let short_id = &pipeline_id[..12.min(pipeline_id.len())];
+        return Err(format!(
+            "agent steps require --message for resume. Example:\n  \
+             oj pipeline resume {} -m \"I fixed the import, try again\"",
+            short_id
+        ));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
