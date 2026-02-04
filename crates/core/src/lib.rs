@@ -20,7 +20,6 @@ pub mod namespace;
 pub mod pipeline;
 pub mod session;
 pub mod timer;
-pub mod traced;
 pub mod worker;
 pub mod workspace;
 
@@ -36,6 +35,5 @@ pub use namespace::{scoped_name, split_scoped_name};
 pub use pipeline::{Pipeline, PipelineConfig, PipelineId, StepOutcome, StepRecord, StepStatus};
 pub use session::SessionId;
 pub use timer::TimerId;
-pub use traced::TracedEffect;
 pub use worker::WorkerId;
 pub use workspace::{WorkspaceId, WorkspaceStatus};

@@ -117,10 +117,6 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
     std::fs::create_dir_all(&runbook_dir).unwrap();
     std::fs::write(runbook_dir.join("test.toml"), runbook_content).unwrap();
 
-    // Create workspaces directory
-    let workspaces = dir_path.join("workspaces");
-    std::fs::create_dir_all(&workspaces).unwrap();
-
     let sessions = FakeSessionAdapter::new();
     let agents = FakeAgentAdapter::new();
     let notifier = FakeNotifyAdapter::new();
@@ -136,7 +132,6 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
         clock.clone(),
         RuntimeConfig {
             state_dir: dir_path.clone(),
-            workspaces_root: workspaces,
             log_dir: dir_path.join("logs"),
         },
         event_tx,

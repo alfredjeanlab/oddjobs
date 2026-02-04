@@ -131,7 +131,6 @@ async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, P
         SystemClock,
         RuntimeConfig {
             state_dir: dir_path.clone(),
-            workspaces_root: dir_path.clone(),
             log_dir: dir_path.join("logs"),
         },
         internal_tx,
@@ -575,7 +574,6 @@ async fn reconcile_state_resumes_running_workers() {
         SystemClock,
         RuntimeConfig {
             state_dir: dir_path.clone(),
-            workspaces_root: dir_path.clone(),
             log_dir: dir_path.join("logs"),
         },
         internal_tx,
@@ -766,7 +764,6 @@ fn setup_reconcile_runtime(dir_path: &Path) -> (Arc<DaemonRuntime>, TracedSessio
         SystemClock,
         RuntimeConfig {
             state_dir: dir_path.to_path_buf(),
-            workspaces_root: dir_path.to_path_buf(),
             log_dir: dir_path.join("logs"),
         },
         internal_tx,
