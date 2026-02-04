@@ -389,7 +389,12 @@ where
                         id: TimerId::liveness_agent_run(&agent_run_id),
                     },
                 ];
-                Ok(self.executor.execute_all(events).await?)
+                let result = self.executor.execute_all(events).await?;
+
+                // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                self.cleanup_standalone_agent_session(agent_run).await?;
+
+                Ok(result)
             }
             ActionEffects::FailAgentRun { error } => {
                 // Emit on_fail notification
@@ -415,7 +420,12 @@ where
                         id: TimerId::liveness_agent_run(&agent_run_id),
                     },
                 ];
-                Ok(self.executor.execute_all(events).await?)
+                let result = self.executor.execute_all(events).await?;
+
+                // Kill the tmux session (mirrors pipeline fail_pipeline behavior)
+                self.cleanup_standalone_agent_session(agent_run).await?;
+
+                Ok(result)
             }
             ActionEffects::Resume {
                 kill_session,
@@ -490,7 +500,12 @@ where
                                 id: TimerId::liveness_agent_run(&agent_run_id),
                             },
                         ];
-                        Ok(self.executor.execute_all(events).await?)
+                        let result = self.executor.execute_all(events).await?;
+
+                        // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                        self.cleanup_standalone_agent_session(agent_run).await?;
+
+                        Ok(result)
                     }
                     Err(gate_error) => {
                         // Gate failed — escalate
@@ -579,6 +594,40 @@ where
         }
     }
 
+    /// Kill the standalone agent's tmux session and clean up mappings.
+    ///
+    /// Mirrors what `advance_pipeline` / `fail_pipeline` do for pipeline agents:
+    /// deregister the agent mapping, kill the session, and emit `SessionDeleted`.
+    async fn cleanup_standalone_agent_session(
+        &self,
+        agent_run: &AgentRun,
+    ) -> Result<(), RuntimeError> {
+        // Deregister agent → agent_run mapping so stale watcher events
+        // from the dying session are dropped as unknown.
+        if let Some(ref aid) = agent_run.agent_id {
+            self.agent_runs.lock().remove(&AgentId::new(aid));
+        }
+
+        // Kill the tmux session and emit SessionDeleted
+        if let Some(ref session_id) = agent_run.session_id {
+            let sid = SessionId::new(session_id);
+            let _ = self
+                .executor
+                .execute(Effect::KillSession {
+                    session_id: sid.clone(),
+                })
+                .await;
+            let _ = self
+                .executor
+                .execute(Effect::Emit {
+                    event: Event::SessionDeleted { id: sid },
+                })
+                .await;
+        }
+
+        Ok(())
+    }
+
     /// Copy standalone agent session log on exit.
     fn copy_standalone_agent_session_log(&self, agent_run: &AgentRun) {
         let agent_id = match &agent_run.agent_id {
@@ -609,6 +658,9 @@ where
             AgentSignalKind::Complete => {
                 tracing::info!(agent_run_id = %agent_run.id, "standalone agent:signal complete");
 
+                // Copy session log before killing the session
+                self.copy_standalone_agent_session_log(agent_run);
+
                 // Emit on_done notification
                 if let Ok(runbook) = self.cached_runbook(&agent_run.runbook_hash) {
                     if let Some(agent_def) = runbook.get_agent(&agent_run.agent_name) {
@@ -634,7 +686,12 @@ where
                         id: TimerId::liveness_agent_run(&agent_run_id),
                     },
                 ];
-                Ok(self.executor.execute_all(events).await?)
+                let result = self.executor.execute_all(events).await?;
+
+                // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                self.cleanup_standalone_agent_session(agent_run).await?;
+
+                Ok(result)
             }
             AgentSignalKind::Escalate => {
                 let msg = message.as_deref().unwrap_or("Agent requested escalation");
