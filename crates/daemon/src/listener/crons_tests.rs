@@ -13,7 +13,7 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::{handle_cron_restart, handle_cron_start, handle_cron_stop};
+use super::{handle_cron_once, handle_cron_restart, handle_cron_start, handle_cron_stop};
 
 /// Helper: create an EventBus backed by a temp WAL, returning the bus and WAL path.
 fn test_event_bus(dir: &std::path::Path) -> (EventBus, PathBuf) {
@@ -373,6 +373,76 @@ fn restart_with_valid_runbook_returns_started() {
     assert!(
         matches!(result, Response::CronStarted { ref cron_name } if cron_name == "nightly"),
         "expected CronStarted response, got {:?}",
+        result
+    );
+}
+
+// ── CronOnce tests ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn once_with_wrong_project_root_falls_back_to_namespace() {
+    let project = project_with_cron();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a cron that knows the real project root,
+    // simulating `--project town` where the daemon already tracks the namespace.
+    let mut initial = MaterializedState::default();
+    initial.crons.insert(
+        "my-project/nightly".to_string(),
+        oj_storage::CronRecord {
+            name: "nightly".to_string(),
+            namespace: "my-project".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            interval: "24h".to_string(),
+            pipeline_name: "deploy".to_string(),
+            started_at_ms: 1_000,
+            last_fired_at_ms: None,
+        },
+    );
+    let state = Arc::new(Mutex::new(initial));
+
+    // Call handle_cron_once with a wrong project_root (simulating --project
+    // from a different directory). The handler should fall back to the known
+    // project root for namespace "my-project".
+    let result = handle_cron_once(
+        std::path::Path::new("/wrong/path"),
+        "my-project",
+        "nightly",
+        &event_bus,
+        &state,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::CommandStarted { .. }),
+        "expected CommandStarted from namespace fallback, got {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn once_without_runbook_returns_error() {
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_cron_once(
+        std::path::Path::new("/fake"),
+        "",
+        "nightly",
+        &event_bus,
+        &state,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("no runbook found")),
+        "expected runbook-not-found error, got {:?}",
         result
     );
 }

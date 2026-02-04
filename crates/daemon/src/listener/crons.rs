@@ -204,22 +204,42 @@ pub(super) async fn handle_cron_once(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook to validate cron exists
-    let runbook = match load_runbook_for_cron(project_root, cron_name) {
-        Ok(rb) => rb,
+    // Load runbook to validate cron exists.
+    // If the provided project_root doesn't contain the cron, try the known
+    // project root for this namespace (supports --project flag from a different dir).
+    let (runbook, effective_root) = match load_runbook_for_cron(project_root, cron_name) {
+        Ok(rb) => (rb, project_root.to_path_buf()),
         Err(e) => {
-            let hint = suggest_for_cron(
-                Some(project_root),
-                cron_name,
-                namespace,
-                "oj cron once",
-                state,
-            );
-            return Ok(Response::Error {
-                message: format!("{}{}", e, hint),
-            });
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| {
+                    load_runbook_for_cron(alt, cron_name)
+                        .ok()
+                        .map(|rb| (rb, alt.to_path_buf()))
+                });
+            match alt_result {
+                Some(result) => result,
+                None => {
+                    let hint = suggest_for_cron(
+                        Some(project_root),
+                        cron_name,
+                        namespace,
+                        "oj cron once",
+                        state,
+                    );
+                    return Ok(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    });
+                }
+            }
         }
     };
+    let project_root = &effective_root;
 
     // Validate cron definition exists
     let cron_def = match runbook.get_cron(cron_name) {
