@@ -391,6 +391,10 @@ impl MaterializedState {
                             .active_pipeline_ids
                             .retain(|pid| pid != &pipeline_id_str);
                     }
+                    // Clean up unresolved decisions for the completed pipeline
+                    let pid = id.as_str();
+                    self.decisions
+                        .retain(|_, d| d.pipeline_id != pid || d.is_resolved());
                 }
             }
 
@@ -454,6 +458,8 @@ impl MaterializedState {
 
             Event::PipelineDeleted { id } => {
                 self.pipelines.remove(id.as_str());
+                // Clean up all decisions associated with the deleted pipeline
+                self.decisions.retain(|_, d| d.pipeline_id != id.as_str());
             }
 
             Event::SessionCreated {

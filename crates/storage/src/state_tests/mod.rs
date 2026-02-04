@@ -1162,6 +1162,137 @@ fn get_decision_prefix_lookup() {
 }
 
 // =============================================================================
+// Decision cleanup on pipeline completion and deletion
+// =============================================================================
+
+#[test]
+fn pipeline_terminal_removes_unresolved_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+
+    assert!(state.decisions.contains_key("dec-1"));
+    assert!(!state.decisions["dec-1"].is_resolved());
+
+    // Pipeline advances to terminal "done" state
+    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+
+    // Unresolved decision should be removed
+    assert!(!state.decisions.contains_key("dec-1"));
+}
+
+#[test]
+fn pipeline_terminal_preserves_resolved_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+
+    // Resolve the decision
+    state.apply_event(&Event::DecisionResolved {
+        id: "dec-1".to_string(),
+        chosen: Some(1),
+        message: None,
+        resolved_at_ms: 3_000_000,
+        namespace: "testns".to_string(),
+    });
+    assert!(state.decisions["dec-1"].is_resolved());
+
+    // Pipeline advances to terminal "done" state
+    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+
+    // Resolved decision should be preserved
+    assert!(state.decisions.contains_key("dec-1"));
+}
+
+#[test]
+fn pipeline_cancelled_removes_unresolved_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+
+    // Pipeline advances to terminal "cancelled" state
+    state.apply_event(&pipeline_transition_event("pipe-1", "cancelled"));
+
+    // Unresolved decision should be removed
+    assert!(!state.decisions.contains_key("dec-1"));
+}
+
+#[test]
+fn pipeline_failed_removes_unresolved_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+
+    // Pipeline advances to terminal "failed" state
+    state.apply_event(&pipeline_transition_event("pipe-1", "failed"));
+
+    // Unresolved decision should be removed
+    assert!(!state.decisions.contains_key("dec-1"));
+}
+
+#[test]
+fn pipeline_deleted_removes_all_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+
+    // Create both unresolved and resolved decisions
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+    state.apply_event(&decision_created_event("dec-2", "pipe-1"));
+    state.apply_event(&Event::DecisionResolved {
+        id: "dec-2".to_string(),
+        chosen: Some(1),
+        message: None,
+        resolved_at_ms: 3_000_000,
+        namespace: "testns".to_string(),
+    });
+
+    assert_eq!(state.decisions.len(), 2);
+
+    // Delete the pipeline
+    state.apply_event(&pipeline_delete_event("pipe-1"));
+
+    // All decisions for the pipeline should be removed
+    assert!(state.decisions.is_empty());
+}
+
+#[test]
+fn pipeline_deleted_only_removes_own_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&pipeline_create_event("pipe-2", "build", "test", "init"));
+
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+    state.apply_event(&decision_created_event("dec-2", "pipe-2"));
+
+    assert_eq!(state.decisions.len(), 2);
+
+    // Delete only pipe-1
+    state.apply_event(&pipeline_delete_event("pipe-1"));
+
+    // Only pipe-1's decision should be removed
+    assert_eq!(state.decisions.len(), 1);
+    assert!(state.decisions.contains_key("dec-2"));
+    assert!(!state.decisions.contains_key("dec-1"));
+}
+
+#[test]
+fn pipeline_terminal_only_removes_own_unresolved_decisions() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&pipeline_create_event("pipe-2", "build", "test", "init"));
+
+    state.apply_event(&decision_created_event("dec-1", "pipe-1"));
+    state.apply_event(&decision_created_event("dec-2", "pipe-2"));
+
+    // Pipeline 1 advances to terminal state
+    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+
+    // Only pipe-1's unresolved decision should be removed
+    assert!(!state.decisions.contains_key("dec-1"));
+    assert!(state.decisions.contains_key("dec-2"));
+}
+
+// =============================================================================
 // Action attempts preservation on on_fail transitions
 // =============================================================================
 

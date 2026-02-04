@@ -104,14 +104,14 @@ fn cancel_pipeline_transitions_queue_item_from_active() {
         .args(&["pipeline", "cancel", &pipeline_id])
         .passes();
 
-    // Wait for queue item to leave "active" status
+    // Wait for queue item to reach a terminal status (dead or failed)
     let transitioned = wait_for(SPEC_WAIT_MAX_MS, || {
         let out = temp
             .oj()
             .args(&["queue", "items", "jobs"])
             .passes()
             .stdout();
-        !out.contains("active")
+        out.contains("dead") || out.contains("failed")
     });
 
     if !transitioned {
@@ -119,19 +119,7 @@ fn cancel_pipeline_transitions_queue_item_from_active() {
     }
     assert!(
         transitioned,
-        "queue item must not stay active after pipeline cancel"
-    );
-
-    // Item should be dead or failed (not stuck on active)
-    let final_status = temp
-        .oj()
-        .args(&["queue", "items", "jobs"])
-        .passes()
-        .stdout();
-    assert!(
-        final_status.contains("dead") || final_status.contains("failed"),
-        "cancelled pipeline should mark queue item as dead or failed, got: {}",
-        final_status
+        "cancelled pipeline should mark queue item as dead or failed"
     );
 }
 
@@ -243,25 +231,31 @@ fn one_pipeline_failure_does_not_affect_others() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push 3 items: one fast-fail, two that succeed
+    // Push 3 items: one fast-fail, two that succeed.
+    // Each item needs unique data to avoid deduplication.
     temp.oj()
         .args(&["queue", "push", "jobs", r#"{"cmd": "exit 1"}"#])
         .passes();
     temp.oj()
-        .args(&["queue", "push", "jobs", r#"{"cmd": "echo ok"}"#])
+        .args(&["queue", "push", "jobs", r#"{"cmd": "echo ok-1"}"#])
         .passes();
     temp.oj()
-        .args(&["queue", "push", "jobs", r#"{"cmd": "echo ok"}"#])
+        .args(&["queue", "push", "jobs", r#"{"cmd": "echo ok-2"}"#])
         .passes();
 
-    // Wait for all 3 items to reach terminal status
+    // Wait for all 3 items to reach terminal status.
+    // Check for 3 terminal items (not just absence of non-terminal) to avoid
+    // passing vacuously before the daemon has processed all pushes.
     let all_terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         let out = temp
             .oj()
             .args(&["queue", "items", "jobs"])
             .passes()
             .stdout();
-        !out.contains("active") && !out.contains("pending")
+        let terminal = out.matches("completed").count()
+            + out.matches("dead").count()
+            + out.matches("failed").count();
+        terminal >= 3
     });
 
     if !all_terminal {
