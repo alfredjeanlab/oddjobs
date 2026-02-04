@@ -7,8 +7,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::color;
 use crate::output::{display_log, OutputFormat};
+use crate::table::{Column, Table};
 
 use oj_daemon::{Query, Request, Response};
 
@@ -273,81 +273,37 @@ pub async fn handle(
                                 let show_project = namespaces.len() > 1
                                     || namespaces.iter().any(|n| !n.is_empty());
 
-                                // Compute dynamic column widths from data
-                                let name_w =
-                                    crons.iter().map(|c| c.name.len()).max().unwrap_or(4).max(4);
-                                let no_project = "(no project)";
-                                let proj_w = if show_project {
-                                    crons
-                                        .iter()
-                                        .map(|c| {
-                                            if c.namespace.is_empty() {
-                                                no_project.len()
-                                            } else {
-                                                c.namespace.len()
-                                            }
-                                        })
-                                        .max()
-                                        .unwrap_or(7)
-                                        .max(7)
-                                } else {
-                                    0
-                                };
-                                let interval_w = crons
-                                    .iter()
-                                    .map(|c| c.interval.len())
-                                    .max()
-                                    .unwrap_or(8)
-                                    .max(8);
-                                let pipeline_w = crons
-                                    .iter()
-                                    .map(|c| c.pipeline.len())
-                                    .max()
-                                    .unwrap_or(8)
-                                    .max(8);
-                                let time_w =
-                                    crons.iter().map(|c| c.time.len()).max().unwrap_or(4).max(4);
-
+                                let mut cols = vec![Column::left("KIND")];
                                 if show_project {
-                                    println!(
-                                        "{} {} {} {} {} {}",
-                                        color::header(&format!("{:<name_w$}", "KIND")),
-                                        color::header(&format!("{:<proj_w$}", "PROJECT")),
-                                        color::header(&format!("{:<interval_w$}", "INTERVAL")),
-                                        color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
-                                        color::header(&format!("{:<time_w$}", "TIME")),
-                                        color::header("STATUS"),
-                                    );
-                                } else {
-                                    println!(
-                                        "{} {} {} {} {}",
-                                        color::header(&format!("{:<name_w$}", "KIND")),
-                                        color::header(&format!("{:<interval_w$}", "INTERVAL")),
-                                        color::header(&format!("{:<pipeline_w$}", "PIPELINE")),
-                                        color::header(&format!("{:<time_w$}", "TIME")),
-                                        color::header("STATUS"),
-                                    );
+                                    cols.push(Column::left("PROJECT"));
                                 }
+                                cols.extend([
+                                    Column::left("INTERVAL"),
+                                    Column::left("PIPELINE"),
+                                    Column::left("TIME"),
+                                    Column::status("STATUS"),
+                                ]);
+                                let mut table = Table::new(cols);
+
                                 for c in &crons {
+                                    let mut cells = vec![c.name.clone()];
                                     if show_project {
                                         let proj = if c.namespace.is_empty() {
-                                            no_project
+                                            "(no project)".to_string()
                                         } else {
-                                            &c.namespace
+                                            c.namespace.clone()
                                         };
-                                        println!(
-                                            "{:<name_w$} {:<proj_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} {}",
-                                            c.name, proj, c.interval, c.pipeline, c.time,
-                                            color::status(&c.status),
-                                        );
-                                    } else {
-                                        println!(
-                                            "{:<name_w$} {:<interval_w$} {:<pipeline_w$} {:<time_w$} {}",
-                                            c.name, c.interval, c.pipeline, c.time,
-                                            color::status(&c.status),
-                                        );
+                                        cells.push(proj);
                                     }
+                                    cells.extend([
+                                        c.interval.clone(),
+                                        c.pipeline.clone(),
+                                        c.time.clone(),
+                                        c.status.clone(),
+                                    ]);
+                                    table.row(cells);
                                 }
+                                table.render(&mut std::io::stdout());
                             }
                         }
                     }

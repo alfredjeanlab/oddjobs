@@ -7,8 +7,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::color;
 use crate::output::{display_log, OutputFormat};
+use crate::table::{Column, Table};
 
 use oj_daemon::{Query, Request, Response};
 
@@ -199,91 +199,37 @@ pub async fn handle(
                                 let show_project = namespaces.len() > 1
                                     || namespaces.iter().any(|n| !n.is_empty());
 
-                                // Compute dynamic column widths from data
-                                let name_w = workers
-                                    .iter()
-                                    .map(|w| w.name.len())
-                                    .max()
-                                    .unwrap_or(4)
-                                    .max(4);
-                                let no_project = "(no project)";
-                                let proj_w = if show_project {
-                                    workers
-                                        .iter()
-                                        .map(|w| {
-                                            if w.namespace.is_empty() {
-                                                no_project.len()
-                                            } else {
-                                                w.namespace.len()
-                                            }
-                                        })
-                                        .max()
-                                        .unwrap_or(7)
-                                        .max(7)
-                                } else {
-                                    0
-                                };
-                                let queue_w = workers
-                                    .iter()
-                                    .map(|w| w.queue.len())
-                                    .max()
-                                    .unwrap_or(5)
-                                    .max(5);
-                                let status_w = workers
-                                    .iter()
-                                    .map(|w| w.status.len())
-                                    .max()
-                                    .unwrap_or(6)
-                                    .max(6);
-                                let active_w = 6; // "ACTIVE"
-
+                                let mut cols = vec![Column::left("NAME")];
                                 if show_project {
-                                    println!(
-                                        "{} {} {} {} {} {}",
-                                        color::header(&format!("{:<name_w$}", "NAME")),
-                                        color::header(&format!("{:<proj_w$}", "PROJECT")),
-                                        color::header(&format!("{:<queue_w$}", "QUEUE")),
-                                        color::header(&format!("{:<status_w$}", "STATUS")),
-                                        color::header(&format!("{:<active_w$}", "ACTIVE")),
-                                        color::header("CONCURRENCY"),
-                                    );
-                                } else {
-                                    println!(
-                                        "{} {} {} {} {}",
-                                        color::header(&format!("{:<name_w$}", "NAME")),
-                                        color::header(&format!("{:<queue_w$}", "QUEUE")),
-                                        color::header(&format!("{:<status_w$}", "STATUS")),
-                                        color::header(&format!("{:<active_w$}", "ACTIVE")),
-                                        color::header("CONCURRENCY"),
-                                    );
+                                    cols.push(Column::left("PROJECT"));
                                 }
+                                cols.extend([
+                                    Column::left("QUEUE"),
+                                    Column::status("STATUS"),
+                                    Column::left("ACTIVE"),
+                                    Column::left("CONCURRENCY"),
+                                ]);
+                                let mut table = Table::new(cols);
+
                                 for w in &workers {
+                                    let mut cells = vec![w.name.clone()];
                                     if show_project {
                                         let proj = if w.namespace.is_empty() {
-                                            no_project
+                                            "(no project)".to_string()
                                         } else {
-                                            &w.namespace
+                                            w.namespace.clone()
                                         };
-                                        println!(
-                                            "{:<name_w$} {:<proj_w$} {:<queue_w$} {} {:<active_w$} {}",
-                                            &w.name[..w.name.len().min(name_w)],
-                                            &proj[..proj.len().min(proj_w)],
-                                            &w.queue[..w.queue.len().min(queue_w)],
-                                            color::status(&format!("{:<status_w$}", &w.status)),
-                                            w.active,
-                                            w.concurrency,
-                                        );
-                                    } else {
-                                        println!(
-                                            "{:<name_w$} {:<queue_w$} {} {:<active_w$} {}",
-                                            &w.name[..w.name.len().min(name_w)],
-                                            &w.queue[..w.queue.len().min(queue_w)],
-                                            color::status(&format!("{:<status_w$}", &w.status)),
-                                            w.active,
-                                            w.concurrency,
-                                        );
+                                        cells.push(proj);
                                     }
+                                    cells.extend([
+                                        w.queue.clone(),
+                                        w.status.clone(),
+                                        w.active.to_string(),
+                                        w.concurrency.to_string(),
+                                    ]);
+                                    table.row(cells);
                                 }
+                                table.render(&mut std::io::stdout());
                             }
                         }
                     }

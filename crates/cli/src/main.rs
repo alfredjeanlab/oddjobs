@@ -10,6 +10,7 @@ mod commands;
 mod daemon_process;
 mod exit_error;
 mod output;
+mod table;
 
 use output::OutputFormat;
 

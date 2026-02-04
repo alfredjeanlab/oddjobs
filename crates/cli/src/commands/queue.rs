@@ -10,8 +10,8 @@ use std::path::Path;
 use oj_daemon::{Query, Request, Response};
 
 use crate::client::DaemonClient;
-use crate::color;
 use crate::output::{display_log, OutputFormat};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct QueueArgs {
@@ -334,14 +334,13 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&queues)?);
                         }
                         _ => {
-                            println!(
-                                "{}\t{}\t{}\t{}\t{}",
-                                color::header("PROJECT"),
-                                color::header("NAME"),
-                                color::header("TYPE"),
-                                color::header("ITEMS"),
-                                color::header("WORKERS"),
-                            );
+                            let mut table = Table::new(vec![
+                                Column::left("PROJECT"),
+                                Column::left("NAME"),
+                                Column::left("TYPE"),
+                                Column::right("ITEMS"),
+                                Column::left("WORKERS"),
+                            ]);
                             for q in &queues {
                                 let workers_str = if q.workers.is_empty() {
                                     "-".to_string()
@@ -353,11 +352,15 @@ pub async fn handle(
                                 } else {
                                     q.namespace.clone()
                                 };
-                                println!(
-                                    "{}\t{}\t{}\titems={}\tworkers={}",
-                                    ns_label, q.name, q.queue_type, q.item_count, workers_str,
-                                );
+                                table.row(vec![
+                                    ns_label,
+                                    q.name.clone(),
+                                    q.queue_type.clone(),
+                                    q.item_count.to_string(),
+                                    workers_str,
+                                ]);
                             }
+                            table.render(&mut std::io::stdout());
                         }
                     }
                 }
@@ -392,13 +395,12 @@ pub async fn handle(
                             println!("{}", serde_json::to_string_pretty(&items)?);
                         }
                         _ => {
-                            println!(
-                                "{}\t{}\t{}\t{}",
-                                color::header("ID"),
-                                color::header("STATUS"),
-                                color::header("WORKER"),
-                                color::header("DATA"),
-                            );
+                            let mut table = Table::new(vec![
+                                Column::muted("ID"),
+                                Column::status("STATUS"),
+                                Column::left("WORKER"),
+                                Column::left("DATA"),
+                            ]);
                             for item in &items {
                                 let data_str: String = item
                                     .data
@@ -406,15 +408,15 @@ pub async fn handle(
                                     .map(|(k, v)| format!("{}={}", k, v))
                                     .collect::<Vec<_>>()
                                     .join(" ");
-                                let worker = item.worker_name.as_deref().unwrap_or("-");
-                                println!(
-                                    "{}\t{}\tworker={}\t{}",
-                                    color::muted(&item.id[..8]),
-                                    color::status(&item.status),
+                                let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
+                                table.row(vec![
+                                    item.id[..8.min(item.id.len())].to_string(),
+                                    item.status.clone(),
                                     worker,
                                     data_str,
-                                );
+                                ]);
                             }
+                            table.render(&mut std::io::stdout());
                         }
                     }
                 }

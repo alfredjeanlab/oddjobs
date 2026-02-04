@@ -7,8 +7,8 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::color;
 use crate::output::OutputFormat;
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct ProjectArgs {
@@ -69,56 +69,30 @@ async fn handle_list(client: &DaemonClient, format: OutputFormat) -> Result<()> 
                 return Ok(());
             }
 
-            // Compute column widths
-            let name_w = projects
-                .iter()
-                .map(|p| p.name.len())
-                .max()
-                .unwrap_or(0)
-                .max(4);
-            let root_w = projects
-                .iter()
-                .map(|p| {
-                    if p.root.as_os_str().is_empty() {
-                        9 // "(unknown)"
-                    } else {
-                        p.root.display().to_string().len()
-                    }
-                })
-                .max()
-                .unwrap_or(0)
-                .max(4);
-
-            // Print header
-            println!(
-                "{}  {}  {:>9}  {:>7}  {:>6}  {:>5}",
-                color::header(&format!("{:<name_w$}", "NAME", name_w = name_w)),
-                color::header(&format!("{:<root_w$}", "ROOT", root_w = root_w)),
-                color::header("PIPELINES"),
-                color::header("WORKERS"),
-                color::header("AGENTS"),
-                color::header("CRONS"),
-            );
-
-            // Print rows
+            let mut table = Table::new(vec![
+                Column::left("NAME"),
+                Column::left("ROOT"),
+                Column::right("PIPELINES"),
+                Column::right("WORKERS"),
+                Column::right("AGENTS"),
+                Column::right("CRONS"),
+            ]);
             for p in &projects {
                 let root = if p.root.as_os_str().is_empty() {
                     "(unknown)".to_string()
                 } else {
                     p.root.display().to_string()
                 };
-                println!(
-                    "{:<name_w$}  {:<root_w$}  {:>9}  {:>7}  {:>6}  {:>5}",
-                    p.name,
+                table.row(vec![
+                    p.name.clone(),
                     root,
-                    p.active_pipelines,
-                    p.workers,
-                    p.active_agents,
-                    p.crons,
-                    name_w = name_w,
-                    root_w = root_w,
-                );
+                    p.active_pipelines.to_string(),
+                    p.workers.to_string(),
+                    p.active_agents.to_string(),
+                    p.crons.to_string(),
+                ]);
             }
+            table.render(&mut std::io::stdout());
         }
     }
 

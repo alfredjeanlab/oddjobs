@@ -17,6 +17,7 @@ use crate::client::DaemonClient;
 use crate::color;
 use crate::exit_error::ExitError;
 use crate::output::{display_log, should_use_color, OutputFormat};
+use crate::table::{Column, Table};
 
 use super::pipeline::parse_duration;
 
@@ -181,47 +182,46 @@ pub async fn handle(
                     if agents.is_empty() {
                         println!("No agents found");
                     } else {
-                        println!(
-                            "{} {} {} {} {} {} {:>5} {:>5} {:>4}",
-                            color::header(&format!("{:<8}", "ID")),
-                            color::header(&format!("{:<16}", "NAME")),
-                            color::header(&format!("{:<16}", "PROJECT")),
-                            color::header(&format!("{:<8}", "PIPELINE")),
-                            color::header(&format!("{:<16}", "STEP")),
-                            color::header(&format!("{:<10}", "STATUS")),
-                            color::header("READ"),
-                            color::header("WRITE"),
-                            color::header("CMDS"),
-                        );
+                        let mut table = Table::new(vec![
+                            Column::muted("ID").with_max(8),
+                            Column::left("NAME"),
+                            Column::left("PROJECT"),
+                            Column::left("PIPELINE").with_max(8),
+                            Column::left("STEP"),
+                            Column::status("STATUS"),
+                            Column::right("READ"),
+                            Column::right("WRITE"),
+                            Column::right("CMDS"),
+                        ]);
                         for a in &agents {
-                            let name = a.agent_name.as_deref().unwrap_or("-");
+                            let name = a.agent_name.as_deref().unwrap_or("-").to_string();
                             let project = match a.namespace.as_deref() {
-                                Some(ns) if !ns.is_empty() => ns,
-                                _ => "(no project)",
+                                Some(ns) if !ns.is_empty() => ns.to_string(),
+                                _ => "(no project)".to_string(),
                             };
                             let pipeline_col = if a.pipeline_id.is_empty() {
-                                "-"
+                                "-".to_string()
                             } else {
-                                truncate(&a.pipeline_id, 8)
+                                a.pipeline_id.clone()
                             };
                             let step_col = if a.step_name.is_empty() {
-                                "-"
+                                "-".to_string()
                             } else {
-                                truncate(&a.step_name, 16)
+                                a.step_name.clone()
                             };
-                            println!(
-                                "{} {:<16} {:<16} {:<8} {:<16} {} {:>5} {:>5} {:>4}",
-                                color::muted(&format!("{:<8}", truncate(&a.agent_id, 8))),
-                                truncate(name, 16),
-                                truncate(project, 16),
+                            table.row(vec![
+                                a.agent_id.clone(),
+                                name,
+                                project,
                                 pipeline_col,
                                 step_col,
-                                color::status(&format!("{:<10}", truncate(&a.status, 10))),
-                                a.files_read,
-                                a.files_written,
-                                a.commands_run,
-                            );
+                                a.status.clone(),
+                                a.files_read.to_string(),
+                                a.files_written.to_string(),
+                                a.commands_run.to_string(),
+                            ]);
                         }
+                        table.render(&mut std::io::stdout());
                     }
                     if remaining > 0 {
                         println!(
@@ -422,15 +422,6 @@ pub async fn handle(
     }
 
     Ok(())
-}
-
-/// Truncate a string to at most `max` characters for columnar display.
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
-    }
 }
 
 /// Resolve the OJ state directory from environment or default.

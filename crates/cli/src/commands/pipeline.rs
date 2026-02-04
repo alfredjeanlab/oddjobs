@@ -13,6 +13,7 @@ use clap::{Args, Subcommand};
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{display_log, format_time_ago, should_use_color, OutputFormat};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct PipelineArgs {
@@ -182,169 +183,46 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
     // Show RETRIES column only when any pipeline has retries
     let show_retries = pipelines.iter().any(|p| p.retry_count > 0);
 
-    // Pre-compute display values and column widths from data
-    let rows: Vec<_> = pipelines
-        .iter()
-        .map(|p| {
-            let id = &p.id[..8.min(p.id.len())];
-            let updated = format_time_ago(p.updated_at_ms);
-            (id, p, updated)
-        })
-        .collect();
-
-    let w_id = rows
-        .iter()
-        .map(|(id, _, _)| id.len())
-        .max()
-        .unwrap_or(0)
-        .max(2);
-    let w_name = rows
-        .iter()
-        .map(|(_, p, _)| p.name.len())
-        .max()
-        .unwrap_or(0)
-        .max(4);
-    let w_kind = rows
-        .iter()
-        .map(|(_, p, _)| p.kind.len())
-        .max()
-        .unwrap_or(0)
-        .max(4);
-    let w_step = rows
-        .iter()
-        .map(|(_, p, _)| p.step.len())
-        .max()
-        .unwrap_or(0)
-        .max(4);
-    let w_updated = rows
-        .iter()
-        .map(|(_, _, u)| u.len())
-        .max()
-        .unwrap_or(0)
-        .max(7);
-    let w_retries = 7; // width of "RETRIES"
-
+    // Build columns
+    let mut cols = vec![Column::muted("ID")];
     if show_project {
-        let no_project = "(no project)";
-        let w_proj = rows
-            .iter()
-            .map(|(_, p, _)| {
-                if p.namespace.is_empty() {
-                    no_project.len()
-                } else {
-                    p.namespace.len()
-                }
-            })
-            .max()
-            .unwrap_or(0)
-            .max(7);
-        if show_retries {
-            let _ = writeln!(
-                out,
-                "{} {} {} {} {} {} {} {}",
-                color::header(&format!("{:<w_id$}", "ID")),
-                color::header(&format!("{:<w_proj$}", "PROJECT")),
-                color::header(&format!("{:<w_name$}", "NAME")),
-                color::header(&format!("{:<w_kind$}", "KIND")),
-                color::header(&format!("{:<w_step$}", "STEP")),
-                color::header(&format!("{:<w_updated$}", "UPDATED")),
-                color::header(&format!("{:<w_retries$}", "RETRIES")),
-                color::header("STATUS"),
-            );
-            for (id, p, updated) in &rows {
-                let proj = if p.namespace.is_empty() {
-                    no_project
-                } else {
-                    &p.namespace
-                };
-                let _ = writeln!(
-                    out,
-                    "{} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
-                    color::muted(&format!("{:<w_id$}", id)),
-                    proj, p.name, p.kind, p.step, updated, p.retry_count,
-                    color::status(&p.step_status),
-                );
-            }
-        } else {
-            let _ = writeln!(
-                out,
-                "{} {} {} {} {} {} {}",
-                color::header(&format!("{:<w_id$}", "ID")),
-                color::header(&format!("{:<w_proj$}", "PROJECT")),
-                color::header(&format!("{:<w_name$}", "NAME")),
-                color::header(&format!("{:<w_kind$}", "KIND")),
-                color::header(&format!("{:<w_step$}", "STEP")),
-                color::header(&format!("{:<w_updated$}", "UPDATED")),
-                color::header("STATUS"),
-            );
-            for (id, p, updated) in &rows {
-                let proj = if p.namespace.is_empty() {
-                    no_project
-                } else {
-                    &p.namespace
-                };
-                let _ = writeln!(
-                    out,
-                    "{} {:<w_proj$} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
-                    color::muted(&format!("{:<w_id$}", id)),
-                    proj,
-                    p.name,
-                    p.kind,
-                    p.step,
-                    updated,
-                    color::status(&p.step_status),
-                );
-            }
-        }
-    } else if show_retries {
-        let _ = writeln!(
-            out,
-            "{} {} {} {} {} {} {}",
-            color::header(&format!("{:<w_id$}", "ID")),
-            color::header(&format!("{:<w_name$}", "NAME")),
-            color::header(&format!("{:<w_kind$}", "KIND")),
-            color::header(&format!("{:<w_step$}", "STEP")),
-            color::header(&format!("{:<w_updated$}", "UPDATED")),
-            color::header(&format!("{:<w_retries$}", "RETRIES")),
-            color::header("STATUS"),
-        );
-        for (id, p, updated) in &rows {
-            let _ = writeln!(
-                out,
-                "{} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {:<w_retries$} {}",
-                color::muted(&format!("{:<w_id$}", id)),
-                p.name,
-                p.kind,
-                p.step,
-                updated,
-                p.retry_count,
-                color::status(&p.step_status),
-            );
-        }
-    } else {
-        let _ = writeln!(
-            out,
-            "{} {} {} {} {} {}",
-            color::header(&format!("{:<w_id$}", "ID")),
-            color::header(&format!("{:<w_name$}", "NAME")),
-            color::header(&format!("{:<w_kind$}", "KIND")),
-            color::header(&format!("{:<w_step$}", "STEP")),
-            color::header(&format!("{:<w_updated$}", "UPDATED")),
-            color::header("STATUS"),
-        );
-        for (id, p, updated) in &rows {
-            let _ = writeln!(
-                out,
-                "{} {:<w_name$} {:<w_kind$} {:<w_step$} {:<w_updated$} {}",
-                color::muted(&format!("{:<w_id$}", id)),
-                p.name,
-                p.kind,
-                p.step,
-                updated,
-                color::status(&p.step_status),
-            );
-        }
+        cols.push(Column::left("PROJECT"));
     }
+    cols.extend([
+        Column::left("NAME"),
+        Column::left("KIND"),
+        Column::left("STEP"),
+        Column::left("UPDATED"),
+    ]);
+    if show_retries {
+        cols.push(Column::left("RETRIES"));
+    }
+    cols.push(Column::status("STATUS"));
+
+    let mut table = Table::new(cols);
+
+    for p in pipelines {
+        let id = p.id[..8.min(p.id.len())].to_string();
+        let updated = format_time_ago(p.updated_at_ms);
+
+        let mut cells = vec![id];
+        if show_project {
+            let proj = if p.namespace.is_empty() {
+                "(no project)".to_string()
+            } else {
+                p.namespace.clone()
+            };
+            cells.push(proj);
+        }
+        cells.extend([p.name.clone(), p.kind.clone(), p.step.clone(), updated]);
+        if show_retries {
+            cells.push(p.retry_count.to_string());
+        }
+        cells.push(p.step_status.clone());
+        table.row(cells);
+    }
+
+    table.render(out);
 }
 
 pub async fn handle(
