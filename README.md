@@ -1,6 +1,6 @@
 # Odd Jobs (oj)
 
-An agentic development team to write software and automate other tasks.
+An automated team for your odd jobs. Orchestrate work from runbooks.
 
 Odd jobs coordinates multiple AI coding agents with runbook-defined workflows, to plan features, decompose work into issues, execute tasks, and merge results. Agents work concurrently with coordination primitives (locks, semaphores, queues) ensuring safe access to shared resources.
 

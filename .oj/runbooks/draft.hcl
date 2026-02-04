@@ -85,7 +85,7 @@ pipeline "draft" {
   }
 
   locals {
-    title  = "$(printf '%s' \"draft(${var.name}): ${var.instructions}\" | tr '\\n' ' ' | cut -c1-80)"
+    title  = "$(printf 'draft(${var.name}): %.71s' \"${var.instructions}\")"
   }
 
   notify {
@@ -179,7 +179,7 @@ pipeline "draft-refine" {
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
     branch = "$(git -C ${invoke.dir} branch -r --list 'origin/draft/${var.name}*' | head -1 | tr -d ' ' | sed 's|^origin/||')"
-    title  = "$(printf '%s' \"refine(${var.name}): ${var.instructions}\" | tr '\\n' ' ' | cut -c1-80)"
+    title  = "$(printf 'refine(${var.name}): %.69s' \"${var.instructions}\")"
   }
 
   on_cancel = { step = "cleanup" }

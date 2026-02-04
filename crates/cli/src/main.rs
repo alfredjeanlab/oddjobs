@@ -30,7 +30,7 @@ use crate::client::DaemonClient;
     name = "oj",
     version,
     disable_version_flag = true,
-    about = "Odd Jobs - Agentic development automation"
+    about = "Odd Jobs - An automated team for your odd jobs"
 )]
 struct Cli {
     /// Change to <dir> before doing anything

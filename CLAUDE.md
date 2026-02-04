@@ -1,6 +1,6 @@
 # Oddjobs (oj)
 
-An agentic development team to write software and automate other tasks.
+An automated team for your odd jobs. Orchestrate work from runbooks.
 
 ## Architecture Overview
 

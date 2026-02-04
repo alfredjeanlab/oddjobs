@@ -10,7 +10,7 @@ command "fix" {
   args = "<description>"
   run  = <<-SHELL
     wok new bug "${args.description}"
-    oj worker start fix
+    oj worker start bug
   SHELL
 }
 
@@ -39,7 +39,7 @@ pipeline "bug" {
 
   locals {
     base   = "main"
-    title  = "$(printf '%s' \"fix: ${var.bug.title}\" | tr '\\n' ' ' | cut -c1-80)"
+    title  = "$(printf 'fix: %.75s' \"${var.bug.title}\")"
   }
 
   notify {

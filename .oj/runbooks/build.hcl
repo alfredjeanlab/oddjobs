@@ -31,7 +31,7 @@ pipeline "build" {
   }
 
   locals {
-    title  = "$(printf '%s' \"feat(${var.name}): ${var.instructions}\" | tr '\\n' ' ' | cut -c1-80)"
+    title  = "$(printf 'feat(${var.name}): %.72s' \"${var.instructions}\")"
     issue  = "$(cd ${invoke.dir} && wok new feature \"${var.instructions}\" -o id)"
   }
 
