@@ -339,12 +339,20 @@ fn format_text(
         // Workers
         if !ns.workers.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Workers:"));
+            let w_name = ns.workers.iter().map(|w| w.name.len()).max().unwrap_or(0);
+            let w_st = ns.workers.iter().map(|w| w.status.len()).max().unwrap_or(0);
             for w in &ns.workers {
+                let indicator = if w.status == "running" {
+                    color::green("●")
+                } else {
+                    color::muted("○")
+                };
                 let _ = writeln!(
                     out,
-                    "    {}  {}  {}/{} active",
+                    "    {:<w_name$}  {} {}  {}/{} active",
                     w.name,
-                    color::status(&w.status),
+                    indicator,
+                    color::status(&format!("{:<w_st$}", w.status)),
                     w.active,
                     w.concurrency,
                 );
@@ -360,10 +368,15 @@ fn format_text(
             .collect();
         if !non_empty_queues.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Queues:"));
+            let w_name = non_empty_queues
+                .iter()
+                .map(|q| q.name.len())
+                .max()
+                .unwrap_or(0);
             for q in &non_empty_queues {
                 let _ = write!(
                     out,
-                    "    {}  {} pending, {} active",
+                    "    {:<w_name$}  {} pending, {} active",
                     q.name, q.pending, q.active,
                 );
                 if q.dead > 0 {
@@ -381,14 +394,31 @@ fn format_text(
                 "  {}",
                 color::header(&format!("Agents ({} running):", ns.active_agents.len()))
             );
-            for a in &ns.active_agents {
+            let labels: Vec<String> = ns
+                .active_agents
+                .iter()
+                .map(|a| format!("{} ({})", a.agent_name, a.command_name))
+                .collect();
+            let w_label = labels.iter().map(|l| l.len()).max().unwrap_or(0);
+            let w_id = ns
+                .active_agents
+                .iter()
+                .map(|a| a.agent_id.len())
+                .max()
+                .unwrap_or(0);
+            let w_st = ns
+                .active_agents
+                .iter()
+                .map(|a| a.status.len())
+                .max()
+                .unwrap_or(0);
+            for (a, label) in ns.active_agents.iter().zip(labels.iter()) {
                 let _ = writeln!(
                     out,
-                    "    {} ({})  {}  {}",
-                    a.agent_name,
-                    a.command_name,
-                    color::muted(&a.agent_id),
-                    color::status(&a.status),
+                    "    {:<w_label$}  {}  {}",
+                    label,
+                    color::muted(&format!("{:<w_id$}", a.agent_id)),
+                    color::status(&format!("{:<w_st$}", a.status)),
                 );
             }
             out.push('\n');

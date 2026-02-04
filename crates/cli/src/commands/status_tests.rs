@@ -1051,3 +1051,160 @@ fn name_column_omitted_when_all_names_hidden() {
         "kind/step should follow id with just 2-space separator when names are hidden:\n  {line}"
     );
 }
+
+#[test]
+#[serial]
+fn worker_columns_are_aligned_across_rows() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![
+            oj_daemon::WorkerSummary {
+                name: "a".to_string(),
+                namespace: "myproject".to_string(),
+                queue: "default".to_string(),
+                status: "running".to_string(),
+                active: 1,
+                concurrency: 4,
+                updated_at_ms: 0,
+            },
+            oj_daemon::WorkerSummary {
+                name: "long-worker-name".to_string(),
+                namespace: "myproject".to_string(),
+                queue: "default".to_string(),
+                status: "idle".to_string(),
+                active: 0,
+                concurrency: 2,
+                updated_at_ms: 0,
+            },
+        ],
+        queues: vec![],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let lines: Vec<&str> = output.lines().filter(|l| l.contains("active")).collect();
+    assert_eq!(lines.len(), 2, "should find exactly 2 worker rows");
+
+    // The indicator (● or ○) should start at the same position in both lines
+    let ind_pos_0 = lines[0].find('●').or_else(|| lines[0].find('○')).unwrap();
+    let ind_pos_1 = lines[1].find('●').or_else(|| lines[1].find('○')).unwrap();
+    assert_eq!(
+        ind_pos_0, ind_pos_1,
+        "indicator columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+}
+
+#[test]
+#[serial]
+fn queue_columns_are_aligned_across_rows() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![
+            oj_daemon::QueueStatus {
+                name: "tasks".to_string(),
+                pending: 3,
+                active: 1,
+                dead: 0,
+            },
+            oj_daemon::QueueStatus {
+                name: "long-queue-name".to_string(),
+                pending: 12,
+                active: 2,
+                dead: 1,
+            },
+        ],
+        active_agents: vec![],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let lines: Vec<&str> = output.lines().filter(|l| l.contains("pending")).collect();
+    assert_eq!(lines.len(), 2, "should find exactly 2 queue rows");
+
+    // The "pending" counts should start at the same column position
+    let pending_pos_0 = lines[0].find("pending").unwrap();
+    let pending_pos_1 = lines[1].find("pending").unwrap();
+
+    // The number before "pending" may differ in length, but the name column
+    // should be padded so the number starts at the same position
+    let num_start_0 = lines[0].find(|c: char| c.is_ascii_digit()).unwrap();
+    let num_start_1 = lines[1].find(|c: char| c.is_ascii_digit()).unwrap();
+    assert_eq!(
+        num_start_0, num_start_1,
+        "count columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+
+    // Sanity check: both "pending" positions differ because the numbers differ
+    // but the start of the number column should be the same
+    let _ = pending_pos_0;
+    let _ = pending_pos_1;
+}
+
+#[test]
+#[serial]
+fn agent_columns_are_aligned_across_rows() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![
+            oj_daemon::AgentStatusEntry {
+                agent_name: "coder".to_string(),
+                command_name: "build".to_string(),
+                agent_id: "agent-001".to_string(),
+                status: "running".to_string(),
+            },
+            oj_daemon::AgentStatusEntry {
+                agent_name: "long-agent-name".to_string(),
+                command_name: "deploy".to_string(),
+                agent_id: "agent-002".to_string(),
+                status: "idle".to_string(),
+            },
+        ],
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let lines: Vec<&str> = output.lines().filter(|l| l.contains("agent-")).collect();
+    assert_eq!(lines.len(), 2, "should find exactly 2 agent rows");
+
+    // The agent_id column should start at the same position in both lines
+    let id_pos_0 = lines[0].find("agent-001").unwrap();
+    let id_pos_1 = lines[1].find("agent-002").unwrap();
+    assert_eq!(
+        id_pos_0, id_pos_1,
+        "agent_id columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+
+    // The status column should also be aligned
+    let st_pos_0 = lines[0].find("running").unwrap();
+    let st_pos_1 = lines[1].find("idle").unwrap();
+    assert_eq!(
+        st_pos_0, st_pos_1,
+        "status columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+}
