@@ -101,6 +101,7 @@ async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, P
         cwd: dir_path.clone(),
         initial_step: "only-step".to_string(),
         namespace: String::new(),
+        cron_name: None,
     };
     let pipeline = oj_core::Pipeline::new(config, &SystemClock);
     state.pipelines.insert("pipe-1".to_string(), pipeline);
@@ -286,6 +287,7 @@ async fn cancelled_pipeline_survives_restart_as_terminal() {
         initial_step: "only-step".to_string(),
         namespace: String::new(),
         created_at_epoch_ms: 1_000_000,
+        cron_name: None,
     });
 
     // Replay WAL events (as the daemon does on startup)
@@ -361,6 +363,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             cwd: PathBuf::from("/tmp"),
             initial_step: "step".to_string(),
             namespace: String::new(),
+            cron_name: None,
         },
         &SystemClock,
     );
@@ -378,6 +381,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             cwd: PathBuf::from("/tmp"),
             initial_step: "done".to_string(),
             namespace: String::new(),
+            cron_name: None,
         },
         &SystemClock,
     );
@@ -395,6 +399,7 @@ fn reconcile_context_counts_non_terminal_pipelines() {
             cwd: PathBuf::from("/tmp"),
             initial_step: "failed".to_string(),
             namespace: String::new(),
+            cron_name: None,
         },
         &SystemClock,
     );
@@ -795,6 +800,7 @@ fn make_pipeline_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: 
         cancelling: false,
         total_retries: 0,
         step_visits: HashMap::new(),
+        cron_name: None,
     }
 }
 

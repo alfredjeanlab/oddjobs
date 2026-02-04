@@ -50,6 +50,8 @@ pub(crate) struct CronState {
     pub run_target: CronRunTarget,
     pub status: CronStatus,
     pub namespace: String,
+    /// Maximum concurrent pipelines this cron can have running. Default 1.
+    pub concurrency: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +120,13 @@ where
             CronRunTarget::from_run_target_str(run_target_str)
         };
 
+        // Read concurrency from the cron definition in the runbook
+        let concurrency = self
+            .cached_runbook(runbook_hash)
+            .ok()
+            .and_then(|rb| rb.get_cron(cron_name).map(|c| c.concurrency.unwrap_or(1)))
+            .unwrap_or(1);
+
         // Store cron state
         let state = CronState {
             project_root: project_root.to_path_buf(),
@@ -126,6 +135,7 @@ where
             run_target: run_target.clone(),
             status: CronStatus::Running,
             namespace: namespace.to_string(),
+            concurrency,
         };
 
         {
@@ -273,6 +283,7 @@ where
                     runbook_json: None,
                     runbook,
                     namespace: namespace.to_string(),
+                    cron_name: Some(cron_name.to_string()),
                 })
                 .await?,
             );
@@ -305,7 +316,7 @@ where
         let cron_name = rest.rsplit('/').next().unwrap_or(rest);
         let timer_namespace = rest.strip_suffix(&format!("/{}", cron_name)).unwrap_or("");
 
-        let (project_root, runbook_hash, run_target, interval, namespace) = {
+        let (project_root, runbook_hash, run_target, interval, namespace, concurrency) = {
             let crons = self.cron_states.lock();
             match crons.get(cron_name) {
                 Some(s) if s.status == CronStatus::Running => (
@@ -314,6 +325,7 @@ where
                     s.run_target.clone(),
                     s.interval.clone(),
                     s.namespace.clone(),
+                    s.concurrency,
                 ),
                 _ => {
                     tracing::debug!(cron = cron_name, "cron timer fired but cron not running");
@@ -339,13 +351,13 @@ where
                 .await?;
         }
 
-        // Re-read hash after potential refresh
-        let runbook_hash = {
+        // Re-read hash and concurrency after potential refresh
+        let (runbook_hash, concurrency) = {
             let crons = self.cron_states.lock();
             crons
                 .get(cron_name)
-                .map(|s| s.runbook_hash.clone())
-                .unwrap_or(runbook_hash)
+                .map(|s| (s.runbook_hash.clone(), s.concurrency))
+                .unwrap_or((runbook_hash, concurrency))
         };
 
         let runbook = self.cached_runbook(&runbook_hash)?;
@@ -354,6 +366,35 @@ where
 
         match &run_target {
             CronRunTarget::Pipeline(pipeline_name) => {
+                // Check concurrency before spawning
+                let active = self.count_active_cron_pipelines(cron_name, &namespace);
+                if active >= concurrency as usize {
+                    append_cron_log(
+                        self.logger.log_dir(),
+                        cron_name,
+                        &namespace,
+                        &format!(
+                            "skip: pipeline '{}' at max concurrency ({}/{})",
+                            pipeline_name, active, concurrency
+                        ),
+                    );
+                    // Reschedule timer but don't spawn
+                    let duration = crate::monitor::parse_duration(&interval).map_err(|e| {
+                        RuntimeError::InvalidFormat(format!(
+                            "invalid cron interval '{}': {}",
+                            interval, e
+                        ))
+                    })?;
+                    let timer_id = TimerId::cron(cron_name, &namespace);
+                    self.executor
+                        .execute(Effect::SetTimer {
+                            id: timer_id,
+                            duration,
+                        })
+                        .await?;
+                    return Ok(result_events);
+                }
+
                 // Generate pipeline ID
                 let pipeline_id = PipelineId::new(UuidIdGen.next());
                 let display_name = oj_runbook::pipeline_display_name(
@@ -377,6 +418,7 @@ where
                         runbook_json: None,
                         runbook,
                         namespace: namespace.clone(),
+                        cron_name: Some(cron_name.to_string()),
                     })
                     .await?,
                 );
@@ -588,11 +630,16 @@ where
             "runbook changed on disk, refreshing"
         );
 
-        // Update cron state
+        // Update cron state (including concurrency from refreshed runbook)
+        let new_concurrency = runbook
+            .get_cron(cron_name)
+            .and_then(|c| c.concurrency)
+            .unwrap_or(1);
         {
             let mut crons = self.cron_states.lock();
             if let Some(state) = crons.get_mut(cron_name) {
                 state.runbook_hash = runbook_hash.clone();
+                state.concurrency = new_concurrency;
             }
         }
 

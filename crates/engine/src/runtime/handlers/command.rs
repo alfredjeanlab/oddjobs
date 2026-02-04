@@ -85,6 +85,7 @@ where
                     runbook_json: runbook_json_param,
                     runbook,
                     namespace: namespace.to_string(),
+                    cron_name: None,
                 })
                 .await
             }
@@ -121,6 +122,7 @@ where
                         initial_step: step_name.to_string(),
                         created_at_epoch_ms: self.clock().epoch_ms(),
                         namespace: namespace.to_string(),
+                        cron_name: None,
                     },
                 });
 

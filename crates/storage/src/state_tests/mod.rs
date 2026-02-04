@@ -17,6 +17,7 @@ fn pipeline_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -
         initial_step: initial_step.to_string(),
         created_at_epoch_ms: 1_000_000,
         namespace: String::new(),
+        cron_name: None,
     }
 }
 

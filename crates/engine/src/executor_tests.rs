@@ -57,6 +57,7 @@ async fn executor_emit_event_effect() {
                 initial_step: "init".to_string(),
                 created_at_epoch_ms: 1_000_000,
                 namespace: String::new(),
+                cron_name: None,
             },
         })
         .await

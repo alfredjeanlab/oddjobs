@@ -16,6 +16,7 @@ fn test_pipeline() -> Pipeline {
         cwd: PathBuf::from("/tmp/test"),
         initial_step: "build".to_string(),
         namespace: "myproject".to_string(),
+        cron_name: None,
     };
     Pipeline::new(config, &SystemClock)
 }

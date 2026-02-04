@@ -217,6 +217,8 @@ pub struct PipelineConfig {
     pub cwd: PathBuf,
     pub initial_step: String,
     pub namespace: String,
+    /// Name of the cron that spawned this pipeline, if any.
+    pub cron_name: Option<String>,
 }
 
 /// Maximum number of times any single step can be entered before the pipeline
@@ -275,6 +277,9 @@ pub struct Pipeline {
     /// Used as a circuit breaker to prevent runaway retry cycles.
     #[serde(default)]
     pub step_visits: HashMap<String, u32>,
+    /// Name of the cron that spawned this pipeline, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cron_name: Option<String>,
 }
 
 /// Build the string key for action_attempts: "trigger:chain_pos".
@@ -319,6 +324,7 @@ impl Pipeline {
             cancelling: false,
             total_retries: 0,
             step_visits: HashMap::new(),
+            cron_name: config.cron_name,
         }
     }
 

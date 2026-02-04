@@ -34,6 +34,7 @@ fn test_pipeline() -> Pipeline {
         cancelling: false,
         total_retries: 0,
         step_visits: HashMap::new(),
+        cron_name: None,
     }
 }
 

@@ -138,6 +138,7 @@ fn event_pipeline_created_roundtrip() {
         initial_step: "init".to_string(),
         created_at_epoch_ms: 1_000_000,
         namespace: String::new(),
+        cron_name: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "pipeline:created");
@@ -328,6 +329,7 @@ fn event_pipeline_id_returns_id_for_pipeline_events() {
                 initial_step: "init".to_string(),
                 created_at_epoch_ms: 1_000_000,
                 namespace: String::new(),
+                cron_name: None,
             },
             PipelineId::new("p6"),
         ),

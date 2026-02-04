@@ -1018,3 +1018,362 @@ async fn count_running_agents_namespace_isolation() {
     // Count in namespace "ns-b" should be 0
     assert_eq!(ctx.runtime.count_running_agents("doctor", "ns-b"), 0);
 }
+
+// ===========================================================================
+// Pipeline-targeted cron concurrency tests
+// ===========================================================================
+
+const CRON_PIPELINE_CONC_RUNBOOK: &str = r#"
+[cron.deployer]
+interval = "10m"
+concurrency = 1
+run = { pipeline = "deploy" }
+
+[pipeline.deploy]
+[[pipeline.deploy.step]]
+name = "run"
+run = "echo deploying"
+on_done = "done"
+
+[[pipeline.deploy.step]]
+name = "done"
+run = "echo finished"
+"#;
+
+const CRON_PIPELINE_CONC2_RUNBOOK: &str = r#"
+[cron.deployer]
+interval = "10m"
+concurrency = 2
+run = { pipeline = "deploy" }
+
+[pipeline.deploy]
+[[pipeline.deploy.step]]
+name = "run"
+run = "echo deploying"
+on_done = "done"
+
+[[pipeline.deploy.step]]
+name = "done"
+run = "echo finished"
+"#;
+
+const CRON_PIPELINE_NO_CONC_RUNBOOK: &str = r#"
+[cron.deployer]
+interval = "10m"
+run = { pipeline = "deploy" }
+
+[pipeline.deploy]
+[[pipeline.deploy.step]]
+name = "run"
+run = "echo deploying"
+on_done = "done"
+
+[[pipeline.deploy.step]]
+name = "done"
+run = "echo finished"
+"#;
+
+// ---- Test 17: cron_pipeline_concurrency_skip ----
+
+#[tokio::test]
+async fn cron_pipeline_concurrency_skip() {
+    let ctx = setup_with_runbook(CRON_PIPELINE_CONC_RUNBOOK).await;
+    let (runbook_json, runbook_hash) = hash_runbook(CRON_PIPELINE_CONC_RUNBOOK);
+
+    load_runbook(&ctx, &runbook_json, &runbook_hash).await;
+
+    // Inject an active (non-terminal) pipeline with cron_name = Some("deployer")
+    ctx.runtime
+        .executor
+        .execute(oj_core::Effect::Emit {
+            event: Event::PipelineCreated {
+                id: PipelineId::new("existing-pipe-1"),
+                kind: "deploy".to_string(),
+                name: "deploy/existing".to_string(),
+                runbook_hash: runbook_hash.clone(),
+                cwd: ctx.project_root.clone(),
+                vars: HashMap::new(),
+                initial_step: "run".to_string(),
+                created_at_epoch_ms: 1000,
+                namespace: String::new(),
+                cron_name: Some("deployer".to_string()),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Verify count_active_cron_pipelines sees it
+    assert_eq!(
+        ctx.runtime.count_active_cron_pipelines("deployer", ""),
+        1,
+        "should count 1 active cron pipeline"
+    );
+
+    // Start cron with concurrency=1
+    ctx.runtime
+        .handle_event(Event::CronStarted {
+            cron_name: "deployer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            interval: "10m".to_string(),
+            pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Fire the timer — should skip due to concurrency
+    let events = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: oj_core::TimerId::cron("deployer", ""),
+        })
+        .await
+        .unwrap();
+
+    // No PipelineCreated should be emitted (spawn was skipped)
+    let has_new_pipeline = events.iter().any(
+        |e| matches!(e, Event::PipelineCreated { id, .. } if id.as_str() != "existing-pipe-1"),
+    );
+    assert!(
+        !has_new_pipeline,
+        "should NOT spawn pipeline when at max concurrency"
+    );
+
+    // No CronFired should be emitted (spawn was skipped)
+    let has_cron_fired = events.iter().any(|e| matches!(e, Event::CronFired { .. }));
+    assert!(
+        !has_cron_fired,
+        "CronFired should NOT be emitted when spawn is skipped"
+    );
+
+    // Timer should still be rescheduled
+    let scheduler = ctx.runtime.executor.scheduler();
+    let sched = scheduler.lock();
+    assert!(
+        sched.has_timers(),
+        "timer should be rescheduled after concurrency skip"
+    );
+}
+
+// ---- Test 18: cron_pipeline_concurrency_respawns_after_complete ----
+
+#[tokio::test]
+async fn cron_pipeline_concurrency_respawns_after_complete() {
+    let ctx = setup_with_runbook(CRON_PIPELINE_CONC_RUNBOOK).await;
+    let (runbook_json, runbook_hash) = hash_runbook(CRON_PIPELINE_CONC_RUNBOOK);
+
+    load_runbook(&ctx, &runbook_json, &runbook_hash).await;
+
+    // Inject a completed (terminal) pipeline with cron_name = Some("deployer")
+    ctx.runtime
+        .executor
+        .execute(oj_core::Effect::Emit {
+            event: Event::PipelineCreated {
+                id: PipelineId::new("completed-pipe-1"),
+                kind: "deploy".to_string(),
+                name: "deploy/completed".to_string(),
+                runbook_hash: runbook_hash.clone(),
+                cwd: ctx.project_root.clone(),
+                vars: HashMap::new(),
+                initial_step: "run".to_string(),
+                created_at_epoch_ms: 1000,
+                namespace: String::new(),
+                cron_name: Some("deployer".to_string()),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Advance it to terminal state
+    ctx.runtime
+        .executor
+        .execute(oj_core::Effect::Emit {
+            event: Event::PipelineAdvanced {
+                id: PipelineId::new("completed-pipe-1"),
+                step: "done".to_string(),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Verify it doesn't count as active
+    assert_eq!(
+        ctx.runtime.count_active_cron_pipelines("deployer", ""),
+        0,
+        "completed pipeline should not count as active"
+    );
+
+    // Start cron with concurrency=1
+    ctx.runtime
+        .handle_event(Event::CronStarted {
+            cron_name: "deployer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            interval: "10m".to_string(),
+            pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Fire the timer — should succeed since previous pipeline is completed
+    let events = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: oj_core::TimerId::cron("deployer", ""),
+        })
+        .await
+        .unwrap();
+
+    // PipelineCreated should be emitted (spawn succeeded)
+    let has_pipeline = events
+        .iter()
+        .any(|e| matches!(e, Event::PipelineCreated { .. }));
+    assert!(
+        has_pipeline,
+        "should spawn pipeline when previous run is completed"
+    );
+
+    // CronFired should be emitted
+    let has_cron_fired = events
+        .iter()
+        .any(|e| matches!(e, Event::CronFired { cron_name, .. } if cron_name == "deployer"));
+    assert!(
+        has_cron_fired,
+        "CronFired should be emitted after successful spawn"
+    );
+}
+
+// ---- Test 19: cron_pipeline_concurrency_default_singleton ----
+
+#[tokio::test]
+async fn cron_pipeline_concurrency_default_singleton() {
+    let ctx = setup_with_runbook(CRON_PIPELINE_NO_CONC_RUNBOOK).await;
+    let (runbook_json, runbook_hash) = hash_runbook(CRON_PIPELINE_NO_CONC_RUNBOOK);
+
+    load_runbook(&ctx, &runbook_json, &runbook_hash).await;
+
+    // Inject an active pipeline with matching cron_name
+    ctx.runtime
+        .executor
+        .execute(oj_core::Effect::Emit {
+            event: Event::PipelineCreated {
+                id: PipelineId::new("active-pipe-1"),
+                kind: "deploy".to_string(),
+                name: "deploy/active".to_string(),
+                runbook_hash: runbook_hash.clone(),
+                cwd: ctx.project_root.clone(),
+                vars: HashMap::new(),
+                initial_step: "run".to_string(),
+                created_at_epoch_ms: 1000,
+                namespace: String::new(),
+                cron_name: Some("deployer".to_string()),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Start cron (no concurrency field = default 1)
+    ctx.runtime
+        .handle_event(Event::CronStarted {
+            cron_name: "deployer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            interval: "10m".to_string(),
+            pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Fire the timer
+    let events = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: oj_core::TimerId::cron("deployer", ""),
+        })
+        .await
+        .unwrap();
+
+    // Spawn should be skipped (default concurrency=1 makes it singleton)
+    let has_new_pipeline = events
+        .iter()
+        .any(|e| matches!(e, Event::PipelineCreated { id, .. } if id.as_str() != "active-pipe-1"));
+    assert!(
+        !has_new_pipeline,
+        "default concurrency=1 should make cron singleton"
+    );
+}
+
+// ---- Test 20: cron_pipeline_concurrency_allows_multiple ----
+
+#[tokio::test]
+async fn cron_pipeline_concurrency_allows_multiple() {
+    let ctx = setup_with_runbook(CRON_PIPELINE_CONC2_RUNBOOK).await;
+    let (runbook_json, runbook_hash) = hash_runbook(CRON_PIPELINE_CONC2_RUNBOOK);
+
+    load_runbook(&ctx, &runbook_json, &runbook_hash).await;
+
+    // Inject one active pipeline with matching cron_name
+    ctx.runtime
+        .executor
+        .execute(oj_core::Effect::Emit {
+            event: Event::PipelineCreated {
+                id: PipelineId::new("active-pipe-1"),
+                kind: "deploy".to_string(),
+                name: "deploy/active".to_string(),
+                runbook_hash: runbook_hash.clone(),
+                cwd: ctx.project_root.clone(),
+                vars: HashMap::new(),
+                initial_step: "run".to_string(),
+                created_at_epoch_ms: 1000,
+                namespace: String::new(),
+                cron_name: Some("deployer".to_string()),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Start cron with concurrency=2
+    ctx.runtime
+        .handle_event(Event::CronStarted {
+            cron_name: "deployer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: runbook_hash.clone(),
+            interval: "10m".to_string(),
+            pipeline_name: "deploy".to_string(),
+            run_target: "pipeline:deploy".to_string(),
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Fire the timer
+    let events = ctx
+        .runtime
+        .handle_event(Event::TimerStart {
+            id: oj_core::TimerId::cron("deployer", ""),
+        })
+        .await
+        .unwrap();
+
+    // PipelineCreated SHOULD be emitted (1 < 2, room for another)
+    let has_new_pipeline = events
+        .iter()
+        .any(|e| matches!(e, Event::PipelineCreated { id, .. } if id.as_str() != "active-pipe-1"));
+    assert!(
+        has_new_pipeline,
+        "concurrency=2 should allow second pipeline when only 1 active"
+    );
+
+    // CronFired should be emitted
+    let has_cron_fired = events.iter().any(|e| matches!(e, Event::CronFired { .. }));
+    assert!(
+        has_cron_fired,
+        "CronFired should be emitted for successful spawn"
+    );
+}

@@ -458,6 +458,7 @@ where
                     runbook_json: None,
                     runbook,
                     namespace: worker_namespace.clone(),
+                    cron_name: None,
                 })
                 .await?,
             );

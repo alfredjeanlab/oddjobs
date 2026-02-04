@@ -216,6 +216,7 @@ pub(super) fn handle_pipeline_resume(
             initial_step: orphan.current_step,
             created_at_epoch_ms: 0,
             namespace: orphan.project,
+            cron_name: None,
         })
         .map_err(|_| ConnectionError::WalError)?;
 

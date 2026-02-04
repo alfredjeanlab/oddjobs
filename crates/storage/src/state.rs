@@ -299,6 +299,7 @@ impl MaterializedState {
                 initial_step,
                 created_at_epoch_ms,
                 namespace,
+                cron_name,
             } => {
                 let config = PipelineConfig {
                     id: id.to_string(),
@@ -309,6 +310,7 @@ impl MaterializedState {
                     cwd: cwd.clone(),
                     initial_step: initial_step.clone(),
                     namespace: namespace.clone(),
+                    cron_name: cron_name.clone(),
                 };
                 let pipeline = Pipeline::new_with_epoch_ms(config, *created_at_epoch_ms);
                 self.pipelines.insert(id.to_string(), pipeline);

@@ -62,6 +62,7 @@ fn make_pipeline(id: &str, step: &str) -> Pipeline {
         cancelling: false,
         total_retries: 0,
         step_visits: HashMap::new(),
+        cron_name: None,
     }
 }
 
@@ -336,6 +337,7 @@ fn make_pipeline_with_agent(id: &str, step: &str, agent_id: &str) -> Pipeline {
         cancelling: false,
         total_retries: 0,
         step_visits: HashMap::new(),
+        cron_name: None,
     }
 }
 

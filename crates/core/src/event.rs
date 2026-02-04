@@ -129,6 +129,8 @@ pub enum Event {
         created_at_epoch_ms: u64,
         #[serde(default)]
         namespace: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cron_name: Option<String>,
     },
 
     #[serde(rename = "pipeline:advanced")]

@@ -21,6 +21,7 @@ pub(crate) struct CreatePipelineParams {
     pub runbook_json: Option<serde_json::Value>,
     pub runbook: Runbook,
     pub namespace: String,
+    pub cron_name: Option<String>,
 }
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -43,6 +44,7 @@ where
             runbook_json,
             runbook,
             namespace,
+            cron_name,
         } = params;
 
         // Look up pipeline definition
@@ -205,6 +207,7 @@ where
                 initial_step: initial_step.clone(),
                 created_at_epoch_ms: self.clock().epoch_ms(),
                 namespace: namespace.clone(),
+                cron_name,
             },
         });
 

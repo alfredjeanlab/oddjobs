@@ -16,4 +16,8 @@ pub struct CronDef {
     pub interval: String,
     /// What to run (pipeline reference only)
     pub run: RunDirective,
+    /// Maximum number of active pipelines this cron can have running
+    /// simultaneously. Defaults to 1 (singleton). `None` means use default.
+    #[serde(default)]
+    pub concurrency: Option<u32>,
 }

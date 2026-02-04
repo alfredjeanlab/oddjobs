@@ -19,6 +19,7 @@ fn test_config(id: &str, name: &str) -> PipelineConfig {
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
         namespace: String::new(),
+        cron_name: None,
     }
 }
 

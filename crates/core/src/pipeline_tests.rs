@@ -47,6 +47,7 @@ fn test_config(id: &str) -> PipelineConfig {
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
         namespace: String::new(),
+        cron_name: None,
     }
 }
 
@@ -62,6 +63,7 @@ fn pipeline_creation() {
         cwd: PathBuf::from("/test/project"),
         initial_step: "init".to_string(),
         namespace: String::new(),
+        cron_name: None,
     };
     let pipeline = Pipeline::new(config, &clock);
 

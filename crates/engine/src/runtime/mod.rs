@@ -134,6 +134,21 @@ where
         f(&mut guard)
     }
 
+    /// Count currently active (non-terminal) pipelines spawned by a given cron.
+    pub(crate) fn count_active_cron_pipelines(&self, cron_name: &str, namespace: &str) -> usize {
+        self.lock_state(|state| {
+            state
+                .pipelines
+                .values()
+                .filter(|p| {
+                    p.cron_name.as_deref() == Some(cron_name)
+                        && p.namespace == namespace
+                        && !p.is_terminal()
+                })
+                .count()
+        })
+    }
+
     /// Count currently running (non-terminal) instances of an agent by name.
     pub(crate) fn count_running_agents(&self, agent_name: &str, namespace: &str) -> usize {
         self.lock_state(|state| {

@@ -64,6 +64,7 @@ fn make_pipeline(
         cancelling: false,
         total_retries: 0,
         step_visits: HashMap::new(),
+        cron_name: None,
     }
 }
 
