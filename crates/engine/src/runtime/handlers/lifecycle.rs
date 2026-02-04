@@ -26,7 +26,9 @@ where
 
         // If pipeline is in terminal "failed" state, find the last failed step
         // from history and reset the pipeline to that step so it can be retried.
-        let pipeline = if pipeline.step == "failed" {
+        // We track the step name separately because the event may not be applied
+        // to state immediately.
+        let resume_step = if pipeline.step == "failed" {
             let failed_step = pipeline
                 .step_history
                 .iter()
@@ -47,14 +49,14 @@ where
                 .execute(Effect::Emit {
                     event: Event::PipelineAdvanced {
                         id: pipeline_id.clone(),
-                        step: failed_step,
+                        step: failed_step.clone(),
                     },
                 })
                 .await?;
 
-            self.require_pipeline(pipeline_id.as_str())?
+            failed_step
         } else {
-            pipeline
+            pipeline.step.clone()
         };
 
         // Persist var updates if any
@@ -83,8 +85,8 @@ where
             .get_pipeline(&pipeline.kind)
             .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline.kind.clone()))?;
         let step_def = pipeline_def
-            .get_step(&pipeline.step)
-            .ok_or_else(|| RuntimeError::StepNotFound(pipeline.step.clone()))?;
+            .get_step(&resume_step)
+            .ok_or_else(|| RuntimeError::StepNotFound(resume_step.clone()))?;
 
         if step_def.is_agent() {
             // Agent step: require message
@@ -100,7 +102,7 @@ where
                 .agent_name()
                 .ok_or_else(|| RuntimeError::AgentNotFound("no agent name in step".into()))?;
 
-            self.handle_agent_resume(&pipeline, agent_name, msg, &merged_inputs)
+            self.handle_agent_resume(&pipeline, &resume_step, agent_name, msg, &merged_inputs)
                 .await
         } else if step_def.is_shell() {
             // Shell step: re-run command
@@ -115,11 +117,12 @@ where
                 .shell_command()
                 .ok_or_else(|| RuntimeError::InvalidRequest("no shell command in step".into()))?;
 
-            self.handle_shell_resume(&pipeline, command).await
+            self.handle_shell_resume(&pipeline, &resume_step, command)
+                .await
         } else {
             Err(RuntimeError::InvalidRequest(format!(
                 "resume not supported for step type in step: {}",
-                pipeline.step
+                resume_step
             )))
         }
     }
@@ -153,6 +156,7 @@ where
     pub(crate) async fn handle_shell_resume(
         &self,
         pipeline: &oj_core::Pipeline,
+        step: &str,
         _command: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Kill existing session if any
@@ -169,7 +173,7 @@ where
         let execution_dir = self.execution_dir(pipeline);
         let pipeline_id = PipelineId::new(&pipeline.id);
         let result = self
-            .start_step(&pipeline_id, &pipeline.step, &pipeline.vars, &execution_dir)
+            .start_step(&pipeline_id, step, &pipeline.vars, &execution_dir)
             .await?;
 
         tracing::info!(pipeline_id = %pipeline.id, "re-running shell step");

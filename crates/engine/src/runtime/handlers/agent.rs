@@ -239,6 +239,7 @@ where
     pub(crate) async fn handle_agent_resume(
         &self,
         pipeline: &oj_core::Pipeline,
+        step: &str,
         _agent_name: &str,
         message: &str,
         input: &HashMap<String, String>,
@@ -247,7 +248,7 @@ where
         let agent_id = pipeline
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == step)
             .and_then(|r| r.agent_id.clone())
             .map(AgentId::new);
 
@@ -278,7 +279,7 @@ where
                     .execute(Effect::Emit {
                         event: Event::StepStarted {
                             pipeline_id: pipeline_id.clone(),
-                            step: pipeline.step.clone(),
+                            step: step.to_string(),
                             agent_id: None,
                             agent_name: None,
                         },
@@ -320,7 +321,7 @@ where
                 let execution_dir = self.execution_dir(pipeline);
                 let pipeline_id = PipelineId::new(&pipeline.id);
                 let result = self
-                    .start_step(&pipeline_id, &pipeline.step, &new_inputs, &execution_dir)
+                    .start_step(&pipeline_id, step, &new_inputs, &execution_dir)
                     .await?;
 
                 tracing::info!(pipeline_id = %pipeline.id, "resumed agent");
