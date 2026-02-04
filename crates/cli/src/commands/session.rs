@@ -72,8 +72,9 @@ pub async fn handle(
         SessionCommand::List { project } => {
             let mut sessions = client.list_sessions().await?;
 
-            // Filter by project namespace
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Filter by project namespace (empty OJ_NAMESPACE treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
             if let Some(ref ns) = filter_namespace {
                 sessions.retain(|s| s.namespace == *ns);
             }

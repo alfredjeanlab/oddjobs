@@ -51,8 +51,10 @@ pub async fn handle(
 ) -> Result<()> {
     match command {
         DecisionCommand::List { project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
             let request = Request::Query {
                 query: Query::ListDecisions {

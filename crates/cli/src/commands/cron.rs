@@ -98,8 +98,9 @@ pub async fn handle(
     match command {
         CronCommand::Start { name, project } => {
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::CronStart {
@@ -121,8 +122,9 @@ pub async fn handle(
         }
         CronCommand::Stop { name, project } => {
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::CronStop {
@@ -143,8 +145,10 @@ pub async fn handle(
             }
         }
         CronCommand::Restart { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::CronRestart {
@@ -166,8 +170,9 @@ pub async fn handle(
         }
         CronCommand::Once { name, project } => {
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::CronOnce {
@@ -196,8 +201,10 @@ pub async fn handle(
             limit,
             project,
         } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
             let (log_path, content) = client
                 .get_cron_logs(&name, &effective_namespace, limit, Some(project_root))
@@ -211,8 +218,9 @@ pub async fn handle(
         } => {
             let (mut pruned, skipped) = client.cron_prune(all, dry_run).await?;
 
-            // Filter by project namespace
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Filter by project namespace (empty OJ_NAMESPACE treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
             if let Some(ref ns) = filter_namespace {
                 pruned.retain(|e| e.namespace == *ns);
             }
@@ -252,8 +260,9 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::Crons { mut crons } => {
-                    // Filter by project namespace
-                    let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+                    // Filter by project namespace (empty OJ_NAMESPACE treated as unset)
+                    let filter_namespace = project
+                        .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
                     if let Some(ref ns) = filter_namespace {
                         crons.retain(|c| c.namespace == *ns);
                     }

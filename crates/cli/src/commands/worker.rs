@@ -90,8 +90,9 @@ pub async fn handle(
     match command {
         WorkerCommand::Start { name, project } => {
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::WorkerStart {
@@ -113,8 +114,9 @@ pub async fn handle(
         }
         WorkerCommand::Stop { name, project } => {
             // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::WorkerStop {
@@ -135,8 +137,10 @@ pub async fn handle(
             }
         }
         WorkerCommand::Restart { name, project } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let request = Request::WorkerRestart {
@@ -162,8 +166,10 @@ pub async fn handle(
             limit,
             project,
         } => {
+            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
+            // (empty OJ_NAMESPACE treated as unset)
             let effective_namespace = project
-                .or_else(|| std::env::var("OJ_NAMESPACE").ok())
+                .or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()))
                 .unwrap_or_else(|| namespace.to_string());
 
             let (log_path, content) = client
@@ -172,8 +178,9 @@ pub async fn handle(
             display_log(&log_path, &content, follow, format, "worker", &name).await?;
         }
         WorkerCommand::List { project } => {
-            // Namespace resolution: --project flag > OJ_NAMESPACE env > resolved namespace
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Namespace resolution: --project flag > OJ_NAMESPACE env (empty OJ_NAMESPACE treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
 
             let request = Request::Query {
                 query: Query::ListWorkers,
@@ -243,8 +250,9 @@ pub async fn handle(
             dry_run,
             project,
         } => {
-            // Namespace resolution: --project flag > OJ_NAMESPACE env > None (all namespaces)
-            let filter_namespace = project.or_else(|| std::env::var("OJ_NAMESPACE").ok());
+            // Namespace resolution: --project flag > OJ_NAMESPACE env (empty treated as unset)
+            let filter_namespace =
+                project.or_else(|| std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty()));
 
             let (pruned, skipped) = client
                 .worker_prune(all, dry_run, filter_namespace.as_deref())
