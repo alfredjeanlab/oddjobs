@@ -7,7 +7,7 @@ use super::super::Runtime;
 use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentState, Clock, Effect, Event, PipelineId, TimerId};
+use oj_core::{split_scoped_name, AgentId, AgentState, Clock, Effect, Event, PipelineId, TimerId};
 use std::time::Duration;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -129,10 +129,8 @@ where
         };
 
         // Extract namespace and queue_name from the scoped key
-        let (namespace, queue_name) = match scoped_queue.split_once('/') {
-            Some((ns, q)) => (ns.to_string(), q.to_string()),
-            None => (String::new(), scoped_queue.to_string()),
-        };
+        let (ns, qn) = split_scoped_name(scoped_queue);
+        let (namespace, queue_name) = (ns.to_string(), qn.to_string());
 
         tracing::info!(
             queue = %queue_name,

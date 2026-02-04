@@ -9,7 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
-use oj_core::Event;
+use oj_core::{scoped_name, Event};
 use oj_runbook::QueueType;
 use oj_storage::MaterializedState;
 
@@ -110,11 +110,7 @@ pub(super) fn handle_queue_push(
     // Deduplicate: if a pending or active item with the same data already exists, return it
     {
         let st = state.lock();
-        let key = if namespace.is_empty() {
-            queue_name.to_string()
-        } else {
-            format!("{}/{}", namespace, queue_name)
-        };
+        let key = scoped_name(namespace, queue_name);
         if let Some(items) = st.queue_items.get(&key) {
             if let Some(existing) = items.iter().find(|i| {
                 (i.status == oj_storage::QueueItemStatus::Pending
@@ -202,11 +198,7 @@ fn wake_attached_workers(
         .collect();
 
     for name in &worker_names {
-        let scoped = if namespace.is_empty() {
-            (*name).to_string()
-        } else {
-            format!("{}/{}", namespace, name)
-        };
+        let scoped = scoped_name(namespace, name);
         let is_running = {
             let state = state.lock();
             state
@@ -286,11 +278,7 @@ fn resolve_queue_item_id(
     item_id: &str,
 ) -> Result<String, Response> {
     let state = state.lock();
-    let key = if namespace.is_empty() {
-        queue_name.to_string()
-    } else {
-        format!("{}/{}", namespace, queue_name)
-    };
+    let key = scoped_name(namespace, queue_name);
     let items = state.queue_items.get(&key);
 
     // Try exact match first
@@ -430,11 +418,7 @@ pub(super) fn handle_queue_retry(
     // Validate item is in Dead or Failed status
     {
         let state = state.lock();
-        let key = if namespace.is_empty() {
-            queue_name.to_string()
-        } else {
-            format!("{}/{}", namespace, queue_name)
-        };
+        let key = scoped_name(namespace, queue_name);
         let item = state
             .queue_items
             .get(&key)
@@ -520,11 +504,7 @@ pub(super) fn handle_queue_drain(
     // Collect pending item IDs and build response summaries
     let pending_items: Vec<crate::protocol::QueueItemSummary> = {
         let state = state.lock();
-        let key = if namespace.is_empty() {
-            queue_name.to_string()
-        } else {
-            format!("{}/{}", namespace, queue_name)
-        };
+        let key = scoped_name(namespace, queue_name);
         state
             .queue_items
             .get(&key)
@@ -606,9 +586,9 @@ fn suggest_for_queue(
                 .queue_items
                 .keys()
                 .filter_map(|k| {
-                    let (item_ns, name) = suggest::parse_scoped_key(k);
+                    let (item_ns, name) = oj_core::split_scoped_name(k);
                     if item_ns == ns {
-                        Some(name)
+                        Some(name.to_string())
                     } else {
                         None
                     }

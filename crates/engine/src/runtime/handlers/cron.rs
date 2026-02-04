@@ -9,7 +9,7 @@ use crate::error::RuntimeError;
 use crate::log_paths::cron_log_path;
 use crate::time_fmt::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -60,21 +60,12 @@ pub(crate) enum CronStatus {
     Stopped,
 }
 
-/// Build a namespace-scoped cron name for log file paths.
-fn scoped_cron_name(namespace: &str, cron_name: &str) -> String {
-    if namespace.is_empty() {
-        cron_name.to_string()
-    } else {
-        format!("{}/{}", namespace, cron_name)
-    }
-}
-
 /// Append a timestamped line to the cron log file.
 ///
 /// Creates the `{logs_dir}/cron/` directory on first write.
 /// Errors are silently ignored — logging must not break the cron.
 fn append_cron_log(logs_dir: &Path, cron_name: &str, namespace: &str, message: &str) {
-    let scoped = scoped_cron_name(namespace, cron_name);
+    let scoped = scoped_name(namespace, cron_name);
     let path = cron_log_path(logs_dir, &scoped);
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

@@ -5,6 +5,28 @@
 
 use std::path::Path;
 
+/// Build a namespace-scoped key from namespace and name.
+///
+/// When namespace is empty (backward compat with old events), returns the bare name.
+/// Otherwise returns `"{namespace}/{name}"`.
+pub fn scoped_name(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_string()
+    } else {
+        format!("{}/{}", namespace, name)
+    }
+}
+
+/// Parse a namespace-scoped key into `(namespace, name)`.
+///
+/// Returns `("", key)` when no slash is present.
+pub fn split_scoped_name(scoped: &str) -> (&str, &str) {
+    match scoped.split_once('/') {
+        Some((ns, name)) => (ns, name),
+        None => ("", scoped),
+    }
+}
+
 /// Resolve the project namespace from a project root path.
 ///
 /// 1. Read `.oj/config.toml` and return `[project].name` if present

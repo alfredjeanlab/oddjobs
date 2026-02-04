@@ -20,7 +20,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
-use oj_core::StepOutcome;
+use oj_core::{scoped_name, split_scoped_name, StepOutcome};
 use oj_storage::{MaterializedState, QueueItemStatus};
 
 use oj_engine::breadcrumb::Breadcrumb;
@@ -386,12 +386,7 @@ pub(super) fn handle_query(
             namespace,
             project_root,
         } => {
-            // Use scoped key: namespace/queue_name (matching storage::state::scoped_key)
-            let key = if namespace.is_empty() {
-                queue_name.clone()
-            } else {
-                format!("{}/{}", namespace, queue_name)
-            };
+            let key = scoped_name(&namespace, &queue_name);
 
             match state.queue_items.get(&key) {
                 Some(queue_items) => {
@@ -426,9 +421,9 @@ pub(super) fn handle_query(
                             .queue_items
                             .keys()
                             .filter_map(|k| {
-                                let (ns, name) = query_queues::parse_scoped_key(k);
+                                let (ns, name) = split_scoped_name(k);
                                 if ns == namespace {
-                                    Some(name)
+                                    Some(name.to_string())
                                 } else {
                                     None
                                 }
@@ -599,13 +594,9 @@ pub(super) fn handle_query(
         } => {
             use oj_engine::log_paths::worker_log_path;
 
-            let scoped_name = if namespace.is_empty() {
-                name.clone()
-            } else {
-                format!("{}/{}", namespace, name)
-            };
+            let scoped = scoped_name(&namespace, &name);
 
-            let log_path = worker_log_path(logs_path, &scoped_name);
+            let log_path = worker_log_path(logs_path, &scoped);
 
             // If log exists, return it (worker was active at some point)
             if log_path.exists() {
@@ -614,7 +605,7 @@ pub(super) fn handle_query(
             }
 
             // Log doesn't exist — check if worker is known
-            let in_state = state.workers.contains_key(&scoped_name);
+            let in_state = state.workers.contains_key(&scoped);
             let in_runbook = project_root.as_ref().is_some_and(|root| {
                 oj_runbook::find_runbook_by_worker(&root.join(".oj/runbooks"), &name)
                     .ok()
@@ -709,11 +700,7 @@ pub(super) fn handle_query(
         } => {
             use oj_engine::log_paths::cron_log_path;
 
-            let scoped = if namespace.is_empty() {
-                name.clone()
-            } else {
-                format!("{}/{}", namespace, name)
-            };
+            let scoped = scoped_name(&namespace, &name);
             let log_path = cron_log_path(logs_path, &scoped);
 
             // If log exists, return it
@@ -901,7 +888,7 @@ pub(super) fn handle_query(
             // Collect queue stats grouped by namespace
             let mut ns_queues: BTreeMap<String, Vec<QueueStatus>> = BTreeMap::new();
             for (scoped_key, items) in &state.queue_items {
-                let (ns, queue_name) = query_queues::parse_scoped_key(scoped_key);
+                let (ns, queue_name) = split_scoped_name(scoped_key);
 
                 let mut pending = 0;
                 let mut active = 0;
@@ -916,12 +903,15 @@ pub(super) fn handle_query(
                     }
                 }
 
-                ns_queues.entry(ns).or_default().push(QueueStatus {
-                    name: queue_name,
-                    pending,
-                    active,
-                    dead,
-                });
+                ns_queues
+                    .entry(ns.to_string())
+                    .or_default()
+                    .push(QueueStatus {
+                        name: queue_name.to_string(),
+                        pending,
+                        active,
+                        dead,
+                    });
             }
 
             // Collect orphaned pipelines grouped by namespace
@@ -975,11 +965,7 @@ pub(super) fn handle_query(
         } => {
             use oj_engine::log_paths::queue_log_path;
 
-            let scoped = if namespace.is_empty() {
-                queue_name
-            } else {
-                format!("{}/{}", namespace, queue_name)
-            };
+            let scoped = scoped_name(&namespace, &queue_name);
             let path = queue_log_path(logs_path, &scoped);
             let content = read_log_file(&path, lines);
             Response::QueueLogs {

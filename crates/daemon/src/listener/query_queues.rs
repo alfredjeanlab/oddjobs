@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use oj_core::split_scoped_name;
 use oj_storage::MaterializedState;
 
 use crate::protocol::{QueueSummary, Response};
@@ -20,7 +21,7 @@ pub(super) fn list_queues(
         .queue_items
         .iter()
         .map(|(scoped_key, items)| {
-            let (ns, queue_name) = parse_scoped_key(scoped_key);
+            let (ns, queue_name) = split_scoped_name(scoped_key);
 
             let workers: Vec<String> = state
                 .workers
@@ -30,8 +31,8 @@ pub(super) fn list_queues(
                 .collect();
 
             QueueSummary {
-                name: queue_name,
-                namespace: ns,
+                name: queue_name.to_string(),
+                namespace: ns.to_string(),
                 queue_type: "persisted".to_string(),
                 item_count: items.len(),
                 workers,
@@ -63,17 +64,4 @@ pub(super) fn list_queues(
 
     queues.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
     Response::Queues { queues }
-}
-
-/// Parse a scoped key like "namespace/name" into (namespace, name).
-/// Returns ("", key) when no slash is present.
-pub(super) fn parse_scoped_key(scoped_key: &str) -> (String, String) {
-    if let Some(pos) = scoped_key.find('/') {
-        (
-            scoped_key[..pos].to_string(),
-            scoped_key[pos + 1..].to_string(),
-        )
-    } else {
-        (String::new(), scoped_key.to_string())
-    }
 }

@@ -7,6 +7,7 @@
 //! actions such as timeouts, heartbeats, or periodic checks.
 
 use crate::agent_run::AgentRunId;
+use crate::namespace::scoped_name;
 use crate::pipeline::PipelineId;
 
 crate::define_id! {
@@ -63,11 +64,7 @@ impl TimerId {
 
     /// Timer ID for a cron interval tick.
     pub fn cron(cron_name: &str, namespace: &str) -> Self {
-        if namespace.is_empty() {
-            Self::new(format!("cron:{}", cron_name))
-        } else {
-            Self::new(format!("cron:{}/{}", namespace, cron_name))
-        }
+        Self::new(format!("cron:{}", scoped_name(namespace, cron_name)))
     }
 
     /// Returns true if this is a cron timer.
@@ -77,11 +74,10 @@ impl TimerId {
 
     /// Timer ID for periodic queue polling.
     pub fn queue_poll(worker_name: &str, namespace: &str) -> Self {
-        if namespace.is_empty() {
-            Self::new(format!("queue-poll:{}", worker_name))
-        } else {
-            Self::new(format!("queue-poll:{}/{}", namespace, worker_name))
-        }
+        Self::new(format!(
+            "queue-poll:{}",
+            scoped_name(namespace, worker_name)
+        ))
     }
 
     /// Returns true if this is a queue poll timer.

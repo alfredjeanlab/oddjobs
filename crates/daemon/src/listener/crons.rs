@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{Event, IdGen, PipelineId, UuidIdGen};
+use oj_core::{scoped_name, Event, IdGen, PipelineId, UuidIdGen};
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
@@ -145,11 +145,7 @@ pub(super) fn handle_cron_stop(
     project_root: Option<&Path>,
 ) -> Result<Response, ConnectionError> {
     // Check if cron exists in state
-    let scoped = if namespace.is_empty() {
-        cron_name.to_string()
-    } else {
-        format!("{}/{}", namespace, cron_name)
-    };
+    let scoped = scoped_name(namespace, cron_name);
     let exists = {
         let state = state.lock();
         state.crons.contains_key(&scoped)
@@ -336,11 +332,7 @@ pub(super) fn handle_cron_restart(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Stop cron if it exists in state
-    let scoped = if namespace.is_empty() {
-        cron_name.to_string()
-    } else {
-        format!("{}/{}", namespace, cron_name)
-    };
+    let scoped = scoped_name(namespace, cron_name);
     let exists = {
         let state = state.lock();
         state.crons.contains_key(&scoped)

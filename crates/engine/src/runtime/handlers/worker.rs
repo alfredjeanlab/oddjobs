@@ -7,21 +7,12 @@ use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, TimerId, UuidIdGen};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-
-/// Build a namespace-scoped worker name for log file paths.
-fn scoped_worker_name(namespace: &str, worker_name: &str) -> String {
-    if namespace.is_empty() {
-        worker_name.to_string()
-    } else {
-        format!("{}/{}", namespace, worker_name)
-    }
-}
 
 /// In-memory state for a running worker
 pub(crate) struct WorkerState {
@@ -78,7 +69,7 @@ where
 
         // Restore active pipelines from persisted state (survives daemon restart)
         let (persisted_active, persisted_item_map) = self.lock_state(|state| {
-            let scoped = scoped_worker_name(namespace, worker_name);
+            let scoped = scoped_name(namespace, worker_name);
             let active: HashSet<PipelineId> = state
                 .workers
                 .get(&scoped)
@@ -124,7 +115,7 @@ where
             workers.insert(worker_name.to_string(), state);
         }
 
-        let scoped = scoped_worker_name(namespace, worker_name);
+        let scoped = scoped_name(namespace, worker_name);
         self.worker_logger.append(
             &scoped,
             &format!(
@@ -182,7 +173,7 @@ where
         {
             let workers = self.worker_states.lock();
             if let Some(state) = workers.get(worker_name) {
-                let scoped = scoped_worker_name(&state.namespace, worker_name);
+                let scoped = scoped_name(&state.namespace, worker_name);
                 self.worker_logger.append(&scoped, "wake");
             }
         }
@@ -243,12 +234,7 @@ where
         queue_name: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Use scoped key: namespace/queue_name (matching storage::state::scoped_key)
-        let key = if namespace.is_empty() {
-            queue_name.to_string()
-        } else {
-            format!("{}/{}", namespace, queue_name)
-        };
+        let key = scoped_name(namespace, queue_name);
         let (total, items): (usize, Vec<serde_json::Value>) = self.lock_state(|state| match state
             .queue_items
             .get(&key)
@@ -318,7 +304,7 @@ where
             let active = state.active_pipelines.len() as u32;
             let available = state.concurrency.saturating_sub(active);
             if available == 0 || items.is_empty() {
-                let scoped = scoped_worker_name(&state.namespace, worker_name);
+                let scoped = scoped_name(&state.namespace, worker_name);
                 self.worker_logger.append(
                     &scoped,
                     &format!("idle (active={}/{})", active, state.concurrency),
@@ -391,7 +377,7 @@ where
                             error = %e,
                             "take command failed, skipping item"
                         );
-                        let scoped = scoped_worker_name(&worker_namespace, worker_name);
+                        let scoped = scoped_name(&worker_namespace, worker_name);
                         self.worker_logger.append(
                             &scoped,
                             &format!("error: take command failed for item {}", item_id),
@@ -492,7 +478,7 @@ where
                     .await?,
             );
 
-            let scoped = scoped_worker_name(&worker_namespace, worker_name);
+            let scoped = scoped_name(&worker_namespace, worker_name);
             self.worker_logger.append(
                 &scoped,
                 &format!(
@@ -513,7 +499,7 @@ where
         let namespace = {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_name) {
-                let scoped = scoped_worker_name(&state.namespace, worker_name);
+                let scoped = scoped_name(&state.namespace, worker_name);
                 self.worker_logger.append(&scoped, "stopped");
                 state.status = WorkerStatus::Stopped;
                 state.namespace.clone()
@@ -623,7 +609,7 @@ where
                     .get(&worker_name)
                     .map(|s| s.concurrency)
                     .unwrap_or(0);
-                let scoped = scoped_worker_name(&worker_namespace, &worker_name);
+                let scoped = scoped_name(&worker_namespace, &worker_name);
                 self.worker_logger.append(
                     &scoped,
                     &format!(
@@ -673,11 +659,7 @@ where
 
                     // Retry-or-dead logic: after QueueFailed is applied, check retry config
                     if terminal_step != "done" {
-                        let scoped_queue = if worker_namespace.is_empty() {
-                            queue_name.clone()
-                        } else {
-                            format!("{}/{}", worker_namespace, queue_name)
-                        };
+                        let scoped_queue = scoped_name(&worker_namespace, &queue_name);
 
                         // Read failure_count from state (QueueFailed already incremented it)
                         let failure_count = self.lock_state(|state| {

@@ -32,6 +32,7 @@ pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};
 pub use effect::Effect;
 pub use event::{AgentSignalKind, Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
 pub use id::{IdGen, SequentialIdGen, UuidIdGen};
+pub use namespace::{scoped_name, split_scoped_name};
 pub use pipeline::{Pipeline, PipelineConfig, PipelineId, StepOutcome, StepRecord, StepStatus};
 pub use session::SessionId;
 pub use timer::TimerId;

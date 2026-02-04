@@ -16,7 +16,7 @@ pub(crate) use pipeline_create::CreatePipelineParams;
 use super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event};
+use oj_core::{scoped_name, Clock, Effect, Event};
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -250,11 +250,7 @@ where
                 ..
             } => {
                 // Log queue push event
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 let data_str = data
                     .iter()
                     .map(|(k, v)| format!("{}={}", k, v))
@@ -309,11 +305,7 @@ where
                 worker_name,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger.append(
                     &scoped,
                     item_id,
@@ -325,11 +317,7 @@ where
                 item_id,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger.append(&scoped, item_id, "completed");
             }
             Event::QueueFailed {
@@ -338,11 +326,7 @@ where
                 error,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger
                     .append(&scoped, item_id, &format!("failed error=\"{}\"", error));
             }
@@ -351,11 +335,7 @@ where
                 item_id,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger.append(&scoped, item_id, "dropped");
             }
 
@@ -405,11 +385,7 @@ where
                 item_id,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger.append(&scoped, item_id, "retried");
             }
             Event::QueueItemDead {
@@ -417,11 +393,7 @@ where
                 item_id,
                 namespace,
             } => {
-                let scoped = if namespace.is_empty() {
-                    queue_name.clone()
-                } else {
-                    format!("{}/{}", namespace, queue_name)
-                };
+                let scoped = scoped_name(namespace, queue_name);
                 self.queue_logger.append(&scoped, item_id, "dead");
             }
         }

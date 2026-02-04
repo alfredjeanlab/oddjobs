@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use oj_core::split_scoped_name;
 use oj_storage::MaterializedState;
 
 /// Levenshtein edit distance between two strings.
@@ -62,19 +63,6 @@ pub(super) fn format_suggestion(similar: &[String]) -> String {
     }
 }
 
-/// Parse a scoped key like "namespace/name" into (namespace, name).
-/// Returns ("", key) when no slash is present.
-pub(super) fn parse_scoped_key(scoped_key: &str) -> (String, String) {
-    if let Some(pos) = scoped_key.find('/') {
-        (
-            scoped_key[..pos].to_string(),
-            scoped_key[pos + 1..].to_string(),
-        )
-    } else {
-        (String::new(), scoped_key.to_string())
-    }
-}
-
 /// Resource type for cross-namespace lookups.
 pub(super) enum ResourceType {
     Queue,
@@ -96,9 +84,9 @@ pub(super) fn find_in_other_namespaces(
             .queue_items
             .keys()
             .filter_map(|k| {
-                let (ns, qname) = parse_scoped_key(k);
+                let (ns, qname) = split_scoped_name(k);
                 if qname == name && ns != current_namespace {
-                    Some(ns)
+                    Some(ns.to_string())
                 } else {
                     None
                 }

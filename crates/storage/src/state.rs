@@ -4,8 +4,8 @@
 //! Materialized state from WAL replay
 
 use oj_core::{
-    pipeline::AgentSignal, AgentRun, AgentRunStatus, Decision, DecisionId, Event, Pipeline,
-    PipelineConfig, StepOutcome, StepStatus, WorkspaceStatus,
+    pipeline::AgentSignal, scoped_name, AgentRun, AgentRunStatus, Decision, DecisionId, Event,
+    Pipeline, PipelineConfig, StepOutcome, StepStatus, WorkspaceStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -167,17 +167,6 @@ pub struct MaterializedState {
     pub decisions: HashMap<String, Decision>,
     #[serde(default)]
     pub agent_runs: HashMap<String, AgentRun>,
-}
-
-/// Build a composite key for namespace-scoped lookups.
-///
-/// When namespace is empty (backward compat with old events), returns the bare name.
-fn scoped_key(namespace: &str, name: &str) -> String {
-    if namespace.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}/{}", namespace, name)
-    }
 }
 
 impl MaterializedState {
@@ -606,7 +595,7 @@ impl MaterializedState {
                 concurrency,
                 namespace,
             } => {
-                let key = scoped_key(namespace, worker_name);
+                let key = scoped_name(namespace, worker_name);
                 // Preserve active_pipeline_ids from before restart
                 let existing_pipeline_ids = self
                     .workers
@@ -635,7 +624,7 @@ impl MaterializedState {
                 namespace,
                 ..
             } => {
-                let key = scoped_key(namespace, worker_name);
+                let key = scoped_name(namespace, worker_name);
                 if let Some(record) = self.workers.get_mut(&key) {
                     let pid = pipeline_id.to_string();
                     if !record.active_pipeline_ids.contains(&pid) {
@@ -648,7 +637,7 @@ impl MaterializedState {
                 worker_name,
                 namespace,
             } => {
-                let key = scoped_key(namespace, worker_name);
+                let key = scoped_name(namespace, worker_name);
                 if let Some(record) = self.workers.get_mut(&key) {
                     record.status = "stopped".to_string();
                 }
@@ -658,7 +647,7 @@ impl MaterializedState {
                 worker_name,
                 namespace,
             } => {
-                let key = scoped_key(namespace, worker_name);
+                let key = scoped_name(namespace, worker_name);
                 self.workers.remove(&key);
             }
 
@@ -670,7 +659,7 @@ impl MaterializedState {
                 pushed_at_epoch_ms,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 let items = self.queue_items.entry(key).or_default();
                 // Idempotency: skip if item already exists
                 if !items.iter().any(|i| i.id == *item_id) {
@@ -692,7 +681,7 @@ impl MaterializedState {
                 worker_name,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Active;
@@ -706,7 +695,7 @@ impl MaterializedState {
                 item_id,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Completed;
@@ -720,7 +709,7 @@ impl MaterializedState {
                 namespace,
                 ..
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Failed;
@@ -734,7 +723,7 @@ impl MaterializedState {
                 item_id,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     items.retain(|i| i.id != *item_id);
                 }
@@ -745,7 +734,7 @@ impl MaterializedState {
                 item_id,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Pending;
@@ -760,7 +749,7 @@ impl MaterializedState {
                 item_id,
                 namespace,
             } => {
-                let key = scoped_key(namespace, queue_name);
+                let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
                         item.status = QueueItemStatus::Dead;
@@ -778,7 +767,7 @@ impl MaterializedState {
                 run_target,
                 namespace,
             } => {
-                let key = scoped_key(namespace, cron_name);
+                let key = scoped_name(namespace, cron_name);
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -812,7 +801,7 @@ impl MaterializedState {
                 cron_name,
                 namespace,
             } => {
-                let key = scoped_key(namespace, cron_name);
+                let key = scoped_name(namespace, cron_name);
                 if let Some(record) = self.crons.get_mut(&key) {
                     record.status = "stopped".to_string();
                 }
@@ -823,7 +812,7 @@ impl MaterializedState {
                 namespace,
                 ..
             } => {
-                let key = scoped_key(namespace, cron_name);
+                let key = scoped_name(namespace, cron_name);
                 if let Some(record) = self.crons.get_mut(&key) {
                     let now_ms = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -837,7 +826,7 @@ impl MaterializedState {
                 cron_name,
                 namespace,
             } => {
-                let key = scoped_key(namespace, cron_name);
+                let key = scoped_name(namespace, cron_name);
                 self.crons.remove(&key);
             }
 

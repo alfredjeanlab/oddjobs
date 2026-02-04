@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::Event;
+use oj_core::{scoped_name, Event};
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
@@ -124,11 +124,7 @@ pub(super) fn handle_worker_stop(
     project_root: Option<&Path>,
 ) -> Result<Response, ConnectionError> {
     // Check if worker exists in state
-    let scoped = if namespace.is_empty() {
-        worker_name.to_string()
-    } else {
-        format!("{}/{}", namespace, worker_name)
-    };
+    let scoped = scoped_name(namespace, worker_name);
     let exists = {
         let state = state.lock();
         state.workers.contains_key(&scoped)
@@ -167,11 +163,7 @@ pub(super) fn handle_worker_restart(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Stop worker if it exists in state
-    let scoped = if namespace.is_empty() {
-        worker_name.to_string()
-    } else {
-        format!("{}/{}", namespace, worker_name)
-    };
+    let scoped = scoped_name(namespace, worker_name);
     let exists = {
         let state = state.lock();
         state.workers.contains_key(&scoped)
