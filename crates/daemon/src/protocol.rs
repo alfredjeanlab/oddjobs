@@ -289,6 +289,10 @@ pub enum Query {
         id: String,
     },
     ListSessions,
+    /// Get a single session by ID (exact or prefix match)
+    GetSession {
+        id: String,
+    },
     ListWorkspaces,
     GetWorkspace {
         id: String,
@@ -427,6 +431,11 @@ pub enum Response {
 
     /// List of sessions
     Sessions { sessions: Vec<SessionSummary> },
+
+    /// Single session details
+    Session {
+        session: Option<Box<SessionSummary>>,
+    },
 
     /// List of workspaces
     Workspaces { workspaces: Vec<WorkspaceSummary> },

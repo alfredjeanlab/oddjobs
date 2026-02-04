@@ -217,31 +217,18 @@ pub(super) fn handle_query(
             let sessions = state
                 .sessions
                 .values()
-                .map(|s| {
-                    // Derive updated_at_ms from associated pipeline's step history
-                    let updated_at_ms = state
-                        .pipelines
-                        .get(&s.pipeline_id)
-                        .and_then(|p| {
-                            p.step_history
-                                .last()
-                                .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
-                        })
-                        .unwrap_or(0);
-                    let namespace = state
-                        .pipelines
-                        .get(&s.pipeline_id)
-                        .map(|p| p.namespace.clone())
-                        .unwrap_or_default();
-                    SessionSummary {
-                        id: s.id.clone(),
-                        namespace,
-                        pipeline_id: Some(s.pipeline_id.clone()),
-                        updated_at_ms,
-                    }
-                })
+                .map(|s| session_summary(s, &state))
                 .collect();
             Response::Sessions { sessions }
+        }
+
+        Query::GetSession { id } => {
+            let session = state
+                .sessions
+                .values()
+                .find(|s| s.id == id || s.id.starts_with(&id))
+                .map(|s| Box::new(session_summary(s, &state)));
+            Response::Session { session }
         }
 
         Query::ListWorkspaces => {
@@ -1043,6 +1030,30 @@ pub(super) fn handle_query(
 
         // Handled by early return above; included for exhaustiveness
         Query::ListOrphans | Query::DismissOrphan { .. } | Query::ListProjects => unreachable!(),
+    }
+}
+
+/// Build a `SessionSummary` from a stored session, deriving fields from its pipeline.
+fn session_summary(s: &oj_storage::Session, state: &MaterializedState) -> SessionSummary {
+    let updated_at_ms = state
+        .pipelines
+        .get(&s.pipeline_id)
+        .and_then(|p| {
+            p.step_history
+                .last()
+                .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
+        })
+        .unwrap_or(0);
+    let namespace = state
+        .pipelines
+        .get(&s.pipeline_id)
+        .map(|p| p.namespace.clone())
+        .unwrap_or_default();
+    SessionSummary {
+        id: s.id.clone(),
+        namespace,
+        pipeline_id: Some(s.pipeline_id.clone()),
+        updated_at_ms,
     }
 }
 
