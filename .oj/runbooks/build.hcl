@@ -30,6 +30,8 @@ pipeline "build" {
     title  = "feat(${var.name}): ${var.instructions}"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_start = "Building: ${var.name}"
     on_done  = "Build landed: ${var.name}"

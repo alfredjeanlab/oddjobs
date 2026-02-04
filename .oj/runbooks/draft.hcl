@@ -86,6 +86,8 @@ pipeline "draft" {
     title  = "draft(${var.name}): ${var.instructions}"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_start = "Drafting: ${var.name}"
     on_done  = "Draft ready: ${var.name}"
@@ -137,6 +139,8 @@ pipeline "draft-rebase" {
     branch = "$(git -C ${invoke.dir} branch -r --list 'origin/draft/${var.name}*' | head -1 | tr -d ' ' | sed 's|^origin/||')"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_start = "Rebasing draft: ${var.name}"
     on_done  = "Rebased draft: ${var.name}"
@@ -187,6 +191,8 @@ pipeline "draft-refine" {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
     branch = "$(git -C ${invoke.dir} branch -r --list 'origin/draft/${var.name}*' | head -1 | tr -d ' ' | sed 's|^origin/||')"
   }
+
+  on_cancel = { step = "cleanup" }
 
   notify {
     on_start = "Refining draft: ${var.name}"

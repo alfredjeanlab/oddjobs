@@ -40,6 +40,8 @@ pipeline "merge" {
     branch = "merge-${workspace.nonce}"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_start = "Merging: ${var.mr.title}"
     on_done  = "Merged: ${var.mr.title}"

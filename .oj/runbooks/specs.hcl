@@ -17,6 +17,8 @@ pipeline "specs" {
     branch = "fix/specs-${workspace.nonce}"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_done = "Specs fixed: ${local.branch}"
     on_fail = "Specs fix failed"

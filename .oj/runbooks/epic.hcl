@@ -27,6 +27,8 @@ pipeline "epic" {
     title  = "feat(${var.name}): ${var.instructions}"
   }
 
+  on_cancel = { step = "cleanup" }
+
   notify {
     on_start = "Epic started: ${var.name}"
     on_done  = "Epic landed: ${var.name}"
