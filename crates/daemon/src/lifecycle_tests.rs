@@ -7,7 +7,10 @@ use crate::event_bus::{EventBus, EventReader};
 use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
 };
-use oj_core::{Event, PipelineConfig, PipelineId, StepStatus, SystemClock};
+use oj_core::{
+    AgentRun, AgentRunId, AgentRunStatus, Event, Pipeline, PipelineConfig, PipelineId, StepOutcome,
+    StepRecord, StepStatus, SystemClock,
+};
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{PipelineDef, RunDirective, Runbook, StepDef};
 use oj_storage::{MaterializedState, Wal, WorkerRecord};
@@ -733,4 +736,336 @@ async fn shutdown_saves_final_snapshot() {
         pipeline.is_terminal(),
         "snapshot should contain the terminal pipeline state"
     );
+}
+
+/// Helper to create a runtime for reconciliation tests.
+fn setup_reconcile_runtime(dir_path: &Path) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
+    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
+    let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
+
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let runtime = Arc::new(Runtime::new(
+        RuntimeDeps {
+            sessions: session_adapter.clone(),
+            agents: agent_adapter,
+            notifier: DesktopNotifyAdapter::new(),
+            state: Arc::clone(&state),
+        },
+        SystemClock,
+        RuntimeConfig {
+            state_dir: dir_path.to_path_buf(),
+            workspaces_root: dir_path.to_path_buf(),
+            log_dir: dir_path.join("logs"),
+        },
+        internal_tx,
+    ));
+
+    (runtime, session_adapter)
+}
+
+/// Helper to create a pipeline with an agent_id in step_history and a session_id.
+fn make_pipeline_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Pipeline {
+    Pipeline {
+        id: id.to_string(),
+        name: "test-pipeline".to_string(),
+        kind: "test".to_string(),
+        namespace: "proj".to_string(),
+        step: step.to_string(),
+        step_status: StepStatus::Running,
+        step_started_at: std::time::Instant::now(),
+        step_history: vec![StepRecord {
+            name: step.to_string(),
+            started_at_ms: 1000,
+            finished_at_ms: None,
+            outcome: StepOutcome::Running,
+            agent_id: Some(agent_uuid.to_string()),
+            agent_name: Some("test-agent".to_string()),
+        }],
+        vars: HashMap::new(),
+        runbook_hash: "abc123".to_string(),
+        cwd: PathBuf::from("/tmp/project"),
+        workspace_id: None,
+        workspace_path: None,
+        session_id: Some(session_id.to_string()),
+        created_at: std::time::Instant::now(),
+        error: None,
+        action_attempts: HashMap::new(),
+        agent_signal: None,
+        cancelling: false,
+        total_retries: 0,
+        step_visits: HashMap::new(),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_pipeline_dead_session_uses_step_history_agent_id() {
+    // When a pipeline's tmux session is dead, reconciliation should emit
+    // AgentGone with the agent_id from step_history (a UUID), not a
+    // fabricated "{pipeline_id}-{step}" string.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let agent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    let mut test_state = MaterializedState::default();
+    test_state.pipelines.insert(
+        "pipe-1".to_string(),
+        make_pipeline_with_agent("pipe-1", "build", agent_uuid, "oj-nonexistent-session"),
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    drop(event_tx);
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    // Should emit AgentGone with the UUID from step_history
+    let gone_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentGone { .. }))
+        .collect();
+    assert_eq!(
+        gone_events.len(),
+        1,
+        "should emit exactly one AgentGone event"
+    );
+
+    match &gone_events[0] {
+        Event::AgentGone { agent_id } => {
+            assert_eq!(
+                agent_id.as_str(),
+                agent_uuid,
+                "AgentGone must use UUID from step_history, not pipeline_id-step"
+            );
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_pipeline_no_agent_id_in_step_history_skips() {
+    // When a pipeline has no agent_id in step_history (e.g., shell step
+    // or crashed before agent was recorded), reconciliation should skip
+    // it rather than emitting events with fabricated agent_ids.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut pipeline = make_pipeline_with_agent("pipe-2", "work", "any", "oj-nonexistent");
+    // Clear agent_id from step_history
+    pipeline.step_history[0].agent_id = None;
+
+    let mut test_state = MaterializedState::default();
+    test_state.pipelines.insert("pipe-2".to_string(), pipeline);
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    drop(event_tx);
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    // Should not emit any agent events for this pipeline
+    let agent_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentGone { .. } | Event::AgentExited { .. }))
+        .collect();
+    assert!(
+        agent_events.is_empty(),
+        "should not emit agent events when step_history has no agent_id, got: {:?}",
+        agent_events
+    );
+}
+
+#[tokio::test]
+async fn reconcile_agent_run_dead_session_emits_gone_with_correct_id() {
+    // When an agent run's tmux session is dead, reconciliation should
+    // emit AgentGone with the agent_id from the agent_run record.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let agent_uuid = "deadbeef-1234-5678-9abc-def012345678";
+    let mut test_state = MaterializedState::default();
+    test_state.agent_runs.insert(
+        "ar-1".to_string(),
+        AgentRun {
+            id: "ar-1".to_string(),
+            agent_name: "test-agent".to_string(),
+            command_name: "do-work".to_string(),
+            namespace: "proj".to_string(),
+            cwd: dir_path.clone(),
+            runbook_hash: "hash123".to_string(),
+            status: AgentRunStatus::Running,
+            agent_id: Some(agent_uuid.to_string()),
+            session_id: Some("oj-nonexistent-ar-session".to_string()),
+            error: None,
+            created_at_ms: 1000,
+            updated_at_ms: 2000,
+            action_attempts: HashMap::new(),
+            agent_signal: None,
+            vars: HashMap::new(),
+        },
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    drop(event_tx);
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    // Should emit AgentGone with the correct UUID
+    let gone_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentGone { .. }))
+        .collect();
+    assert_eq!(
+        gone_events.len(),
+        1,
+        "should emit exactly one AgentGone event"
+    );
+    match &gone_events[0] {
+        Event::AgentGone { agent_id } => {
+            assert_eq!(agent_id.as_str(), agent_uuid);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_agent_run_no_agent_id_marks_failed_directly() {
+    // When an agent run has no agent_id (daemon crashed before
+    // AgentRunStarted was persisted), reconciliation should directly
+    // emit AgentRunStatusChanged(Failed) instead of trying to route
+    // through AgentExited/AgentGone events that would be dropped.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.agent_runs.insert(
+        "ar-2".to_string(),
+        AgentRun {
+            id: "ar-2".to_string(),
+            agent_name: "test-agent".to_string(),
+            command_name: "do-work".to_string(),
+            namespace: "proj".to_string(),
+            cwd: dir_path.clone(),
+            runbook_hash: "hash123".to_string(),
+            status: AgentRunStatus::Starting,
+            agent_id: None, // No agent_id yet
+            session_id: Some("oj-nonexistent-ar-session".to_string()),
+            error: None,
+            created_at_ms: 1000,
+            updated_at_ms: 2000,
+            action_attempts: HashMap::new(),
+            agent_signal: None,
+            vars: HashMap::new(),
+        },
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    drop(event_tx);
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    // Should emit AgentRunStatusChanged(Failed) directly
+    let status_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentRunStatusChanged { .. }))
+        .collect();
+    assert_eq!(
+        status_events.len(),
+        1,
+        "should emit exactly one AgentRunStatusChanged event"
+    );
+    match &status_events[0] {
+        Event::AgentRunStatusChanged { id, status, reason } => {
+            assert_eq!(id, &AgentRunId::new("ar-2"));
+            assert_eq!(*status, AgentRunStatus::Failed);
+            assert!(
+                reason.as_ref().unwrap().contains("no agent_id"),
+                "reason should mention missing agent_id, got: {:?}",
+                reason
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    // Should NOT emit AgentGone or AgentExited
+    let agent_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentGone { .. } | Event::AgentExited { .. }))
+        .collect();
+    assert!(
+        agent_events.is_empty(),
+        "should not emit AgentGone/AgentExited when agent_id is None"
+    );
+}
+
+#[tokio::test]
+async fn reconcile_agent_run_no_session_id_marks_failed() {
+    // When an agent run has no session_id, reconciliation should
+    // directly emit AgentRunStatusChanged(Failed).
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.agent_runs.insert(
+        "ar-3".to_string(),
+        AgentRun {
+            id: "ar-3".to_string(),
+            agent_name: "test-agent".to_string(),
+            command_name: "do-work".to_string(),
+            namespace: "proj".to_string(),
+            cwd: dir_path.clone(),
+            runbook_hash: "hash123".to_string(),
+            status: AgentRunStatus::Running,
+            agent_id: Some("some-uuid".to_string()),
+            session_id: None, // No session
+            error: None,
+            created_at_ms: 1000,
+            updated_at_ms: 2000,
+            action_attempts: HashMap::new(),
+            agent_signal: None,
+            vars: HashMap::new(),
+        },
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
+    reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
+
+    drop(event_tx);
+    let mut events = Vec::new();
+    while let Some(event) = event_rx.recv().await {
+        events.push(event);
+    }
+
+    let status_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::AgentRunStatusChanged { .. }))
+        .collect();
+    assert_eq!(status_events.len(), 1);
+    match &status_events[0] {
+        Event::AgentRunStatusChanged { id, status, reason } => {
+            assert_eq!(id, &AgentRunId::new("ar-3"));
+            assert_eq!(*status, AgentRunStatus::Failed);
+            assert!(reason.as_ref().unwrap().contains("no session"));
+        }
+        _ => unreachable!(),
+    }
 }

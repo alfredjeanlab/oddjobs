@@ -653,10 +653,25 @@ pub(crate) async fn reconcile_state(
             continue;
         };
 
+        // If the agent_run has no agent_id, the agent was never fully spawned
+        // (daemon crashed before AgentRunStarted was persisted). Directly mark
+        // it failed — we can't route through AgentExited/AgentGone events because
+        // the handler verifies agent_id matches.
+        let Some(ref agent_id_str) = agent_run.agent_id else {
+            warn!(agent_run_id = %agent_run.id, "no agent_id, marking failed");
+            let _ = event_tx
+                .send(Event::AgentRunStatusChanged {
+                    id: AgentRunId::new(&agent_run.id),
+                    status: AgentRunStatus::Failed,
+                    reason: Some("no agent_id at recovery".to_string()),
+                })
+                .await;
+            continue;
+        };
+
         let is_alive = sessions.is_alive(session_id).await.unwrap_or(false);
 
         if is_alive {
-            let agent_id_str = agent_run.agent_id.as_deref().unwrap_or("");
             let process_name = "claude";
             let is_running = sessions
                 .is_process_running(session_id, process_name)
@@ -673,10 +688,15 @@ pub(crate) async fn reconcile_state(
                     warn!(
                         agent_run_id = %agent_run.id,
                         error = %e,
-                        "failed to recover standalone agent, triggering gone"
+                        "failed to recover standalone agent, marking failed"
                     );
-                    let agent_id = AgentId::new(agent_id_str);
-                    let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+                    let _ = event_tx
+                        .send(Event::AgentRunStatusChanged {
+                            id: AgentRunId::new(&agent_run.id),
+                            status: AgentRunStatus::Failed,
+                            reason: Some(format!("recovery failed: {}", e)),
+                        })
+                        .await;
                 }
             } else {
                 info!(
@@ -699,7 +719,6 @@ pub(crate) async fn reconcile_state(
                 session_id,
                 "recovering: standalone agent session died while daemon was down"
             );
-            let agent_id_str = agent_run.agent_id.as_deref().unwrap_or(&agent_run.id);
             let agent_id = AgentId::new(agent_id_str);
             runtime.register_agent_run(agent_id.clone(), AgentRunId::new(&agent_run.id));
             let _ = event_tx.send(Event::AgentGone { agent_id }).await;
@@ -735,6 +754,15 @@ pub(crate) async fn reconcile_state(
             continue;
         };
 
+        // Extract agent_id from step_history (stored when agent was spawned).
+        // This must match the UUID used during spawn — using any other format
+        // causes the handler's stale-event check to drop the event.
+        let agent_id_str = pipeline
+            .step_history
+            .iter()
+            .rfind(|r| r.name == pipeline.step)
+            .and_then(|r| r.agent_id.clone());
+
         // Check tmux session liveness
         let is_alive = sessions.is_alive(session_id).await.unwrap_or(false);
 
@@ -757,17 +785,29 @@ pub(crate) async fn reconcile_state(
                         error = %e,
                         "failed to recover agent, triggering exit"
                     );
-                    let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+                    // recover_agent extracts agent_id from step_history internally,
+                    // so if it failed, use our extracted agent_id (or a fallback).
+                    let aid = agent_id_str
+                        .clone()
+                        .unwrap_or_else(|| format!("{}-{}", pipeline.id, pipeline.step));
+                    let agent_id = AgentId::new(aid);
                     let _ = event_tx.send(Event::AgentGone { agent_id }).await;
                 }
             } else {
                 // Case 2: tmux alive, agent dead → trigger on_dead
+                let Some(ref aid) = agent_id_str else {
+                    warn!(
+                        pipeline_id = %pipeline.id,
+                        "no agent_id in step_history, cannot route exit event"
+                    );
+                    continue;
+                };
                 info!(
                     pipeline_id = %pipeline.id,
                     session_id,
                     "recovering: agent exited while daemon was down"
                 );
-                let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+                let agent_id = AgentId::new(aid);
                 // Register mapping so handle_agent_state_changed can find it
                 runtime.register_agent_pipeline(
                     agent_id.clone(),
@@ -782,12 +822,19 @@ pub(crate) async fn reconcile_state(
             }
         } else {
             // Case 3: tmux dead → trigger session gone
+            let Some(ref aid) = agent_id_str else {
+                warn!(
+                    pipeline_id = %pipeline.id,
+                    "no agent_id in step_history, cannot route gone event"
+                );
+                continue;
+            };
             info!(
                 pipeline_id = %pipeline.id,
                 session_id,
                 "recovering: tmux session died while daemon was down"
             );
-            let agent_id = AgentId::new(format!("{}-{}", pipeline.id, pipeline.step));
+            let agent_id = AgentId::new(aid);
             runtime.register_agent_pipeline(agent_id.clone(), PipelineId::new(pipeline.id.clone()));
             let _ = event_tx.send(Event::AgentGone { agent_id }).await;
         }
