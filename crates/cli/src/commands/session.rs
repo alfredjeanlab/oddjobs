@@ -62,17 +62,12 @@ pub fn attach(id: &str) -> Result<()> {
 pub async fn handle(
     command: SessionCommand,
     client: &DaemonClient,
-    namespace: &str,
+    _namespace: &str,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
         SessionCommand::List {} => {
-            let mut sessions = client.list_sessions().await?;
-
-            // Filter by project namespace
-            if !namespace.is_empty() {
-                sessions.retain(|s| s.namespace == namespace);
-            }
+            let sessions = client.list_sessions().await?;
 
             match format {
                 OutputFormat::Text => {
