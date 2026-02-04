@@ -4,6 +4,7 @@
 //! Agent monitoring timer and event handler tests
 
 use super::*;
+use oj_adapters::SessionCall;
 use oj_core::{AgentSignalKind, PipelineId, TimerId};
 
 /// Helper: create a pipeline and advance it to the "plan" agent step.
@@ -625,4 +626,161 @@ async fn stale_agent_signal_dropped_after_pipeline_advances() {
     // Pipeline should still be at "execute"
     let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
     assert_eq!(pipeline.step, "execute");
+}
+
+// =============================================================================
+// Standalone agent signal: session cleanup
+// =============================================================================
+
+/// Runbook with a standalone agent command and on_idle = "done"
+const RUNBOOK_STANDALONE_AGENT: &str = r#"
+[command.agent_cmd]
+args = "<name>"
+run = { agent = "worker" }
+
+[agent.worker]
+run = 'claude'
+prompt = "Hello"
+on_idle = "done"
+on_dead = "done"
+"#;
+
+/// Helper: spawn a standalone agent and return (agent_run_id, session_id, agent_id)
+async fn setup_standalone_agent(ctx: &TestContext) -> (String, String, AgentId) {
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let agent_run_id = "pipe-1".to_string();
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
+        .unwrap();
+    let agent_id = AgentId::new(agent_run.agent_id.as_ref().unwrap());
+    let session_id = agent_run.session_id.clone().unwrap();
+
+    (agent_run_id, session_id, agent_id)
+}
+
+#[tokio::test]
+async fn standalone_agent_signal_complete_kills_session() {
+    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+
+    // Register the session as alive
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent signals complete
+    ctx.runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Complete,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    // Verify the agent run status is Completed
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
+        .unwrap();
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Completed);
+
+    // Verify the session was killed
+    let kills: Vec<_> = ctx
+        .sessions
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .collect();
+    assert!(
+        !kills.is_empty(),
+        "session should be killed after agent:signal complete"
+    );
+}
+
+#[tokio::test]
+async fn standalone_agent_on_idle_done_kills_session() {
+    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+
+    // Register the session as alive
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent goes idle — on_idle = "done" should complete the agent run
+    ctx.agents
+        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    // Verify the agent run status is Completed
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
+        .unwrap();
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Completed);
+
+    // Verify the session was killed
+    let kills: Vec<_> = ctx
+        .sessions
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .collect();
+    assert!(
+        !kills.is_empty(),
+        "session should be killed after on_idle=done completes agent run"
+    );
+}
+
+#[tokio::test]
+async fn standalone_agent_signal_escalate_keeps_session() {
+    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+
+    // Register the session as alive
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent signals escalate
+    ctx.runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Escalate,
+            message: Some("need help".to_string()),
+        })
+        .await
+        .unwrap();
+
+    // Verify the agent run status is Escalated (not terminal)
+    let agent_run = ctx
+        .runtime
+        .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
+        .unwrap();
+    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+
+    // Verify the session was NOT killed (agent stays alive for user interaction)
+    let kills: Vec<_> = ctx
+        .sessions
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .collect();
+    assert!(
+        kills.is_empty(),
+        "session should NOT be killed on escalate (agent stays alive)"
+    );
 }
