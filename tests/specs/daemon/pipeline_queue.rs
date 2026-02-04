@@ -25,10 +25,6 @@ vars = ["cmd"]
 [[pipeline.process.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.process.step]]
-name = "done"
-run = "echo done"
 "#;
 
 /// Same as QUEUE_PIPELINE_RUNBOOK but concurrency = 3.
@@ -48,10 +44,6 @@ vars = ["cmd"]
 [[pipeline.process.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.process.step]]
-name = "done"
-run = "echo done"
 "#;
 
 /// Extract the first pipeline ID from `oj pipeline list` output

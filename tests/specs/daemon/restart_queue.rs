@@ -25,10 +25,6 @@ vars = ["cmd"]
 [[pipeline.process.step]]
 name = "work"
 run = "${var.cmd}"
-
-[[pipeline.process.step]]
-name = "done"
-run = "echo done"
 "#;
 
 /// Queue-only runbook for testing WAL persistence without worker interference.
