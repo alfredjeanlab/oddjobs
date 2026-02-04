@@ -170,6 +170,70 @@ async fn command_with_agent_directive_spawns_standalone_agent() {
     );
 }
 
+/// Runbook with a command that uses agent directive with max_concurrency
+const RUNBOOK_AGENT_MAX_CONC_COMMAND: &str = r#"
+[command.agent_cmd]
+args = "<name>"
+run = { agent = "worker" }
+
+[agent.worker]
+max_concurrency = 1
+run = 'claude'
+prompt = "Hello"
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "init"
+run = "echo init"
+"#;
+
+#[tokio::test]
+async fn command_agent_max_concurrency_error() {
+    let ctx = setup_with_runbook(RUNBOOK_AGENT_MAX_CONC_COMMAND).await;
+
+    // First spawn should succeed
+    let result = ctx
+        .runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await;
+    assert!(
+        result.is_ok(),
+        "first agent spawn should succeed: {:?}",
+        result.err()
+    );
+
+    // Second spawn should fail due to max_concurrency=1
+    let result = ctx
+        .runtime
+        .handle_event(command_event(
+            "pipe-2",
+            "build",
+            "agent_cmd",
+            [("name".to_string(), "test2".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await;
+    assert!(result.is_err(), "second spawn should fail");
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("max concurrency"),
+        "error should mention max concurrency, got: {}",
+        err
+    );
+}
+
 /// Runbook with a step that uses pipeline run directive
 const RUNBOOK_PIPELINE_STEP: &str = r#"
 [command.build]

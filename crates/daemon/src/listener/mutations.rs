@@ -572,6 +572,7 @@ pub(super) fn handle_pipeline_prune(
 /// older than 24 hours; use `--all` to prune all.
 pub(super) fn handle_agent_prune(
     state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
     logs_path: &std::path::Path,
     all: bool,
     dry_run: bool,
@@ -583,6 +584,7 @@ pub(super) fn handle_agent_prune(
     let age_threshold_ms = 24 * 60 * 60 * 1000; // 24 hours in ms
 
     let mut to_prune = Vec::new();
+    let mut pipeline_ids_to_delete = Vec::new();
     let mut skipped = 0usize;
 
     {
@@ -616,10 +618,28 @@ pub(super) fn handle_agent_prune(
                     });
                 }
             }
+
+            pipeline_ids_to_delete.push(pipeline.id.clone());
         }
     }
 
     if !dry_run {
+        // Delete the terminal pipelines from state so agents no longer appear in `agent list`
+        for pipeline_id in &pipeline_ids_to_delete {
+            let event = Event::PipelineDeleted {
+                id: PipelineId::new(pipeline_id.clone()),
+            };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
+
+            // Best-effort cleanup of pipeline log and breadcrumb files
+            let log_file = oj_engine::log_paths::pipeline_log_path(logs_path, pipeline_id);
+            let _ = std::fs::remove_file(&log_file);
+            let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, pipeline_id);
+            let _ = std::fs::remove_file(&crumb_file);
+        }
+
         for entry in &to_prune {
             // Best-effort cleanup of agent log file
             let agent_log = logs_path
