@@ -61,6 +61,8 @@ mod agent_config;
 mod agent_events;
 #[path = "specs/agent/gates.rs"]
 mod agent_gates;
+#[path = "specs/agent/hooks.rs"]
+mod agent_hooks;
 #[path = "specs/agent/logs.rs"]
 mod agent_logs;
 #[path = "specs/agent/spawn.rs"]
