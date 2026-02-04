@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use crate::client_lifecycle::log_connection_error;
+use crate::color;
 use crate::daemon_process::{
     cleanup_stale_socket, daemon_dir, daemon_socket, probe_socket, read_startup_error,
     start_daemon_background, stop_daemon_sync, wrap_with_startup_error,
@@ -144,7 +145,8 @@ impl DaemonClient {
                 // Mark that we're restarting (before actually doing it)
                 RESTARTED.store(true, Ordering::SeqCst);
                 eprintln!(
-                    "warn: daemon version {} does not match cli version {}, restarting daemon",
+                    "{} daemon version {} does not match cli version {}, restarting daemon",
+                    color::yellow("warn:"),
                     daemon_version.trim(),
                     cli_version
                 );
@@ -181,7 +183,8 @@ impl DaemonClient {
             if daemon_version.trim() != cli_version {
                 // Version mismatch - stop old daemon first
                 eprintln!(
-                    "warn: daemon version {} does not match cli version {}, restarting daemon",
+                    "{} daemon version {} does not match cli version {}, restarting daemon",
+                    color::yellow("warn:"),
                     daemon_version.trim(),
                     cli_version
                 );

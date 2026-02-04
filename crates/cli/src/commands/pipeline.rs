@@ -564,10 +564,22 @@ pub async fn handle(
 /// Print follow-up commands for a pipeline.
 pub(crate) fn print_pipeline_commands(short_id: &str) {
     println!("    oj pipeline show {short_id}");
-    println!("    oj pipeline wait {short_id}      # Wait until pipeline ends");
-    println!("    oj pipeline logs {short_id} -f   # Follow logs");
-    println!("    oj pipeline peek {short_id}      # Capture tmux pane");
-    println!("    oj pipeline attach {short_id}    # Attach to tmux");
+    println!(
+        "    oj pipeline wait {short_id}      {}",
+        color::muted("# Wait until pipeline ends")
+    );
+    println!(
+        "    oj pipeline logs {short_id} -f   {}",
+        color::muted("# Follow logs")
+    );
+    println!(
+        "    oj pipeline peek {short_id}      {}",
+        color::muted("# Capture tmux pane")
+    );
+    println!(
+        "    oj pipeline attach {short_id}    {}",
+        color::muted("# Attach to tmux")
+    );
 }
 
 fn format_agent_summary(agent: &oj_daemon::AgentSummary) -> String {

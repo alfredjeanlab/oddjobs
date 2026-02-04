@@ -13,6 +13,7 @@ use clap::Args;
 use oj_runbook::RunDirective;
 
 use crate::client::DaemonClient;
+use crate::color;
 
 #[derive(Args)]
 pub struct RunArgs {
@@ -259,9 +260,13 @@ async fn dispatch_pipeline(
     pipeline_name: &str,
 ) -> Result<()> {
     let short_id = &pipeline_id[..8.min(pipeline_id.len())];
-    println!("Project: {namespace}");
-    println!("Command: {command}");
-    println!("Waiting for pipeline to start... (Ctrl+C to skip)");
+    println!("{} {namespace}", color::context("Project:"));
+    println!("{} {command}", color::context("Command:"));
+    println!(
+        "{} {}",
+        color::yellow("Waiting for pipeline to start..."),
+        color::muted("(Ctrl+C to skip)")
+    );
     println!();
 
     // Poll for pipeline start
@@ -292,9 +297,17 @@ async fn dispatch_pipeline(
     }
 
     if started {
-        println!("Started {} (pipeline: {})", pipeline_name, short_id);
+        println!(
+            "{} {} {}",
+            color::green("Started"),
+            pipeline_name,
+            color::muted(&format!("(pipeline: {short_id})"))
+        );
     } else {
-        println!("Still waiting for the pipeline to start, check:");
+        println!(
+            "{}",
+            color::yellow("Still waiting for the pipeline to start, check:")
+        );
     }
     super::pipeline::print_pipeline_commands(short_id);
 
@@ -310,9 +323,13 @@ async fn dispatch_agent_run(
     should_attach: bool,
 ) -> Result<()> {
     let short_id = &agent_run_id[..8.min(agent_run_id.len())];
-    println!("Project: {namespace}");
-    println!("Command: {command}");
-    println!("Agent: {agent_name} ({short_id})");
+    println!("{} {namespace}", color::context("Project:"));
+    println!("{} {command}", color::context("Command:"));
+    println!(
+        "{} {agent_name} {}",
+        color::context("Agent:"),
+        color::muted(&format!("({short_id})"))
+    );
     println!();
 
     if !should_attach || !std::io::stdout().is_terminal() {
@@ -322,7 +339,11 @@ async fn dispatch_agent_run(
     }
 
     // Poll for session_id to appear on the agent run
-    println!("Waiting for agent session... (Ctrl+C to skip)");
+    println!(
+        "{} {}",
+        color::yellow("Waiting for agent session..."),
+        color::muted("(Ctrl+C to skip)")
+    );
 
     let poll_interval = Duration::from_millis(300);
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -353,7 +374,10 @@ async fn dispatch_agent_run(
             crate::commands::session::attach(&sid)?;
         }
         None => {
-            println!("Agent session not ready yet. You can attach manually:");
+            println!(
+                "{}",
+                color::yellow("Agent session not ready yet. You can attach manually:")
+            );
             println!("  oj attach {short_id}");
         }
     }
