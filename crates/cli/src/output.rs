@@ -2,6 +2,11 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use clap::ValueEnum;
+use serde::Serialize;
+
+#[cfg(test)]
+#[path = "output_tests.rs"]
+mod tests;
 
 /// Determine if color output should be enabled.
 ///
@@ -49,7 +54,7 @@ pub fn format_time_ago(epoch_ms: u64) -> String {
 ///   `"active workspace(s) skipped"`.
 /// - `format_entry` — returns the text to print after "Pruned" / "Would prune"
 ///   for each entry.
-pub fn print_prune_results<T: serde::Serialize>(
+pub fn print_prune_results<T: Serialize>(
     pruned: &[T],
     skipped: usize,
     dry_run: bool,

@@ -26,6 +26,23 @@ pub(super) struct PruneFlags<'a> {
     pub namespace: Option<&'a str>,
 }
 
+/// Best-effort cleanup of pipeline log, breadcrumb, and associated agent files.
+fn cleanup_pipeline_files(logs_path: &std::path::Path, pipeline_id: &str) {
+    let log_file = oj_engine::log_paths::pipeline_log_path(logs_path, pipeline_id);
+    let _ = std::fs::remove_file(&log_file);
+    let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, pipeline_id);
+    let _ = std::fs::remove_file(&crumb_file);
+    cleanup_agent_files(logs_path, pipeline_id);
+}
+
+/// Best-effort cleanup of agent log file and directory.
+fn cleanup_agent_files(logs_path: &std::path::Path, agent_id: &str) {
+    let agent_log = logs_path.join("agent").join(format!("{}.log", agent_id));
+    let _ = std::fs::remove_file(&agent_log);
+    let agent_dir = logs_path.join("agent").join(agent_id);
+    let _ = std::fs::remove_dir_all(&agent_dir);
+}
+
 /// Handle a status request.
 pub(super) fn handle_status(
     state: &Arc<Mutex<MaterializedState>>,
@@ -588,27 +605,13 @@ pub(super) fn handle_pipeline_prune(
 
     if !flags.dry_run {
         for entry in &to_prune {
-            // Emit PipelineDeleted event to remove from state
             let event = Event::PipelineDeleted {
                 id: PipelineId::new(entry.id.clone()),
             };
             event_bus
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
-
-            // Best-effort cleanup of pipeline log and breadcrumb files
-            let log_file = oj_engine::log_paths::pipeline_log_path(logs_path, &entry.id);
-            let _ = std::fs::remove_file(&log_file);
-            let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, &entry.id);
-            let _ = std::fs::remove_file(&crumb_file);
-
-            // Best-effort cleanup of agent log files for this pipeline's steps
-            // Agent logs are at logs_path/agent/<agent_id>.log
-            // The pipeline ID is used as agent_id for agent steps
-            let agent_log = logs_path.join("agent").join(format!("{}.log", entry.id));
-            let _ = std::fs::remove_file(&agent_log);
-            let agent_dir = logs_path.join("agent").join(&entry.id);
-            let _ = std::fs::remove_dir_all(&agent_dir);
+            cleanup_pipeline_files(logs_path, &entry.id);
         }
     }
 
@@ -625,20 +628,7 @@ pub(super) fn handle_pipeline_prune(
             });
             if !flags.dry_run {
                 let removed = orphan_guard.remove(i);
-                // Delete breadcrumb file
-                let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
-                let _ = std::fs::remove_file(&crumb);
-                // Delete pipeline log
-                let log_file =
-                    oj_engine::log_paths::pipeline_log_path(logs_path, &removed.pipeline_id);
-                let _ = std::fs::remove_file(&log_file);
-                // Delete agent logs/dirs
-                let agent_log = logs_path
-                    .join("agent")
-                    .join(format!("{}.log", removed.pipeline_id));
-                let _ = std::fs::remove_file(&agent_log);
-                let agent_dir = logs_path.join("agent").join(&removed.pipeline_id);
-                let _ = std::fs::remove_dir_all(&agent_dir);
+                cleanup_pipeline_files(logs_path, &removed.pipeline_id);
             }
         }
     }
@@ -715,24 +705,11 @@ pub(super) fn handle_agent_prune(
             event_bus
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
-
-            // Best-effort cleanup of pipeline log and breadcrumb files
-            let log_file = oj_engine::log_paths::pipeline_log_path(logs_path, pipeline_id);
-            let _ = std::fs::remove_file(&log_file);
-            let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, pipeline_id);
-            let _ = std::fs::remove_file(&crumb_file);
+            cleanup_pipeline_files(logs_path, pipeline_id);
         }
 
         for entry in &to_prune {
-            // Best-effort cleanup of agent log file
-            let agent_log = logs_path
-                .join("agent")
-                .join(format!("{}.log", entry.agent_id));
-            let _ = std::fs::remove_file(&agent_log);
-
-            // Best-effort cleanup of agent log directory
-            let agent_dir = logs_path.join("agent").join(&entry.agent_id);
-            let _ = std::fs::remove_dir_all(&agent_dir);
+            cleanup_agent_files(logs_path, &entry.agent_id);
         }
     }
 
