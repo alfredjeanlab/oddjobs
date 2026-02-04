@@ -530,6 +530,28 @@ impl DaemonClient {
         }
     }
 
+    /// Prune completed/dead items from a queue
+    pub async fn queue_prune(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        all: bool,
+        dry_run: bool,
+    ) -> Result<(Vec<oj_daemon::QueueItemEntry>, usize), ClientError> {
+        let req = Request::QueuePrune {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            all,
+            dry_run,
+        };
+        match self.send(&req).await? {
+            Response::QueuesPruned { pruned, skipped } => Ok((pruned, skipped)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Get queue activity logs
     pub async fn get_queue_logs(
         &self,

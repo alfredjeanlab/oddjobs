@@ -124,6 +124,14 @@ pub struct CronEntry {
     pub namespace: String,
 }
 
+/// Queue item entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QueueItemEntry {
+    pub queue_name: String,
+    pub item_id: String,
+    pub status: String,
+}
+
 /// Summary of a project with active work
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ProjectSummary {

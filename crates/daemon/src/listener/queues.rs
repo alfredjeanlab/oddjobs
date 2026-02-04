@@ -11,10 +11,10 @@ use parking_lot::Mutex;
 
 use oj_core::{scoped_name, Event};
 use oj_runbook::QueueType;
-use oj_storage::MaterializedState;
+use oj_storage::{MaterializedState, QueueItemStatus};
 
 use crate::event_bus::EventBus;
-use crate::protocol::Response;
+use crate::protocol::{QueueItemEntry, Response};
 
 use super::suggest;
 use super::workers::hash_runbook;
@@ -699,6 +699,104 @@ pub(super) fn handle_queue_done(
     Ok(Response::QueueCompleted {
         queue_name: queue_name.to_string(),
         item_id: resolved_id,
+    })
+}
+
+/// Handle a QueuePrune request.
+///
+/// Removes completed and dead items from a persisted queue. By default, only
+/// items older than 12 hours are pruned. The `all` flag removes all terminal
+/// items regardless of age.
+pub(super) fn handle_queue_prune(
+    project_root: &Path,
+    namespace: &str,
+    queue_name: &str,
+    all: bool,
+    dry_run: bool,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Load runbook containing the queue.
+    let (runbook, _effective_root) = match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        state,
+        |root| load_runbook_for_queue(root, queue_name),
+        || suggest_for_queue(project_root, queue_name, namespace, "oj queue prune", state),
+    ) {
+        Ok(result) => result,
+        Err(resp) => return Ok(resp),
+    };
+
+    // Validate queue exists
+    let queue_def = match runbook.get_queue(queue_name) {
+        Some(def) => def,
+        None => {
+            return Ok(Response::Error {
+                message: format!("unknown queue: {}", queue_name),
+            })
+        }
+    };
+
+    // Validate queue is persisted
+    if queue_def.queue_type != QueueType::Persisted {
+        return Ok(Response::Error {
+            message: format!("queue '{}' is not a persisted queue", queue_name),
+        });
+    }
+
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let age_threshold_ms: u64 = 12 * 60 * 60 * 1000; // 12 hours
+
+    // Collect terminal items (Completed, Dead)
+    let mut to_prune = Vec::new();
+    let mut skipped = 0usize;
+    {
+        let state = state.lock();
+        let key = scoped_name(namespace, queue_name);
+        if let Some(items) = state.queue_items.get(&key) {
+            for item in items {
+                let is_terminal = matches!(
+                    item.status,
+                    QueueItemStatus::Completed | QueueItemStatus::Dead
+                );
+                if !is_terminal {
+                    skipped += 1;
+                    continue;
+                }
+                if !all && now_ms.saturating_sub(item.pushed_at_epoch_ms) < age_threshold_ms {
+                    skipped += 1;
+                    continue;
+                }
+                to_prune.push(QueueItemEntry {
+                    queue_name: queue_name.to_string(),
+                    item_id: item.id.clone(),
+                    status: format!("{:?}", item.status).to_lowercase(),
+                });
+            }
+        }
+    }
+
+    // Emit QueueDropped events (unless dry-run)
+    if !dry_run {
+        for entry in &to_prune {
+            let event = Event::QueueDropped {
+                queue_name: queue_name.to_string(),
+                item_id: entry.item_id.clone(),
+                namespace: namespace.to_string(),
+            };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
+        }
+    }
+
+    Ok(Response::QueuesPruned {
+        pruned: to_prune,
+        skipped,
     })
 }
 

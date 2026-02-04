@@ -13,7 +13,7 @@ use oj_daemon::{Query, Request, Response};
 use crate::color;
 
 use crate::client::DaemonClient;
-use crate::output::{display_log, format_time_ago, OutputFormat};
+use crate::output::{display_log, format_time_ago, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -84,6 +84,17 @@ pub enum QueueCommand {
     Drain {
         /// Queue name
         queue: String,
+    },
+    /// Remove completed and dead items from a queue
+    Prune {
+        /// Queue name
+        queue: String,
+        /// Prune all terminal items regardless of age
+        #[arg(long)]
+        all: bool,
+        /// Show what would be pruned without making changes
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -381,6 +392,32 @@ pub async fn handle(
                     anyhow::bail!("unexpected response from daemon");
                 }
             }
+        }
+        QueueCommand::Prune {
+            queue,
+            all,
+            dry_run,
+        } => {
+            let (pruned, skipped) = client
+                .queue_prune(project_root, namespace, &queue, all, dry_run)
+                .await?;
+
+            print_prune_results(
+                &pruned,
+                skipped,
+                dry_run,
+                format,
+                "queue item",
+                "skipped",
+                |entry| {
+                    format!(
+                        "item {} ({}) from queue '{}'",
+                        &entry.item_id[..8.min(entry.item_id.len())],
+                        entry.status,
+                        entry.queue_name,
+                    )
+                },
+            )?;
         }
         QueueCommand::Show { queue } => {
             let request = Request::Query {

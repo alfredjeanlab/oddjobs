@@ -471,6 +471,22 @@ async fn handle_request(
             state,
         ),
 
+        Request::QueuePrune {
+            project_root,
+            namespace,
+            queue_name,
+            all,
+            dry_run,
+        } => queues::handle_queue_prune(
+            &project_root,
+            &namespace,
+            &queue_name,
+            all,
+            dry_run,
+            event_bus,
+            state,
+        ),
+
         Request::DecisionResolve {
             id,
             chosen,
