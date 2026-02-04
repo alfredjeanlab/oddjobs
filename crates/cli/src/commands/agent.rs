@@ -195,7 +195,7 @@ pub async fn handle(
                     } else {
                         let mut table = Table::new(vec![
                             Column::muted("ID").with_max(8),
-                            Column::left("NAME"),
+                            Column::left("KIND"),
                             Column::left("PROJECT"),
                             Column::left("PIPELINE").with_max(8),
                             Column::left("STEP"),

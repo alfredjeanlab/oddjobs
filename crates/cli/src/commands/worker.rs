@@ -199,7 +199,7 @@ pub async fn handle(
                                 let show_project = namespaces.len() > 1
                                     || namespaces.iter().any(|n| !n.is_empty());
 
-                                let mut cols = vec![Column::left("NAME")];
+                                let mut cols = vec![Column::left("KIND")];
                                 if show_project {
                                     cols.push(Column::left("PROJECT"));
                                 }
