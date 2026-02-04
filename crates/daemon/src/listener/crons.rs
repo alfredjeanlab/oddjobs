@@ -31,39 +31,23 @@ pub(super) fn handle_cron_start(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Load runbook to validate cron exists.
-    // If the provided project_root doesn't contain the cron, try the known
-    // project root for this namespace (supports --project flag from a different dir).
-    let (runbook, effective_root) = match load_runbook_for_cron(project_root, cron_name) {
-        Ok(rb) => (rb, project_root.to_path_buf()),
-        Err(e) => {
-            let known_root = {
-                let st = state.lock();
-                st.project_root_for_namespace(namespace)
-            };
-            let alt_result = known_root
-                .as_deref()
-                .filter(|alt| *alt != project_root)
-                .and_then(|alt| {
-                    load_runbook_for_cron(alt, cron_name)
-                        .ok()
-                        .map(|rb| (rb, alt.to_path_buf()))
-                });
-            match alt_result {
-                Some(result) => result,
-                None => {
-                    let hint = suggest_for_cron(
-                        Some(project_root),
-                        cron_name,
-                        namespace,
-                        "oj cron start",
-                        state,
-                    );
-                    return Ok(Response::Error {
-                        message: format!("{}{}", e, hint),
-                    });
-                }
-            }
-        }
+    let (runbook, effective_root) = match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        state,
+        |root| load_runbook_for_cron(root, cron_name),
+        || {
+            suggest_for_cron(
+                Some(project_root),
+                cron_name,
+                namespace,
+                "oj cron start",
+                state,
+            )
+        },
+    ) {
+        Ok(result) => result,
+        Err(resp) => return Ok(resp),
     };
     let project_root = &effective_root;
 
@@ -205,39 +189,23 @@ pub(super) async fn handle_cron_once(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Load runbook to validate cron exists.
-    // If the provided project_root doesn't contain the cron, try the known
-    // project root for this namespace (supports --project flag from a different dir).
-    let (runbook, effective_root) = match load_runbook_for_cron(project_root, cron_name) {
-        Ok(rb) => (rb, project_root.to_path_buf()),
-        Err(e) => {
-            let known_root = {
-                let st = state.lock();
-                st.project_root_for_namespace(namespace)
-            };
-            let alt_result = known_root
-                .as_deref()
-                .filter(|alt| *alt != project_root)
-                .and_then(|alt| {
-                    load_runbook_for_cron(alt, cron_name)
-                        .ok()
-                        .map(|rb| (rb, alt.to_path_buf()))
-                });
-            match alt_result {
-                Some(result) => result,
-                None => {
-                    let hint = suggest_for_cron(
-                        Some(project_root),
-                        cron_name,
-                        namespace,
-                        "oj cron once",
-                        state,
-                    );
-                    return Ok(Response::Error {
-                        message: format!("{}{}", e, hint),
-                    });
-                }
-            }
-        }
+    let (runbook, effective_root) = match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        state,
+        |root| load_runbook_for_cron(root, cron_name),
+        || {
+            suggest_for_cron(
+                Some(project_root),
+                cron_name,
+                namespace,
+                "oj cron once",
+                state,
+            )
+        },
+    ) {
+        Ok(result) => result,
+        Err(resp) => return Ok(resp),
     };
     let project_root = &effective_root;
 

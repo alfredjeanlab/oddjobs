@@ -17,6 +17,7 @@ mod suggest;
 mod tmux;
 mod workers;
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -424,6 +425,42 @@ async fn handle_request(
             kill,
             all,
         } => mutations::handle_agent_resume(state, event_bus, agent_id, kill, all).await,
+    }
+}
+
+/// Load a runbook, falling back to the known project root for the namespace.
+///
+/// Tries `load_fn(project_root)` first; if that fails, looks up the known root
+/// for the namespace in materialized state (supports `--project` from a different
+/// directory). On total failure, calls `suggest_fn` to generate a "did you mean" hint.
+fn load_runbook_with_fallback(
+    project_root: &Path,
+    namespace: &str,
+    state: &Arc<Mutex<MaterializedState>>,
+    load_fn: impl Fn(&Path) -> Result<oj_runbook::Runbook, String>,
+    suggest_fn: impl FnOnce() -> String,
+) -> Result<(oj_runbook::Runbook, PathBuf), Response> {
+    match load_fn(project_root) {
+        Ok(rb) => Ok((rb, project_root.to_path_buf())),
+        Err(e) => {
+            let known_root = {
+                let st = state.lock();
+                st.project_root_for_namespace(namespace)
+            };
+            let alt_result = known_root
+                .as_deref()
+                .filter(|alt| *alt != project_root)
+                .and_then(|alt| load_fn(alt).ok().map(|rb| (rb, alt.to_path_buf())));
+            match alt_result {
+                Some(result) => Ok(result),
+                None => {
+                    let hint = suggest_fn();
+                    Err(Response::Error {
+                        message: format!("{}{}", e, hint),
+                    })
+                }
+            }
+        }
     }
 }
 
