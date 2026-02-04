@@ -532,9 +532,9 @@ fn error_action_config_default_when_no_match() {
 
 #[test]
 fn action_config_defaults() {
-    // Defaults: on_idle = "nudge", on_dead = "escalate", on_error = "escalate"
+    // Defaults: on_idle = "escalate", on_dead = "escalate", on_error = "escalate"
     let default_idle = ActionConfig::default();
-    assert_eq!(default_idle.action(), &AgentAction::Nudge);
+    assert_eq!(default_idle.action(), &AgentAction::Escalate);
 
     let default_exit = default_on_dead();
     assert_eq!(default_exit.action(), &AgentAction::Escalate);

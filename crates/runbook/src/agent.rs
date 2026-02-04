@@ -258,7 +258,7 @@ pub enum ActionConfig {
 
 impl Default for ActionConfig {
     fn default() -> Self {
-        ActionConfig::Simple(AgentAction::Nudge)
+        ActionConfig::Simple(AgentAction::Escalate)
     }
 }
 
@@ -347,14 +347,14 @@ pub enum ActionTrigger {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentAction {
-    #[default]
     Nudge, // Send message prompting to continue
-    Done, // Treat as success, advance pipeline
-    Fail, // Mark pipeline as failed
+    Done,  // Treat as success, advance pipeline
+    Fail,  // Mark pipeline as failed
     #[serde(alias = "recover")]
     Resume, // Re-spawn with --resume, preserving conversation history
+    #[default]
     Escalate, // Notify human
-    Gate, // Run a shell command; advance if it passes, escalate if it fails
+    Gate,  // Run a shell command; advance if it passes, escalate if it fails
 }
 
 impl AgentAction {
