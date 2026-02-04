@@ -98,3 +98,59 @@ fn cron_once_runs_immediately() {
 
     assert!(created, "cron once should create a pipeline immediately");
 }
+
+/// Runbook where the cron pipeline writes ${invoke.dir} to a marker file.
+const INVOKE_DIR_CRON_RUNBOOK: &str = r#"
+[cron.writer]
+interval = "30s"
+run = { pipeline = "write_dir" }
+
+[pipeline.write_dir]
+
+[[pipeline.write_dir.step]]
+name = "write"
+run = "printf '%s' '${invoke.dir}' > invoke_dir.txt"
+"#;
+
+/// Verifies that cron-triggered pipelines receive invoke.dir set to the
+/// project root, not the daemon's working directory.
+#[test]
+fn cron_once_sets_invoke_dir_to_project_root() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/cron.toml", INVOKE_DIR_CRON_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Run the cron's pipeline once
+    temp.oj()
+        .args(&["cron", "once", "writer"])
+        .passes()
+        .stdout_has("Pipeline")
+        .stdout_has("started");
+
+    // Wait for the pipeline to complete and write the marker file
+    let marker = temp.path().join("invoke_dir.txt");
+    let written = wait_for(SPEC_WAIT_MAX_MS, || marker.exists());
+
+    if !written {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+    }
+    assert!(written, "pipeline should write invoke_dir.txt");
+
+    let invoke_dir = std::fs::read_to_string(&marker).unwrap();
+    let project_root = temp.path().to_string_lossy().to_string();
+
+    // Canonicalize both paths for comparison (handles /private/var vs /var on macOS)
+    let invoke_dir_canon = std::fs::canonicalize(&invoke_dir)
+        .unwrap_or_else(|_| std::path::PathBuf::from(&invoke_dir));
+    let project_root_canon =
+        std::fs::canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf());
+
+    assert_eq!(
+        invoke_dir_canon, project_root_canon,
+        "invoke.dir should be the project root, not the daemon cwd\n\
+         invoke.dir={}\nproject_root={}",
+        invoke_dir, project_root
+    );
+}

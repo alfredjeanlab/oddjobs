@@ -140,12 +140,15 @@ where
     }
 
     /// Handle a one-shot cron execution: create and start the pipeline immediately.
+    // TODO(refactor): group cron handler parameters into a struct
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_cron_once(
         &self,
         cron_name: &str,
         pipeline_id: &PipelineId,
         pipeline_name: &str,
         pipeline_kind: &str,
+        project_root: &Path,
         runbook_hash: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
@@ -153,13 +156,17 @@ where
 
         let mut result_events = Vec::new();
 
+        // Set invoke.dir to project root so runbooks can reference ${invoke.dir}
+        let mut vars = HashMap::new();
+        vars.insert("invoke.dir".to_string(), project_root.display().to_string());
+
         // Create and start pipeline (same path as handle_cron_timer_fired)
         result_events.extend(
             self.create_and_start_pipeline(CreatePipelineParams {
                 pipeline_id: pipeline_id.clone(),
                 pipeline_name: pipeline_name.to_string(),
                 pipeline_kind: pipeline_kind.to_string(),
-                vars: HashMap::new(),
+                vars,
                 runbook_hash: runbook_hash.to_string(),
                 runbook_json: None,
                 runbook,
@@ -194,7 +201,7 @@ where
         let cron_name = rest.rsplit('/').next().unwrap_or(rest);
         let timer_namespace = rest.strip_suffix(&format!("/{}", cron_name)).unwrap_or("");
 
-        let (_project_root, runbook_hash, pipeline_name, interval, namespace) = {
+        let (project_root, runbook_hash, pipeline_name, interval, namespace) = {
             let crons = self.cron_states.lock();
             match crons.get(cron_name) {
                 Some(s) if s.status == CronStatus::Running => (
@@ -249,13 +256,17 @@ where
 
         let mut result_events = Vec::new();
 
+        // Set invoke.dir to project root so runbooks can reference ${invoke.dir}
+        let mut vars = HashMap::new();
+        vars.insert("invoke.dir".to_string(), project_root.display().to_string());
+
         // Create and start pipeline
         result_events.extend(
             self.create_and_start_pipeline(CreatePipelineParams {
                 pipeline_id: pipeline_id.clone(),
                 pipeline_name: display_name,
                 pipeline_kind: pipeline_name.clone(),
-                vars: HashMap::new(),
+                vars,
                 runbook_hash: runbook_hash.clone(),
                 runbook_json: None,
                 runbook,

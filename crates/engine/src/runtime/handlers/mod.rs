@@ -169,9 +169,9 @@ where
                 pipeline_id,
                 pipeline_name,
                 pipeline_kind,
+                project_root,
                 runbook_hash,
                 namespace,
-                ..
             } => {
                 result_events.extend(
                     self.handle_cron_once(
@@ -179,6 +179,7 @@ where
                         pipeline_id,
                         pipeline_name,
                         pipeline_kind,
+                        project_root,
                         runbook_hash,
                         namespace,
                     )
