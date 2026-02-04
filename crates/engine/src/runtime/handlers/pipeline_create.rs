@@ -177,7 +177,10 @@ where
                             stderr.trim()
                         )));
                     }
-                    String::from_utf8_lossy(&output.stdout).to_string()
+                    // Strip trailing newlines to match standard $() substitution behavior
+                    String::from_utf8_lossy(&output.stdout)
+                        .trim_end_matches('\n')
+                        .to_string()
                 } else {
                     value
                 };
@@ -239,7 +242,10 @@ where
                             stderr.trim()
                         )));
                     }
-                    String::from_utf8_lossy(&output.stdout).to_string()
+                    // Strip trailing newlines to match standard $() substitution behavior
+                    String::from_utf8_lossy(&output.stdout)
+                        .trim_end_matches('\n')
+                        .to_string()
                 } else {
                     value
                 };
