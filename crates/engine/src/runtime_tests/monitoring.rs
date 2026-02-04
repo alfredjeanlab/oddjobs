@@ -1365,3 +1365,59 @@ async fn standalone_agent_signal_escalate_keeps_session() {
         "session should NOT be killed on escalate (agent stays alive)"
     );
 }
+
+// =============================================================================
+// Pipeline agent signal: session cleanup
+// =============================================================================
+
+#[tokio::test]
+async fn pipeline_agent_signal_complete_kills_session() {
+    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    let session_id = pipeline.session_id.clone().unwrap();
+
+    // Register the session as alive
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent signals complete — pipeline should advance AND kill the session
+    ctx.runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Complete,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    // Pipeline advanced
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert_eq!(pipeline.step, "done");
+
+    // Session was killed
+    let kills: Vec<_> = ctx
+        .sessions
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .collect();
+    assert!(
+        !kills.is_empty(),
+        "session should be killed when pipeline agent signals complete"
+    );
+}

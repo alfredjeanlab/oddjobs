@@ -830,8 +830,7 @@ async fn handle_stop_hook(agent_id: &str, client: &DaemonClient) -> Result<()> {
             // "signal" (default) — current behavior
             block_exit(&format!(
                 "You must explicitly signal completion before stopping. \
-                 Run: oj emit agent:signal --agent {} '<json>' \
-                 where <json> is {{\"action\": \"complete\"}} or {{\"action\": \"escalate\", \"message\": \"...\"}}",
+                 Run: oj emit agent:signal --agent {} complete",
                 agent_id
             ));
         }

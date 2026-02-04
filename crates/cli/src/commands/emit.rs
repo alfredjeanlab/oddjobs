@@ -29,9 +29,9 @@ pub enum EmitCommand {
         #[arg(long = "agent")]
         agent_id: String,
 
-        /// JSON payload: {"action": "complete"|"escalate", "message": "..."}
+        /// Signal payload: "complete", "escalate", or JSON {"action": "complete"}
         /// If omitted, reads from stdin
-        #[arg(value_name = "JSON")]
+        #[arg(value_name = "PAYLOAD")]
         payload: Option<String>,
     },
 
@@ -61,6 +61,41 @@ struct AgentDonePayload {
     message: Option<String>,
 }
 
+/// Parse agent:signal payload from a string.
+///
+/// Accepts:
+/// - Plain strings: "complete", "escalate"
+/// - JSON objects: {"action": "complete"}, {"kind": "escalate", "message": "..."}
+/// - Relaxed forms: {action: complete} (treated as plain-string fallback)
+fn parse_signal_payload(input: &str) -> Result<AgentDonePayload> {
+    let trimmed = input.trim();
+
+    // Try plain-string shortcuts first (most common from agents)
+    match trimmed {
+        "complete" => {
+            return Ok(AgentDonePayload {
+                kind: AgentSignalKind::Complete,
+                message: None,
+            });
+        }
+        "escalate" => {
+            return Ok(AgentDonePayload {
+                kind: AgentSignalKind::Escalate,
+                message: None,
+            });
+        }
+        _ => {}
+    }
+
+    // Try JSON parsing
+    serde_json::from_str(trimmed).map_err(|e| {
+        anyhow::anyhow!(
+            "invalid signal payload: {}. Use: complete, escalate, or JSON {{\"action\": \"complete\"}}",
+            e
+        )
+    })
+}
+
 /// Parse a prompt type string to PromptType enum
 fn parse_prompt_type(s: &str) -> PromptType {
     match s {
@@ -71,6 +106,10 @@ fn parse_prompt_type(s: &str) -> PromptType {
         _ => PromptType::Other,
     }
 }
+
+#[cfg(test)]
+#[path = "emit_tests.rs"]
+mod tests;
 
 pub async fn handle(
     command: EmitCommand,
@@ -89,12 +128,7 @@ pub async fn handle(
                 }
             };
 
-            let payload: AgentDonePayload = serde_json::from_str(&json_str).map_err(|e| {
-                anyhow::anyhow!(
-                    "invalid JSON payload: {}. Expected: {{\"kind\": \"complete\"|\"escalate\", \"message\": \"...\"}}",
-                    e
-                )
-            })?;
+            let payload: AgentDonePayload = parse_signal_payload(&json_str)?;
 
             let event = Event::AgentSignal {
                 agent_id: AgentId::new(agent_id),
