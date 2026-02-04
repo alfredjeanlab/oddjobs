@@ -27,7 +27,7 @@ queue "merges" {
 worker "merge" {
   source      = { queue = "merges" }
   handler     = { pipeline = "merge" }
-  concurrency = 4
+  concurrency = 3
 }
 
 pipeline "merge" {
@@ -48,17 +48,6 @@ pipeline "merge" {
 
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" ls-remote --exit-code origin "refs/heads/${var.mr.branch}" >/dev/null 2>&1 \
-        || { echo "error: branch '${var.mr.branch}' not found on remote"; exit 1; }
-      git -C "${local.repo}" fetch origin ${var.mr.base} ${var.mr.branch}
-      git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
-    SHELL
-    on_done = { step = "merge" }
-    on_fail = { step = "reinit" }
-  }
-
-  step "reinit" {
-    run = <<-SHELL
       git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
       rm -rf "${workspace.root}" 2>/dev/null || true
@@ -73,10 +62,10 @@ pipeline "merge" {
   step "merge" {
     run     = "git merge origin/${var.mr.branch} --no-edit"
     on_done = { step = "push" }
-    on_fail = { step = "resolve" }
+    on_fail = { step = "conflicts" }
   }
 
-  step "resolve" {
+  step "conflicts" {
     run     = { agent = "conflicts" }
     on_done = { step = "push" }
   }
@@ -99,7 +88,7 @@ pipeline "merge" {
       git -C "${local.repo}" push origin --delete ${var.mr.branch} || true
     SHELL
     on_done = { step = "cleanup" }
-    on_fail = { step = "reinit", attempts = 3 }
+    on_fail = { step = "init", attempts = 3 }
   }
 
   step "cleanup" {
@@ -136,6 +125,5 @@ agent "conflicts" {
     3. If mid-merge, run `git commit --no-edit` to complete it
     4. Run `make check` to verify everything passes
     5. Fix any test failures
-    6. When `make check` passes, say "I'm done"
   PROMPT
 }
