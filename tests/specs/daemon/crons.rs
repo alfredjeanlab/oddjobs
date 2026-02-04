@@ -129,9 +129,15 @@ fn cron_once_sets_invoke_dir_to_project_root() {
         .stdout_has("Pipeline")
         .stdout_has("started");
 
-    // Wait for the pipeline to complete and write the marker file
+    // Wait for the pipeline to complete and write the marker file.
+    // Check for non-empty content, not just file existence — the shell
+    // redirection `> file` creates/truncates the file before printf writes.
     let marker = temp.path().join("invoke_dir.txt");
-    let written = wait_for(SPEC_WAIT_MAX_MS, || marker.exists());
+    let written = wait_for(SPEC_WAIT_MAX_MS, || {
+        std::fs::read_to_string(&marker)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    });
 
     if !written {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
