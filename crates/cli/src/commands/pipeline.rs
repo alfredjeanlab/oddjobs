@@ -394,6 +394,14 @@ pub async fn handle(
                                 for (k, v) in &p.vars {
                                     println!("    {}: {}", k, format_var_value(v, 80));
                                 }
+                                let any_truncated =
+                                    p.vars.values().any(|v| is_var_truncated(v, 80));
+                                if any_truncated {
+                                    println!(
+                                        "  {}",
+                                        color::muted("hint: use --verbose to show full variables")
+                                    );
+                                }
                             }
                         }
                     } else {
@@ -623,6 +631,11 @@ fn format_var_value(value: &str, max_len: usize) -> String {
         let truncated: String = escaped.chars().take(max_len).collect();
         format!("{}...", truncated)
     }
+}
+
+fn is_var_truncated(value: &str, max_len: usize) -> bool {
+    let escaped = value.replace('\n', "\\n");
+    escaped.chars().count() > max_len
 }
 
 #[cfg(test)]
