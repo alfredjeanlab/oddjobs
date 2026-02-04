@@ -442,7 +442,6 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         SystemClock,
         RuntimeConfig {
             state_dir: config.state_dir.clone(),
-            workspaces_root: config.workspaces_path.clone(),
             log_dir: config.logs_path.clone(),
         },
         internal_tx.clone(),

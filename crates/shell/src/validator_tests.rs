@@ -86,11 +86,6 @@ fn valid_assignment_with_command() {
     assert!(validate_str("FOO=bar echo $FOO").is_ok());
 }
 
-// Note: The parser currently requires a command after assignments,
-// so standalone assignments like "FOO=bar" don't parse successfully.
-// The StandaloneAssignment validation error is designed for future
-// parser support of standalone assignments (bash allows them).
-
 // =============================================================================
 // Error Cases - Empty Structures
 // =============================================================================
@@ -147,27 +142,6 @@ fn ok_variable_named_like_ifs_prefix() {
     // IFS_BACKUP is fine, only exactly "IFS" is rejected
     assert!(validate_str("IFS_BACKUP=x echo test").is_ok());
 }
-
-// =============================================================================
-// Standalone Assignments - Parser Limitation Note
-// =============================================================================
-
-// The current parser requires a command after assignments, so standalone
-// assignments like "FOO=bar" result in a parse error, not a validation error.
-// The StandaloneAssignment validation error is designed for future parser
-// support of standalone assignments. When the parser is extended to support
-// them, uncomment these tests:
-//
-// #[test]
-// fn error_standalone_assignment_when_disallowed() {
-//     let config = ValidatorConfig {
-//         allow_standalone_assignments: false,
-//         ..Default::default()
-//     };
-//     let err = validate_str_with_config("FOO=bar", config).unwrap_err();
-//     assert_eq!(err.len(), 1);
-//     assert!(matches!(err[0], ValidationError::StandaloneAssignment { .. }));
-// }
 
 // =============================================================================
 // Error Cases - Excessive Nesting
