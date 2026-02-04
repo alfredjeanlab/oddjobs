@@ -113,6 +113,25 @@ pub fn print_help(cmd: Command) {
     let _ = stdout.flush();
 }
 
+/// Print pre-formatted help text to stdout with post-hoc colorization.
+///
+/// Used for help text generated outside of clap (e.g., runbook commands).
+pub fn print_help_text(raw_help: &str) {
+    let output = if color::should_colorize() {
+        colorize_help(raw_help)
+    } else {
+        raw_help.to_string()
+    };
+    let output = if output.ends_with('\n') {
+        output
+    } else {
+        format!("{}\n", output)
+    };
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(output.as_bytes());
+    let _ = stdout.flush();
+}
+
 /// Apply oj palette to plain help text.
 ///
 /// Recognizes:

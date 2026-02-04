@@ -293,6 +293,72 @@ Options:
 }
 
 // ============================================================================
+// Runbook Help Colorization Tests
+// ============================================================================
+
+/// Runbook-style help text (produced by `CommandDef::format_help`) should be
+/// colorized the same way as clap-based help when passed through `colorize_help`.
+#[test]
+fn colorize_help_handles_runbook_style_output() {
+    let input = "\
+Merge branches together
+
+Usage: oj run merge <name> [--base <branch>]
+
+Arguments:
+  <name>
+
+Options:
+  --base <base>          [default: main]
+  -f, --force";
+
+    let result = colorize_help(input);
+
+    // Section headers
+    assert!(
+        result.contains(&format!("{}Arguments:{}", HEADER_START, RESET)),
+        "Arguments header should be HEADER colored in:\n{}",
+        result
+    );
+    assert!(
+        result.contains(&format!("{}Options:{}", HEADER_START, RESET)),
+        "Options header should be HEADER colored in:\n{}",
+        result
+    );
+
+    // Usage line
+    assert!(
+        result.contains(&format!("{}Usage:{}", HEADER_START, RESET)),
+        "Usage: should be HEADER colored in:\n{}",
+        result
+    );
+
+    // Option flags
+    assert!(
+        result.contains(&format!("{}--base{}", LITERAL_START, RESET)),
+        "--base flag should be LITERAL colored in:\n{}",
+        result
+    );
+    assert!(
+        result.contains(&format!("{}-f{}", LITERAL_START, RESET)),
+        "-f short flag should be LITERAL colored in:\n{}",
+        result
+    );
+    assert!(
+        result.contains(&format!("{}--force{}", LITERAL_START, RESET)),
+        "--force flag should be LITERAL colored in:\n{}",
+        result
+    );
+
+    // Default value metadata
+    assert!(
+        result.contains(&format!("{}[default: main]{}", CONTEXT_START, RESET)),
+        "[default: main] should be CONTEXT colored in:\n{}",
+        result
+    );
+}
+
+// ============================================================================
 // Format Help Tests
 // ============================================================================
 

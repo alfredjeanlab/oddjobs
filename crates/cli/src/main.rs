@@ -672,7 +672,7 @@ fn print_formatted_help(args: &[String]) {
                     .flatten()
                     .and_then(|(_, comment)| comment);
 
-                eprint!("{}", cmd_def.format_help(command_name, comment.as_ref()));
+                help::print_help_text(&cmd_def.format_help(command_name, comment.as_ref()));
                 return;
             }
         }

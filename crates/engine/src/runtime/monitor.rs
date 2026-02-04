@@ -660,10 +660,6 @@ where
                             Effect::Emit {
                                 event: decision_event,
                             },
-                            Effect::Notify {
-                                title: format!("Gate failed: {}", pipeline.name),
-                                message: format!("Command '{}' failed", command),
-                            },
                             Effect::CancelTimer {
                                 id: TimerId::exit_deferred(&pipeline_id),
                             },
