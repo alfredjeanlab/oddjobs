@@ -215,12 +215,21 @@ where
                 ref message,
                 ref error_type,
             } => {
-                tracing::error!(pipeline_id = %pipeline.id, error = %message, "agent error");
+                tracing::warn!(pipeline_id = %pipeline.id, error = %message, "agent error");
                 self.logger.append(
                     &pipeline.id,
                     &pipeline.step,
                     &format!("agent error: {}", message),
                 );
+                // Write error to agent log so it's visible in `oj logs <agent>`
+                if let Some(agent_id) = pipeline
+                    .step_history
+                    .iter()
+                    .rfind(|r| r.name == pipeline.step)
+                    .and_then(|r| r.agent_id.as_deref())
+                {
+                    self.logger.append_agent_error(agent_id, message);
+                }
                 let error_action = agent_def.on_error.action_for(error_type.as_ref());
                 return self
                     .execute_action_with_attempts(pipeline, agent_def, &error_action, message, 0)

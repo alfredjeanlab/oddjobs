@@ -134,6 +134,44 @@ fn copy_session_log_creates_directory_and_copies_file() {
 }
 
 #[test]
+fn append_agent_error_writes_to_agent_log() {
+    let dir = tempdir().unwrap();
+    let log_dir = dir.path().join("logs");
+    let logger = PipelineLogger::new(log_dir.clone());
+
+    let agent_id = "8cf5e1df-a434-4029-a369-c95af9c374c9";
+    logger.append_agent_error(agent_id, "rate limit exceeded");
+
+    let content =
+        std::fs::read_to_string(log_dir.join("agent").join(format!("{}.log", agent_id))).unwrap();
+    assert!(
+        content.contains("error: rate limit exceeded"),
+        "expected error in agent log, got: {}",
+        content
+    );
+    // Verify timestamp format
+    assert!(content.starts_with("20"), "expected timestamp prefix");
+}
+
+#[test]
+fn append_agent_error_appends_multiple() {
+    let dir = tempdir().unwrap();
+    let log_dir = dir.path().join("logs");
+    let logger = PipelineLogger::new(log_dir.clone());
+
+    let agent_id = "test-agent-1";
+    logger.append_agent_error(agent_id, "first error");
+    logger.append_agent_error(agent_id, "second error");
+
+    let content =
+        std::fs::read_to_string(log_dir.join("agent").join(format!("{}.log", agent_id))).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].contains("error: first error"));
+    assert!(lines[1].contains("error: second error"));
+}
+
+#[test]
 fn copy_session_log_handles_missing_source() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
