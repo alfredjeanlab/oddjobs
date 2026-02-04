@@ -72,10 +72,16 @@ fn concurrency_limit_caps_active_pipelines() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push 4 items with blocking commands so pipelines stay running
-    for _ in 0..4 {
+    // Push 4 items with blocking commands so pipelines stay running.
+    // Each item needs unique data to avoid deduplication.
+    for i in 0..4 {
         temp.oj()
-            .args(&["queue", "push", "jobs", r#"{"cmd": "sleep 30"}"#])
+            .args(&[
+                "queue",
+                "push",
+                "jobs",
+                &format!(r#"{{"cmd": "sleep 30 && echo item-{}"}}"#, i),
+            ])
             .passes();
     }
 
@@ -251,12 +257,23 @@ fn worker_list_reflects_active_pipeline_count() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push 2 blocking items so both slots fill
+    // Push 2 blocking items so both slots fill.
+    // Each item needs unique data to avoid deduplication.
     temp.oj()
-        .args(&["queue", "push", "jobs", r#"{"cmd": "sleep 30"}"#])
+        .args(&[
+            "queue",
+            "push",
+            "jobs",
+            r#"{"cmd": "sleep 30 && echo item-0"}"#,
+        ])
         .passes();
     temp.oj()
-        .args(&["queue", "push", "jobs", r#"{"cmd": "sleep 30"}"#])
+        .args(&[
+            "queue",
+            "push",
+            "jobs",
+            r#"{"cmd": "sleep 30 && echo item-1"}"#,
+        ])
         .passes();
 
     // Wait for 2 pipelines to be running
@@ -295,12 +312,24 @@ fn independent_workers_have_separate_concurrency_pools() {
         .passes();
     temp.oj().args(&["worker", "start", "beta_runner"]).passes();
 
-    // Push a blocking item to each queue
+    // Push a blocking item to each queue.
+    // Note: Different queues don't share deduplication, but using unique
+    // data anyway for consistency.
     temp.oj()
-        .args(&["queue", "push", "alpha", r#"{"cmd": "sleep 30"}"#])
+        .args(&[
+            "queue",
+            "push",
+            "alpha",
+            r#"{"cmd": "sleep 30 && echo alpha"}"#,
+        ])
         .passes();
     temp.oj()
-        .args(&["queue", "push", "beta", r#"{"cmd": "sleep 30"}"#])
+        .args(&[
+            "queue",
+            "push",
+            "beta",
+            r#"{"cmd": "sleep 30 && echo beta"}"#,
+        ])
         .passes();
 
     // Wait for both pipelines to be running simultaneously.
