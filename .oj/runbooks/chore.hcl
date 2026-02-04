@@ -37,6 +37,7 @@ pipeline "chore" {
   }
 
   locals {
+    base   = "main"
     branch = "chore/${var.task.id}-${workspace.nonce}"
     title  = "$(printf '%s' \"chore: ${var.task.title}\" | tr '\\n' ' ' | cut -c1-80)"
   }
@@ -52,18 +53,16 @@ pipeline "chore" {
     on_done = { step = "submit" }
   }
 
+  # TODO: hook into merge pipeline to mark issue done instead
   step "submit" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
+      test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0 || { echo "No changes to submit" >&2; exit 1; }
       git push origin "${workspace.branch}"
+      cd ${invoke.dir} && wok done ${var.task.id}
       oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
     SHELL
-    on_done = { step = "done" }
-  }
-
-  step "done" {
-    run = "cd ${invoke.dir} && wok done ${var.task.id}"
   }
 
   step "cancel" {
