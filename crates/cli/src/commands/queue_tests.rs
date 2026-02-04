@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::{build_data_map, parse_key_value};
+use super::{build_data_map, format_item_data, parse_key_value};
 use serde_json::json;
+use std::collections::HashMap;
 
 #[test]
 fn parse_key_value_simple() {
@@ -100,4 +101,26 @@ fn build_data_map_invalid_json() {
 fn build_data_map_json_not_object() {
     let err = build_data_map(Some("[1, 2, 3]".into()), vec![]).unwrap_err();
     assert!(err.to_string().contains("JSON data must be an object"));
+}
+
+#[test]
+fn format_item_data_sorts_keys() {
+    let mut data = HashMap::new();
+    data.insert("zebra".into(), "z".into());
+    data.insert("alpha".into(), "a".into());
+    data.insert("middle".into(), "m".into());
+    assert_eq!(format_item_data(&data), "alpha=a middle=m zebra=z");
+}
+
+#[test]
+fn format_item_data_single_entry() {
+    let mut data = HashMap::new();
+    data.insert("key".into(), "value".into());
+    assert_eq!(format_item_data(&data), "key=value");
+}
+
+#[test]
+fn format_item_data_empty() {
+    let data = HashMap::new();
+    assert_eq!(format_item_data(&data), "");
 }

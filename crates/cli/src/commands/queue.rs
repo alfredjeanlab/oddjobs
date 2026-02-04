@@ -94,6 +94,17 @@ pub enum QueueCommand {
     },
 }
 
+/// Format a queue item's data map as a sorted `key=value` string.
+fn format_item_data(data: &std::collections::HashMap<String, String>) -> String {
+    let mut pairs: Vec<_> = data.iter().collect();
+    pairs.sort_by_key(|(k, _)| k.as_str());
+    pairs
+        .into_iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Parse a key=value string for --var arguments.
 fn parse_key_value(s: &str) -> Result<(String, String), String> {
     let pos = s
@@ -277,12 +288,7 @@ pub async fn handle(
                                 queue_name
                             );
                             for item in &items {
-                                let data_str: String = item
-                                    .data
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
+                                let data_str = format_item_data(&item.data);
                                 println!(
                                     "  {} {}",
                                     color::muted(&item.id[..8.min(item.id.len())]),
@@ -404,12 +410,7 @@ pub async fn handle(
                                 Column::left("DATA"),
                             ]);
                             for item in &items {
-                                let data_str: String = item
-                                    .data
-                                    .iter()
-                                    .map(|(k, v)| format!("{}={}", k, v))
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
+                                let data_str = format_item_data(&item.data);
                                 let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
                                 table.row(vec![
                                     item.id[..8.min(item.id.len())].to_string(),
