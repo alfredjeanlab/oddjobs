@@ -3,12 +3,13 @@
 
 //! Decision command handlers
 
-use std::io::Write;
+use std::io::{BufRead, IsTerminal, Write};
 
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use oj_core::ShortId;
+use oj_daemon::protocol::DecisionDetail;
 use oj_daemon::{Query, Request, Response};
 
 use crate::client::DaemonClient;
@@ -31,6 +32,8 @@ pub enum DecisionCommand {
         /// Decision ID (or prefix)
         id: String,
     },
+    /// Interactively review pending decisions
+    Review {},
     /// Resolve a pending decision
     Resolve {
         /// Decision ID (or prefix)
@@ -97,85 +100,7 @@ pub async fn handle(
                                 println!("{}", serde_json::to_string_pretty(&*d)?);
                             }
                             _ => {
-                                let short_id = d.id.short(8);
-                                let pipeline_display = if d.pipeline_name.is_empty() {
-                                    d.pipeline_id.clone()
-                                } else {
-                                    format!("{} ({})", d.pipeline_name, d.pipeline_id.short(8))
-                                };
-                                let age = format_time_ago(d.created_at_ms);
-
-                                println!(
-                                    "{} {}",
-                                    color::header("Decision:"),
-                                    color::muted(short_id)
-                                );
-                                println!("{} {}", color::context("Pipeline:"), pipeline_display);
-                                println!("{} {}", color::context("Source:  "), d.source);
-                                println!("{} {}", color::context("Age:    "), age);
-                                if let Some(ref aid) = d.agent_id {
-                                    println!(
-                                        "{} {}",
-                                        color::context("Agent:  "),
-                                        color::muted(aid.short(8))
-                                    );
-                                }
-
-                                if d.resolved_at_ms.is_some() {
-                                    println!(
-                                        "{} {}",
-                                        color::context("Status: "),
-                                        color::status("completed")
-                                    );
-                                    if let Some(c) = d.chosen {
-                                        let label = d
-                                            .options
-                                            .iter()
-                                            .find(|o| o.number == c)
-                                            .map(|o| o.label.as_str())
-                                            .unwrap_or("?");
-                                        println!(
-                                            "{} {} ({})",
-                                            color::context("Chosen: "),
-                                            c,
-                                            label
-                                        );
-                                    }
-                                    if let Some(ref m) = d.message {
-                                        println!("{} {}", color::context("Message:"), m);
-                                    }
-                                }
-
-                                println!();
-                                println!("{}", color::header("Context:"));
-                                for line in d.context.lines() {
-                                    println!("  {}", line);
-                                }
-
-                                if !d.options.is_empty() {
-                                    println!();
-                                    println!("{}", color::header("Options:"));
-                                    for opt in &d.options {
-                                        let rec = if opt.recommended {
-                                            " (recommended)"
-                                        } else {
-                                            ""
-                                        };
-                                        print!("  {}. {}{}", opt.number, opt.label, rec);
-                                        if let Some(ref desc) = opt.description {
-                                            print!(" - {}", desc);
-                                        }
-                                        println!();
-                                    }
-                                }
-
-                                if d.resolved_at_ms.is_none() {
-                                    println!();
-                                    println!(
-                                        "Use: oj decision resolve {} <number> [-m message]",
-                                        short_id
-                                    );
-                                }
+                                format_decision_detail(&mut std::io::stdout(), &d, true);
                             }
                         }
                     } else {
@@ -189,6 +114,155 @@ pub async fn handle(
                     anyhow::bail!("unexpected response from daemon");
                 }
             }
+        }
+
+        DecisionCommand::Review {} => {
+            if !std::io::stdin().is_terminal() {
+                anyhow::bail!("review requires an interactive terminal");
+            }
+            if format == OutputFormat::Json {
+                anyhow::bail!("review does not support --output json");
+            }
+
+            // Fetch pending decisions
+            let request = Request::Query {
+                query: Query::ListDecisions {
+                    namespace: namespace.to_string(),
+                },
+            };
+            let decisions = match client.send(&request).await? {
+                Response::Decisions { mut decisions } => {
+                    if let Some(proj) = project_filter {
+                        decisions.retain(|d| d.namespace == proj);
+                    }
+                    decisions
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            };
+
+            if decisions.is_empty() {
+                println!("No pending decisions");
+                return Ok(());
+            }
+
+            let total = decisions.len();
+            println!(
+                "{} pending decision{}",
+                total,
+                if total == 1 { "" } else { "s" }
+            );
+            println!();
+
+            let mut resolved = 0usize;
+            let mut skipped = 0usize;
+            let stdin = std::io::stdin();
+            let mut lines = stdin.lock().lines();
+
+            for (i, summary) in decisions.iter().enumerate() {
+                // Fetch fresh detail (may have been resolved by another user)
+                let req = Request::Query {
+                    query: Query::GetDecision {
+                        id: summary.id.clone(),
+                    },
+                };
+                let detail = match client.send(&req).await? {
+                    Response::Decision { decision } => match decision {
+                        Some(d) if d.resolved_at_ms.is_none() => d,
+                        _ => {
+                            skipped += 1;
+                            continue;
+                        }
+                    },
+                    Response::Error { message } => {
+                        eprintln!("error fetching {}: {}", summary.id.short(8), message);
+                        skipped += 1;
+                        continue;
+                    }
+                    _ => {
+                        eprintln!("unexpected response for {}", summary.id.short(8));
+                        skipped += 1;
+                        continue;
+                    }
+                };
+
+                println!("[{}/{}]", i + 1, total);
+                format_decision_detail(&mut std::io::stdout(), &detail, false);
+
+                let option_count = detail.options.len();
+                let prompt_label = if option_count > 0 {
+                    format!("Choose [1-{}=pick, s=skip, q=quit]: ", option_count)
+                } else {
+                    "Choose [s=skip, q=quit]: ".to_string()
+                };
+                eprint!("{}", prompt_label);
+                std::io::stderr().flush().ok();
+
+                let line = match lines.next() {
+                    Some(Ok(l)) => l,
+                    _ => break,
+                };
+
+                match parse_review_input(&line, option_count) {
+                    ReviewAction::Pick(n) => {
+                        eprint!("Message (Enter to skip): ");
+                        std::io::stderr().flush().ok();
+                        let msg_line = match lines.next() {
+                            Some(Ok(l)) => l,
+                            _ => String::new(),
+                        };
+                        let message = if msg_line.trim().is_empty() {
+                            None
+                        } else {
+                            Some(msg_line.trim().to_string())
+                        };
+
+                        let resolve_req = Request::DecisionResolve {
+                            id: detail.id.clone(),
+                            chosen: Some(n),
+                            message,
+                        };
+                        match client.send(&resolve_req).await? {
+                            Response::DecisionResolved { .. } => {
+                                let label = detail
+                                    .options
+                                    .iter()
+                                    .find(|o| o.number == n)
+                                    .map(|o| o.label.as_str())
+                                    .unwrap_or("?");
+                                println!("  Resolved {} -> {} ({})", detail.id.short(8), n, label);
+                                resolved += 1;
+                            }
+                            Response::Error { message } => {
+                                eprintln!("  error: {}", message);
+                                skipped += 1;
+                            }
+                            _ => {
+                                eprintln!("  unexpected response");
+                                skipped += 1;
+                            }
+                        }
+                    }
+                    ReviewAction::Skip => {
+                        skipped += 1;
+                    }
+                    ReviewAction::Quit => {
+                        skipped += total - i - resolved;
+                        break;
+                    }
+                    ReviewAction::Invalid => {
+                        eprintln!("  invalid input, skipping");
+                        skipped += 1;
+                    }
+                }
+                println!();
+            }
+
+            println!("Done. {} resolved, {} skipped.", resolved, skipped);
         }
 
         DecisionCommand::Resolve {
@@ -215,6 +289,115 @@ pub async fn handle(
         }
     }
     Ok(())
+}
+
+pub(crate) fn format_decision_detail(
+    out: &mut impl Write,
+    d: &DecisionDetail,
+    show_resolve_hint: bool,
+) {
+    let short_id = d.id.short(8);
+    let pipeline_display = if d.pipeline_name.is_empty() {
+        d.pipeline_id.clone()
+    } else {
+        format!("{} ({})", d.pipeline_name, d.pipeline_id.short(8))
+    };
+    let age = format_time_ago(d.created_at_ms);
+
+    let _ = writeln!(
+        out,
+        "{} {}",
+        color::header("Decision:"),
+        color::muted(short_id)
+    );
+    let _ = writeln!(out, "{} {}", color::context("Pipeline:"), pipeline_display);
+    let _ = writeln!(out, "{} {}", color::context("Source:  "), d.source);
+    let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
+    if let Some(ref aid) = d.agent_id {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            color::context("Agent:  "),
+            color::muted(aid.short(8))
+        );
+    }
+
+    if d.resolved_at_ms.is_some() {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            color::context("Status: "),
+            color::status("completed")
+        );
+        if let Some(c) = d.chosen {
+            let label = d
+                .options
+                .iter()
+                .find(|o| o.number == c)
+                .map(|o| o.label.as_str())
+                .unwrap_or("?");
+            let _ = writeln!(out, "{} {} ({})", color::context("Chosen: "), c, label);
+        }
+        if let Some(ref m) = d.message {
+            let _ = writeln!(out, "{} {}", color::context("Message:"), m);
+        }
+    }
+
+    let _ = writeln!(out);
+    let _ = writeln!(out, "{}", color::header("Context:"));
+    for line in d.context.lines() {
+        let _ = writeln!(out, "  {}", line);
+    }
+
+    if !d.options.is_empty() {
+        let _ = writeln!(out);
+        let _ = writeln!(out, "{}", color::header("Options:"));
+        for opt in &d.options {
+            let rec = if opt.recommended {
+                " (recommended)"
+            } else {
+                ""
+            };
+            let _ = write!(out, "  {}. {}{}", opt.number, opt.label, rec);
+            if let Some(ref desc) = opt.description {
+                let _ = write!(out, " - {}", desc);
+            }
+            let _ = writeln!(out);
+        }
+    }
+
+    if show_resolve_hint && d.resolved_at_ms.is_none() {
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Use: oj decision resolve {} <number> [-m message]",
+            short_id
+        );
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum ReviewAction {
+    Pick(usize),
+    Skip,
+    Quit,
+    Invalid,
+}
+
+pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewAction {
+    let trimmed = input.trim();
+    if trimmed.is_empty() || trimmed == "s" || trimmed == "S" {
+        return ReviewAction::Skip;
+    }
+    if trimmed == "q" || trimmed == "Q" || trimmed == "x" || trimmed == "X" {
+        return ReviewAction::Quit;
+    }
+    if let Ok(n) = trimmed.parse::<usize>() {
+        if n >= 1 && n <= option_count {
+            return ReviewAction::Pick(n);
+        }
+    }
+    ReviewAction::Invalid
 }
 
 pub(crate) fn format_decision_list(

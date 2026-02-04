@@ -16,7 +16,7 @@ pub fn should_use_color() -> bool {
     crate::color::should_colorize()
 }
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
 pub enum OutputFormat {
     #[default]
     Text,

@@ -435,7 +435,7 @@ async fn run() -> Result<()> {
         Commands::Decision(args) => {
             use decision::DecisionCommand;
             match &args.command {
-                DecisionCommand::Resolve { .. } => {
+                DecisionCommand::Resolve { .. } | DecisionCommand::Review {} => {
                     let client = DaemonClient::for_action()?;
                     decision::handle(args.command, &client, &namespace, project_filter, format)
                         .await?
