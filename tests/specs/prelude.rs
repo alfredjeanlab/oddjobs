@@ -29,6 +29,8 @@ pub const SPEC_WAIT_MAX_MS: u64 = 2000;
 /// Falls back to resolving relative to the test binary itself when
 /// CARGO_MANIFEST_DIR is stale (e.g. compiled by a removed worktree
 /// into a shared target directory).
+///
+/// If the binary doesn't exist, attempts to build it using cargo.
 fn binary_path(name: &str) -> PathBuf {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
 
@@ -56,7 +58,31 @@ fn binary_path(name: &str) -> PathBuf {
         }
     }
 
+    // Binary not found - try to build it
+    build_binary_if_missing(name);
+
     standard
+}
+
+/// Builds binaries using cargo if they don't exist.
+/// Called lazily on first access to ensure binaries are available for tests.
+fn build_binary_if_missing(_name: &str) {
+    use std::sync::Once;
+
+    // Only build once per test run, even if called multiple times
+    static BUILD_ONCE: Once = Once::new();
+
+    BUILD_ONCE.call_once(|| {
+        eprintln!("Building oj and ojd binaries (required for tests)...");
+        let status = Command::new("cargo")
+            .args(["build", "-p", "oj", "-p", "oj-daemon"])
+            .status()
+            .expect("Failed to run cargo build");
+
+        if !status.success() {
+            panic!("Failed to build binaries");
+        }
+    });
 }
 
 /// Returns the path to the oj binary.
