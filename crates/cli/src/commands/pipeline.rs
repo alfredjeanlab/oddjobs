@@ -218,8 +218,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
 pub async fn handle(
     command: PipelineCommand,
     client: &DaemonClient,
-    namespace: &str,
-    project_filter: Option<&str>,
+    project: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
@@ -232,7 +231,7 @@ pub async fn handle(
             let mut pipelines = client.list_pipelines().await?;
 
             // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-            if let Some(proj) = project_filter {
+            if let Some(proj) = project {
                 pipelines.retain(|p| p.namespace == proj);
             }
 
@@ -523,13 +522,12 @@ pub async fn handle(
             orphans,
             dry_run,
         } => {
-            let ns = if namespace.is_empty() {
-                None
-            } else {
-                Some(namespace)
-            };
+            // Only scope by namespace when explicitly requested via --project.
+            // Without this, prune matches `pipeline list` behavior and operates
+            // across all namespaces — fixing the bug where auto-resolved namespace
+            // silently skipped pipelines from other projects.
             let (pruned, skipped) = client
-                .pipeline_prune(all, failed, orphans, dry_run, ns)
+                .pipeline_prune(all, failed, orphans, dry_run, project)
                 .await?;
 
             print_prune_results(

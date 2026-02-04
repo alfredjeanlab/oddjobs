@@ -159,7 +159,6 @@ pub async fn handle_peek(client: &DaemonClient, id: &str, format: OutputFormat) 
             super::pipeline::handle(
                 super::pipeline::PipelineCommand::Peek { id: entity.id },
                 client,
-                "",
                 None,
                 format,
             )
@@ -195,7 +194,6 @@ pub async fn handle_attach(client: &DaemonClient, id: &str) -> Result<()> {
             super::pipeline::handle(
                 super::pipeline::PipelineCommand::Attach { id: entity.id },
                 client,
-                "",
                 None,
                 OutputFormat::Text,
             )
@@ -233,7 +231,6 @@ pub async fn handle_logs(
                     limit,
                 },
                 client,
-                "",
                 None,
                 format,
             )
@@ -279,7 +276,6 @@ pub async fn handle_show(
                     verbose,
                 },
                 client,
-                "",
                 None,
                 format,
             )

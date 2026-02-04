@@ -279,8 +279,7 @@ async fn run() -> Result<()> {
                 | PipelineCommand::Cancel { .. }
                 | PipelineCommand::Prune { .. } => {
                     let client = DaemonClient::for_action()?;
-                    pipeline::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
+                    pipeline::handle(args.command, &client, cli.project.as_deref(), format).await?
                 }
                 // Query: reads pipeline state
                 PipelineCommand::List { .. }
@@ -290,8 +289,7 @@ async fn run() -> Result<()> {
                 | PipelineCommand::Wait { .. }
                 | PipelineCommand::Attach { .. } => {
                     let client = DaemonClient::for_query()?;
-                    pipeline::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
+                    pipeline::handle(args.command, &client, cli.project.as_deref(), format).await?
                 }
             }
         }
@@ -507,8 +505,7 @@ async fn run() -> Result<()> {
             pipeline::handle(
                 pipeline::PipelineCommand::Cancel { ids },
                 &client,
-                &namespace,
-                None,
+                cli.project.as_deref(),
                 format,
             )
             .await?
@@ -518,8 +515,7 @@ async fn run() -> Result<()> {
             pipeline::handle(
                 pipeline::PipelineCommand::Resume { id, message, var },
                 &client,
-                &namespace,
-                None,
+                cli.project.as_deref(),
                 format,
             )
             .await?
