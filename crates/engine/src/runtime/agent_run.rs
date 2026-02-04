@@ -16,6 +16,17 @@ use oj_runbook::AgentDef;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// Parameters for spawning a standalone agent.
+pub(crate) struct SpawnAgentParams<'a> {
+    pub agent_run_id: &'a AgentRunId,
+    pub agent_def: &'a AgentDef,
+    pub agent_name: &'a str,
+    pub input: &'a HashMap<String, String>,
+    pub cwd: &'a Path,
+    pub namespace: &'a str,
+    pub resume_session_id: Option<&'a str>,
+}
+
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
@@ -29,38 +40,18 @@ where
     /// mapping, and executes the effects. Returns events produced.
     pub(crate) async fn spawn_standalone_agent(
         &self,
-        agent_run_id: &AgentRunId,
-        agent_def: &AgentDef,
-        agent_name: &str,
-        input: &HashMap<String, String>,
-        cwd: &Path,
-        namespace: &str,
+        params: SpawnAgentParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        self.spawn_standalone_agent_with_resume(
+        let SpawnAgentParams {
             agent_run_id,
             agent_def,
             agent_name,
             input,
             cwd,
             namespace,
-            None,
-        )
-        .await
-    }
+            resume_session_id,
+        } = params;
 
-    /// Spawn a standalone agent with optional resume support.
-    // TODO(refactor): group spawn parameters into a struct
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn spawn_standalone_agent_with_resume(
-        &self,
-        agent_run_id: &AgentRunId,
-        agent_def: &AgentDef,
-        agent_name: &str,
-        input: &HashMap<String, String>,
-        cwd: &Path,
-        namespace: &str,
-        resume_session_id: Option<&str>,
-    ) -> Result<Vec<Event>, RuntimeError> {
         // Build a SpawnContext for standalone agent
         let sentinel_pipeline_id = PipelineId::new("");
         let ctx = crate::spawn::SpawnContext {
@@ -491,15 +482,15 @@ where
                         .await;
                 }
                 // Re-spawn agent in same directory with resume support
-                self.spawn_standalone_agent_with_resume(
-                    &agent_run_id,
+                self.spawn_standalone_agent(SpawnAgentParams {
+                    agent_run_id: &agent_run_id,
                     agent_def,
-                    &agent_name,
-                    &input,
-                    &agent_run.cwd,
-                    &agent_run.namespace,
-                    resume_session_id.as_deref(),
-                )
+                    agent_name: &agent_name,
+                    input: &input,
+                    cwd: &agent_run.cwd,
+                    namespace: &agent_run.namespace,
+                    resume_session_id: resume_session_id.as_deref(),
+                })
                 .await
             }
             ActionEffects::EscalateAgentRun { effects } => {

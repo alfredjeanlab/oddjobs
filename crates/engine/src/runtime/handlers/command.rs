@@ -6,12 +6,24 @@
 use super::super::Runtime;
 use super::CreatePipelineParams;
 use crate::error::RuntimeError;
+use crate::runtime::agent_run::SpawnAgentParams;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{AgentRunId, Clock, Effect, Event, PipelineId};
 use oj_runbook::RunDirective;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::Path;
+
+/// Parameters for handling a command run event.
+pub(crate) struct HandleCommandParams<'a> {
+    pub pipeline_id: &'a PipelineId,
+    pub pipeline_name: &'a str,
+    pub project_root: &'a Path,
+    pub invoke_dir: &'a Path,
+    pub namespace: &'a str,
+    pub command: &'a str,
+    pub args: &'a HashMap<String, String>,
+}
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -20,18 +32,20 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    // TODO(refactor): group command handler parameters into a struct
-    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn handle_command(
         &self,
-        pipeline_id: &PipelineId,
-        pipeline_name: &str,
-        project_root: &Path,
-        invoke_dir: &Path,
-        namespace: &str,
-        command: &str,
-        args: &HashMap<String, String>,
+        params: HandleCommandParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let HandleCommandParams {
+            pipeline_id,
+            pipeline_name,
+            project_root,
+            invoke_dir,
+            namespace,
+            command,
+            args,
+        } = params;
+
         // Load runbook from project
         let runbook = self.load_runbook_for_command(project_root, command)?;
 
@@ -247,14 +261,15 @@ where
 
                 // Spawn the standalone agent
                 let spawn_events = self
-                    .spawn_standalone_agent(
-                        &agent_run_id,
-                        &agent_def,
-                        &agent_name,
-                        &args,
-                        invoke_dir,
+                    .spawn_standalone_agent(SpawnAgentParams {
+                        agent_run_id: &agent_run_id,
+                        agent_def: &agent_def,
+                        agent_name: &agent_name,
+                        input: &args,
+                        cwd: invoke_dir,
                         namespace,
-                    )
+                        resume_session_id: None,
+                    })
                     .await?;
                 result_events.extend(spawn_events);
 

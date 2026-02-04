@@ -18,19 +18,32 @@ use crate::protocol::Response;
 use super::suggest;
 use super::ConnectionError;
 
+/// Parameters for handling a run command request.
+pub(super) struct RunCommandParams<'a> {
+    pub project_root: &'a Path,
+    pub invoke_dir: &'a Path,
+    pub namespace: &'a str,
+    pub command: &'a str,
+    pub args: &'a [String],
+    pub named_args: &'a HashMap<String, String>,
+    pub event_bus: &'a EventBus,
+    pub state: &'a Arc<Mutex<MaterializedState>>,
+}
+
 /// Handle a RunCommand request.
-// TODO(refactor): group run command parameters into a struct
-#[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_run_command(
-    project_root: &Path,
-    invoke_dir: &Path,
-    namespace: &str,
-    command: &str,
-    args: &[String],
-    named_args: &HashMap<String, String>,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    params: RunCommandParams<'_>,
 ) -> Result<Response, ConnectionError> {
+    let RunCommandParams {
+        project_root,
+        invoke_dir,
+        namespace,
+        command,
+        args,
+        named_args,
+        event_bus,
+        state,
+    } = params;
     // Load runbook from project (with --project fallback and suggest hints)
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,

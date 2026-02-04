@@ -217,16 +217,16 @@ async fn handle_request(
             args,
             named_args,
         } => {
-            commands::handle_run_command(
-                &project_root,
-                &invoke_dir,
-                &namespace,
-                &command,
-                &args,
-                &named_args,
+            commands::handle_run_command(commands::RunCommandParams {
+                project_root: &project_root,
+                invoke_dir: &invoke_dir,
+                namespace: &namespace,
+                command: &command,
+                args: &args,
+                named_args: &named_args,
                 event_bus,
                 state,
-            )
+            })
             .await
         }
 

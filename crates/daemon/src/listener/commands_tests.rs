@@ -12,7 +12,7 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::handle_run_command;
+use super::{handle_run_command, RunCommandParams};
 
 /// Helper: create a temp project with a runbook TOML and return the project root path.
 fn project_with_runbook(toml_content: &str) -> tempfile::TempDir {
@@ -44,16 +44,16 @@ run = "echo deploying"
     let event_bus = test_event_bus(wal_dir.path());
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
-    let result = handle_run_command(
-        project.path(),
-        project.path(),
-        "",
-        "deploy",
-        &[],
-        &HashMap::new(),
-        &event_bus,
-        &state,
-    )
+    let result = handle_run_command(RunCommandParams {
+        project_root: project.path(),
+        invoke_dir: project.path(),
+        namespace: "",
+        command: "deploy",
+        args: &[],
+        named_args: &HashMap::new(),
+        event_bus: &event_bus,
+        state: &state,
+    })
     .await
     .unwrap();
 
@@ -85,16 +85,16 @@ run = "make"
     let event_bus = test_event_bus(wal_dir.path());
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
-    let result = handle_run_command(
-        project.path(),
-        project.path(),
-        "",
-        "build",
-        &[],
-        &HashMap::new(),
-        &event_bus,
-        &state,
-    )
+    let result = handle_run_command(RunCommandParams {
+        project_root: project.path(),
+        invoke_dir: project.path(),
+        namespace: "",
+        command: "build",
+        args: &[],
+        named_args: &HashMap::new(),
+        event_bus: &event_bus,
+        state: &state,
+    })
     .await
     .unwrap();
 
@@ -119,16 +119,16 @@ run = "echo deploying"
     let event_bus = test_event_bus(wal_dir.path());
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
-    let result = handle_run_command(
-        project.path(),
-        project.path(),
-        "",
-        "deploj",
-        &[],
-        &HashMap::new(),
-        &event_bus,
-        &state,
-    )
+    let result = handle_run_command(RunCommandParams {
+        project_root: project.path(),
+        invoke_dir: project.path(),
+        namespace: "",
+        command: "deploj",
+        args: &[],
+        named_args: &HashMap::new(),
+        event_bus: &event_bus,
+        state: &state,
+    })
     .await
     .unwrap();
 
@@ -145,16 +145,16 @@ async fn unknown_command_returns_error_without_hint_when_no_match() {
     let event_bus = test_event_bus(wal_dir.path());
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
-    let result = handle_run_command(
-        std::path::Path::new("/nonexistent"),
-        std::path::Path::new("/nonexistent"),
-        "",
-        "xyz",
-        &[],
-        &HashMap::new(),
-        &event_bus,
-        &state,
-    )
+    let result = handle_run_command(RunCommandParams {
+        project_root: std::path::Path::new("/nonexistent"),
+        invoke_dir: std::path::Path::new("/nonexistent"),
+        namespace: "",
+        command: "xyz",
+        args: &[],
+        named_args: &HashMap::new(),
+        event_bus: &event_bus,
+        state: &state,
+    })
     .await
     .unwrap();
 

@@ -13,6 +13,8 @@ pub(crate) mod worker;
 
 pub(crate) use pipeline_create::CreatePipelineParams;
 
+use self::command::HandleCommandParams;
+use self::cron::{CronOnceParams, CronStartedParams};
 use super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
@@ -40,7 +42,7 @@ where
                 args,
             } => {
                 result_events.extend(
-                    self.handle_command(
+                    self.handle_command(HandleCommandParams {
                         pipeline_id,
                         pipeline_name,
                         project_root,
@@ -48,7 +50,7 @@ where
                         namespace,
                         command,
                         args,
-                    )
+                    })
                     .await?,
                 );
             }
@@ -162,15 +164,15 @@ where
                 namespace,
             } => {
                 result_events.extend(
-                    self.handle_cron_started(
+                    self.handle_cron_started(CronStartedParams {
                         cron_name,
                         project_root,
                         runbook_hash,
                         interval,
                         pipeline_name,
-                        run_target,
+                        run_target_str: run_target,
                         namespace,
-                    )
+                    })
                     .await?,
                 );
             }
@@ -195,7 +197,7 @@ where
                 namespace,
             } => {
                 result_events.extend(
-                    self.handle_cron_once(
+                    self.handle_cron_once(CronOnceParams {
                         cron_name,
                         pipeline_id,
                         pipeline_name,
@@ -206,7 +208,7 @@ where
                         run_target,
                         namespace,
                         project_root,
-                    )
+                    })
                     .await?,
                 );
             }
