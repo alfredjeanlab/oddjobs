@@ -366,6 +366,7 @@ pub async fn handle(
                             println!("  {} {}", color::context("Workspace:"), ws.display());
                         }
                         if let Some(error) = &p.error {
+                            println!();
                             println!("  {} {}", color::context("Error:"), error);
                         }
                         if !p.vars.is_empty() {

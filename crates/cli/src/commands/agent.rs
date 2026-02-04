@@ -309,9 +309,11 @@ pub async fn handle(
                             crate::output::format_time_ago(a.updated_at_ms)
                         );
                         if let Some(ref err) = a.error {
+                            println!();
                             println!("  {} {}", color::context("Error:"), err);
                         } else if let Some(ref reason) = a.exit_reason {
                             if reason.starts_with("failed") || reason == "gone" {
+                                println!();
                                 println!("  {} {}", color::context("Error:"), reason);
                             }
                         }
