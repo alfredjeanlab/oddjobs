@@ -155,3 +155,146 @@ async fn pipeline_on_fail_emits_notification() {
         calls[0].message
     );
 }
+
+// =============================================================================
+// Gate failure should NOT produce automatic notifications
+// =============================================================================
+
+const GATE_NO_NOTIFY_RUNBOOK: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = { agent = "worker" }
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[agent.worker]
+run = 'claude'
+prompt = "Test"
+on_idle = { action = "gate", run = "false" }
+"#;
+
+#[tokio::test]
+async fn gate_failure_does_not_produce_automatic_notification() {
+    let ctx = setup_with_runbook(GATE_NO_NOTIFY_RUNBOOK).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // No notifications yet
+    assert_eq!(ctx.notifier.calls().len(), 0);
+
+    // Agent goes idle → on_idle gate runs "false" → gate fails → decision created
+    ctx.agents
+        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.runtime
+        .handle_event(Event::AgentWaiting {
+            agent_id: agent_id.clone(),
+        })
+        .await
+        .unwrap();
+
+    // Pipeline should be waiting (decision created)
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.step_status.is_waiting());
+
+    // No automatic notification should have fired
+    let calls = ctx.notifier.calls();
+    assert_eq!(
+        calls.len(),
+        0,
+        "gate failure should not produce automatic notification, got: {:?}",
+        calls
+    );
+}
+
+const GATE_DEAD_NO_NOTIFY_RUNBOOK: &str = r#"
+[command.build]
+args = "<name>"
+run = { pipeline = "build" }
+
+[pipeline.build]
+input  = ["name"]
+
+[[pipeline.build.step]]
+name = "work"
+run = { agent = "worker" }
+on_done = "done"
+
+[[pipeline.build.step]]
+name = "done"
+run = "echo done"
+
+[agent.worker]
+run = 'claude'
+prompt = "Test"
+on_dead = { action = "gate", run = "false" }
+"#;
+
+#[tokio::test]
+async fn gate_dead_failure_does_not_produce_automatic_notification() {
+    let ctx = setup_with_runbook(GATE_DEAD_NO_NOTIFY_RUNBOOK).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+
+    // No notifications yet
+    assert_eq!(ctx.notifier.calls().len(), 0);
+
+    // Agent exits → on_dead gate runs "false" → gate fails → decision created
+    ctx.runtime
+        .handle_event(Event::AgentExited {
+            agent_id: agent_id.clone(),
+            exit_code: Some(0),
+        })
+        .await
+        .unwrap();
+
+    // Pipeline should be waiting (decision created)
+    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    assert!(pipeline.step_status.is_waiting());
+
+    // No automatic notification should have fired
+    let calls = ctx.notifier.calls();
+    assert_eq!(
+        calls.len(),
+        0,
+        "gate failure should not produce automatic notification, got: {:?}",
+        calls
+    );
+}
