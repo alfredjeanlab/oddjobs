@@ -762,3 +762,53 @@ fn split_raw_args_no_flags() {
     assert_eq!(positional, vec!["kanban", "build the thing"]);
     assert!(named.is_empty());
 }
+
+// Tests for alternative variadic syntax with ellipsis outside brackets
+#[test]
+fn parse_variadic_ellipsis_outside_required() {
+    let spec = parse_arg_spec("<cmd> <files>...").unwrap();
+    assert!(spec.variadic.is_some());
+    assert!(spec.variadic.as_ref().unwrap().required);
+    assert_eq!(spec.variadic.as_ref().unwrap().name, "files");
+}
+
+#[test]
+fn parse_variadic_ellipsis_outside_optional() {
+    let spec = parse_arg_spec("<cmd> [args]...").unwrap();
+    assert!(spec.variadic.is_some());
+    assert!(!spec.variadic.as_ref().unwrap().required);
+    assert_eq!(spec.variadic.as_ref().unwrap().name, "args");
+}
+
+#[test]
+fn parse_variadic_both_syntaxes_equivalent() {
+    let spec1 = parse_arg_spec("<files...>").unwrap();
+    let spec2 = parse_arg_spec("<files>...").unwrap();
+    assert_eq!(
+        spec1.variadic.as_ref().unwrap().name,
+        spec2.variadic.as_ref().unwrap().name
+    );
+    assert_eq!(
+        spec1.variadic.as_ref().unwrap().required,
+        spec2.variadic.as_ref().unwrap().required
+    );
+}
+
+#[test]
+fn parse_error_variadic_ellipsis_outside_not_last() {
+    let result = parse_arg_spec("<files>... <other>");
+    assert!(result.is_err());
+}
+
+#[test]
+fn usage_line_variadic_ellipsis_outside() {
+    let spec = parse_arg_spec("<cmd> <files>...").unwrap();
+    // Canonical output always uses ellipsis inside brackets
+    assert_eq!(spec.usage_line(), "<cmd> <files...>");
+}
+
+#[test]
+fn parse_error_ellipsis_after_flag() {
+    let result = parse_arg_spec("[--force]...");
+    assert!(result.is_err());
+}
