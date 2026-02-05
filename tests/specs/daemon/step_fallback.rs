@@ -288,33 +288,32 @@ fn on_fail_cycle_triggers_circuit_breaker() {
 
     temp.oj().args(&["run", "test", "cycle"]).passes();
 
-    // The circuit breaker should fire after several rounds through the cycle
-    let failed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["pipeline", "list"])
-            .passes()
-            .stdout()
-            .contains("failed")
+    // Wait for the circuit breaker to fire and become visible.
+    // Poll for the error message directly — polling only for "failed" status
+    // and then checking the error in a separate call is racy because the
+    // error may not be flushed to the WAL yet when the status first flips.
+    let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
+        let list_output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let id = list_output
+            .lines()
+            .find(|l| l.contains("cycle"))
+            .and_then(|l| l.split_whitespace().next());
+        match id {
+            Some(id) => temp
+                .oj()
+                .args(&["pipeline", "show", id])
+                .passes()
+                .stdout()
+                .contains("circuit breaker"),
+            None => false,
+        }
     });
 
-    if !failed {
+    if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
     assert!(
-        failed,
+        done,
         "pipeline should fail via circuit breaker, not cycle forever"
     );
-
-    // Verify the error mentions the circuit breaker
-    let list_output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
-    let id = list_output
-        .lines()
-        .find(|l| l.contains("cycle"))
-        .and_then(|l| l.split_whitespace().next())
-        .expect("should find pipeline ID");
-
-    temp.oj()
-        .args(&["pipeline", "show", id])
-        .passes()
-        .stdout_has("circuit breaker");
 }

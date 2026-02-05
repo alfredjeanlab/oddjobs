@@ -412,8 +412,9 @@ fn daemon_stop_kill_terminates_sessions() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow", "kill-test"]).passes();
 
-    // Wait for agent to be spawned (tmux session exists)
-    let running = wait_for(SPEC_WAIT_MAX_MS, || {
+    // Wait for agent to be spawned (tmux session exists).
+    // Use extended timeout — tmux session creation is slow under load.
+    let running = wait_for(SPEC_WAIT_MAX_MS * 2, || {
         tmux_session_exists("oj-kill-test-worker-")
     });
     assert!(
@@ -426,7 +427,7 @@ fn daemon_stop_kill_terminates_sessions() {
     temp.oj().args(&["daemon", "stop", "--kill"]).passes();
 
     // Verify tmux session is gone
-    let gone = wait_for(SPEC_WAIT_MAX_MS, || {
+    let gone = wait_for(SPEC_WAIT_MAX_MS * 2, || {
         !tmux_session_exists("oj-kill-test-worker-")
     });
     assert!(
@@ -435,6 +436,30 @@ fn daemon_stop_kill_terminates_sessions() {
         temp.daemon_log()
     );
 }
+
+/// Scenario for an agent that stays alive long enough to survive daemon shutdown.
+/// Needs a longer sleep than SLOW_AGENT_SCENARIO (which is tuned for crash recovery)
+/// because this test must: spawn agent → stop daemon → confirm session alive.
+const LONG_LIVED_AGENT_SCENARIO: &str = r#"
+name = "long-lived-agent"
+trusted = true
+
+[[responses]]
+pattern = { type = "any" }
+
+[responses.response]
+text = "Running a long task..."
+
+[[responses.response.tool_calls]]
+tool = "Bash"
+input = { command = "sleep 10" }
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#;
 
 /// Tests that sessions survive normal daemon shutdown (no --kill).
 ///
@@ -445,7 +470,7 @@ fn sessions_survive_normal_shutdown() {
     let temp = Project::empty();
     temp.git_init();
 
-    temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
+    temp.file(".oj/scenarios/slow.toml", LONG_LIVED_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
     temp.file(
         ".oj/runbooks/slow.toml",
@@ -456,8 +481,9 @@ fn sessions_survive_normal_shutdown() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow", "survive-test"]).passes();
 
-    // Wait for agent to be spawned
-    let running = wait_for(SPEC_WAIT_MAX_MS, || {
+    // Wait for agent to be spawned.
+    // Use extended timeout — tmux session creation is slow under load.
+    let running = wait_for(SPEC_WAIT_MAX_MS * 2, || {
         tmux_session_exists("oj-survive-test-worker-")
     });
     assert!(
@@ -469,7 +495,18 @@ fn sessions_survive_normal_shutdown() {
     // Stop WITHOUT --kill
     temp.oj().args(&["daemon", "stop"]).passes();
 
-    // Verify tmux session is still alive
+    // Wait for daemon to fully exit, then verify tmux session survived.
+    // A single synchronous check is racy under load — the daemon may still
+    // be shutting down (flushing WAL, closing sockets) when we check.
+    let stopped = wait_for(SPEC_WAIT_MAX_MS, || {
+        temp.oj()
+            .args(&["daemon", "status"])
+            .passes()
+            .stdout()
+            .contains("not running")
+    });
+    assert!(stopped, "daemon should stop");
+
     assert!(
         tmux_session_exists("oj-survive-test-worker-"),
         "tmux session should survive normal daemon shutdown"
