@@ -12,10 +12,11 @@ use clap::{Args, Subcommand};
 
 use oj_core::ShortId;
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::output::{
-    display_log, format_time_ago, print_prune_results, should_use_color, OutputFormat,
+    display_log, format_time_ago, print_peek_frame, print_prune_results, should_use_color,
+    OutputFormat,
 };
 use crate::table::{project_cell, should_show_project, Column, Table};
 
@@ -126,6 +127,20 @@ pub enum JobCommand {
         #[arg(long)]
         timeout: Option<String>,
     },
+}
+
+impl JobCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List { .. }
+            | Self::Show { .. }
+            | Self::Logs { .. }
+            | Self::Peek { .. }
+            | Self::Wait { .. }
+            | Self::Attach { .. } => ClientKind::Query,
+            _ => ClientKind::Action,
+        }
+    }
 }
 
 /// Parse a key=value string for input arguments.
@@ -505,12 +520,7 @@ pub async fn handle(
 
             match peek_output {
                 Some((session_id, output)) => {
-                    println!(
-                        "╭────── {} ──────",
-                        color::header(&format!("peek: {}", session_id))
-                    );
-                    print!("{}", output);
-                    println!("╰────── {} ──────", color::header("end peek"));
+                    print_peek_frame(&session_id, &output);
                 }
                 None => {
                     let short_id = job.id.short(8);

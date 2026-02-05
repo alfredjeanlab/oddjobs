@@ -21,7 +21,22 @@ use tokio::net::UnixStream;
 
 #[path = "client_queries.rs"]
 mod queries;
-pub use queries::RunCommandResult;
+pub use queries::{
+    CronStartResult, QueuePushResult, QueueRetryResult, RunCommandResult, WorkerStartResult,
+};
+
+/// Client semantics for CLI command dispatch.
+///
+/// Each command variant knows whether it is an action (mutates state),
+/// a query (reads state), or a signal (agent-initiated, context-dependent).
+pub enum ClientKind {
+    /// User-initiated mutations: auto-start daemon, max 1 restart.
+    Action,
+    /// Read-only queries: connect only, no restart.
+    Query,
+    /// Agent-initiated signals: connect only, no restart.
+    Signal,
+}
 
 // Timeout configuration (env vars in milliseconds, via crate::env)
 
@@ -119,6 +134,15 @@ impl DaemonClient {
     /// This is a semantic alias for `for_query()` to document intent.
     pub fn for_signal() -> Result<Self, ClientError> {
         Self::connect()
+    }
+
+    /// Create a client with the specified semantics.
+    pub fn for_kind(kind: ClientKind) -> Result<Self, ClientError> {
+        match kind {
+            ClientKind::Action => Self::for_action(),
+            ClientKind::Query => Self::for_query(),
+            ClientKind::Signal => Self::for_signal(),
+        }
     }
 
     /// Internal: connect_or_start with restart limit (max 1 restart per process)

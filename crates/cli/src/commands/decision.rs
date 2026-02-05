@@ -10,9 +10,8 @@ use clap::{Args, Subcommand};
 
 use oj_core::ShortId;
 use oj_daemon::protocol::DecisionDetail;
-use oj_daemon::{Query, Request, Response};
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::output::{format_time_ago, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
@@ -46,6 +45,15 @@ pub enum DecisionCommand {
     },
 }
 
+impl DecisionCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List {} | Self::Show { .. } => ClientKind::Query,
+            Self::Resolve { .. } | Self::Review {} => ClientKind::Action,
+        }
+    }
+}
+
 pub async fn handle(
     command: DecisionCommand,
     client: &DaemonClient,
@@ -55,64 +63,37 @@ pub async fn handle(
 ) -> Result<()> {
     match command {
         DecisionCommand::List {} => {
-            let request = Request::Query {
-                query: Query::ListDecisions {
-                    namespace: namespace.to_string(),
-                },
-            };
-            match client.send(&request).await? {
-                Response::Decisions { mut decisions } => {
-                    // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-                    if let Some(proj) = project_filter {
-                        decisions.retain(|d| d.namespace == proj);
-                    }
-                    if decisions.is_empty() {
-                        println!("No pending decisions");
-                        return Ok(());
-                    }
-                    match format {
-                        OutputFormat::Json => {
-                            println!("{}", serde_json::to_string_pretty(&decisions)?);
-                        }
-                        _ => {
-                            format_decision_list(&mut std::io::stdout(), &decisions);
-                        }
-                    }
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
+            let mut decisions = client.list_decisions(namespace).await?;
+            if let Some(proj) = project_filter {
+                decisions.retain(|d| d.namespace == proj);
+            }
+            if decisions.is_empty() {
+                println!("No pending decisions");
+                return Ok(());
+            }
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&decisions)?);
                 }
                 _ => {
-                    anyhow::bail!("unexpected response from daemon");
+                    format_decision_list(&mut std::io::stdout(), &decisions);
                 }
             }
         }
 
         DecisionCommand::Show { id } => {
-            let request = Request::Query {
-                query: Query::GetDecision { id: id.clone() },
-            };
-            match client.send(&request).await? {
-                Response::Decision { decision } => {
-                    if let Some(d) = decision {
-                        match format {
-                            OutputFormat::Json => {
-                                println!("{}", serde_json::to_string_pretty(&*d)?);
-                            }
-                            _ => {
-                                format_decision_detail(&mut std::io::stdout(), &d, true);
-                            }
-                        }
-                    } else {
-                        anyhow::bail!("decision not found: {}", id);
+            let decision = client.get_decision(&id).await?;
+            if let Some(d) = decision {
+                match format {
+                    OutputFormat::Json => {
+                        println!("{}", serde_json::to_string_pretty(&d)?);
+                    }
+                    _ => {
+                        format_decision_detail(&mut std::io::stdout(), &d, true);
                     }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
+            } else {
+                anyhow::bail!("decision not found: {}", id);
             }
         }
 
@@ -124,26 +105,10 @@ pub async fn handle(
                 anyhow::bail!("review does not support --output json");
             }
 
-            // Fetch pending decisions
-            let request = Request::Query {
-                query: Query::ListDecisions {
-                    namespace: namespace.to_string(),
-                },
-            };
-            let decisions = match client.send(&request).await? {
-                Response::Decisions { mut decisions } => {
-                    if let Some(proj) = project_filter {
-                        decisions.retain(|d| d.namespace == proj);
-                    }
-                    decisions
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            };
+            let mut decisions = client.list_decisions(namespace).await?;
+            if let Some(proj) = project_filter {
+                decisions.retain(|d| d.namespace == proj);
+            }
 
             if decisions.is_empty() {
                 println!("No pending decisions");
@@ -164,27 +129,14 @@ pub async fn handle(
             let mut lines = stdin.lock().lines();
 
             for (i, summary) in decisions.iter().enumerate() {
-                // Fetch fresh detail (may have been resolved by another user)
-                let req = Request::Query {
-                    query: Query::GetDecision {
-                        id: summary.id.clone(),
-                    },
-                };
-                let detail = match client.send(&req).await? {
-                    Response::Decision { decision } => match decision {
-                        Some(d) if d.resolved_at_ms.is_none() => d,
-                        _ => {
-                            skipped += 1;
-                            continue;
-                        }
-                    },
-                    Response::Error { message } => {
-                        eprintln!("error fetching {}: {}", summary.id.short(8), message);
+                let detail = match client.get_decision(&summary.id).await {
+                    Ok(Some(d)) if d.resolved_at_ms.is_none() => d,
+                    Ok(_) => {
                         skipped += 1;
                         continue;
                     }
-                    _ => {
-                        eprintln!("unexpected response for {}", summary.id.short(8));
+                    Err(e) => {
+                        eprintln!("error fetching {}: {}", summary.id.short(8), e);
                         skipped += 1;
                         continue;
                     }
@@ -221,13 +173,8 @@ pub async fn handle(
                             Some(msg_line.trim().to_string())
                         };
 
-                        let resolve_req = Request::DecisionResolve {
-                            id: detail.id.clone(),
-                            chosen: Some(n),
-                            message,
-                        };
-                        match client.send(&resolve_req).await? {
-                            Response::DecisionResolved { .. } => {
+                        match client.decision_resolve(&detail.id, Some(n), message).await {
+                            Ok(_) => {
                                 let label = detail
                                     .options
                                     .iter()
@@ -237,12 +184,8 @@ pub async fn handle(
                                 println!("  Resolved {} -> {} ({})", detail.id.short(8), n, label);
                                 resolved += 1;
                             }
-                            Response::Error { message } => {
-                                eprintln!("  error: {}", message);
-                                skipped += 1;
-                            }
-                            _ => {
-                                eprintln!("  unexpected response");
+                            Err(e) => {
+                                eprintln!("  error: {}", e);
                                 skipped += 1;
                             }
                         }
@@ -270,22 +213,8 @@ pub async fn handle(
             choice,
             message,
         } => {
-            let request = Request::DecisionResolve {
-                id: id.clone(),
-                chosen: choice,
-                message,
-            };
-            match client.send(&request).await? {
-                Response::DecisionResolved { id: resolved_id } => {
-                    println!("Resolved decision {}", resolved_id.short(8));
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let resolved_id = client.decision_resolve(&id, choice, message).await?;
+            println!("Resolved decision {}", resolved_id.short(8));
         }
     }
     Ok(())

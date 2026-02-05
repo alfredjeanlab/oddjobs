@@ -187,8 +187,7 @@ impl DaemonClient {
         };
         match self.send(&query).await? {
             Response::Workspaces { workspaces } => Ok(workspaces),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -202,8 +201,7 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::Workspace { workspace } => Ok(workspace.map(|b| *b)),
-            Response::Error { message } => Err(ClientError::Rejected(message)),
-            _ => Err(ClientError::UnexpectedResponse),
+            other => Self::reject(other),
         }
     }
 
@@ -615,10 +613,477 @@ impl DaemonClient {
             other => Self::reject(other),
         }
     }
+
+    // -- Worker commands --
+
+    /// Start a worker
+    pub async fn worker_start(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        worker_name: &str,
+        all: bool,
+    ) -> Result<WorkerStartResult, ClientError> {
+        let request = Request::WorkerStart {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            worker_name: worker_name.to_string(),
+            all,
+        };
+        match self.send(&request).await? {
+            Response::WorkerStarted { worker_name } => {
+                Ok(WorkerStartResult::Single { worker_name })
+            }
+            Response::WorkersStarted { started, skipped } => {
+                Ok(WorkerStartResult::Multiple { started, skipped })
+            }
+            other => Self::reject(other),
+        }
+    }
+
+    /// Stop a worker
+    pub async fn worker_stop(
+        &self,
+        name: &str,
+        namespace: &str,
+        project_root: Option<&Path>,
+    ) -> Result<(), ClientError> {
+        let request = Request::WorkerStop {
+            worker_name: name.to_string(),
+            namespace: namespace.to_string(),
+            project_root: project_root.map(|p| p.to_path_buf()),
+        };
+        self.send_simple(&request).await
+    }
+
+    /// Restart a worker
+    pub async fn worker_restart(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        name: &str,
+    ) -> Result<String, ClientError> {
+        let request = Request::WorkerRestart {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            worker_name: name.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::WorkerStarted { worker_name } => Ok(worker_name),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Resize a worker's concurrency
+    pub async fn worker_resize(
+        &self,
+        name: &str,
+        namespace: &str,
+        concurrency: u32,
+    ) -> Result<(String, u32, u32), ClientError> {
+        let request = Request::WorkerResize {
+            worker_name: name.to_string(),
+            namespace: namespace.to_string(),
+            concurrency,
+        };
+        match self.send(&request).await? {
+            Response::WorkerResized {
+                worker_name,
+                old_concurrency,
+                new_concurrency,
+            } => Ok((worker_name, old_concurrency, new_concurrency)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// List all workers
+    pub async fn list_workers(&self) -> Result<Vec<oj_daemon::WorkerSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::ListWorkers,
+        };
+        match self.send(&request).await? {
+            Response::Workers { workers } => Ok(workers),
+            other => Self::reject(other),
+        }
+    }
+
+    // -- Cron commands --
+
+    /// Start a cron
+    pub async fn cron_start(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        cron_name: &str,
+        all: bool,
+    ) -> Result<CronStartResult, ClientError> {
+        let request = Request::CronStart {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            cron_name: cron_name.to_string(),
+            all,
+        };
+        match self.send(&request).await? {
+            Response::CronStarted { cron_name } => Ok(CronStartResult::Single { cron_name }),
+            Response::CronsStarted { started, skipped } => {
+                Ok(CronStartResult::Multiple { started, skipped })
+            }
+            other => Self::reject(other),
+        }
+    }
+
+    /// Stop a cron
+    pub async fn cron_stop(
+        &self,
+        name: &str,
+        namespace: &str,
+        project_root: Option<&Path>,
+    ) -> Result<(), ClientError> {
+        let request = Request::CronStop {
+            cron_name: name.to_string(),
+            namespace: namespace.to_string(),
+            project_root: project_root.map(|p| p.to_path_buf()),
+        };
+        self.send_simple(&request).await
+    }
+
+    /// Restart a cron
+    pub async fn cron_restart(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        name: &str,
+    ) -> Result<String, ClientError> {
+        let request = Request::CronRestart {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            cron_name: name.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::CronStarted { cron_name } => Ok(cron_name),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Run a cron's job once immediately
+    pub async fn cron_once(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        name: &str,
+    ) -> Result<(String, String), ClientError> {
+        let request = Request::CronOnce {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            cron_name: name.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::CommandStarted { job_id, job_name } => Ok((job_id, job_name)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// List all crons
+    pub async fn list_crons(&self) -> Result<Vec<oj_daemon::protocol::CronSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::ListCrons,
+        };
+        match self.send(&request).await? {
+            Response::Crons { crons } => Ok(crons),
+            other => Self::reject(other),
+        }
+    }
+
+    // -- Queue commands --
+
+    /// Push an item to a queue
+    pub async fn queue_push(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        data: serde_json::Value,
+    ) -> Result<QueuePushResult, ClientError> {
+        let request = Request::QueuePush {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            data,
+        };
+        match self.send(&request).await? {
+            Response::QueuePushed {
+                queue_name,
+                item_id,
+            } => Ok(QueuePushResult::Pushed {
+                queue_name,
+                item_id,
+            }),
+            Response::Ok => Ok(QueuePushResult::Refreshed),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Drop an item from a queue
+    pub async fn queue_drop(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        item_id: &str,
+    ) -> Result<(String, String), ClientError> {
+        let request = Request::QueueDrop {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            item_id: item_id.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::QueueDropped {
+                queue_name,
+                item_id,
+            } => Ok((queue_name, item_id)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Retry dead or failed queue items
+    pub async fn queue_retry(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        item_ids: Vec<String>,
+        all_dead: bool,
+        status: Option<String>,
+    ) -> Result<QueueRetryResult, ClientError> {
+        let request = Request::QueueRetry {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            item_ids,
+            all_dead,
+            status,
+        };
+        match self.send(&request).await? {
+            Response::QueueRetried {
+                queue_name,
+                item_id,
+            } => Ok(QueueRetryResult::Single {
+                queue_name,
+                item_id,
+            }),
+            Response::QueueItemsRetried {
+                queue_name,
+                item_ids,
+                already_retried,
+                not_found,
+            } => Ok(QueueRetryResult::Bulk {
+                queue_name,
+                item_ids,
+                already_retried,
+                not_found,
+            }),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Force-fail an active queue item
+    pub async fn queue_fail(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        item_id: &str,
+    ) -> Result<(String, String), ClientError> {
+        let request = Request::QueueFail {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            item_id: item_id.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::QueueFailed {
+                queue_name,
+                item_id,
+            } => Ok((queue_name, item_id)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Force-complete an active queue item
+    pub async fn queue_done(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+        item_id: &str,
+    ) -> Result<(String, String), ClientError> {
+        let request = Request::QueueDone {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+            item_id: item_id.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::QueueCompleted {
+                queue_name,
+                item_id,
+            } => Ok((queue_name, item_id)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Drain all pending items from a queue
+    pub async fn queue_drain(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+        queue_name: &str,
+    ) -> Result<(String, Vec<oj_daemon::QueueItemSummary>), ClientError> {
+        let request = Request::QueueDrain {
+            project_root: project_root.to_path_buf(),
+            namespace: namespace.to_string(),
+            queue_name: queue_name.to_string(),
+        };
+        match self.send(&request).await? {
+            Response::QueueDrained { queue_name, items } => Ok((queue_name, items)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// List all queues in a project
+    pub async fn list_queues(
+        &self,
+        project_root: &Path,
+        namespace: &str,
+    ) -> Result<Vec<oj_daemon::QueueSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::ListQueues {
+                project_root: project_root.to_path_buf(),
+                namespace: namespace.to_string(),
+            },
+        };
+        match self.send(&request).await? {
+            Response::Queues { queues } => Ok(queues),
+            other => Self::reject(other),
+        }
+    }
+
+    /// List items in a specific queue
+    pub async fn list_queue_items(
+        &self,
+        queue_name: &str,
+        namespace: &str,
+        project_root: Option<&Path>,
+    ) -> Result<Vec<oj_daemon::QueueItemSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::ListQueueItems {
+                queue_name: queue_name.to_string(),
+                namespace: namespace.to_string(),
+                project_root: project_root.map(|p| p.to_path_buf()),
+            },
+        };
+        match self.send(&request).await? {
+            Response::QueueItems { items } => Ok(items),
+            other => Self::reject(other),
+        }
+    }
+
+    // -- Decision commands --
+
+    /// List pending decisions
+    pub async fn list_decisions(
+        &self,
+        namespace: &str,
+    ) -> Result<Vec<oj_daemon::protocol::DecisionSummary>, ClientError> {
+        let request = Request::Query {
+            query: Query::ListDecisions {
+                namespace: namespace.to_string(),
+            },
+        };
+        match self.send(&request).await? {
+            Response::Decisions { decisions } => Ok(decisions),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Get a single decision by ID
+    pub async fn get_decision(
+        &self,
+        id: &str,
+    ) -> Result<Option<oj_daemon::protocol::DecisionDetail>, ClientError> {
+        let request = Request::Query {
+            query: Query::GetDecision { id: id.to_string() },
+        };
+        match self.send(&request).await? {
+            Response::Decision { decision } => Ok(decision.map(|b| *b)),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Resolve a pending decision
+    pub async fn decision_resolve(
+        &self,
+        id: &str,
+        chosen: Option<usize>,
+        message: Option<String>,
+    ) -> Result<String, ClientError> {
+        let request = Request::DecisionResolve {
+            id: id.to_string(),
+            chosen,
+            message,
+        };
+        match self.send(&request).await? {
+            Response::DecisionResolved { id } => Ok(id),
+            other => Self::reject(other),
+        }
+    }
 }
 
 /// Result from session prune operation
 pub struct SessionPruneResult {
     pub pruned: Vec<oj_daemon::SessionEntry>,
     pub skipped: usize,
+}
+
+/// Result from worker start operation
+pub enum WorkerStartResult {
+    Single {
+        worker_name: String,
+    },
+    Multiple {
+        started: Vec<String>,
+        skipped: Vec<(String, String)>,
+    },
+}
+
+/// Result from cron start operation
+pub enum CronStartResult {
+    Single {
+        cron_name: String,
+    },
+    Multiple {
+        started: Vec<String>,
+        skipped: Vec<(String, String)>,
+    },
+}
+
+/// Result from queue push operation
+pub enum QueuePushResult {
+    Pushed { queue_name: String, item_id: String },
+    Refreshed,
+}
+
+/// Result from queue retry operation
+pub enum QueueRetryResult {
+    Single {
+        queue_name: String,
+        item_id: String,
+    },
+    Bulk {
+        queue_name: String,
+        item_ids: Vec<String>,
+        already_retried: Vec<String>,
+        not_found: Vec<String>,
+    },
 }
