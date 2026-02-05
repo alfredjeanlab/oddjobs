@@ -412,7 +412,7 @@ where
         // Check 1: Has the session log grown?
         let recorded_size = pipeline.idle_grace_log_size.unwrap_or(0);
         if let Some(ref aid) = agent_id {
-            let current_size = self.executor.get_session_log_size(aid).unwrap_or(0);
+            let current_size = self.executor.get_session_log_size(aid).await.unwrap_or(0);
             if current_size > recorded_size {
                 tracing::info!(
                     pipeline_id,
@@ -505,7 +505,7 @@ where
         // Check 1: Has the session log grown?
         let recorded_size = agent_run.idle_grace_log_size.unwrap_or(0);
         if let Some(ref aid) = agent_id {
-            let current_size = self.executor.get_session_log_size(aid).unwrap_or(0);
+            let current_size = self.executor.get_session_log_size(aid).await.unwrap_or(0);
             if current_size > recorded_size {
                 tracing::info!(
                     agent_run_id,

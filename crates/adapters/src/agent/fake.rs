@@ -260,7 +260,7 @@ impl AgentAdapter for FakeAgentAdapter {
             .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))
     }
 
-    fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
+    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
         let inner = self.inner.lock();
         inner.agents.get(agent_id).and_then(|a| a.session_log_size)
     }

@@ -647,7 +647,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         Ok(AgentState::Working)
     }
 
-    fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
+    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
         let workspace_path = {
             let agents = self.agents.lock();
             agents.get(agent_id).map(|info| info.workspace_path.clone())
@@ -655,7 +655,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
 
         let log_session_id = agent_id.to_string();
         let log_path = super::watcher::find_session_log(&workspace_path, &log_session_id)?;
-        fs::metadata(&log_path).ok().map(|m| m.len())
+        tokio::fs::metadata(&log_path).await.ok().map(|m| m.len())
     }
 }
 
