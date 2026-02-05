@@ -8,6 +8,15 @@
 #   oj run epic "Implement user authentication with OAuth"
 #   oj run epic "Refactor storage layer for multi-tenancy"
 
+
+command "idea" {
+  args = "<description>"
+  run  = <<-SHELL
+    wok new epic "${args.description}" -l plan:needed
+    oj worker start plan
+  SHELL
+}
+
 command "epic" {
   args = "<description>"
   run  = <<-SHELL
