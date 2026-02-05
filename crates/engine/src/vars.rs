@@ -83,10 +83,7 @@ mod tests {
         let result = namespace_vars(&input);
         assert_eq!(result.get("var.title"), Some(&"hello".to_string()));
         assert_eq!(result.get("var.mr.branch"), Some(&"feat/x".to_string()));
-        assert_eq!(
-            result.get("workspace.nonce"),
-            Some(&"abc123".to_string())
-        );
+        assert_eq!(result.get("workspace.nonce"), Some(&"abc123".to_string()));
         assert!(!result.contains_key("var.var.mr.branch"));
     }
 }
