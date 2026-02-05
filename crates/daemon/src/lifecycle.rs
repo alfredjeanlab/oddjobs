@@ -312,7 +312,6 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     )?;
 
     // 4. Load state from snapshot (if exists) and replay Wal
-    // Supports both compressed (zstd) and uncompressed (JSON) formats
     let (mut state, processed_seq) = match load_snapshot(&config.snapshot_path)? {
         Some(snapshot) => {
             info!(
