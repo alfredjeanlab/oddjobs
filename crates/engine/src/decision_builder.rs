@@ -6,7 +6,7 @@
 //! Creates DecisionCreated events with system-generated options
 //! when escalation paths are triggered.
 
-use oj_core::{DecisionOption, DecisionSource, Event, JobId, QuestionData};
+use oj_core::{AgentRunId, DecisionOption, DecisionSource, Event, JobId, OwnerId, QuestionData};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -46,8 +46,10 @@ impl EscalationTrigger {
 
 /// Build a DecisionCreated event for an escalation.
 pub struct EscalationDecisionBuilder {
-    job_id: JobId,
-    job_name: String,
+    /// Owner of the decision (job or agent_run)
+    owner: OwnerId,
+    /// Display name for context messages (job name or command name)
+    display_name: String,
     agent_id: Option<String>,
     trigger: EscalationTrigger,
     agent_log_tail: Option<String>,
@@ -55,10 +57,27 @@ pub struct EscalationDecisionBuilder {
 }
 
 impl EscalationDecisionBuilder {
-    pub fn new(job_id: JobId, job_name: String, trigger: EscalationTrigger) -> Self {
+    /// Create a decision builder for a job.
+    pub fn for_job(job_id: JobId, job_name: String, trigger: EscalationTrigger) -> Self {
         Self {
-            job_id,
-            job_name,
+            owner: OwnerId::Job(job_id),
+            display_name: job_name,
+            agent_id: None,
+            trigger,
+            agent_log_tail: None,
+            namespace: String::new(),
+        }
+    }
+
+    /// Create a decision builder for a standalone agent run.
+    pub fn for_agent_run(
+        agent_run_id: AgentRunId,
+        command_name: String,
+        trigger: EscalationTrigger,
+    ) -> Self {
+        Self {
+            owner: OwnerId::AgentRun(agent_run_id),
+            display_name: command_name,
             agent_id: None,
             trigger,
             agent_log_tail: None,
@@ -92,10 +111,17 @@ impl EscalationDecisionBuilder {
             .unwrap_or_default()
             .as_millis() as u64;
 
+        // Extract job_id from owner (empty for agent runs)
+        let job_id = match &self.owner {
+            OwnerId::Job(id) => id.clone(),
+            OwnerId::AgentRun(_) => JobId::default(),
+        };
+
         let event = Event::DecisionCreated {
             id: decision_id.clone(),
-            job_id: self.job_id,
+            job_id,
             agent_id: self.agent_id,
+            owner: Some(self.owner),
             source: self.trigger.to_source(),
             context,
             options,
@@ -114,7 +140,7 @@ impl EscalationDecisionBuilder {
             EscalationTrigger::Idle => {
                 parts.push(format!(
                     "Agent in job \"{}\" is idle and waiting for input.",
-                    self.job_name
+                    self.display_name
                 ));
             }
             EscalationTrigger::Dead { exit_code } => {
@@ -123,7 +149,7 @@ impl EscalationDecisionBuilder {
                     .unwrap_or_default();
                 parts.push(format!(
                     "Agent in job \"{}\" exited unexpectedly{}.",
-                    self.job_name, code_str
+                    self.display_name, code_str
                 ));
             }
             EscalationTrigger::Error {
@@ -132,7 +158,7 @@ impl EscalationDecisionBuilder {
             } => {
                 parts.push(format!(
                     "Agent in job \"{}\" encountered an error: {} - {}",
-                    self.job_name, error_type, message
+                    self.display_name, error_type, message
                 ));
             }
             EscalationTrigger::GateFailed {
@@ -140,7 +166,10 @@ impl EscalationDecisionBuilder {
                 exit_code,
                 stderr,
             } => {
-                parts.push(format!("Gate command failed in job \"{}\".", self.job_name));
+                parts.push(format!(
+                    "Gate command failed in job \"{}\".",
+                    self.display_name
+                ));
                 parts.push(format!("Command: {}", command));
                 parts.push(format!("Exit code: {}", exit_code));
                 if !stderr.is_empty() {
@@ -150,7 +179,7 @@ impl EscalationDecisionBuilder {
             EscalationTrigger::Prompt { prompt_type } => {
                 parts.push(format!(
                     "Agent in job \"{}\" is showing a {} prompt.",
-                    self.job_name, prompt_type
+                    self.display_name, prompt_type
                 ));
             }
             EscalationTrigger::Question { ref question_data } => {
@@ -159,7 +188,7 @@ impl EscalationDecisionBuilder {
                         let header = entry.header.as_deref().unwrap_or("Question");
                         parts.push(format!(
                             "Agent in job \"{}\" is asking a question.",
-                            self.job_name
+                            self.display_name
                         ));
                         parts.push(String::new());
                         parts.push(format!("[{}] {}", header, entry.question));
@@ -171,13 +200,13 @@ impl EscalationDecisionBuilder {
                     } else {
                         parts.push(format!(
                             "Agent in job \"{}\" is asking a question.",
-                            self.job_name
+                            self.display_name
                         ));
                     }
                 } else {
                     parts.push(format!(
                         "Agent in job \"{}\" is asking a question (no details available).",
-                        self.job_name
+                        self.display_name
                     ));
                 }
             }
@@ -203,12 +232,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Done".to_string(),
-                    description: Some("Mark as complete and advance the job".to_string()),
+                    description: Some("Mark as complete".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the job".to_string()),
+                    description: Some("Cancel and fail".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
@@ -227,12 +256,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Skip".to_string(),
-                    description: Some("Skip this step and advance the job".to_string()),
+                    description: Some("Skip and mark as complete".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the job".to_string()),
+                    description: Some("Cancel and fail".to_string()),
                     recommended: false,
                 },
             ],
@@ -244,12 +273,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Skip".to_string(),
-                    description: Some("Skip the gate and advance the job".to_string()),
+                    description: Some("Skip the gate and continue".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the job".to_string()),
+                    description: Some("Cancel and fail".to_string()),
                     recommended: false,
                 },
             ],
@@ -266,7 +295,7 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the job".to_string()),
+                    description: Some("Cancel and fail".to_string()),
                     recommended: false,
                 },
             ],
@@ -288,7 +317,7 @@ impl EscalationDecisionBuilder {
                 // Always add Cancel as the last option
                 options.push(DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the job".to_string()),
+                    description: Some("Cancel and fail".to_string()),
                     recommended: false,
                 });
 

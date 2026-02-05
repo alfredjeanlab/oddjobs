@@ -51,6 +51,7 @@ fn decision_serde_roundtrip() {
         id: DecisionId::new("dec-123"),
         job_id: "pipe-1".to_string(),
         agent_id: Some("agent-1".to_string()),
+        owner: None,
         source: DecisionSource::Gate,
         context: "Gate failed with exit code 1".to_string(),
         options: vec![
@@ -86,6 +87,7 @@ fn decision_is_resolved() {
         id: DecisionId::new("dec-1"),
         job_id: "pipe-1".to_string(),
         agent_id: None,
+        owner: None,
         source: DecisionSource::Question,
         context: "What should we do?".to_string(),
         options: vec![],

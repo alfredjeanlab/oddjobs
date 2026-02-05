@@ -82,8 +82,8 @@ pub struct ArgSpec {
 /// Supports:
 /// - `<name>` - required positional
 /// - `[name]` - optional positional
-/// - `<files...>` - required variadic
-/// - `[files...]` - optional variadic
+/// - `<files...>` or `<files>...` - required variadic
+/// - `[files...]` or `[files]...` - optional variadic
 /// - `--flag` - boolean flag
 /// - `-f/--flag` - flag with short alias
 /// - `--opt <val>` - required option with value
@@ -123,8 +123,12 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                 }
 
                 let name = current_token.trim();
-                if name.ends_with("...") {
-                    // Variadic
+
+                // Check for trailing "..." after the closing bracket (e.g., <files>...)
+                let trailing_ellipsis = peek_ellipsis(&mut chars);
+
+                if name.ends_with("...") || trailing_ellipsis {
+                    // Variadic - support both <files...> and <files>...
                     let var_name = name.trim_end_matches("...");
                     check_name(var_name)?;
                     if result.variadic.is_some() {
@@ -166,11 +170,22 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                 }
 
                 let content = current_token.trim();
+
+                // Check for trailing "..." after the closing bracket (e.g., [args]...)
+                let trailing_ellipsis = peek_ellipsis(&mut chars);
+
                 if content.starts_with('-') {
                     // Optional flag or option: [--flag] or [--opt <val>] or [-o/--opt <val>]
+                    // Trailing ellipsis is not valid for flags/options
+                    if trailing_ellipsis {
+                        return Err(ArgSpecError::InvalidSyntax(format!(
+                            "ellipsis not valid after flag/option: [{}]...",
+                            content
+                        )));
+                    }
                     parse_flag_or_option(content, false, &mut result, &mut check_name)?;
-                } else if content.ends_with("...") {
-                    // Optional variadic
+                } else if content.ends_with("...") || trailing_ellipsis {
+                    // Optional variadic - support both [files...] and [files]...
                     let var_name = content.trim_end_matches("...");
                     check_name(var_name)?;
                     if result.variadic.is_some() {
@@ -250,6 +265,22 @@ fn skip_whitespace(chars: &mut std::iter::Peekable<std::str::Chars>) {
             break;
         }
     }
+}
+
+/// Peek ahead to see if the next characters are "..."
+/// If so, consume them and return true. Otherwise, return false.
+fn peek_ellipsis(chars: &mut std::iter::Peekable<std::str::Chars>) -> bool {
+    let mut lookahead = chars.clone();
+    if lookahead.next() == Some('.')
+        && lookahead.next() == Some('.')
+        && lookahead.next() == Some('.')
+    {
+        chars.next();
+        chars.next();
+        chars.next();
+        return true;
+    }
+    false
 }
 
 fn parse_flag_or_option<F>(

@@ -243,7 +243,7 @@ pub fn build_action_effects(
                 _ => EscalationTrigger::Idle, // fallback
             };
 
-            let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
+            let (_decision_id, decision_event) = EscalationDecisionBuilder::for_job(
                 job_id.clone(),
                 job.name.clone(),
                 escalation_trigger,
@@ -355,14 +355,62 @@ pub fn build_action_effects_for_agent_run(
                 agent_run_id = %agent_run.id,
                 trigger = trigger,
                 message = ?message,
-                "escalating standalone agent to human"
+                "escalating standalone agent to human — creating decision"
             );
 
-            let effects = vec![
-                Effect::Notify {
-                    title: format!("Agent needs attention: {}", agent_run.command_name),
-                    message: trigger.to_string(),
+            // Determine escalation trigger type from the trigger string
+            let escalation_trigger = match trigger {
+                "idle" | "on_idle" => EscalationTrigger::Idle,
+                "dead" | "on_dead" | "exit" | "exited" => {
+                    EscalationTrigger::Dead { exit_code: None }
+                }
+                "error" | "on_error" => EscalationTrigger::Error {
+                    error_type: "unknown".to_string(),
+                    message: message.unwrap_or("").to_string(),
                 },
+                "prompt:question" => EscalationTrigger::Question {
+                    question_data: _question_data.cloned(),
+                },
+                "prompt" | "on_prompt" => EscalationTrigger::Prompt {
+                    prompt_type: "permission".to_string(),
+                },
+                t if t.ends_with("_exhausted") => {
+                    let base = t.trim_end_matches("_exhausted");
+                    match base {
+                        "idle" => EscalationTrigger::Idle,
+                        "prompt:question" => EscalationTrigger::Question {
+                            question_data: _question_data.cloned(),
+                        },
+                        "error" => EscalationTrigger::Error {
+                            error_type: "exhausted".to_string(),
+                            message: message.unwrap_or("").to_string(),
+                        },
+                        _ => EscalationTrigger::Dead { exit_code: None },
+                    }
+                }
+                _ => EscalationTrigger::Idle, // fallback
+            };
+
+            let (_decision_id, decision_event) = EscalationDecisionBuilder::for_agent_run(
+                agent_run_id.clone(),
+                agent_run.command_name.clone(),
+                escalation_trigger,
+            )
+            .agent_id(agent_run.agent_id.clone().unwrap_or_default())
+            .namespace(agent_run.namespace.clone())
+            .build();
+
+            let effects = vec![
+                // Emit DecisionCreated
+                Effect::Emit {
+                    event: decision_event,
+                },
+                // Desktop notification on decision created
+                Effect::Notify {
+                    title: format!("Decision needed: {}", agent_run.command_name),
+                    message: format!("Agent requires attention ({})", trigger),
+                },
+                // Emit AgentRunStatusChanged to Escalated
                 Effect::Emit {
                     event: Event::AgentRunStatusChanged {
                         id: agent_run_id.clone(),

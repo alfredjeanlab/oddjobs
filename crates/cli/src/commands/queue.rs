@@ -59,12 +59,19 @@ pub enum QueueCommand {
         #[arg(short = 'n', long, default_value = "50")]
         limit: usize,
     },
-    /// Retry a dead or failed queue item
+    /// Retry dead or failed queue items
     Retry {
         /// Queue name
         queue: String,
-        /// Item ID (or prefix)
-        item_id: String,
+        /// Item IDs (or prefixes) to retry
+        #[arg(required_unless_present_any = ["all_dead", "status"])]
+        item_ids: Vec<String>,
+        /// Retry all dead items
+        #[arg(long)]
+        all_dead: bool,
+        /// Retry items with specific status (dead or failed)
+        #[arg(long, value_name = "STATUS")]
+        status: Option<String>,
     },
     /// Mark an active queue item as failed
     Fail {
@@ -212,12 +219,27 @@ pub async fn handle(
                 }
             }
         }
-        QueueCommand::Retry { queue, item_id } => {
+        QueueCommand::Retry {
+            queue,
+            item_ids,
+            all_dead,
+            status,
+        } => {
+            // Validate --status if provided
+            if let Some(ref s) = status {
+                let s_lower = s.to_lowercase();
+                if s_lower != "dead" && s_lower != "failed" {
+                    anyhow::bail!("invalid status '{}': must be 'dead' or 'failed'", s);
+                }
+            }
+
             let request = Request::QueueRetry {
                 project_root: project_root.to_path_buf(),
                 namespace: namespace.to_string(),
                 queue_name: queue.clone(),
-                item_id: item_id.clone(),
+                item_ids: item_ids.clone(),
+                all_dead,
+                status: status.clone(),
             };
 
             match client.send(&request).await? {
@@ -225,7 +247,44 @@ pub async fn handle(
                     queue_name,
                     item_id,
                 } => {
+                    // Single item retried (backward compat)
                     println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
+                }
+                Response::QueueItemsRetried {
+                    queue_name,
+                    item_ids: retried_ids,
+                    already_retried,
+                    not_found,
+                } => {
+                    // Bulk retry response
+                    if !retried_ids.is_empty() {
+                        println!(
+                            "Retried {} item{} in queue '{}'",
+                            retried_ids.len(),
+                            if retried_ids.len() == 1 { "" } else { "s" },
+                            queue_name
+                        );
+                        for id in &retried_ids {
+                            println!("  {}", id.short(8));
+                        }
+                    }
+                    if !already_retried.is_empty() {
+                        println!(
+                            "Skipped {} item{} (not dead/failed):",
+                            already_retried.len(),
+                            if already_retried.len() == 1 { "" } else { "s" }
+                        );
+                        for id in &already_retried {
+                            println!("  {}", id.short(8));
+                        }
+                    }
+                    if !not_found.is_empty() {
+                        println!("Not found: {}", not_found.join(", "));
+                    }
+                    if retried_ids.is_empty() && already_retried.is_empty() && not_found.is_empty()
+                    {
+                        println!("No items to retry in queue '{}'", queue_name);
+                    }
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

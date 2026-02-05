@@ -370,12 +370,16 @@ pub(super) fn handle_queue_drop(
     })
 }
 
-/// Handle a QueueRetry request.
+/// Handle a QueueRetry request (single or bulk).
+// TODO(refactor): Consolidate filter args into a RetryOptions struct once patterns stabilize
+#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_queue_retry(
     project_root: &Path,
     namespace: &str,
     queue_name: &str,
-    item_id: &str,
+    item_ids: &[String],
+    all_dead: bool,
+    status_filter: Option<&str>,
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
@@ -409,56 +413,168 @@ pub(super) fn handle_queue_retry(
         });
     }
 
-    // Resolve item ID (exact or prefix match)
-    let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
-        Ok(id) => id,
-        Err(resp) => return Ok(resp),
+    // Determine which items to retry
+    let items_to_process: Vec<String> = if all_dead || status_filter.is_some() {
+        // Filter mode: collect items by status
+        let st = state.lock();
+        let key = scoped_name(namespace, queue_name);
+        st.queue_items
+            .get(&key)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|i| {
+                        if all_dead {
+                            i.status == QueueItemStatus::Dead
+                        } else if let Some(filter) = status_filter {
+                            match filter.to_lowercase().as_str() {
+                                "dead" => i.status == QueueItemStatus::Dead,
+                                "failed" => i.status == QueueItemStatus::Failed,
+                                _ => false,
+                            }
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|i| i.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        // Explicit IDs mode
+        item_ids.to_vec()
     };
 
-    // Validate item is in Dead or Failed status
-    {
-        let state = state.lock();
-        let key = scoped_name(namespace, queue_name);
-        let item = state
-            .queue_items
-            .get(&key)
-            .and_then(|items| items.iter().find(|i| i.id == resolved_id));
-        if let Some(item) = item {
-            use oj_storage::QueueItemStatus;
-            if item.status != QueueItemStatus::Dead && item.status != QueueItemStatus::Failed {
-                return Ok(Response::Error {
-                    message: format!(
-                        "item '{}' is {:?}, only dead or failed items can be retried",
-                        resolved_id, item.status
-                    ),
-                });
+    // If no items to process and using filters, return early with empty result
+    if items_to_process.is_empty() && (all_dead || status_filter.is_some()) {
+        return Ok(Response::QueueItemsRetried {
+            queue_name: queue_name.to_string(),
+            item_ids: vec![],
+            already_retried: vec![],
+            not_found: vec![],
+        });
+    }
+
+    // For backward compatibility: single item without filters uses old response
+    if items_to_process.len() == 1 && !all_dead && status_filter.is_none() {
+        let item_id = &items_to_process[0];
+
+        // Resolve item ID (exact or prefix match)
+        let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+            Ok(id) => id,
+            Err(resp) => return Ok(resp),
+        };
+
+        // Validate item is in Dead or Failed status
+        {
+            let st = state.lock();
+            let key = scoped_name(namespace, queue_name);
+            let item = st
+                .queue_items
+                .get(&key)
+                .and_then(|items| items.iter().find(|i| i.id == resolved_id));
+            if let Some(item) = item {
+                if item.status != QueueItemStatus::Dead && item.status != QueueItemStatus::Failed {
+                    return Ok(Response::Error {
+                        message: format!(
+                            "item '{}' is {:?}, only dead or failed items can be retried",
+                            resolved_id, item.status
+                        ),
+                    });
+                }
+            }
+        }
+
+        // Emit QueueItemRetry event
+        let event = Event::QueueItemRetry {
+            queue_name: queue_name.to_string(),
+            item_id: resolved_id.clone(),
+            namespace: namespace.to_string(),
+        };
+        event_bus
+            .send(event)
+            .map_err(|_| ConnectionError::WalError)?;
+
+        // Wake workers attached to this queue
+        wake_attached_workers(
+            project_root,
+            namespace,
+            queue_name,
+            &runbook,
+            event_bus,
+            state,
+        )?;
+
+        return Ok(Response::QueueRetried {
+            queue_name: queue_name.to_string(),
+            item_id: resolved_id,
+        });
+    }
+
+    // Bulk retry: process multiple items
+    let mut retried = Vec::new();
+    let mut already_retried = Vec::new();
+    let mut not_found = Vec::new();
+
+    for item_id in &items_to_process {
+        // Resolve item ID (exact or prefix match)
+        let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+            Ok(id) => id,
+            Err(_) => {
+                not_found.push(item_id.clone());
+                continue;
+            }
+        };
+
+        // Check item status
+        let item_status = {
+            let st = state.lock();
+            let key = scoped_name(namespace, queue_name);
+            st.queue_items
+                .get(&key)
+                .and_then(|items| items.iter().find(|i| i.id == resolved_id))
+                .map(|i| i.status.clone())
+        };
+
+        match item_status {
+            Some(QueueItemStatus::Dead) | Some(QueueItemStatus::Failed) => {
+                // Emit QueueItemRetry event
+                let event = Event::QueueItemRetry {
+                    queue_name: queue_name.to_string(),
+                    item_id: resolved_id.clone(),
+                    namespace: namespace.to_string(),
+                };
+                event_bus
+                    .send(event)
+                    .map_err(|_| ConnectionError::WalError)?;
+                retried.push(resolved_id);
+            }
+            Some(_) => {
+                already_retried.push(resolved_id);
+            }
+            None => {
+                not_found.push(item_id.clone());
             }
         }
     }
 
-    // Emit QueueItemRetry event
-    let event = Event::QueueItemRetry {
-        queue_name: queue_name.to_string(),
-        item_id: resolved_id.clone(),
-        namespace: namespace.to_string(),
-    };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    // Wake workers if any items were retried
+    if !retried.is_empty() {
+        wake_attached_workers(
+            project_root,
+            namespace,
+            queue_name,
+            &runbook,
+            event_bus,
+            state,
+        )?;
+    }
 
-    // Wake workers attached to this queue
-    wake_attached_workers(
-        project_root,
-        namespace,
-        queue_name,
-        &runbook,
-        event_bus,
-        state,
-    )?;
-
-    Ok(Response::QueueRetried {
+    Ok(Response::QueueItemsRetried {
         queue_name: queue_name.to_string(),
-        item_id: resolved_id,
+        item_ids: retried,
+        already_retried,
+        not_found,
     })
 }
 

@@ -1143,6 +1143,7 @@ fn decision_created_event(id: &str, job_id: &str) -> Event {
         id: id.to_string(),
         job_id: JobId::new(job_id),
         agent_id: Some("agent-1".to_string()),
+        owner: None,
         source: oj_core::DecisionSource::Gate,
         context: "Gate check failed".to_string(),
         options: vec![
