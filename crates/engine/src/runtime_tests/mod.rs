@@ -8,6 +8,7 @@ mod cron;
 mod directives;
 mod errors;
 mod idempotency;
+mod job_create;
 mod job_deleted;
 mod monitoring;
 mod notify;
