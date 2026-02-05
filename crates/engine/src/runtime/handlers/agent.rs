@@ -74,11 +74,9 @@ where
             return Ok(vec![]);
         };
 
-        let job = self.require_job(&job_id)?;
-
-        if job.is_terminal() {
+        let Some(job) = self.get_active_job(&job_id) else {
             return Ok(vec![]);
-        }
+        };
 
         // Verify this event is for the current step's agent, not a stale event
         // from a previous step's agent that hasn't been cleaned up yet.
@@ -178,13 +176,12 @@ where
             return Ok(vec![]);
         };
 
-        let job = self.require_job(&job_id)?;
+        let Some(job) = self.get_active_job(&job_id) else {
+            return Ok(vec![]);
+        };
 
-        // If job already advanced, has a signal, or is already waiting for a decision, ignore
-        if job.is_terminal()
-            || job.action_tracker.agent_signal.is_some()
-            || job.step_status.is_waiting()
-        {
+        // If job has a signal or is already waiting for a decision, ignore
+        if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
             return Ok(vec![]);
         }
 
@@ -285,13 +282,12 @@ where
             return Ok(vec![]);
         };
 
-        let job = self.require_job(&job_id)?;
+        let Some(job) = self.get_active_job(&job_id) else {
+            return Ok(vec![]);
+        };
 
-        // If job already advanced, has a signal, or is already waiting for a decision, ignore
-        if job.is_terminal()
-            || job.action_tracker.agent_signal.is_some()
-            || job.step_status.is_waiting()
-        {
+        // If job has a signal or is already waiting for a decision, ignore
+        if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
             return Ok(vec![]);
         }
 
@@ -365,10 +361,11 @@ where
         let Some(job_id_str) = self.agent_jobs.lock().get(agent_id).cloned() else {
             return Ok(vec![]);
         };
-        let job = self.require_job(&job_id_str)?;
-
-        if job.is_terminal() || job.step_status.is_waiting() {
-            return Ok(vec![]); // Already escalated or terminal — no-op
+        let Some(job) = self.get_active_job(&job_id_str) else {
+            return Ok(vec![]); // Terminal — no-op
+        };
+        if job.step_status.is_waiting() {
+            return Ok(vec![]); // Already escalated — no-op
         }
 
         // Stale agent check

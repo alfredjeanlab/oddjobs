@@ -75,17 +75,10 @@ where
         let trigger = parts[1];
         let chain_pos: usize = parts[2].parse().unwrap_or(0);
 
-        let job = match self.get_job(job_id) {
-            Some(p) => p,
-            None => {
-                tracing::debug!(job_id, "cooldown timer for missing job");
-                return Ok(vec![]);
-            }
-        };
-
-        if job.is_terminal() {
+        let Some(job) = self.get_active_job(job_id) else {
+            tracing::debug!(job_id, "cooldown timer for missing/terminal job");
             return Ok(vec![]);
-        }
+        };
 
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let agent_def = match monitor::get_agent_def(&runbook, &job) {
@@ -197,14 +190,9 @@ where
 
     /// Periodic liveness check (30s). Checks if tmux session + agent process are alive.
     async fn handle_liveness_timer(&self, job_id: &str) -> Result<Vec<Event>, RuntimeError> {
-        let job = match self.get_job(job_id) {
-            Some(p) => p,
-            None => return Ok(vec![]),
-        };
-
-        if job.is_terminal() {
+        let Some(job) = self.get_active_job(job_id) else {
             return Ok(vec![]); // No need to reschedule
-        }
+        };
 
         let session_id = match &job.session_id {
             Some(id) => id.clone(),
@@ -253,15 +241,10 @@ where
     /// Deferred exit handler (5s after liveness detected death).
     /// Reads final session log to determine exit reason.
     async fn handle_exit_deferred_timer(&self, job_id: &str) -> Result<Vec<Event>, RuntimeError> {
-        let job = match self.get_job(job_id) {
-            Some(p) => p,
-            None => return Ok(vec![]),
-        };
-
-        // If job already terminal, agent state event won the race — no-op
-        if job.is_terminal() {
+        // If job missing or already terminal, agent state event won the race — no-op
+        let Some(job) = self.get_active_job(job_id) else {
             return Ok(vec![]);
-        }
+        };
 
         // Read final agent state from session log
         // Get agent_id from step history (it's a UUID stored when the agent was spawned)
