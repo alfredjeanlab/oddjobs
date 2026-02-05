@@ -1,22 +1,14 @@
-# Plan and implement a large feature using two-phase worker queues.
+# Plan and implement a large 'epic' wok issues with the 'plan:needed' and 'build:needed' labels.
 #
 # Creates an epic issue, then workers handle planning and implementation:
 # 1. Plan worker explores codebase and writes plan to issue notes
 # 2. Epic worker implements the plan and submits to merge queue
+
+# Create a new wok epic with 'plan:needed' and 'build:needed'.
 #
 # Examples:
 #   oj run epic "Implement user authentication with OAuth"
 #   oj run epic "Refactor storage layer for multi-tenancy"
-
-
-command "idea" {
-  args = "<description>"
-  run  = <<-SHELL
-    wok new epic "${args.description}" -l plan:needed
-    oj worker start plan
-  SHELL
-}
-
 command "epic" {
   args = "<description>"
   run  = <<-SHELL
@@ -26,7 +18,20 @@ command "epic" {
   SHELL
 }
 
-# Queue existing issues for planning.
+# Create a new wok epic with 'plan:needed' only.
+#
+# Examples:
+#   oj run plan oj-abc123
+#   oj run plan oj-abc123 oj-def456
+command "idea" {
+  args = "<description>"
+  run  = <<-SHELL
+    wok new epic "${args.description}" -l plan:needed
+    oj worker start plan
+  SHELL
+}
+
+# Queue existing feature/epic for planning, adding the 'plan:needed' label.
 #
 # Examples:
 #   oj run plan oj-abc123
@@ -40,7 +45,7 @@ command "plan" {
   SHELL
 }
 
-# Queue planned issues for implementation.
+# Queue existing feature/epic for planning, adding the 'build:needed' label.
 #
 # Examples:
 #   oj run build oj-abc123
