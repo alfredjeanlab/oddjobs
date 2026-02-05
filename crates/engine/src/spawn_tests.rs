@@ -793,6 +793,77 @@ fn build_spawn_effects_no_session_block_gets_defaults() {
     }
 }
 
+#[test]
+fn build_spawn_effects_session_config_interpolates_variables() {
+    let workspace = TempDir::new().unwrap();
+    let mut agent = test_agent_def();
+    // Configure session with variable references
+    agent.session.insert(
+        "tmux".to_string(),
+        oj_runbook::TmuxSessionConfig {
+            color: Some("blue".to_string()),
+            title: Some("Bug: ${var.bug.id}".to_string()),
+            status: Some(oj_runbook::SessionStatusConfig {
+                left: Some("${var.bug.id}: ${var.bug.title}".to_string()),
+                right: Some("${workspace.branch}".to_string()),
+            }),
+        },
+    );
+    let mut job = test_job();
+    job.namespace = "test".to_string();
+
+    // Job vars use the "workspace." prefix for workspace-level vars
+    let input: HashMap<String, String> = [
+        ("bug.id".to_string(), "BUG-456".to_string()),
+        ("bug.title".to_string(), "Fix button".to_string()),
+        ("workspace.branch".to_string(), "fix/bug-456".to_string()),
+    ]
+    .into_iter()
+    .collect();
+
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "worker",
+        &input,
+        workspace.path(),
+        workspace.path(),
+        None,
+    )
+    .unwrap();
+
+    if let Effect::SpawnAgent { session_config, .. } = &effects[0] {
+        let tmux = session_config.get("tmux").unwrap().as_object().unwrap();
+
+        // Color is not interpolated (and shouldn't be - it's validated at parse time)
+        assert_eq!(tmux.get("color").unwrap().as_str().unwrap(), "blue");
+
+        // Title should be interpolated
+        assert_eq!(
+            tmux.get("title").unwrap().as_str().unwrap(),
+            "Bug: BUG-456",
+            "title should have variables interpolated"
+        );
+
+        // Status left/right should be interpolated
+        let status = tmux.get("status").unwrap().as_object().unwrap();
+        assert_eq!(
+            status.get("left").unwrap().as_str().unwrap(),
+            "BUG-456: Fix button",
+            "status.left should have variables interpolated"
+        );
+        assert_eq!(
+            status.get("right").unwrap().as_str().unwrap(),
+            "fix/bug-456",
+            "status.right should have variables interpolated"
+        );
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}
+
 // =============================================================================
 // User Env File Injection Tests
 // =============================================================================

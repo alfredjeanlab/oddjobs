@@ -949,6 +949,52 @@ fn session_config_serialization_roundtrip() {
     assert_eq!(status.right.as_deref(), Some("right text"));
 }
 
+#[test]
+fn session_config_interpolate() {
+    let config = TmuxSessionConfig {
+        color: Some("blue".to_string()),
+        title: Some("Bug: ${var.bug.id}".to_string()),
+        status: Some(SessionStatusConfig {
+            left: Some("${var.bug.id}: ${var.bug.title}".to_string()),
+            right: Some("${workspace.branch}".to_string()),
+        }),
+    };
+
+    let vars: HashMap<String, String> = [
+        ("var.bug.id".to_string(), "BUG-123".to_string()),
+        ("var.bug.title".to_string(), "Fix login".to_string()),
+        ("workspace.branch".to_string(), "fix/bug-123".to_string()),
+    ]
+    .into_iter()
+    .collect();
+
+    let interpolated = config.interpolate(&vars);
+
+    // Color is not interpolated
+    assert_eq!(interpolated.color.as_deref(), Some("blue"));
+    // Title is interpolated
+    assert_eq!(interpolated.title.as_deref(), Some("Bug: BUG-123"));
+    // Status left/right are interpolated
+    let status = interpolated.status.unwrap();
+    assert_eq!(status.left.as_deref(), Some("BUG-123: Fix login"));
+    assert_eq!(status.right.as_deref(), Some("fix/bug-123"));
+}
+
+#[test]
+fn session_config_interpolate_missing_vars_preserved() {
+    let config = TmuxSessionConfig {
+        color: None,
+        title: Some("${unknown.var}".to_string()),
+        status: None,
+    };
+
+    let vars = HashMap::new();
+    let interpolated = config.interpolate(&vars);
+
+    // Missing variables are preserved as-is
+    assert_eq!(interpolated.title.as_deref(), Some("${unknown.var}"));
+}
+
 // =============================================================================
 // on_stop Tests
 // =============================================================================

@@ -85,9 +85,10 @@ pub fn build_spawn_effects(
         workspace_path.display().to_string(),
     );
 
-    // Expose invoke.dir and local.* at top level
+    // Expose invoke.*, local.*, and workspace.* at top level
     for (key, val) in input.iter() {
-        if key.starts_with("invoke.") || key.starts_with("local.") {
+        if key.starts_with("invoke.") || key.starts_with("local.") || key.starts_with("workspace.")
+        {
             prompt_vars.insert(key.clone(), val.clone());
         }
     }
@@ -306,10 +307,13 @@ pub fn build_spawn_effects(
     );
 
     // Build session config with defaults
+    // Note: use prompt_vars (not vars) to avoid shell-escaped ${prompt}
     let session_config = {
         let mut config: HashMap<String, serde_json::Value> = HashMap::new();
         if let Some(tmux_cfg) = agent_def.session.get("tmux") {
-            if let Ok(val) = serde_json::to_value(tmux_cfg) {
+            // Interpolate variables in session config (title, status left/right)
+            let interpolated = tmux_cfg.interpolate(&prompt_vars);
+            if let Ok(val) = serde_json::to_value(interpolated) {
                 config.insert("tmux".to_string(), val);
             }
         }

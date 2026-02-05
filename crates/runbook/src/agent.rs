@@ -33,6 +33,29 @@ pub struct TmuxSessionConfig {
     pub status: Option<SessionStatusConfig>,
 }
 
+impl TmuxSessionConfig {
+    /// Interpolate all string fields with the provided variables
+    pub fn interpolate(&self, vars: &HashMap<String, String>) -> Self {
+        Self {
+            color: self.color.clone(), // Color is validated at parse-time, no interpolation needed
+            title: self
+                .title
+                .as_ref()
+                .map(|t| crate::template::interpolate(t, vars)),
+            status: self.status.as_ref().map(|s| SessionStatusConfig {
+                left: s
+                    .left
+                    .as_ref()
+                    .map(|l| crate::template::interpolate(l, vars)),
+                right: s
+                    .right
+                    .as_ref()
+                    .map(|r| crate::template::interpolate(r, vars)),
+            }),
+        }
+    }
+}
+
 /// Valid SessionStart source values for matcher filtering.
 pub const VALID_PRIME_SOURCES: &[&str] = &["startup", "resume", "clear", "compact"];
 
