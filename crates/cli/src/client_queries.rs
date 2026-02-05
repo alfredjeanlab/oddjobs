@@ -163,6 +163,18 @@ impl DaemonClient {
         self.send_simple(&request).await
     }
 
+    /// Resume all resumable jobs
+    pub async fn job_resume_all(
+        &self,
+        kill: bool,
+    ) -> Result<(Vec<String>, Vec<(String, String)>), ClientError> {
+        let request = Request::JobResumeAll { kill };
+        match self.send(&request).await? {
+            Response::JobsResumed { resumed, skipped } => Ok((resumed, skipped)),
+            other => Self::reject(other),
+        }
+    }
+
     /// Cancel one or more jobs by ID
     pub async fn job_cancel(&self, ids: &[String]) -> Result<CancelResult, ClientError> {
         let request = Request::JobCancel { ids: ids.to_vec() };

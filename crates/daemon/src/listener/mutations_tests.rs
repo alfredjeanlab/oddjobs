@@ -19,7 +19,7 @@ use crate::protocol::Response;
 
 use super::{
     handle_agent_prune, handle_agent_send, handle_job_cancel, handle_job_prune, handle_job_resume,
-    handle_session_kill, workspace_prune_inner, PruneFlags,
+    handle_job_resume_all, handle_session_kill, workspace_prune_inner, PruneFlags,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -1782,5 +1782,143 @@ async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
             );
         }
         other => panic!("expected WorkspacesPruned, got: {:?}", other),
+    }
+}
+
+// -- Job Resume All ---------------------------------------------------------
+
+#[test]
+fn resume_all_resumes_waiting_jobs() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        let mut job = make_job("job-1", "work");
+        job.step_status = StepStatus::Waiting(None);
+        s.jobs.insert("job-1".to_string(), job);
+    }
+
+    let result = handle_job_resume_all(&state, &event_bus, false);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert_eq!(resumed, vec!["job-1"]);
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_all_resumes_failed_jobs() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        let mut job = make_job("job-1", "work");
+        job.step_status = StepStatus::Failed;
+        s.jobs.insert("job-1".to_string(), job);
+    }
+
+    let result = handle_job_resume_all(&state, &event_bus, false);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert_eq!(resumed, vec!["job-1"]);
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_all_skips_running_jobs_without_kill() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        let job = make_job("job-1", "work"); // step_status = Running by default
+        s.jobs.insert("job-1".to_string(), job);
+    }
+
+    let result = handle_job_resume_all(&state, &event_bus, false);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert!(resumed.is_empty());
+            assert_eq!(skipped.len(), 1);
+            assert_eq!(skipped[0].0, "job-1");
+            assert!(skipped[0].1.contains("--kill"));
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_all_with_kill_resumes_running_jobs() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        let job = make_job("job-1", "work"); // step_status = Running
+        s.jobs.insert("job-1".to_string(), job);
+    }
+
+    let result = handle_job_resume_all(&state, &event_bus, true);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert_eq!(resumed, vec!["job-1"]);
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_all_skips_terminal_jobs() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        // Terminal job (done)
+        let done_job = make_job("job-done", "done");
+        s.jobs.insert("job-done".to_string(), done_job);
+
+        // Non-terminal waiting job
+        let mut waiting_job = make_job("job-wait", "work");
+        waiting_job.step_status = StepStatus::Waiting(None);
+        s.jobs.insert("job-wait".to_string(), waiting_job);
+    }
+
+    let result = handle_job_resume_all(&state, &event_bus, false);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert_eq!(resumed, vec!["job-wait"]);
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
+    }
+}
+
+#[test]
+fn resume_all_returns_empty_when_no_jobs() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let result = handle_job_resume_all(&state, &event_bus, false);
+    match result {
+        Ok(Response::JobsResumed { resumed, skipped }) => {
+            assert!(resumed.is_empty());
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected JobsResumed, got: {:?}", other),
     }
 }

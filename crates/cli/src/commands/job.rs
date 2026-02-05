@@ -55,8 +55,8 @@ pub enum JobCommand {
     },
     /// Resume monitoring for an escalated job
     Resume {
-        /// Job ID or name
-        id: String,
+        /// Job ID or name. Required unless --all is used.
+        id: Option<String>,
 
         /// Message for nudge/recovery (required for agent steps)
         #[arg(short = 'm', long)]
@@ -69,6 +69,10 @@ pub enum JobCommand {
         /// Kill running agent and restart (still preserves conversation via --resume)
         #[arg(long)]
         kill: bool,
+
+        /// Resume all resumable jobs (waiting/failed/pending)
+        #[arg(long)]
+        all: bool,
     },
     /// Cancel one or more running jobs
     Cancel {
@@ -423,26 +427,43 @@ pub async fn handle(
             message,
             var,
             kill,
+            all,
         } => {
-            let var_map: HashMap<String, String> = var.into_iter().collect();
-            match client
-                .job_resume(&id, message.as_deref(), &var_map, kill)
-                .await
-            {
-                Ok(()) => {
-                    if !var_map.is_empty() {
-                        println!("Updated vars and resumed job {}", id);
-                    } else {
+            if all {
+                let (resumed, skipped) = client.job_resume_all(kill).await?;
+                if resumed.is_empty() && skipped.is_empty() {
+                    println!("No resumable jobs found");
+                } else {
+                    for id in &resumed {
                         println!("Resumed job {}", id);
                     }
+                    for (id, reason) in &skipped {
+                        println!("Skipped job {} ({})", id, reason);
+                    }
                 }
-                Err(crate::client::ClientError::Rejected(msg))
-                    if msg.contains("--message") || msg.contains("agent steps require") =>
+            } else {
+                let id =
+                    id.ok_or_else(|| anyhow::anyhow!("Either provide a job ID or use --all"))?;
+                let var_map: HashMap<String, String> = var.into_iter().collect();
+                match client
+                    .job_resume(&id, message.as_deref(), &var_map, kill)
+                    .await
                 {
-                    eprintln!("error: {}", msg);
-                    std::process::exit(1);
+                    Ok(()) => {
+                        if !var_map.is_empty() {
+                            println!("Updated vars and resumed job {}", id);
+                        } else {
+                            println!("Resumed job {}", id);
+                        }
+                    }
+                    Err(crate::client::ClientError::Rejected(msg))
+                        if msg.contains("--message") || msg.contains("agent steps require") =>
+                    {
+                        eprintln!("error: {}", msg);
+                        std::process::exit(1);
+                    }
+                    Err(e) => return Err(e.into()),
                 }
-                Err(e) => return Err(e.into()),
             }
         }
         JobCommand::Cancel { ids } => {

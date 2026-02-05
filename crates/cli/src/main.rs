@@ -126,8 +126,8 @@ enum Commands {
     },
     /// Resume monitoring for an escalated job
     Resume {
-        /// Job ID or name
-        id: String,
+        /// Job ID or name. Required unless --all is used.
+        id: Option<String>,
         /// Message for nudge/recovery (required for agent steps)
         #[arg(short = 'm', long)]
         message: Option<String>,
@@ -137,6 +137,9 @@ enum Commands {
         /// Kill running agent and restart (still preserves conversation via --resume)
         #[arg(long)]
         kill: bool,
+        /// Resume all resumable jobs (waiting/failed/pending)
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -533,6 +536,7 @@ async fn run() -> Result<()> {
             message,
             var,
             kill,
+            all,
         } => {
             let client = DaemonClient::for_action()?;
             job::handle(
@@ -541,6 +545,7 @@ async fn run() -> Result<()> {
                     message,
                     var,
                     kill,
+                    all,
                 },
                 &client,
                 cli.project.as_deref(),

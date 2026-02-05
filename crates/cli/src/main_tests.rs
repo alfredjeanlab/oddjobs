@@ -347,7 +347,7 @@ fn resume_accepts_id_and_message() {
     let cli = Cli::from_arg_matches(&matches).unwrap();
     assert!(
         matches!(cli.command, Some(Commands::Resume { id, message, .. })
-        if id == "abc" && message.as_deref() == Some("try again"))
+        if id.as_deref() == Some("abc") && message.as_deref() == Some("try again"))
     );
 }
 
@@ -358,4 +358,26 @@ fn resume_accepts_var_flags() {
         .unwrap();
     let cli = Cli::from_arg_matches(&matches).unwrap();
     assert!(matches!(cli.command, Some(Commands::Resume { var, .. }) if var.len() == 1));
+}
+
+#[test]
+fn resume_accepts_all_flag() {
+    let matches = cli_command()
+        .try_get_matches_from(["oj", "resume", "--all"])
+        .unwrap();
+    let cli = Cli::from_arg_matches(&matches).unwrap();
+    assert!(matches!(cli.command, Some(Commands::Resume { id, all, .. })
+        if id.is_none() && all));
+}
+
+#[test]
+fn resume_all_with_kill() {
+    let matches = cli_command()
+        .try_get_matches_from(["oj", "resume", "--all", "--kill"])
+        .unwrap();
+    let cli = Cli::from_arg_matches(&matches).unwrap();
+    assert!(
+        matches!(cli.command, Some(Commands::Resume { id, all, kill, .. })
+        if id.is_none() && all && kill)
+    );
 }
