@@ -352,6 +352,27 @@ where
             });
         }
 
+        // Namespace user input variables with `var.` prefix for display isolation.
+        // Variables with existing scope prefixes (invoke.*, workspace.*, local.*, etc.)
+        // are kept as-is. Only bare keys (user input) get the `var.` prefix.
+        let namespaced_vars: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| {
+                // Check if key already has a scope prefix
+                let has_prefix = k.starts_with("invoke.")
+                    || k.starts_with("workspace.")
+                    || k.starts_with("local.")
+                    || k.starts_with("var.")
+                    || k.starts_with("args.")
+                    || k.starts_with("item.");
+                if has_prefix {
+                    (k.clone(), v.clone())
+                } else {
+                    (format!("var.{}", k), v.clone())
+                }
+            })
+            .collect();
+
         creation_effects.push(Effect::Emit {
             event: Event::JobCreated {
                 id: job_id.clone(),
@@ -359,7 +380,7 @@ where
                 name: job_name.clone(),
                 runbook_hash: runbook_hash.clone(),
                 cwd: execution_path.clone(),
-                vars: vars.clone(),
+                vars: namespaced_vars,
                 initial_step: initial_step.clone(),
                 created_at_epoch_ms: self.clock().epoch_ms(),
                 namespace: namespace.clone(),

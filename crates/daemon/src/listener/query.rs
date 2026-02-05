@@ -95,13 +95,17 @@ pub(super) fn handle_query(
                 };
                 let agents = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 
+                // Filter variables to only show declared scope prefixes
+                // System variables (agent_id, job_id, prompt, etc.) are excluded
+                let vars = filter_vars_by_scope(&p.vars);
+
                 Box::new(JobDetail {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     kind: p.kind.clone(),
                     step: p.step.clone(),
                     step_status: p.step_status.to_string(),
-                    vars: p.vars.clone(),
+                    vars,
                     workspace_path: p.workspace_path.clone(),
                     session_id: p.session_id.clone(),
                     error: p.error.clone(),
@@ -1156,6 +1160,32 @@ fn read_log_file(path: &Path, lines: usize) -> String {
         }
         Err(_) => String::new(),
     }
+}
+
+/// Allowed variable scope prefixes for job display.
+/// Only variables with these prefixes are exposed via `oj show`.
+const ALLOWED_VAR_PREFIXES: &[&str] = &[
+    "var.",       // User input variables (namespaced)
+    "local.",     // Computed locals from job definition
+    "invoke.",    // Invocation context (e.g., invoke.dir)
+    "workspace.", // Workspace context (id, root, branch, ref, nonce)
+    "args.",      // Command arguments
+    "item.",      // Queue item fields
+];
+
+/// Filter variables to only include user-facing scopes.
+/// Variables without a declared scope prefix are excluded.
+fn filter_vars_by_scope(
+    vars: &std::collections::HashMap<String, String>,
+) -> std::collections::HashMap<String, String> {
+    vars.iter()
+        .filter(|(key, _)| {
+            ALLOWED_VAR_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 #[cfg(test)]
