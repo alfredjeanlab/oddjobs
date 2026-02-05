@@ -314,6 +314,7 @@ async fn job_deleted_handles_terminal_job() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();

@@ -10,7 +10,7 @@ use oj_adapters::agent::find_session_log;
 use oj_adapters::subprocess::{run_with_timeout, GATE_TIMEOUT};
 use oj_adapters::{AgentAdapter, AgentReconnectConfig, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event, JobId,
+    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event,
     QuestionData, SessionId, TimerId,
 };
 use oj_runbook::AgentDef;
@@ -54,13 +54,7 @@ where
         } = params;
 
         // Build a SpawnContext for standalone agent
-        let sentinel_job_id = JobId::new("");
-        let ctx = crate::spawn::SpawnContext {
-            job_id: &sentinel_job_id,
-            agent_run_id: Some(agent_run_id),
-            name: agent_name,
-            namespace,
-        };
+        let ctx = crate::spawn::SpawnContext::from_agent_run(agent_run_id, agent_name, namespace);
 
         let effects = crate::spawn::build_spawn_effects(
             agent_def,

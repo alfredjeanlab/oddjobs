@@ -4,7 +4,7 @@
 mod cron;
 
 use super::*;
-use oj_core::{Event, JobId, SessionId, StepOutcome, WorkspaceId};
+use oj_core::{Event, JobId, OwnerId, SessionId, StepOutcome, WorkspaceId};
 
 fn job_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -> Event {
     Event::JobCreated {
@@ -44,8 +44,7 @@ fn step_started_event(job_id: &str) -> Event {
 fn session_create_event(id: &str, job_id: &str) -> Event {
     Event::SessionCreated {
         id: SessionId::new(id),
-        job_id: JobId::new(job_id),
-        agent_run_id: None,
+        owner: OwnerId::Job(JobId::new(job_id)),
     }
 }
 
@@ -358,11 +357,10 @@ fn session_created_with_agent_run_id_sets_session_on_agent_run() {
     assert!(state.agent_runs.contains_key("ar-1"));
     assert!(state.agent_runs["ar-1"].session_id.is_none());
 
-    // SessionCreated with agent_run_id should link the session
+    // SessionCreated with agent_run owner should link the session
     state.apply_event(&Event::SessionCreated {
         id: SessionId::new("sess-1"),
-        job_id: JobId::new(""),
-        agent_run_id: Some(ar_id),
+        owner: OwnerId::AgentRun(ar_id),
     });
 
     assert!(state.sessions.contains_key("sess-1"));

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use crate::JobId;
 
 #[test]
 fn effect_serialization_roundtrip() {
@@ -14,8 +15,7 @@ fn effect_serialization_roundtrip() {
         Effect::SpawnAgent {
             agent_id: AgentId::new("agent-1"),
             agent_name: "claude".to_string(),
-            job_id: JobId::new("pipe-1"),
-            agent_run_id: None,
+            owner: crate::OwnerId::Job(JobId::new("pipe-1")),
             workspace_path: PathBuf::from("/work"),
             input: HashMap::new(),
             command: "claude".to_string(),
@@ -57,7 +57,7 @@ fn effect_serialization_roundtrip() {
             id: TimerId::new("timer-1"),
         },
         Effect::Shell {
-            job_id: JobId::new("pipe-1"),
+            owner: Some(crate::OwnerId::Job(JobId::new("pipe-1"))),
             step: "init".to_string(),
             command: "echo hello".to_string(),
             cwd: PathBuf::from("/tmp"),
@@ -103,8 +103,7 @@ fn traced_effect_names() {
             Effect::SpawnAgent {
                 agent_id: AgentId::new("a"),
                 agent_name: "claude".to_string(),
-                job_id: JobId::new("p"),
-                agent_run_id: None,
+                owner: crate::OwnerId::Job(JobId::new("p")),
                 workspace_path: PathBuf::from("/w"),
                 input: HashMap::new(),
                 command: "claude".to_string(),
@@ -173,7 +172,7 @@ fn traced_effect_names() {
         ),
         (
             Effect::Shell {
-                job_id: JobId::new("p"),
+                owner: Some(crate::OwnerId::Job(JobId::new("p"))),
                 step: "init".to_string(),
                 command: "cmd".to_string(),
                 cwd: PathBuf::from("/"),
@@ -229,8 +228,7 @@ fn traced_effect_fields() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        job_id: JobId::new("pipe-1"),
-        agent_run_id: None,
+        owner: crate::OwnerId::Job(JobId::new("pipe-1")),
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
         command: "claude".to_string(),
@@ -242,7 +240,7 @@ fn traced_effect_fields() {
     assert_eq!(fields.len(), 6);
     assert_eq!(fields[0], ("agent_id", "agent-1".to_string()));
     assert_eq!(fields[1], ("agent_name", "claude".to_string()));
-    assert_eq!(fields[2], ("job_id", "pipe-1".to_string()));
+    assert_eq!(fields[2], ("owner", "job:pipe-1".to_string()));
     assert_eq!(fields[3], ("workspace_path", "/work".to_string()));
     assert_eq!(fields[4], ("command", "claude".to_string()));
     assert_eq!(fields[5], ("cwd", "/work".to_string()));
@@ -326,7 +324,7 @@ fn traced_effect_fields() {
 
     // Test Shell fields
     let effect = Effect::Shell {
-        job_id: JobId::new("pipe-1"),
+        owner: Some(crate::OwnerId::Job(JobId::new("pipe-1"))),
         step: "build".to_string(),
         command: "make".to_string(),
         cwd: PathBuf::from("/src"),
@@ -336,7 +334,7 @@ fn traced_effect_fields() {
     assert_eq!(
         fields,
         vec![
-            ("job_id", "pipe-1".to_string()),
+            ("owner", "job:pipe-1".to_string()),
             ("step", "build".to_string()),
             ("cwd", "/src".to_string())
         ]
@@ -402,8 +400,7 @@ fn spawn_agent_session_config_roundtrip() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        job_id: JobId::new("pipe-1"),
-        agent_run_id: None,
+        owner: crate::OwnerId::Job(JobId::new("pipe-1")),
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
         command: "claude".to_string(),
@@ -434,8 +431,7 @@ fn spawn_agent_empty_session_config_skipped_in_serialization() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        job_id: JobId::new("pipe-1"),
-        agent_run_id: None,
+        owner: crate::OwnerId::Job(JobId::new("pipe-1")),
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
         command: "claude".to_string(),

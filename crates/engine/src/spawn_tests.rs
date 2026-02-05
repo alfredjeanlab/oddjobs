@@ -4,7 +4,7 @@
 //! Tests for agent spawning
 
 use super::*;
-use oj_core::{JobId, StepStatus};
+use oj_core::{JobId, OwnerId, StepStatus};
 use oj_runbook::PrimeDef;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -245,7 +245,7 @@ fn build_spawn_effects_carries_full_config() {
     if let Effect::SpawnAgent {
         agent_id,
         agent_name,
-        job_id,
+        owner,
         command,
         cwd,
         input: effect_inputs,
@@ -259,7 +259,7 @@ fn build_spawn_effects_carries_full_config() {
             agent_id
         );
         assert_eq!(agent_name, "worker");
-        assert_eq!(job_id, "pipe-1");
+        assert_eq!(owner, &OwnerId::Job(JobId::new("pipe-1")));
         assert!(!command.is_empty());
         assert!(cwd.is_some());
         // System vars are not namespaced
@@ -558,14 +558,8 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
         .into_iter()
         .collect();
 
-    let empty_job_id = JobId::new("");
     let agent_run_id = oj_core::AgentRunId::new("ar-test-1");
-    let ctx = SpawnContext {
-        job_id: &empty_job_id,
-        agent_run_id: Some(&agent_run_id),
-        name: "fixer",
-        namespace: "",
-    };
+    let ctx = SpawnContext::from_agent_run(&agent_run_id, "fixer", "");
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -577,20 +571,18 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
     )
     .unwrap();
 
-    // SpawnAgent should carry the agent_run_id
+    // SpawnAgent should carry the agent_run_id as owner
     if let Effect::SpawnAgent {
-        agent_run_id: effect_ar_id,
-        job_id,
+        owner,
         command,
         input: effect_inputs,
         ..
     } = &effects[0]
     {
         assert_eq!(
-            effect_ar_id.as_ref().map(|id| id.as_str()),
-            Some("ar-test-1")
+            owner,
+            &OwnerId::AgentRun(oj_core::AgentRunId::new("ar-test-1"))
         );
-        assert_eq!(job_id.as_str(), "");
         // Command args should be accessible via var. namespace
         assert_eq!(
             effect_inputs.get("var.description"),

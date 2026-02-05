@@ -5,7 +5,7 @@
 
 use crate::error::RuntimeError;
 use crate::executor::ExecuteError;
-use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, ShortId, TimerId};
+use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId, ShortId, TimerId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -17,10 +17,8 @@ pub const LIVENESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Context for spawning an agent, abstracting over jobs and standalone runs.
 pub struct SpawnContext<'a> {
-    /// Job ID (set for job agents, empty for standalone)
-    pub job_id: &'a JobId,
-    /// Optional agent run ID (set for standalone agents)
-    pub agent_run_id: Option<&'a AgentRunId>,
+    /// Owner of this agent (job or agent_run)
+    pub owner: OwnerId,
     /// Display name (job name or command name)
     pub name: &'a str,
     /// Namespace for scoping
@@ -29,12 +27,20 @@ pub struct SpawnContext<'a> {
 
 impl<'a> SpawnContext<'a> {
     /// Create a SpawnContext from a Job.
-    pub fn from_job(job: &'a Job, job_id: &'a JobId) -> Self {
+    pub fn from_job(job: &'a Job, job_id: &JobId) -> Self {
         Self {
-            job_id,
-            agent_run_id: None,
+            owner: OwnerId::Job(job_id.clone()),
             name: &job.name,
             namespace: &job.namespace,
+        }
+    }
+
+    /// Create a SpawnContext for a standalone agent run.
+    pub fn from_agent_run(agent_run_id: &AgentRunId, name: &'a str, namespace: &'a str) -> Self {
+        Self {
+            owner: OwnerId::AgentRun(agent_run_id.clone()),
+            name,
+            namespace,
         }
     }
 }
@@ -58,8 +64,12 @@ pub fn build_spawn_effects(
     // into workspace_path, so settings are found there.
     let project_root = workspace_path.to_path_buf();
 
+    let owner_str = match &ctx.owner {
+        OwnerId::Job(id) => format!("job:{}", id),
+        OwnerId::AgentRun(id) => format!("agent_run:{}", id),
+    };
     tracing::debug!(
-        owner_id = %ctx.job_id,
+        owner = %owner_str,
         agent_name,
         workspace_path = %workspace_path.display(),
         project_root = %project_root.display(),
@@ -78,7 +88,12 @@ pub fn build_spawn_effects(
     // Generate a unique UUID for agent_id (used as --session-id for claude/claudeless)
     let agent_id = Uuid::new_v4().to_string();
     prompt_vars.insert("agent_id".to_string(), agent_id.clone());
-    prompt_vars.insert("job_id".to_string(), ctx.job_id.to_string());
+    // For backwards compatibility, extract job_id from owner if it's a Job
+    let job_id_str = match &ctx.owner {
+        OwnerId::Job(id) => id.to_string(),
+        OwnerId::AgentRun(_) => String::new(),
+    };
+    prompt_vars.insert("job_id".to_string(), job_id_str);
     prompt_vars.insert("name".to_string(), ctx.name.to_string());
     prompt_vars.insert(
         "workspace".to_string(),
@@ -145,7 +160,7 @@ pub fn build_spawn_effects(
     })?;
 
     // Write on_stop config: resolve from agent def or context-dependent default
-    let is_standalone = ctx.agent_run_id.is_some();
+    let is_standalone = matches!(&ctx.owner, OwnerId::AgentRun(_));
     let on_stop_action = agent_def
         .on_stop
         .as_ref()
@@ -299,7 +314,7 @@ pub fn build_spawn_effects(
     );
 
     tracing::info!(
-        owner_id = %ctx.job_id,
+        owner = %owner_str,
         agent_name,
         command,
         effective_cwd = ?effective_cwd,
@@ -337,18 +352,16 @@ pub fn build_spawn_effects(
     };
 
     // Build liveness timer keyed to the right owner
-    let liveness_timer_id = if let Some(ar_id) = ctx.agent_run_id {
-        TimerId::liveness_agent_run(ar_id)
-    } else {
-        TimerId::liveness(ctx.job_id)
+    let liveness_timer_id = match &ctx.owner {
+        OwnerId::Job(job_id) => TimerId::liveness(job_id),
+        OwnerId::AgentRun(ar_id) => TimerId::liveness_agent_run(ar_id),
     };
 
     Ok(vec![
         Effect::SpawnAgent {
             agent_id: AgentId::new(agent_id),
             agent_name: agent_name.to_string(),
-            job_id: ctx.job_id.clone(),
-            agent_run_id: ctx.agent_run_id.cloned(),
+            owner: ctx.owner.clone(),
             workspace_path: workspace_path.to_path_buf(),
             input: vars,
             command,

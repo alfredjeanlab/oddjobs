@@ -122,7 +122,7 @@ where
                 }
 
                 let effects = vec![Effect::Shell {
-                    job_id: job_id.clone(),
+                    owner: Some(oj_core::OwnerId::Job(job_id.clone())),
                     step: step_name.to_string(),
                     command,
                     cwd: workspace_path.to_path_buf(),

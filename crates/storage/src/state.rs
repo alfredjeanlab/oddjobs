@@ -488,26 +488,30 @@ impl MaterializedState {
                 self.decisions.retain(|_, d| d.job_id != id.as_str());
             }
 
-            Event::SessionCreated {
-                id,
-                job_id,
-                agent_run_id,
-            } => {
+            Event::SessionCreated { id, owner } => {
+                // Extract job_id from owner for Session record (for backwards compat)
+                let job_id_str = match owner {
+                    OwnerId::Job(jid) => jid.to_string(),
+                    OwnerId::AgentRun(_) => String::new(),
+                };
                 self.sessions.insert(
                     id.to_string(),
                     Session {
                         id: id.to_string(),
-                        job_id: job_id.to_string(),
+                        job_id: job_id_str,
                     },
                 );
-                // Update the job's session_id
-                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
-                    job.session_id = Some(id.to_string());
-                }
-                // Update the agent_run's session_id (standalone agents)
-                if let Some(ref ar_id) = agent_run_id {
-                    if let Some(agent_run) = self.agent_runs.get_mut(ar_id.as_str()) {
-                        agent_run.session_id = Some(id.to_string());
+                // Update the job's or agent_run's session_id based on owner
+                match owner {
+                    OwnerId::Job(job_id) => {
+                        if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                            job.session_id = Some(id.to_string());
+                        }
+                    }
+                    OwnerId::AgentRun(ar_id) => {
+                        if let Some(agent_run) = self.agent_runs.get_mut(ar_id.as_str()) {
+                            agent_run.session_id = Some(id.to_string());
+                        }
                     }
                 }
             }

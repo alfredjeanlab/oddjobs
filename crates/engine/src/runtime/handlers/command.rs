@@ -196,7 +196,7 @@ where
                         },
                     },
                     Effect::Shell {
-                        job_id: job_id.clone(),
+                        owner: Some(oj_core::OwnerId::Job(job_id.clone())),
                         step: step_name.to_string(),
                         command: interpolated,
                         cwd: execution_path,

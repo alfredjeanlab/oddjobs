@@ -121,8 +121,7 @@ where
             Effect::SpawnAgent {
                 agent_id,
                 agent_name,
-                job_id,
-                agent_run_id,
+                owner,
                 workspace_path,
                 input,
                 command,
@@ -130,6 +129,12 @@ where
                 cwd,
                 session_config,
             } => {
+                // Extract job_id for backwards compatibility with AgentSpawnConfig
+                let job_id_str = match &owner {
+                    oj_core::OwnerId::Job(id) => id.to_string(),
+                    oj_core::OwnerId::AgentRun(_) => String::new(),
+                };
+
                 // Build agent configuration from effect fields
                 let config = AgentSpawnConfig {
                     agent_id: agent_id.clone(),
@@ -142,8 +147,8 @@ where
                     job_name: input
                         .get("name")
                         .cloned()
-                        .unwrap_or_else(|| job_id.to_string()),
-                    job_id: job_id.to_string(),
+                        .unwrap_or_else(|| job_id_str.clone()),
+                    job_id: job_id_str,
                     project_root: workspace_path,
                     session_config,
                 };
@@ -154,8 +159,7 @@ where
                 // Emit SessionCreated so state tracks the session_id
                 let event = Event::SessionCreated {
                     id: oj_core::SessionId::new(handle.session_id),
-                    job_id,
-                    agent_run_id,
+                    owner,
                 };
                 {
                     let mut state = self.state.lock();
@@ -401,7 +405,7 @@ where
 
             // === Shell effects ===
             Effect::Shell {
-                job_id,
+                owner,
                 step,
                 command,
                 cwd,
@@ -409,9 +413,20 @@ where
             } => {
                 let event_tx = self.event_tx.clone();
 
+                // Extract job_id from owner for ShellExited event (required for backwards compat)
+                let job_id = match &owner {
+                    Some(oj_core::OwnerId::Job(id)) => id.clone(),
+                    _ => oj_core::JobId::new(""),
+                };
+
                 tokio::spawn(async move {
+                    let owner_str = match &owner {
+                        Some(oj_core::OwnerId::Job(id)) => format!("job:{}", id),
+                        Some(oj_core::OwnerId::AgentRun(id)) => format!("agent_run:{}", id),
+                        None => "none".to_string(),
+                    };
                     tracing::info!(
-                        %job_id,
+                        owner = %owner_str,
                         step,
                         %command,
                         cwd = %cwd.display(),
@@ -431,7 +446,7 @@ where
                             } else {
                                 let s = String::from_utf8_lossy(&output.stdout).into_owned();
                                 tracing::info!(
-                                    %job_id,
+                                    owner = %owner_str,
                                     step,
                                     cwd = %cwd.display(),
                                     stdout = %s,
@@ -444,7 +459,7 @@ where
                             } else {
                                 let s = String::from_utf8_lossy(&output.stderr).into_owned();
                                 tracing::warn!(
-                                    %job_id,
+                                    owner = %owner_str,
                                     step,
                                     cwd = %cwd.display(),
                                     stderr = %s,
@@ -456,7 +471,7 @@ where
                         }
                         Err(e) => {
                             tracing::error!(
-                                %job_id,
+                                owner = %owner_str,
                                 step,
                                 cwd = %cwd.display(),
                                 error = %e,

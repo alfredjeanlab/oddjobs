@@ -4,7 +4,7 @@
 use super::*;
 use crate::RuntimeDeps;
 use oj_adapters::{FakeAgentAdapter, FakeNotifyAdapter, FakeSessionAdapter};
-use oj_core::{FakeClock, JobId, SessionId, TimerId, WorkspaceId};
+use oj_core::{FakeClock, JobId, OwnerId, SessionId, TimerId, WorkspaceId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -99,7 +99,7 @@ async fn shell_effect_runs_command() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            job_id: JobId::new("test"),
+            owner: Some(OwnerId::Job(JobId::new("test"))),
             step: "init".to_string(),
             command: "echo hello".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -122,7 +122,7 @@ async fn shell_failure_returns_nonzero() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            job_id: JobId::new("test"),
+            owner: Some(OwnerId::Job(JobId::new("test"))),
             step: "init".to_string(),
             command: "exit 1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -212,14 +212,14 @@ async fn execute_all_shell_effects_are_async() {
 
     let effects = vec![
         Effect::Shell {
-            job_id: JobId::new("pipe-1"),
+            owner: Some(OwnerId::Job(JobId::new("pipe-1"))),
             step: "init".to_string(),
             command: "echo first".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
         },
         Effect::Shell {
-            job_id: JobId::new("pipe-1"),
+            owner: Some(OwnerId::Job(JobId::new("pipe-1"))),
             step: "build".to_string(),
             command: "echo second".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -297,7 +297,7 @@ async fn shell_intermediate_failure_propagates() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            job_id: JobId::new("test"),
+            owner: Some(OwnerId::Job(JobId::new("test"))),
             step: "init".to_string(),
             command: "false\ntrue".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -327,7 +327,7 @@ async fn shell_pipefail_propagates() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            job_id: JobId::new("test"),
+            owner: Some(OwnerId::Job(JobId::new("test"))),
             step: "init".to_string(),
             command: "exit 1 | cat".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),

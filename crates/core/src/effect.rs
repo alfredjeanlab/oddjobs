@@ -4,9 +4,9 @@
 //! Effects represent side effects the system needs to perform
 
 use crate::agent::AgentId;
-use crate::agent_run::AgentRunId;
 use crate::event::Event;
-use crate::job::JobId;
+use crate::owner::OwnerId;
+
 use crate::session::SessionId;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
@@ -27,10 +27,8 @@ pub enum Effect {
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        job_id: JobId,
-        /// For standalone agents, the AgentRunId that owns this spawn
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_run_id: Option<AgentRunId>,
+        /// Owner of this agent (job or agent_run)
+        owner: OwnerId,
         workspace_path: PathBuf,
         input: HashMap<String, String>,
         /// Command to execute (already interpolated)
@@ -97,8 +95,9 @@ pub enum Effect {
     // === Shell effects ===
     /// Execute a shell command
     Shell {
-        /// Job this belongs to
-        job_id: JobId,
+        /// Owner of this shell command (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
         /// Step name
         step: String,
         /// Command to execute (already interpolated)
@@ -168,17 +167,20 @@ impl Effect {
             Effect::SpawnAgent {
                 agent_id,
                 agent_name,
-                job_id,
-                agent_run_id,
+                owner,
                 workspace_path,
                 command,
                 cwd,
                 ..
             } => {
-                let mut fields = vec![
+                let owner_str = match owner {
+                    OwnerId::Job(id) => format!("job:{}", id),
+                    OwnerId::AgentRun(id) => format!("agent_run:{}", id),
+                };
+                vec![
                     ("agent_id", agent_id.to_string()),
                     ("agent_name", agent_name.clone()),
-                    ("job_id", job_id.to_string()),
+                    ("owner", owner_str),
                     ("workspace_path", workspace_path.display().to_string()),
                     ("command", command.clone()),
                     (
@@ -187,11 +189,7 @@ impl Effect {
                             .map(|p| p.display().to_string())
                             .unwrap_or_default(),
                     ),
-                ];
-                if let Some(ref run_id) = agent_run_id {
-                    fields.push(("agent_run_id", run_id.to_string()));
-                }
-                fields
+                ]
             }
             Effect::SendToAgent { agent_id, .. } => vec![("agent_id", agent_id.to_string())],
             Effect::KillAgent { agent_id } => vec![("agent_id", agent_id.to_string())],
@@ -214,12 +212,18 @@ impl Effect {
             ],
             Effect::CancelTimer { id } => vec![("timer_id", id.to_string())],
             Effect::Shell {
-                job_id, step, cwd, ..
-            } => vec![
-                ("job_id", job_id.to_string()),
-                ("step", step.clone()),
-                ("cwd", cwd.display().to_string()),
-            ],
+                owner, step, cwd, ..
+            } => {
+                let mut fields = vec![("step", step.clone()), ("cwd", cwd.display().to_string())];
+                if let Some(ref o) = owner {
+                    let owner_str = match o {
+                        OwnerId::Job(id) => format!("job:{}", id),
+                        OwnerId::AgentRun(id) => format!("agent_run:{}", id),
+                    };
+                    fields.insert(0, ("owner", owner_str));
+                }
+                fields
+            }
             Effect::PollQueue {
                 worker_name, cwd, ..
             } => vec![
