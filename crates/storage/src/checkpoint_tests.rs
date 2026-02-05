@@ -68,6 +68,8 @@ impl FakeCheckpointWriter {
         self.fail_fsync_dir.store(fail, Ordering::SeqCst);
     }
 
+    // NOTE(compat): keep for future checkpoint tests
+    #[allow(dead_code)]
     pub fn set_fail_rename(&self, fail: bool) {
         self.fail_rename.store(fail, Ordering::SeqCst);
     }
