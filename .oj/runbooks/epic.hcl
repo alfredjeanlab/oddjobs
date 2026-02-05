@@ -49,7 +49,7 @@ queue "plans" {
   type = "external"
   list = "wok ready -t epic,feature -l plan:needed -p oj -o json"
   take = "wok start ${item.id}"
-  poll = "30s"
+  poll = "1m"
 }
 
 worker "plan" {
@@ -95,7 +95,7 @@ queue "epics" {
   type = "external"
   list = "wok ready -t epic,feature -l build:needed -l plan:ready -p oj -o json"
   take = "wok start ${item.id}"
-  poll = "30s"
+  poll = "1m"
 }
 
 worker "epic" {
