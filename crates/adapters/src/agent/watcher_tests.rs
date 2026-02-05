@@ -1212,3 +1212,881 @@ fn parse_very_long_line_does_not_crash() {
     let state = parse_session_log(&log_path);
     assert_eq!(state, AgentState::WaitingForInput);
 }
+
+// --- wait_for_session_log_or_exit Tests ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn wait_for_session_log_found_immediately() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+
+    let session_id = "test-session-found";
+
+    // Create session log at the expected location
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join(format!("{session_id}.jsonl")),
+        r#"{"type":"user","message":{"content":"hello"}}"#,
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("tmux-session", true);
+
+    let result =
+        wait_for_session_log_or_exit(workspace_dir.path(), session_id, "tmux-session", &sessions)
+            .await;
+
+    assert!(
+        matches!(result, SessionLogWait::Found(_)),
+        "expected Found, got {:?}",
+        std::mem::discriminant(&result)
+    );
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn wait_for_session_log_session_died() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+
+    let sessions = FakeSessionAdapter::new();
+    // Session is dead from the start
+    sessions.add_session("dead-tmux", false);
+
+    let result = wait_for_session_log_or_exit(
+        workspace_dir.path(),
+        "nonexistent-session",
+        "dead-tmux",
+        &sessions,
+    )
+    .await;
+
+    assert!(
+        matches!(result, SessionLogWait::SessionDied),
+        "expected SessionDied"
+    );
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn wait_for_session_log_timeout() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+
+    let sessions = FakeSessionAdapter::new();
+    // Session alive but log never created → timeout after 30 iterations
+    sessions.add_session("alive-tmux", true);
+
+    let result = wait_for_session_log_or_exit(
+        workspace_dir.path(),
+        "never-created-session",
+        "alive-tmux",
+        &sessions,
+    )
+    .await;
+
+    assert!(
+        matches!(result, SessionLogWait::Timeout),
+        "expected Timeout"
+    );
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn wait_for_session_log_checks_trust_prompt_early() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("trust-tmux", true);
+    sessions.set_output(
+        "trust-tmux",
+        vec!["Do you trust the files in this folder?".to_string()],
+    );
+
+    // Log never appears, so this will timeout, but trust prompt should be checked
+    let _ =
+        wait_for_session_log_or_exit(workspace_dir.path(), "no-session", "trust-tmux", &sessions)
+            .await;
+
+    // Verify trust prompt was detected and "y" was sent
+    let calls = sessions.calls();
+    let send_calls: Vec<_> = calls
+        .iter()
+        .filter(|c| matches!(c, SessionCall::Send { input, .. } if input == "y"))
+        .collect();
+    assert!(
+        !send_calls.is_empty(),
+        "should send 'y' for trust prompt during early iterations"
+    );
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+}
+
+// --- watch_loop with log_entry_tx Tests ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_extracts_log_entries_when_log_entry_tx_set() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.keep();
+    let log_path = dir_path.join("session.jsonl");
+
+    // Start with a user message
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-tmux", true);
+
+    let (event_tx, _event_rx) = mpsc::channel(32);
+    let (file_tx, file_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (log_entry_tx, mut log_entry_rx) = mpsc::channel(32);
+
+    std::env::set_var("OJ_WATCHER_POLL_MS", "50");
+
+    let params = WatchLoopParams {
+        agent_id: AgentId::new("test-agent"),
+        tmux_session_id: "test-tmux".to_string(),
+        process_name: "claude".to_string(),
+        log_path: log_path.clone(),
+        sessions,
+        event_tx,
+        shutdown_rx,
+        log_entry_tx: Some(log_entry_tx),
+        file_rx,
+    };
+
+    let _handle = tokio::spawn(watch_loop(params));
+
+    // Yield to let watch_loop initialize
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Append an assistant message with a tool_use (Bash command) - this creates a log entry
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls -la"}}]}}"#,
+    );
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+
+    // Check that log entries were forwarded
+    let entry = log_entry_rx.try_recv();
+    assert!(
+        entry.is_ok(),
+        "should receive log entries when log_entry_tx is set"
+    );
+    let (agent_id, entries) = entry.unwrap();
+    assert_eq!(agent_id, AgentId::new("test-agent"));
+    assert!(!entries.is_empty(), "should have extracted log entries");
+
+    let _ = shutdown_tx.send(());
+}
+
+// --- watch_loop liveness check breaks loop ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_detects_process_death_via_liveness_check() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.keep();
+    let log_path = dir_path.join("session.jsonl");
+
+    // Start with working state
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-tmux", true);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (_file_tx, file_rx) = mpsc::channel(32);
+    let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    // Very short poll interval so liveness check fires quickly
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions_clone = sessions.clone();
+    let params = WatchLoopParams {
+        agent_id: AgentId::new("test-agent"),
+        tmux_session_id: "test-tmux".to_string(),
+        process_name: "claude".to_string(),
+        log_path,
+        sessions,
+        event_tx,
+        shutdown_rx,
+        log_entry_tx: None,
+        file_rx,
+    };
+
+    let handle = tokio::spawn(watch_loop(params));
+
+    // Let the loop start
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    // Kill the session
+    sessions_clone.set_exited("test-tmux", 0);
+
+    // Wait for liveness check to detect it
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Should receive AgentGone and the loop should have exited
+    let event = event_rx.try_recv();
+    assert!(
+        matches!(event, Ok(Event::AgentGone { .. })),
+        "expected AgentGone from liveness check, got {:?}",
+        event
+    );
+
+    // The handle should complete since the loop broke
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(result.is_ok(), "watch_loop should exit after session dies");
+}
+
+// --- watch_loop shutdown breaks loop ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_exits_on_shutdown_signal() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.keep();
+    let log_path = dir_path.join("session.jsonl");
+
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-tmux", true);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (_file_tx, file_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    std::env::set_var("OJ_WATCHER_POLL_MS", "5000");
+
+    let params = WatchLoopParams {
+        agent_id: AgentId::new("test-agent"),
+        tmux_session_id: "test-tmux".to_string(),
+        process_name: "claude".to_string(),
+        log_path,
+        sessions,
+        event_tx,
+        shutdown_rx,
+        log_entry_tx: None,
+        file_rx,
+    };
+
+    let handle = tokio::spawn(watch_loop(params));
+
+    // Yield to let the loop start
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Send shutdown
+    shutdown_tx.send(()).unwrap();
+
+    // Should exit promptly
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(
+        result.is_ok(),
+        "watch_loop should exit after shutdown signal"
+    );
+
+    // No agent-death events should have been emitted
+    assert!(
+        event_rx.try_recv().is_err(),
+        "should not emit events on clean shutdown"
+    );
+}
+
+// --- watch_loop no duplicate events for same state ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_does_not_emit_duplicate_state_changes() {
+    let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
+
+    // Append idle state
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
+    );
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+
+    let event = event_rx.try_recv();
+    assert!(
+        matches!(event, Ok(Event::AgentIdle { .. })),
+        "first idle event should be emitted"
+    );
+
+    // Send another file change notification with same state (no new log content)
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+
+    // Should NOT emit a duplicate event
+    let event = event_rx.try_recv();
+    assert!(
+        event.is_err(),
+        "should not emit duplicate event for same state, got {:?}",
+        event
+    );
+
+    let _ = shutdown_tx.send(());
+}
+
+// --- watch_agent full lifecycle tests ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watch_agent_emits_agent_gone_when_session_dies_before_log() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("dead-session", false);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: "nonexistent-log".to_string(),
+        tmux_session_id: "dead-session".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    let handle = tokio::spawn(watch_agent(config, sessions, event_tx, shutdown_rx, None));
+
+    // Wait for event
+    let event = tokio::time::timeout(Duration::from_millis(500), event_rx.recv()).await;
+    assert!(
+        matches!(event, Ok(Some(Event::AgentGone { .. }))),
+        "expected AgentGone when session dies before log, got {:?}",
+        event
+    );
+
+    // watch_agent should exit
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(result.is_ok(), "watch_agent should exit after AgentGone");
+
+    let _ = shutdown_tx.send(());
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watch_agent_falls_back_to_poll_on_timeout() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("alive-session", true);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: "never-created".to_string(),
+        tmux_session_id: "alive-session".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    let sessions_clone = sessions.clone();
+    let handle = tokio::spawn(watch_agent(config, sessions, event_tx, shutdown_rx, None));
+
+    // Wait for timeout (30 iterations * 1ms = ~30ms), then fallback polling starts
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Now kill the session during fallback polling
+    sessions_clone.set_exited("alive-session", 1);
+
+    // Should detect via fallback polling
+    let event = tokio::time::timeout(Duration::from_millis(200), event_rx.recv()).await;
+    assert!(
+        matches!(event, Ok(Some(Event::AgentGone { .. }))),
+        "expected AgentGone during fallback polling, got {:?}",
+        event
+    );
+
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(result.is_ok(), "watch_agent should exit after session dies");
+
+    let _ = shutdown_tx.send(());
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watch_agent_with_session_log_enters_watch_loop() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let session_id = "found-session";
+
+    // Create the session log at the expected location
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let log_file = log_dir.join(format!("{session_id}.jsonl"));
+    std::fs::write(
+        &log_file,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("tmux-found", true);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: session_id.to_string(),
+        tmux_session_id: "tmux-found".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    let sessions_clone = sessions.clone();
+    let handle = tokio::spawn(watch_agent(config, sessions, event_tx, shutdown_rx, None));
+
+    // Let it enter watch_loop (log found → watch_loop starts)
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Initial state is Working so no event emitted yet
+    assert!(
+        event_rx.try_recv().is_err(),
+        "no event for initial Working state"
+    );
+
+    // Kill the session to trigger liveness check
+    sessions_clone.set_exited("tmux-found", 0);
+
+    // Wait for poll to detect
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let event = event_rx.try_recv();
+    assert!(
+        matches!(event, Ok(Event::AgentGone { .. })),
+        "expected AgentGone from watch_loop liveness check, got {:?}",
+        event
+    );
+
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(result.is_ok(), "watch_agent should exit");
+
+    let _ = shutdown_tx.send(());
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+// --- start_watcher Tests ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn start_watcher_returns_shutdown_sender() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("start-watcher-tmux", false);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: "start-watcher-session".to_string(),
+        tmux_session_id: "start-watcher-tmux".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    let shutdown_tx = start_watcher(config, sessions, event_tx, None);
+
+    // Session is dead, should emit AgentGone
+    let event = tokio::time::timeout(Duration::from_millis(500), event_rx.recv()).await;
+    assert!(
+        matches!(event, Ok(Some(Event::AgentGone { .. }))),
+        "expected AgentGone from start_watcher, got {:?}",
+        event
+    );
+
+    // Shutdown sender should be usable (even if the task already completed)
+    let _ = shutdown_tx.send(());
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn start_watcher_shutdown_stops_watcher() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1000");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "5000");
+
+    let session_id = "shutdown-session";
+
+    // Create the session log so it enters watch_loop
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(
+        log_dir.join(format!("{session_id}.jsonl")),
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("shutdown-tmux", true);
+
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: session_id.to_string(),
+        tmux_session_id: "shutdown-tmux".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    let shutdown_tx = start_watcher(config, sessions, event_tx, None);
+
+    // Let it start and enter watch_loop
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Send shutdown
+    shutdown_tx.send(()).unwrap();
+
+    // Give it time to process
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // No death events
+    assert!(
+        event_rx.try_recv().is_err(),
+        "no events after clean shutdown"
+    );
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+// --- find_session_log with CLAUDE_CONFIG_DIR Tests ---
+
+#[test]
+#[serial_test::serial]
+fn find_session_log_uses_claude_config_dir_env() {
+    let claude_base = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+
+    let session_id = "env-var-session";
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    let session_file = log_dir.join(format!("{session_id}.jsonl"));
+    std::fs::write(&session_file, r#"{"type":"user"}"#).unwrap();
+
+    let result = find_session_log(workspace_dir.path(), session_id);
+    assert!(
+        result.is_some(),
+        "should find session log via CLAUDE_CONFIG_DIR"
+    );
+    assert_eq!(result.unwrap(), session_file);
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+}
+
+#[test]
+#[serial_test::serial]
+fn find_session_log_returns_none_when_no_log_exists() {
+    let claude_base = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+
+    let result = find_session_log(workspace_dir.path(), "nonexistent");
+    assert!(result.is_none());
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+}
+
+// --- check_liveness edge cases ---
+
+#[tokio::test]
+async fn check_liveness_returns_exited_with_exit_code() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+    sessions.set_process_running("test-session", false);
+
+    let agent_id = AgentId::new("test-agent");
+    let result = check_liveness(&sessions, "test-session", "claude", &agent_id).await;
+
+    assert!(
+        matches!(result, Some(AgentState::Exited { exit_code: None })),
+        "expected Exited with no exit code, got {:?}",
+        result
+    );
+}
+
+// --- poll_process_only with process exit (not session death) ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn poll_process_only_detects_process_exit() {
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-session", true);
+    sessions.set_process_running("test-session", true);
+
+    let agent_id = AgentId::new("test-agent");
+    let (event_tx, mut event_rx) = mpsc::channel(32);
+    let (_shutdown_tx, shutdown_rx) = oneshot::channel();
+
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions_clone = sessions.clone();
+    let handle = tokio::spawn(poll_process_only(
+        agent_id,
+        "test-session".to_string(),
+        "claude".to_string(),
+        sessions,
+        event_tx,
+        shutdown_rx,
+    ));
+
+    // Let it poll once
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    // Process exits but tmux session still alive
+    sessions_clone.set_process_running("test-session", false);
+
+    // Wait for poll to detect
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let event = event_rx.try_recv();
+    assert!(
+        matches!(event, Ok(Event::AgentExited { .. })),
+        "expected AgentExited when process exits but session alive, got {:?}",
+        event
+    );
+
+    let result = tokio::time::timeout(Duration::from_millis(200), handle).await;
+    assert!(result.is_ok(), "poll_process_only should exit");
+}
+
+// --- watch_loop with log_entry_tx extraction on state change ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn watcher_forwards_log_entries_on_file_change() {
+    let dir = TempDir::new().unwrap();
+    let dir_path = dir.keep();
+    let log_path = dir_path.join("session.jsonl");
+
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("test-tmux", true);
+
+    let (event_tx, _event_rx) = mpsc::channel(32);
+    let (file_tx, file_rx) = mpsc::channel(32);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let (log_entry_tx, mut log_entry_rx) = mpsc::channel(32);
+
+    std::env::set_var("OJ_WATCHER_POLL_MS", "50");
+
+    let params = WatchLoopParams {
+        agent_id: AgentId::new("test-agent"),
+        tmux_session_id: "test-tmux".to_string(),
+        process_name: "claude".to_string(),
+        log_path: log_path.clone(),
+        sessions,
+        event_tx,
+        shutdown_rx,
+        log_entry_tx: Some(log_entry_tx),
+        file_rx,
+    };
+
+    let _handle = tokio::spawn(watch_loop(params));
+
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Append a Read tool use entry (will produce a FileRead log entry)
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/test.txt"}}]}}"#,
+    );
+    file_tx.send(()).await.unwrap();
+    wait_for_poll().await;
+
+    let entry = log_entry_rx.try_recv();
+    assert!(entry.is_ok(), "should forward log entries");
+    let (agent_id, entries) = entry.unwrap();
+    assert_eq!(agent_id, AgentId::new("test-agent"));
+    assert!(
+        entries.iter().any(|e| matches!(&e.kind, log_entry::EntryKind::FileRead { path } if path == "/tmp/test.txt")),
+        "should contain FileRead entry, got {:?}",
+        entries
+    );
+
+    let _ = shutdown_tx.send(());
+}
+
+// --- start_watcher with log_entry_tx ---
+
+#[tokio::test]
+#[serial_test::serial]
+async fn start_watcher_with_log_entry_tx() {
+    let workspace_dir = TempDir::new().unwrap();
+    let claude_base = TempDir::new().unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_base.path());
+    std::env::set_var("OJ_SESSION_POLL_MS", "1");
+    std::env::set_var("OJ_WATCHER_POLL_MS", "10");
+
+    let sessions = FakeSessionAdapter::new();
+    sessions.add_session("log-entry-tmux", false);
+
+    let (event_tx, _event_rx) = mpsc::channel(32);
+    let (log_entry_tx, _log_entry_rx) = mpsc::channel(32);
+
+    let config = WatcherConfig {
+        agent_id: AgentId::new("test-agent"),
+        log_session_id: "log-entry-session".to_string(),
+        tmux_session_id: "log-entry-tmux".to_string(),
+        project_path: workspace_dir.path().to_path_buf(),
+        process_name: "claude".to_string(),
+    };
+
+    // Verify start_watcher accepts log_entry_tx
+    let shutdown_tx = start_watcher(config, sessions, event_tx, Some(log_entry_tx));
+
+    // Clean up - session is dead so it exits quickly
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let _ = shutdown_tx.send(());
+
+    std::env::remove_var("CLAUDE_CONFIG_DIR");
+    std::env::remove_var("OJ_SESSION_POLL_MS");
+    std::env::remove_var("OJ_WATCHER_POLL_MS");
+}
+
+// --- find_session_log_in fallback to most recent file ---
+
+#[test]
+fn find_session_log_in_picks_most_recent_fallback() {
+    let claude_base = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+
+    // Create two session files with different modification times
+    let older = log_dir.join("older-session.jsonl");
+    std::fs::write(&older, r#"{"type":"user"}"#).unwrap();
+
+    // Force a small time gap
+    std::thread::sleep(Duration::from_millis(50));
+
+    let newer = log_dir.join("newer-session.jsonl");
+    std::fs::write(&newer, r#"{"type":"user"}"#).unwrap();
+
+    // Look for non-existent session - should fall back to most recent (newer)
+    let result = find_session_log_in(
+        workspace_dir.path(),
+        "nonexistent-session",
+        claude_base.path(),
+    );
+
+    assert!(result.is_some());
+    assert_eq!(
+        result.unwrap(),
+        newer,
+        "should fall back to most recently modified file"
+    );
+}
+
+// --- find_session_log_in with empty project directory ---
+
+#[test]
+fn find_session_log_in_returns_none_for_empty_project_dir() {
+    let claude_base = TempDir::new().unwrap();
+    let workspace_dir = TempDir::new().unwrap();
+
+    let workspace_hash = project_dir_name(workspace_dir.path());
+    let log_dir = claude_base.path().join("projects").join(&workspace_hash);
+    std::fs::create_dir_all(&log_dir).unwrap();
+    // Directory exists but no .jsonl files
+
+    let result = find_session_log_in(workspace_dir.path(), "any-session", claude_base.path());
+
+    assert!(
+        result.is_none(),
+        "should return None when project dir exists but has no jsonl files"
+    );
+}
