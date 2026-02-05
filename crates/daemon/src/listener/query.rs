@@ -20,7 +20,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
-use oj_core::{scoped_name, split_scoped_name, StepOutcome};
+use oj_core::{scoped_name, split_scoped_name, OwnerId, StepOutcome};
 use oj_storage::{MaterializedState, QueueItemStatus};
 
 use oj_engine::breadcrumb::Breadcrumb;
@@ -236,41 +236,47 @@ pub(super) fn handle_query(
         }
 
         Query::ListWorkspaces => {
-            let workspaces =
-                state
-                    .workspaces
-                    .values()
-                    .map(|w| {
-                        let namespace =
-                            w.owner
-                                .as_deref()
-                                .and_then(|owner| {
-                                    // Try job first, then worker
-                                    state.jobs.get(owner).map(|p| p.namespace.clone()).or_else(
-                                        || state.workers.get(owner).map(|wr| wr.namespace.clone()),
-                                    )
-                                })
-                                .unwrap_or_default();
-                        WorkspaceSummary {
-                            id: w.id.clone(),
-                            path: w.path.clone(),
-                            branch: w.branch.clone(),
-                            status: w.status.to_string(),
-                            created_at_ms: w.created_at_ms,
-                            namespace,
-                        }
-                    })
-                    .collect();
+            let workspaces = state
+                .workspaces
+                .values()
+                .map(|w| {
+                    let namespace = match &w.owner {
+                        Some(oj_core::OwnerId::Job(job_id)) => state
+                            .jobs
+                            .get(job_id.as_str())
+                            .map(|p| p.namespace.clone())
+                            .unwrap_or_default(),
+                        Some(oj_core::OwnerId::AgentRun(ar_id)) => state
+                            .agent_runs
+                            .get(ar_id.as_str())
+                            .map(|ar| ar.namespace.clone())
+                            .unwrap_or_default(),
+                        None => String::new(),
+                    };
+                    WorkspaceSummary {
+                        id: w.id.clone(),
+                        path: w.path.clone(),
+                        branch: w.branch.clone(),
+                        status: w.status.to_string(),
+                        created_at_ms: w.created_at_ms,
+                        namespace,
+                    }
+                })
+                .collect();
             Response::Workspaces { workspaces }
         }
 
         Query::GetWorkspace { id } => {
             let workspace = state.workspaces.get(&id).map(|w| {
+                let owner_str = w.owner.as_ref().map(|o| match o {
+                    oj_core::OwnerId::Job(job_id) => job_id.to_string(),
+                    oj_core::OwnerId::AgentRun(ar_id) => ar_id.to_string(),
+                });
                 Box::new(WorkspaceDetail {
                     id: w.id.clone(),
                     path: w.path.clone(),
                     branch: w.branch.clone(),
-                    owner: w.owner.clone(),
+                    owner: owner_str,
                     status: w.status.to_string(),
                     created_at_ms: w.created_at_ms,
                 })
@@ -513,7 +519,98 @@ pub(super) fn handle_query(
 
         Query::ListAgents { job_id, status } => {
             let mut agents: Vec<AgentSummary> = Vec::new();
+            let mut tracked_agent_ids: HashSet<String> = HashSet::new();
 
+            // Primary source: unified agents map
+            for record in state.agents.values() {
+                // Apply job_id filter (only matches Job-owned agents)
+                if let Some(ref prefix) = job_id {
+                    match &record.owner {
+                        OwnerId::Job(jid) if jid.as_str().starts_with(prefix.as_str()) => {}
+                        OwnerId::Job(_) => continue,
+                        OwnerId::AgentRun(_) => continue,
+                    }
+                }
+
+                let status_str = match record.status {
+                    oj_core::AgentRecordStatus::Starting => "running",
+                    oj_core::AgentRecordStatus::Running => "running",
+                    oj_core::AgentRecordStatus::Idle => "waiting",
+                    oj_core::AgentRecordStatus::Exited => "completed",
+                    oj_core::AgentRecordStatus::Gone => "failed",
+                };
+
+                if let Some(ref s) = status {
+                    if status_str != s.as_str() {
+                        continue;
+                    }
+                }
+
+                // Derive job_id and step_name from owner
+                let (owner_job_id, step_name) = match &record.owner {
+                    OwnerId::Job(jid) => {
+                        let sname = state
+                            .jobs
+                            .get(jid.as_str())
+                            .and_then(|j| {
+                                j.step_history
+                                    .iter()
+                                    .find(|r| r.agent_id.as_deref() == Some(&record.agent_id))
+                                    .map(|r| r.name.clone())
+                            })
+                            .unwrap_or_default();
+                        (jid.to_string(), sname)
+                    }
+                    OwnerId::AgentRun(_) => (String::new(), String::new()),
+                };
+
+                let namespace = if record.namespace.is_empty() {
+                    None
+                } else {
+                    Some(record.namespace.clone())
+                };
+
+                // Read agent log for file stats
+                let (files_read, files_written, commands_run) =
+                    count_agent_log_stats(logs_path, &record.agent_id);
+
+                // Derive exit_reason
+                let exit_reason = match &record.owner {
+                    OwnerId::Job(jid) => state.jobs.get(jid.as_str()).and_then(|j| {
+                        j.step_history
+                            .iter()
+                            .find(|r| r.agent_id.as_deref() == Some(&record.agent_id))
+                            .and_then(|r| match &r.outcome {
+                                StepOutcome::Completed => Some("completed".to_string()),
+                                StepOutcome::Waiting(reason) => Some(format!("idle: {}", reason)),
+                                StepOutcome::Failed(msg) => Some(format!("failed: {}", msg)),
+                                _ => None,
+                            })
+                    }),
+                    OwnerId::AgentRun(arid) => state
+                        .agent_runs
+                        .get(arid.as_str())
+                        .and_then(|ar| ar.error.clone()),
+                };
+
+                tracked_agent_ids.insert(record.agent_id.clone());
+
+                agents.push(AgentSummary {
+                    job_id: owner_job_id,
+                    step_name,
+                    agent_id: record.agent_id.clone(),
+                    agent_name: Some(record.agent_name.clone()),
+                    namespace,
+                    status: status_str.to_string(),
+                    files_read,
+                    files_written,
+                    commands_run,
+                    exit_reason,
+                    updated_at_ms: record.updated_at_ms,
+                });
+            }
+
+            // Fallback: job step_history for agents not in agents map (old WAL entries)
             for p in state.jobs.values() {
                 if let Some(ref prefix) = job_id {
                     if !p.id.starts_with(prefix.as_str()) {
@@ -532,6 +629,9 @@ pub(super) fn handle_query(
                 let mut summaries =
                     compute_agent_summaries(&p.id, &steps, logs_path, namespace.as_deref());
 
+                // Skip agents already tracked from the agents map
+                summaries.retain(|a| !tracked_agent_ids.contains(&a.agent_id));
+
                 if let Some(ref s) = status {
                     summaries.retain(|a| a.status == *s);
                 }
@@ -539,8 +639,13 @@ pub(super) fn handle_query(
                 agents.extend(summaries);
             }
 
-            // Include standalone agent runs
+            // Fallback: standalone agent runs not in agents map
             for ar in state.agent_runs.values() {
+                let aid = ar.agent_id.clone().unwrap_or_else(|| ar.id.clone());
+                if tracked_agent_ids.contains(&aid) {
+                    continue;
+                }
+
                 let ar_status = format!("{}", ar.status);
                 if let Some(ref s) = status {
                     if ar_status != *s {
@@ -555,7 +660,7 @@ pub(super) fn handle_query(
                 agents.push(AgentSummary {
                     job_id: String::new(),
                     step_name: String::new(),
-                    agent_id: ar.agent_id.clone().unwrap_or_else(|| ar.id.clone()),
+                    agent_id: aid,
                     agent_name: Some(ar.agent_name.clone()),
                     namespace,
                     status: ar_status,
@@ -828,12 +933,51 @@ pub(super) fn handle_query(
                 }
             }
 
-            // Collect standalone agents
+            // Collect standalone agents from unified agents map
+            let mut tracked_standalone_ids: HashSet<String> = HashSet::new();
+            for record in state.agents.values() {
+                // Only show standalone agents (job agents are shown via their job entry)
+                let arid = match &record.owner {
+                    OwnerId::AgentRun(id) => id,
+                    OwnerId::Job(_) => continue,
+                };
+
+                // Skip terminal agents
+                if matches!(
+                    record.status,
+                    oj_core::AgentRecordStatus::Exited | oj_core::AgentRecordStatus::Gone
+                ) {
+                    continue;
+                }
+
+                // Derive command_name from the parent AgentRun record
+                let command_name = state
+                    .agent_runs
+                    .get(arid.as_str())
+                    .map(|ar| ar.command_name.clone())
+                    .unwrap_or_default();
+
+                tracked_standalone_ids.insert(record.agent_id.clone());
+                ns_agents
+                    .entry(record.namespace.clone())
+                    .or_default()
+                    .push(AgentStatusEntry {
+                        agent_id: record.agent_id.clone(),
+                        agent_name: record.agent_name.clone(),
+                        command_name,
+                        status: format!("{}", record.status),
+                    });
+            }
+
+            // Fallback: agent_runs not yet in agents map (old WAL entries)
             for ar in state.agent_runs.values() {
                 if ar.status.is_terminal() {
                     continue;
                 }
                 let agent_id = ar.agent_id.clone().unwrap_or_else(|| ar.id.clone());
+                if tracked_standalone_ids.contains(&agent_id) {
+                    continue;
+                }
                 ns_agents
                     .entry(ar.namespace.clone())
                     .or_default()
@@ -1067,6 +1211,35 @@ fn session_summary(s: &oj_storage::Session, state: &MaterializedState) -> Sessio
         job_id: Some(s.job_id.clone()),
         updated_at_ms,
     }
+}
+
+/// Count file read/write/command stats from an agent log file.
+fn count_agent_log_stats(logs_path: &Path, agent_id: &str) -> (usize, usize, usize) {
+    use oj_engine::log_paths::agent_log_path;
+
+    let log_path = agent_log_path(logs_path, agent_id);
+    let content = std::fs::read_to_string(&log_path).unwrap_or_default();
+
+    let mut files_read = 0usize;
+    let mut files_written = 0usize;
+    let mut commands_run = 0usize;
+
+    for line in content.lines() {
+        let rest = match line.find(' ') {
+            Some(pos) => &line[pos + 1..],
+            None => continue,
+        };
+
+        if rest.starts_with("read:") {
+            files_read += 1;
+        } else if rest.starts_with("wrote:") || rest.starts_with("edited:") {
+            files_written += 1;
+        } else if rest.starts_with("bash:") {
+            commands_run += 1;
+        }
+    }
+
+    (files_read, files_written, commands_run)
 }
 
 /// Compute agent summaries from step records by scanning agent log files.

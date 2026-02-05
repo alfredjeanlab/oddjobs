@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use crate::JobId;
+use crate::{JobId, OwnerId};
 
 #[test]
 fn effect_serialization_roundtrip() {
@@ -40,7 +40,7 @@ fn effect_serialization_roundtrip() {
         Effect::CreateWorkspace {
             workspace_id: crate::WorkspaceId::new("ws-1"),
             path: PathBuf::from("/work/tree"),
-            owner: Some("pipe-1".to_string()),
+            owner: Some(OwnerId::Job(crate::JobId::new("pipe-1"))),
             workspace_type: Some("folder".to_string()),
             repo_root: None,
             branch: None,
@@ -279,7 +279,7 @@ fn traced_effect_fields() {
     let effect = Effect::CreateWorkspace {
         workspace_id: crate::WorkspaceId::new("ws-1"),
         path: PathBuf::from("/work"),
-        owner: Some("pipe-1".to_string()),
+        owner: Some(OwnerId::Job(crate::JobId::new("pipe-1"))),
         workspace_type: Some("folder".to_string()),
         repo_root: None,
         branch: None,

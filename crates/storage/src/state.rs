@@ -4,8 +4,9 @@
 //! Materialized state from WAL replay
 
 use oj_core::{
-    job::AgentSignal, scoped_name, AgentRun, AgentRunStatus, AgentSignalKind, Decision, DecisionId,
-    Event, Job, JobConfig, OwnerId, StepOutcome, StepStatus, WorkspaceStatus,
+    job::AgentSignal, scoped_name, AgentRecord, AgentRecordStatus, AgentRun, AgentRunStatus,
+    AgentSignalKind, Decision, DecisionId, Event, Job, JobConfig, JobId, OwnerId, StepOutcome,
+    StepStatus, WorkspaceStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -59,6 +60,53 @@ impl<'de> serde::Deserialize<'de> for WorkspaceType {
     }
 }
 
+/// Custom deserializer for workspace owner that handles backward compatibility.
+///
+/// Accepts:
+/// - `null` / missing → `None`
+/// - Plain string `"job-abc"` → `Some(OwnerId::Job(JobId::new("job-abc")))` (legacy snapshot)
+/// - Tagged object `{"type": "job", "id": "..."}` → `Some(OwnerId::Job(...))` (new format)
+/// - Tagged object `{"type": "agent_run", "id": "..."}` → `Some(OwnerId::AgentRun(...))` (new)
+fn deserialize_workspace_owner<'de, D>(deserializer: D) -> Result<Option<OwnerId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct WorkspaceOwnerVisitor;
+
+    impl<'de> de::Visitor<'de> for WorkspaceOwnerVisitor {
+        type Value = Option<OwnerId>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("null, a string (legacy job_id), or an OwnerId object")
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            Ok(Some(OwnerId::Job(JobId::new(v))))
+        }
+
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(Some(OwnerId::Job(JobId::new(&v))))
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            let owner = OwnerId::deserialize(de::value::MapAccessDeserializer::new(map))?;
+            Ok(Some(owner))
+        }
+    }
+
+    deserializer.deserialize_any(WorkspaceOwnerVisitor)
+}
+
 /// Workspace record with lifecycle management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
@@ -66,8 +114,9 @@ pub struct Workspace {
     pub path: PathBuf,
     /// Branch for the worktree (None for folder workspaces)
     pub branch: Option<String>,
-    /// Owner of the workspace (job_id or worker_name)
-    pub owner: Option<String>,
+    /// Owner of the workspace (job or agent_run)
+    #[serde(default, deserialize_with = "deserialize_workspace_owner")]
+    pub owner: Option<OwnerId>,
     /// Current lifecycle status
     pub status: WorkspaceStatus,
     /// Workspace type (folder or worktree)
@@ -167,6 +216,14 @@ pub struct MaterializedState {
     pub decisions: HashMap<String, Decision>,
     #[serde(default)]
     pub agent_runs: HashMap<String, AgentRun>,
+    /// Unified agent index: agent_id → AgentRecord.
+    ///
+    /// Populated from existing events (StepStarted, AgentRunStarted, agent
+    /// state events) during WAL replay. Provides a single source of truth
+    /// for all agent queries regardless of whether the agent is job-embedded
+    /// or standalone.
+    #[serde(default)]
+    pub agents: HashMap<String, AgentRecord>,
     /// Durable namespace → project root mapping.
     ///
     /// Populated from WorkerStarted, CronStarted, and CommandRun events.
@@ -264,7 +321,9 @@ impl MaterializedState {
     /// - Use `finalize_current_step` which is internally guarded by `finished_at_ms`
     pub fn apply_event(&mut self, event: &Event) {
         match event {
-            Event::AgentWorking { owner, .. } => {
+            Event::AgentWorking {
+                agent_id, owner, ..
+            } => {
                 // Route by owner when present; standalone agent status is
                 // handled via AgentRunStatusChanged events.
                 if let Some(OwnerId::Job(job_id)) = owner {
@@ -272,14 +331,24 @@ impl MaterializedState {
                         job.step_status = StepStatus::Running;
                     }
                 }
-                // OwnerId::AgentRun or None: no action needed here
-                // (standalone agents use AgentRunStatusChanged events)
+                // Update unified agent record
+                if let Some(rec) = self.agents.get_mut(agent_id.as_str()) {
+                    rec.status = AgentRecordStatus::Running;
+                    rec.updated_at_ms = epoch_ms_now();
+                }
             }
-            Event::AgentWaiting { .. } => {
-                // Agent is idle, but still running - no state change needed
+            Event::AgentWaiting { agent_id, .. } => {
+                // Update unified agent record
+                if let Some(rec) = self.agents.get_mut(agent_id.as_str()) {
+                    rec.status = AgentRecordStatus::Idle;
+                    rec.updated_at_ms = epoch_ms_now();
+                }
             }
             Event::AgentExited {
-                exit_code, owner, ..
+                agent_id,
+                exit_code,
+                owner,
+                ..
             } => {
                 // Route by owner when present
                 if let Some(OwnerId::Job(job_id)) = owner {
@@ -292,9 +361,18 @@ impl MaterializedState {
                         }
                     }
                 }
-                // OwnerId::AgentRun or None: no action needed here
+                // Update unified agent record
+                if let Some(rec) = self.agents.get_mut(agent_id.as_str()) {
+                    rec.status = AgentRecordStatus::Exited;
+                    rec.updated_at_ms = epoch_ms_now();
+                }
             }
-            Event::AgentFailed { error, owner, .. } => {
+            Event::AgentFailed {
+                agent_id,
+                error,
+                owner,
+                ..
+            } => {
                 // Route by owner when present
                 if let Some(OwnerId::Job(job_id)) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
@@ -302,9 +380,15 @@ impl MaterializedState {
                         job.error = Some(error.to_string());
                     }
                 }
-                // OwnerId::AgentRun or None: no action needed here
+                // Update unified agent record
+                if let Some(rec) = self.agents.get_mut(agent_id.as_str()) {
+                    rec.status = AgentRecordStatus::Exited;
+                    rec.updated_at_ms = epoch_ms_now();
+                }
             }
-            Event::AgentGone { owner, .. } => {
+            Event::AgentGone {
+                agent_id, owner, ..
+            } => {
                 // Route by owner when present
                 if let Some(OwnerId::Job(job_id)) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
@@ -312,7 +396,11 @@ impl MaterializedState {
                         job.error = Some("session terminated unexpectedly".to_string());
                     }
                 }
-                // OwnerId::AgentRun or None: no action needed here
+                // Update unified agent record
+                if let Some(rec) = self.agents.get_mut(agent_id.as_str()) {
+                    rec.status = AgentRecordStatus::Gone;
+                    rec.updated_at_ms = epoch_ms_now();
+                }
             }
 
             Event::ShellExited {
@@ -450,6 +538,29 @@ impl MaterializedState {
                     job.step_status = StepStatus::Running;
                     if let Some(aid) = agent_id {
                         job.set_current_step_agent_id(aid.as_str());
+
+                        // Insert unified agent record for job-embedded agents
+                        let now = epoch_ms_now();
+                        self.agents
+                            .entry(aid.as_str().to_string())
+                            .or_insert_with(|| {
+                                let workspace = job
+                                    .workspace_path
+                                    .as_ref()
+                                    .cloned()
+                                    .unwrap_or_else(|| job.cwd.clone());
+                                AgentRecord {
+                                    agent_id: aid.as_str().to_string(),
+                                    agent_name: agent_name.clone().unwrap_or_default(),
+                                    owner: OwnerId::Job(job_id.clone()),
+                                    namespace: job.namespace.clone(),
+                                    workspace_path: workspace,
+                                    session_id: None,
+                                    status: AgentRecordStatus::Starting,
+                                    created_at_ms: now,
+                                    updated_at_ms: now,
+                                }
+                            });
                     }
                     if let Some(aname) = agent_name {
                         job.set_current_step_agent_name(aname.as_str());
@@ -499,6 +610,9 @@ impl MaterializedState {
                 self.jobs.remove(id.as_str());
                 // Clean up all decisions associated with the deleted job
                 self.decisions.retain(|_, d| d.job_id != id.as_str());
+                // Remove agents owned by this job
+                let owner = OwnerId::Job(id.clone());
+                self.agents.retain(|_, rec| rec.owner != owner);
             }
 
             Event::SessionCreated { id, owner } => {
@@ -527,6 +641,12 @@ impl MaterializedState {
                         }
                     }
                 }
+                // Set session_id on matching agent records
+                for rec in self.agents.values_mut() {
+                    if rec.owner == *owner && rec.session_id.is_none() {
+                        rec.session_id = Some(id.to_string());
+                    }
+                }
             }
 
             Event::SessionDeleted { id } => {
@@ -543,6 +663,13 @@ impl MaterializedState {
                 for agent_run in self.agent_runs.values_mut() {
                     if agent_run.session_id.as_deref() == Some(id.as_str()) {
                         agent_run.session_id = None;
+                    }
+                }
+
+                // Clear agent record session_id if it references the deleted session
+                for rec in self.agents.values_mut() {
+                    if rec.session_id.as_deref() == Some(id.as_str()) {
+                        rec.session_id = None;
                     }
                 }
             }
@@ -562,9 +689,9 @@ impl MaterializedState {
                     })
                     .unwrap_or_default();
 
-                // Also update the job's workspace info if owner matches
-                if let Some(ref owner_id) = owner {
-                    if let Some(job) = self.jobs.get_mut(owner_id.as_str()) {
+                // Update the job's workspace info if owner is a job
+                if let Some(OwnerId::Job(job_id)) = owner {
+                    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                         job.workspace_path = Some(path.clone());
                         job.workspace_id = Some(id.clone());
                     }
@@ -1007,6 +1134,22 @@ impl MaterializedState {
                     run.status = AgentRunStatus::Running;
                     run.agent_id = Some(agent_id.as_str().to_string());
                     run.updated_at_ms = epoch_ms_now();
+
+                    // Insert unified agent record for standalone agents
+                    let now = epoch_ms_now();
+                    self.agents
+                        .entry(agent_id.as_str().to_string())
+                        .or_insert_with(|| AgentRecord {
+                            agent_id: agent_id.as_str().to_string(),
+                            agent_name: run.agent_name.clone(),
+                            owner: OwnerId::AgentRun(id.clone()),
+                            namespace: run.namespace.clone(),
+                            workspace_path: run.cwd.clone(),
+                            session_id: None,
+                            status: AgentRecordStatus::Running,
+                            created_at_ms: now,
+                            updated_at_ms: now,
+                        });
                 }
             }
 
@@ -1033,6 +1176,9 @@ impl MaterializedState {
 
             Event::AgentRunDeleted { id } => {
                 self.agent_runs.remove(id.as_str());
+                // Remove agents owned by this agent_run
+                let owner = OwnerId::AgentRun(id.clone());
+                self.agents.retain(|_, rec| rec.owner != owner);
             }
 
             // CommandRun: only persist the namespace → project_root mapping

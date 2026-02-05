@@ -10,6 +10,7 @@
 
 pub mod action_tracker;
 pub mod agent;
+pub mod agent_record;
 pub mod agent_run;
 pub mod clock;
 pub mod decision;
@@ -26,6 +27,7 @@ pub mod workspace;
 
 // ActionTracker and AgentSignal available via action_tracker module or job re-export
 pub use agent::{AgentError, AgentId, AgentState};
+pub use agent_record::{AgentRecord, AgentRecordStatus};
 pub use agent_run::{AgentRun, AgentRunId, AgentRunStatus};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};

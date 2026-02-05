@@ -881,7 +881,7 @@ async fn create_folder_workspace() {
         .execute(Effect::CreateWorkspace {
             workspace_id: WorkspaceId::new("ws-folder-1"),
             path: tmp.clone(),
-            owner: Some("job-1".to_string()),
+            owner: Some(oj_core::OwnerId::Job(oj_core::JobId::new("job-1"))),
             workspace_type: Some("folder".to_string()),
             repo_root: None,
             branch: None,

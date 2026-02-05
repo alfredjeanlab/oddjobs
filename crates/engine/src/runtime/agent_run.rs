@@ -421,6 +421,7 @@ where
 
                 // Kill the tmux session (mirrors job advance_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
+                self.cleanup_agent_run_workspaces(&agent_run_id).await?;
 
                 Ok(result)
             }
@@ -452,6 +453,7 @@ where
 
                 // Kill the tmux session (mirrors job fail_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
+                self.cleanup_agent_run_workspaces(&agent_run_id).await?;
 
                 Ok(result)
             }
@@ -528,6 +530,7 @@ where
 
                         // Kill the tmux session (mirrors job advance_job behavior)
                         self.cleanup_standalone_agent_session(agent_run).await?;
+                        self.cleanup_agent_run_workspaces(&agent_run_id).await?;
 
                         Ok(result)
                     }
@@ -614,6 +617,30 @@ where
             }
             Err(e) => Err(format!("gate `{}` execution error: {}", command, e)),
         }
+    }
+
+    /// Delete workspaces owned by a standalone agent run.
+    async fn cleanup_agent_run_workspaces(
+        &self,
+        agent_run_id: &AgentRunId,
+    ) -> Result<(), RuntimeError> {
+        let ar_owner = OwnerId::agent_run(agent_run_id.clone());
+        let ws_ids: Vec<oj_core::WorkspaceId> = self.lock_state(|s| {
+            s.workspaces
+                .values()
+                .filter(|ws| ws.owner.as_ref() == Some(&ar_owner))
+                .map(|ws| oj_core::WorkspaceId::new(&ws.id))
+                .collect()
+        });
+        for ws_id in ws_ids {
+            let _ = self
+                .executor
+                .execute(Effect::DeleteWorkspace {
+                    workspace_id: ws_id,
+                })
+                .await;
+        }
+        Ok(())
     }
 
     /// Kill the standalone agent's tmux session and clean up mappings.
@@ -712,6 +739,7 @@ where
 
                 // Kill the tmux session (mirrors job advance_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
+                self.cleanup_agent_run_workspaces(&agent_run_id).await?;
 
                 Ok(result)
             }

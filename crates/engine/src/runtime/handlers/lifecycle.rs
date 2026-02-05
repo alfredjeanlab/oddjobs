@@ -328,7 +328,10 @@ where
             self.lock_state(|s| {
                 s.workspaces
                     .values()
-                    .find(|ws| ws.owner.as_deref() == Some(&job.id))
+                    .find(|ws| {
+                        ws.owner.as_ref()
+                            == Some(&oj_core::OwnerId::Job(oj_core::JobId::new(&job.id)))
+                    })
                     .map(|ws| oj_core::WorkspaceId::new(&ws.id))
             })
         });
