@@ -24,7 +24,7 @@ text = "Signaling completion to daemon."
 
 [[responses.response.tool_calls]]
 tool = "Bash"
-input = { command = "oj emit agent:signal --agent $AGENT_ID '{\"action\":\"complete\"}' && touch emit-ok" }
+input = { command = "oj emit agent:signal --agent $AGENT_ID complete && touch emit-ok" }
 
 [tool_execution]
 mode = "live"
