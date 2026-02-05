@@ -73,9 +73,9 @@ job "plan" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  step "plan" {
+  step "think" {
     run     = { agent = "plan" }
-    on_done = { step = "mark-ready" }
+    on_done = { step = "planned" }
   }
 
   step "planned" {
