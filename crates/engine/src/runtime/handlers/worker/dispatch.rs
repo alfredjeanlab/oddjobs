@@ -285,6 +285,9 @@ where
             .ok_or_else(|| RuntimeError::JobDefNotFound(job_kind.clone()))?;
 
         // Build input from item fields
+        // Only create properly namespaced mappings:
+        // - item.* (canonical namespace for queue item fields)
+        // - ${first_var}.* (for backward compatibility with jobs declaring vars = ["epic"])
         let mut input = HashMap::new();
         input.insert("invoke.dir".to_string(), cwd.display().to_string());
         if let Some(obj) = item.as_object() {
@@ -295,7 +298,6 @@ where
                     value.to_string()
                 };
                 input.insert(format!("item.{}", key), v.clone());
-                input.insert(key.clone(), v.clone());
                 // Map fields into the namespace of the job's first declared var
                 // e.g. if vars = ["bug"], map "bug.title", "bug.id", etc.
                 if let Some(first_input) = job_def.vars.first() {

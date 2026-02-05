@@ -243,6 +243,51 @@ pub(crate) fn validate_agent_command(
     Ok(())
 }
 
+/// Valid template namespaces for job context.
+///
+/// Template references must use one of these known prefixes to prevent typos
+/// like `${vra.name}` from silently failing at runtime.
+const VALID_TEMPLATE_NAMESPACES: &[&str] = &[
+    "var",
+    "args",
+    "item",
+    "local",
+    "workspace",
+    "invoke",
+    "prompt",
+    "step",
+];
+
+/// Validate that template references use recognized namespaces.
+///
+/// Catches typos like `${vra.name}` (should be `${var.name}`) at parse time.
+/// Single-segment references (no dot) are allowed as they may reference
+/// environment variables or simple placeholders.
+pub(crate) fn validate_template_namespaces(
+    template: &str,
+    location: &str,
+) -> Result<(), ParseError> {
+    for cap in crate::template::VAR_PATTERN.captures_iter(template) {
+        let var_name = &cap[1];
+        // Only validate namespaced refs (containing a dot)
+        if let Some(dot_pos) = var_name.find('.') {
+            let namespace = &var_name[..dot_pos];
+            if !VALID_TEMPLATE_NAMESPACES.contains(&namespace) {
+                return Err(ParseError::InvalidFormat {
+                    location: location.to_string(),
+                    message: format!(
+                        "unrecognized template namespace '{}' in ${{{}}}; valid namespaces: {}",
+                        namespace,
+                        var_name,
+                        VALID_TEMPLATE_NAMESPACES.join(", "),
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Sort and join names from a HashSet for deterministic error messages.
 pub(crate) fn sorted_names(names: &HashSet<&str>) -> String {
     let mut v: Vec<&str> = names.iter().copied().collect();

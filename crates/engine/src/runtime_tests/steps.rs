@@ -987,6 +987,69 @@ async fn locals_eagerly_evaluate_shell_expressions() {
     );
 }
 
+// --- Workspace variable interpolation tests ---
+
+/// Runbook with folder workspace and variables referencing workspace.nonce
+/// Tests runtime interpolation of workspace variables (not just parsing).
+const RUNBOOK_WORKSPACE_VAR_INTERPOLATION: &str = r#"
+[command.build]
+args = "<name>"
+run = { job = "build" }
+
+[job.build]
+input = ["name"]
+workspace = "folder"
+
+[job.build.locals]
+branch = "feature/${var.name}-${workspace.nonce}"
+
+[[job.build.step]]
+name = "init"
+run = "echo ${local.branch}"
+"#;
+
+#[tokio::test]
+async fn workspace_variables_interpolate_at_runtime() {
+    let ctx = setup_with_runbook(RUNBOOK_WORKSPACE_VAR_INTERPOLATION).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "auth".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+
+    // workspace.nonce should be set
+    let nonce = job.vars.get("workspace.nonce").cloned().unwrap_or_default();
+    assert!(!nonce.is_empty(), "workspace.nonce should be set");
+
+    // local.branch should be interpolated with var.name and workspace.nonce
+    let branch = job.vars.get("local.branch").cloned().unwrap_or_default();
+    assert!(
+        branch.starts_with("feature/auth-"),
+        "local.branch should start with 'feature/auth-', got: {branch}"
+    );
+    assert!(
+        !branch.contains("${"),
+        "local.branch should not contain unresolved variables, got: {branch}"
+    );
+
+    // Verify the nonce portion is in the branch
+    assert!(
+        branch.ends_with(&nonce),
+        "local.branch should end with workspace.nonce '{nonce}', got: {branch}"
+    );
+}
+
 // --- on_fail cycle tests ---
 
 /// Runbook with on_fail self-cycle: step retries itself on failure

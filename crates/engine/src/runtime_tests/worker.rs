@@ -1289,6 +1289,106 @@ async fn worker_stop_clears_inflight_items() {
     }
 }
 
+// -- Variable namespace isolation tests --
+
+/// Runbook with a worker that creates jobs from queue items.
+/// The job declares vars = ["epic"] so fields should be mapped to epic.* and item.*
+const NAMESPACED_WORKER_RUNBOOK: &str = r#"
+[job.handle-epic]
+vars = ["epic"]
+
+[[job.handle-epic.step]]
+name = "init"
+run = "echo ${var.epic.title}"
+on_done = "done"
+
+[[job.handle-epic.step]]
+name = "done"
+run = "echo done"
+
+[queue.bugs]
+type = "persisted"
+vars = ["title", "labels"]
+
+[worker.fixer]
+source = { queue = "bugs" }
+handler = { job = "handle-epic" }
+concurrency = 1
+"#;
+
+/// Worker dispatch should only create properly namespaced variable mappings:
+/// - item.* (canonical namespace for queue item fields)
+/// - ${first_var}.* (for backward compatibility with jobs declaring vars = ["epic"])
+/// - invoke.* (system-provided invocation context)
+///
+/// Bare keys (like "title" without a namespace prefix) should NOT be present.
+#[tokio::test]
+async fn worker_dispatch_uses_namespaced_vars_only() {
+    let ctx = setup_with_runbook(NAMESPACED_WORKER_RUNBOOK).await;
+
+    // Push a queue item with title and labels fields
+    ctx.runtime.lock_state_mut(|state| {
+        state.apply_event(&Event::QueuePushed {
+            queue_name: "bugs".to_string(),
+            item_id: "item-1".to_string(),
+            data: {
+                let mut m = HashMap::new();
+                m.insert("title".to_string(), "Fix login bug".to_string());
+                m.insert("labels".to_string(), "bug,p1".to_string());
+                m
+            },
+            pushed_at_epoch_ms: 1000,
+            namespace: String::new(),
+        });
+    });
+
+    // Start worker and dispatch using the helper
+    let events = start_worker_and_poll(&ctx, NAMESPACED_WORKER_RUNBOOK, "fixer", 1).await;
+    assert_eq!(count_dispatched(&events), 1, "should dispatch 1 item");
+
+    // Get the dispatched job
+    let job = ctx.runtime.jobs().values().next().cloned();
+    assert!(job.is_some(), "job should be created");
+    let job = job.unwrap();
+
+    // Verify namespaced keys exist
+    assert!(
+        job.vars.contains_key("item.title"),
+        "job.vars should contain item.title, got keys: {:?}",
+        job.vars.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        job.vars.contains_key("item.labels"),
+        "job.vars should contain item.labels"
+    );
+    assert!(
+        job.vars.contains_key("epic.title"),
+        "job.vars should contain epic.title (from first declared var)"
+    );
+    assert!(
+        job.vars.contains_key("epic.labels"),
+        "job.vars should contain epic.labels (from first declared var)"
+    );
+
+    // Verify NO bare keys (keys without a dot prefix that came from queue item fields)
+    assert!(
+        !job.vars.contains_key("title"),
+        "job.vars should NOT contain bare 'title' key"
+    );
+    assert!(
+        !job.vars.contains_key("labels"),
+        "job.vars should NOT contain bare 'labels' key"
+    );
+
+    // All keys should have a namespace prefix (contain a dot)
+    let bare_keys: Vec<_> = job.vars.keys().filter(|k| !k.contains('.')).collect();
+    assert!(
+        bare_keys.is_empty(),
+        "job.vars should not contain bare keys, found: {:?}",
+        bare_keys
+    );
+}
+
 // -- pending_takes tracking tests --
 
 /// pending_takes should count toward the concurrency limit, preventing

@@ -5,7 +5,7 @@
 
 use crate::validate::{
     sorted_keys, sorted_names, validate_agent_command, validate_command_template_refs,
-    validate_duration_str, validate_shell_command,
+    validate_duration_str, validate_shell_command, validate_template_namespaces,
 };
 use crate::{
     ActionTrigger, AgentDef, ArgSpecError, CommandDef, CronDef, JobDef, PrimeDef, QueueDef,
@@ -180,12 +180,16 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
 
     for (job_name, job) in &runbook.jobs {
         for (i, step) in job.steps.iter().enumerate() {
+            let step_location = format!("job.{}.step[{}]({}).run", job_name, i, step.name);
             if let RunDirective::Shell(ref shell_cmd) = step.run {
-                validate_shell_command(
-                    shell_cmd,
-                    &format!("job.{}.step[{}]({}).run", job_name, i, step.name),
-                )?;
+                validate_shell_command(shell_cmd, &step_location)?;
+                validate_template_namespaces(shell_cmd, &step_location)?;
             }
+        }
+        // Validate job local variable templates
+        for (local_name, local_value) in &job.locals {
+            let local_location = format!("job.{}.locals.{}", job_name, local_name);
+            validate_template_namespaces(local_value, &local_location)?;
         }
     }
 
@@ -196,6 +200,10 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             let run_location = format!("agent.{}.run", name);
             validate_shell_command(&agent.run, &run_location)?;
             validate_agent_command(&agent.run, &run_location, has_prompt)?;
+        }
+        // Validate agent prompt templates
+        if let Some(ref prompt) = agent.prompt {
+            validate_template_namespaces(prompt, &format!("agent.{}.prompt", name))?;
         }
 
         if let Some(ref prime) = agent.prime {

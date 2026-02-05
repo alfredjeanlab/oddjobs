@@ -372,9 +372,9 @@ pub async fn handle(
                         if !p.vars.is_empty() {
                             println!();
                             println!("  {}", color::header("Variables:"));
-                            let sorted = sorted_vars(&p.vars);
+                            let sorted_vars = group_vars_by_scope(&p.vars);
                             if verbose {
-                                for (k, v) in &sorted {
+                                for (k, v) in &sorted_vars {
                                     if v.contains('\n') {
                                         println!("    {}", color::context(&format!("{}:", k)));
                                         for line in v.lines() {
@@ -389,7 +389,7 @@ pub async fn handle(
                                     }
                                 }
                             } else {
-                                for (k, v) in &sorted {
+                                for (k, v) in &sorted_vars {
                                     println!(
                                         "    {} {}",
                                         color::context(&format!("{}:", k)),
@@ -639,36 +639,42 @@ fn format_var_value(value: &str, max_len: usize) -> String {
     }
 }
 
-/// Returns the sort priority for a variable namespace.
-/// Lower values sort first: invoke (0) → workspace (1) → local (2) → var (3) → other (4)
-fn var_namespace_priority(name: &str) -> u8 {
-    if name.starts_with("invoke.") {
-        0
-    } else if name.starts_with("workspace.") {
-        1
-    } else if name.starts_with("local.") {
-        2
-    } else if name.starts_with("var.") {
-        3
-    } else {
-        4
-    }
-}
-
-/// Sort variables by namespace priority, then alphabetically within each group.
-fn sorted_vars(vars: &HashMap<String, String>) -> Vec<(&String, &String)> {
-    let mut sorted: Vec<_> = vars.iter().collect();
-    sorted.sort_by(|(a, _), (b, _)| {
-        let pri_a = var_namespace_priority(a);
-        let pri_b = var_namespace_priority(b);
-        pri_a.cmp(&pri_b).then_with(|| a.cmp(b))
-    });
-    sorted
-}
-
 fn is_var_truncated(value: &str, max_len: usize) -> bool {
     let escaped = value.replace('\n', "\\n");
     escaped.chars().count() > max_len
+}
+
+/// Variable scope ordering for grouped display.
+/// Returns (order_priority, scope_name) for sorting.
+fn var_scope_order(key: &str) -> (usize, &str) {
+    if let Some(dot_pos) = key.find('.') {
+        let scope = &key[..dot_pos];
+        let priority = match scope {
+            "var" => 0,
+            "local" => 1,
+            "workspace" => 2,
+            "item" => 3,
+            "invoke" => 4,
+            _ => 5, // other namespaced vars
+        };
+        (priority, scope)
+    } else {
+        (6, "") // unnamespaced vars last
+    }
+}
+
+/// Group and sort variables by scope for display.
+fn group_vars_by_scope(vars: &HashMap<String, String>) -> Vec<(&String, &String)> {
+    let mut sorted: Vec<_> = vars.iter().collect();
+    sorted.sort_by(|(a, _), (b, _)| {
+        let (order_a, scope_a) = var_scope_order(a);
+        let (order_b, scope_b) = var_scope_order(b);
+        order_a
+            .cmp(&order_b)
+            .then_with(|| scope_a.cmp(scope_b))
+            .then_with(|| a.cmp(b))
+    });
+    sorted
 }
 
 #[cfg(test)]

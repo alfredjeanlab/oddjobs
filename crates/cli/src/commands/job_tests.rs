@@ -3,8 +3,8 @@
 
 use super::super::job_wait::{print_step_progress, StepTracker};
 use super::{
-    format_job_list, format_var_value, is_var_truncated, parse_duration, sorted_vars,
-    var_namespace_priority,
+    format_job_list, format_var_value, group_vars_by_scope, is_var_truncated, parse_duration,
+    var_scope_order,
 };
 use oj_daemon::{JobDetail, JobSummary, StepRecordDetail};
 use std::collections::HashMap;
@@ -586,70 +586,79 @@ fn project_filter_no_match_returns_empty() {
 // ── Variable sorting tests ─────────────────────────────────────────────────
 
 #[test]
-fn var_namespace_priority_invoke_first() {
-    assert_eq!(var_namespace_priority("invoke.item"), 0);
-    assert_eq!(var_namespace_priority("invoke.foo.bar"), 0);
+fn var_scope_order_var_first() {
+    assert_eq!(var_scope_order("var.input").0, 0);
+    assert_eq!(var_scope_order("var.output").0, 0);
 }
 
 #[test]
-fn var_namespace_priority_workspace_second() {
-    assert_eq!(var_namespace_priority("workspace.path"), 1);
-    assert_eq!(var_namespace_priority("workspace.name"), 1);
+fn var_scope_order_local_second() {
+    assert_eq!(var_scope_order("local.temp").0, 1);
+    assert_eq!(var_scope_order("local.result").0, 1);
 }
 
 #[test]
-fn var_namespace_priority_local_third() {
-    assert_eq!(var_namespace_priority("local.temp"), 2);
-    assert_eq!(var_namespace_priority("local.result"), 2);
+fn var_scope_order_workspace_third() {
+    assert_eq!(var_scope_order("workspace.path").0, 2);
+    assert_eq!(var_scope_order("workspace.name").0, 2);
 }
 
 #[test]
-fn var_namespace_priority_var_fourth() {
-    assert_eq!(var_namespace_priority("var.input"), 3);
-    assert_eq!(var_namespace_priority("var.output"), 3);
+fn var_scope_order_item_fourth() {
+    assert_eq!(var_scope_order("item.id").0, 3);
+    assert_eq!(var_scope_order("item.name").0, 3);
 }
 
 #[test]
-fn var_namespace_priority_other_last() {
-    assert_eq!(var_namespace_priority("custom.value"), 4);
-    assert_eq!(var_namespace_priority("unknown"), 4);
-    assert_eq!(var_namespace_priority("result"), 4);
+fn var_scope_order_invoke_fifth() {
+    assert_eq!(var_scope_order("invoke.item").0, 4);
+    assert_eq!(var_scope_order("invoke.foo.bar").0, 4);
 }
 
 #[test]
-fn sorted_vars_groups_by_namespace() {
+fn var_scope_order_other_namespaced() {
+    assert_eq!(var_scope_order("custom.value").0, 5);
+}
+
+#[test]
+fn var_scope_order_unnamespaced_last() {
+    assert_eq!(var_scope_order("result").0, 6);
+    assert_eq!(var_scope_order("unknown").0, 6);
+}
+
+#[test]
+fn group_vars_by_scope_groups_by_namespace() {
     let mut vars = HashMap::new();
     vars.insert("var.output".to_string(), "1".to_string());
     vars.insert("invoke.item".to_string(), "2".to_string());
     vars.insert("local.temp".to_string(), "3".to_string());
     vars.insert("workspace.path".to_string(), "4".to_string());
 
-    let sorted = sorted_vars(&vars);
+    let sorted = group_vars_by_scope(&vars);
     let keys: Vec<&str> = sorted.iter().map(|(k, _)| k.as_str()).collect();
 
     assert_eq!(
         keys,
-        vec!["invoke.item", "workspace.path", "local.temp", "var.output"]
+        vec!["var.output", "local.temp", "workspace.path", "invoke.item"]
     );
 }
 
 #[test]
-fn sorted_vars_alphabetical_within_namespace() {
+fn group_vars_by_scope_alphabetical_within_namespace() {
     let mut vars = HashMap::new();
     vars.insert("var.zebra".to_string(), "1".to_string());
     vars.insert("var.apple".to_string(), "2".to_string());
     vars.insert("var.mango".to_string(), "3".to_string());
 
-    let sorted = sorted_vars(&vars);
+    let sorted = group_vars_by_scope(&vars);
     let keys: Vec<&str> = sorted.iter().map(|(k, _)| k.as_str()).collect();
 
     assert_eq!(keys, vec!["var.apple", "var.mango", "var.zebra"]);
 }
 
 #[test]
-fn sorted_vars_mixed_namespaces_alphabetical() {
+fn group_vars_by_scope_mixed_namespaces() {
     let mut vars = HashMap::new();
-    // Add vars in random order
     vars.insert("var.c".to_string(), "1".to_string());
     vars.insert("invoke.b".to_string(), "2".to_string());
     vars.insert("invoke.a".to_string(), "3".to_string());
@@ -659,28 +668,28 @@ fn sorted_vars_mixed_namespaces_alphabetical() {
     vars.insert("var.a".to_string(), "7".to_string());
     vars.insert("other.value".to_string(), "8".to_string());
 
-    let sorted = sorted_vars(&vars);
+    let sorted = group_vars_by_scope(&vars);
     let keys: Vec<&str> = sorted.iter().map(|(k, _)| k.as_str()).collect();
 
-    // Expected order: invoke.* (alphabetical), workspace.*, local.* (alphabetical), var.* (alphabetical), other.*
+    // Expected order: var.*, local.*, workspace.*, invoke.*, other.*
     assert_eq!(
         keys,
         vec![
-            "invoke.a",
-            "invoke.b",
-            "workspace.x",
-            "local.a",
-            "local.z",
             "var.a",
             "var.c",
+            "local.a",
+            "local.z",
+            "workspace.x",
+            "invoke.a",
+            "invoke.b",
             "other.value"
         ]
     );
 }
 
 #[test]
-fn sorted_vars_empty() {
+fn group_vars_by_scope_empty() {
     let vars: HashMap<String, String> = HashMap::new();
-    let sorted = sorted_vars(&vars);
+    let sorted = group_vars_by_scope(&vars);
     assert!(sorted.is_empty());
 }
