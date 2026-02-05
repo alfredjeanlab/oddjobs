@@ -36,7 +36,7 @@ command "gt-review" {
 job "code-review" {
   name      = "review-${var.branch}"
   vars      = ["branch", "base"]
-  workspace = "ephemeral"
+  workspace = "folder"
 
   locals {
     repo = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"

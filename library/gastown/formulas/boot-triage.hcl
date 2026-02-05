@@ -1,4 +1,4 @@
-# Formula: Boot Triage — Ephemeral Watchdog
+# Formula: Boot Triage — Watchdog
 #
 # Gas Town equivalent: mol-boot-triage.formula.toml
 #
@@ -27,7 +27,7 @@ command "gt-triage" {
 
 job "boot-triage" {
   name      = "boot-triage"
-  workspace = "ephemeral"
+  workspace = "folder"
 
   notify {
     on_fail = "Boot triage failed"
