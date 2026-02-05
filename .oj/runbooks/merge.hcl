@@ -38,9 +38,9 @@ worker "merge" {
   concurrency = 1
 }
 
-worker "merge-conflicts" {
+worker "merge-conflict" {
   source      = { queue = "merge-conflicts" }
-  handler     = { job = "merge-conflicts" }
+  handler     = { job = "merge-conflict" }
   concurrency = 1
 }
 
@@ -122,7 +122,7 @@ job "merge" {
 }
 
 # Slow-path: agent-assisted conflict resolution.
-job "merge-conflicts" {
+job "merge-conflict" {
   name      = "Conflicts: ${var.mr.title}"
   vars      = ["mr"]
   workspace = "folder"
