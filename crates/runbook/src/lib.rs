@@ -42,7 +42,7 @@ pub use job::{
     WorkspaceConfig, WorkspaceType,
 };
 pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
-pub use queue::{QueueDef, QueueType};
+pub use queue::{QueueDef, QueueType, ReportConfig};
 pub use slug::{job_display_name, slugify};
 pub use template::{escape_for_shell, interpolate, interpolate_shell};
 pub use worker::{WorkerDef, WorkerHandler, WorkerSource};

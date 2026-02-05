@@ -69,6 +69,12 @@ pub struct QueueStatus {
     pub pending: usize,
     pub active: usize,
     pub dead: usize,
+    /// Completed item count for external queues with show_completed=true (ephemeral)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed: Option<usize>,
+    /// Failed item count for external queues with show_failed=true (ephemeral)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

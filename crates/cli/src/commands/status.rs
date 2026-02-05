@@ -271,10 +271,13 @@ fn format_text(
 
         // Check if this namespace has any content to show
         // Note: queues need at least one non-zero count to be displayed
-        let has_non_empty_queues = ns
-            .queues
-            .iter()
-            .any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
+        let has_non_empty_queues = ns.queues.iter().any(|q| {
+            q.pending > 0
+                || q.active > 0
+                || q.dead > 0
+                || q.completed.unwrap_or(0) > 0
+                || q.failed.unwrap_or(0) > 0
+        });
         let has_content = !ns.active_jobs.is_empty()
             || !ns.escalated_jobs.is_empty()
             || !ns.orphaned_jobs.is_empty()
@@ -423,7 +426,13 @@ fn format_text(
         let non_empty_queues: Vec<_> = ns
             .queues
             .iter()
-            .filter(|q| q.pending > 0 || q.active > 0 || q.dead > 0)
+            .filter(|q| {
+                q.pending > 0
+                    || q.active > 0
+                    || q.dead > 0
+                    || q.completed.unwrap_or(0) > 0
+                    || q.failed.unwrap_or(0) > 0
+            })
             .collect();
         if !non_empty_queues.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Queues:"));
@@ -440,6 +449,16 @@ fn format_text(
                 );
                 if q.dead > 0 {
                     let _ = write!(out, ", {} {}", q.dead, color::status("dead"));
+                }
+                if let Some(done) = q.completed {
+                    if done > 0 {
+                        let _ = write!(out, ", {} done", done);
+                    }
+                }
+                if let Some(failed) = q.failed {
+                    if failed > 0 {
+                        let _ = write!(out, ", {} failed", failed);
+                    }
                 }
                 out.push('\n');
             }

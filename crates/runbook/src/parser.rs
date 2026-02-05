@@ -266,6 +266,15 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                         });
                     }
                 }
+                // Validate report block commands
+                if let Some(ref report) = queue.report {
+                    if let Some(ref on_done) = report.on_done {
+                        validate_shell_command(on_done, &format!("queue.{}.report.on_done", name))?;
+                    }
+                    if let Some(ref on_fail) = report.on_fail {
+                        validate_shell_command(on_fail, &format!("queue.{}.report.on_fail", name))?;
+                    }
+                }
             }
             QueueType::Persisted => {
                 if queue.vars.is_empty() {
@@ -290,6 +299,12 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                     return Err(ParseError::InvalidFormat {
                         location: format!("queue.{}", name),
                         message: "persisted queue must not have 'poll' field".to_string(),
+                    });
+                }
+                if queue.report.is_some() {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("queue.{}", name),
+                        message: "persisted queue must not have 'report' block".to_string(),
                     });
                 }
                 if let Some(ref retry) = queue.retry {

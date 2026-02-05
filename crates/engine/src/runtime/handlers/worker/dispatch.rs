@@ -328,6 +328,8 @@ where
             if let Some(state) = workers.get_mut(worker_name) {
                 state.active_jobs.insert(job_id.clone());
                 state.item_job_map.insert(job_id.clone(), item_id.clone());
+                // Store item data for report command interpolation
+                state.item_data.insert(item_id.clone(), item.clone());
             }
         }
 

@@ -894,6 +894,11 @@ pub(super) fn handle_query(
                         pending,
                         active,
                         dead,
+                        // Ephemeral counts for external queues are tracked in the engine's
+                        // worker state but not exposed through the daemon query handler yet.
+                        // These will show as None until a mechanism to share the counts is added.
+                        completed: None,
+                        failed: None,
                     });
             }
 

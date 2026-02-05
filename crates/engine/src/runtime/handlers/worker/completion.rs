@@ -9,6 +9,7 @@ use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{scoped_name, Clock, Effect, Event, JobId, TimerId};
 use oj_runbook::QueueType;
+use std::collections::HashMap;
 use std::time::Duration;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -63,6 +64,13 @@ where
             worker_namespace,
         )) = worker_info
         {
+            // Retrieve and clear stored item data for report interpolation
+            let item_data = {
+                let mut workers = self.worker_states.lock();
+                workers
+                    .get_mut(&worker_name)
+                    .and_then(|s| item_id.as_ref().and_then(|id| s.item_data.remove(id)))
+            };
             // Log job completion
             {
                 let workers = self.worker_states.lock();
@@ -98,6 +106,72 @@ where
                     .map(|s| s.runbook_hash.clone())
                     .unwrap_or(_old_runbook_hash)
             };
+
+            // For external queues with report config, execute report command
+            if queue_type == QueueType::External {
+                let runbook = self.cached_runbook(&runbook_hash)?;
+                if let Some(queue_def) = runbook.get_queue(&queue_name) {
+                    if let Some(ref report) = queue_def.report {
+                        let is_completion = terminal_step == "done";
+
+                        // Build interpolation vars from item data
+                        let mut vars: HashMap<String, String> = HashMap::new();
+                        if let Some(ref data) = item_data {
+                            if let Some(obj) = data.as_object() {
+                                for (key, value) in obj {
+                                    let v = if let Some(s) = value.as_str() {
+                                        s.to_string()
+                                    } else {
+                                        value.to_string()
+                                    };
+                                    vars.insert(format!("item.{}", key), v);
+                                }
+                            }
+                        }
+                        // Add error variable for on_fail
+                        if !is_completion {
+                            vars.insert(
+                                "error".to_string(),
+                                format!("job reached '{}'", terminal_step),
+                            );
+                        }
+
+                        // Get the appropriate report command
+                        let report_command = if is_completion {
+                            report.on_done.as_ref()
+                        } else {
+                            report.on_fail.as_ref()
+                        };
+
+                        // Execute report command if configured
+                        if let Some(cmd_template) = report_command {
+                            let command = oj_runbook::interpolate_shell(cmd_template, &vars);
+                            let item_id_str = item_id.clone().unwrap_or_default();
+                            self.executor
+                                .execute(Effect::ReportQueueItem {
+                                    worker_name: worker_name.clone(),
+                                    command,
+                                    cwd: project_root.clone(),
+                                    item_id: item_id_str,
+                                    is_completion,
+                                })
+                                .await?;
+                        }
+
+                        // Update tracking counts
+                        {
+                            let mut workers = self.worker_states.lock();
+                            if let Some(state) = workers.get_mut(&worker_name) {
+                                if is_completion && state.track_completed {
+                                    state.completed_count += 1;
+                                } else if !is_completion && state.track_failed {
+                                    state.failed_count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // For persisted queues, emit queue completion/failure event
             if queue_type == QueueType::Persisted {
