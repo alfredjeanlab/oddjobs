@@ -292,7 +292,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_workspace_prune(state, &flags).await
+            mutations::handle_workspace_prune(state, event_bus, &flags).await
         }
 
         Request::WorkerPrune {
