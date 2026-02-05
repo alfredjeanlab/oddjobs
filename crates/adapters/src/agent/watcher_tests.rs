@@ -3,7 +3,14 @@
 
 use super::*;
 use crate::session::FakeSessionAdapter;
+use std::io::Write;
 use tempfile::TempDir;
+
+/// Append a JSONL line to a file (simulates real session log appends).
+fn append_line(path: &Path, content: &str) {
+    let mut f = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    writeln!(f, "{}", content).unwrap();
+}
 
 #[test]
 fn parse_working_state() {
@@ -177,10 +184,10 @@ async fn setup_watch_loop() -> (
     let dir_path = dir.keep();
     let log_path = dir_path.join("session.jsonl");
 
-    // Start with a working state
+    // Start with a working state (trailing newline matches real JSONL format)
     std::fs::write(
         &log_path,
-        r#"{"type":"user","message":{"content":"hello"}}"#,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
     )
     .unwrap();
 
@@ -231,12 +238,11 @@ async fn watcher_emits_agent_idle_for_waiting_state() {
     // instant idle detection without the old timeout delay.
     let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
 
-    // Write an idle state (text only, no thinking/tool_use)
-    std::fs::write(
+    // Append an idle state (text only, no thinking/tool_use)
+    append_line(
         &log_path,
         r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
-    )
-    .unwrap();
+    );
     file_tx.send(()).await.unwrap();
     wait_for_poll().await;
 
@@ -256,8 +262,8 @@ async fn watcher_emits_agent_idle_for_waiting_state() {
 async fn watcher_emits_working_to_failed_transition() {
     let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
 
-    // Transition to Failed
-    std::fs::write(&log_path, r#"{"error":"Rate limit exceeded"}"#).unwrap();
+    // Append error to transition to Failed
+    append_line(&log_path, r#"{"error":"Rate limit exceeded"}"#);
     file_tx.send(()).await.unwrap();
     wait_for_poll().await;
 
@@ -278,18 +284,17 @@ async fn watcher_emits_working_state_on_state_change() {
     // First go to a non-working state (failed), then back to working
     let (mut event_rx, file_tx, shutdown_tx, log_path, _handle) = setup_watch_loop().await;
 
-    // Transition to Failed first
-    std::fs::write(&log_path, r#"{"error":"Rate limit exceeded"}"#).unwrap();
+    // Append error to transition to Failed first
+    append_line(&log_path, r#"{"error":"Rate limit exceeded"}"#);
     file_tx.send(()).await.unwrap();
     wait_for_poll().await;
     let _ = event_rx.try_recv(); // drain AgentFailed
 
-    // Transition back to Working
-    std::fs::write(
+    // Append user message to transition back to Working
+    append_line(
         &log_path,
         r#"{"type":"user","message":{"content":"retry"}}"#,
-    )
-    .unwrap();
+    );
     file_tx.send(()).await.unwrap();
     wait_for_poll().await;
 
@@ -302,4 +307,70 @@ async fn watcher_emits_working_state_on_state_change() {
     );
 
     let _ = shutdown_tx.send(());
+}
+
+#[test]
+fn incremental_parse_reads_only_new_content() {
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write initial line
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+    )
+    .unwrap();
+
+    // First read from offset 0 — gets the full file
+    let (state, offset) = parse_session_log_from(&log_path, 0);
+    assert_eq!(state, Some(AgentState::Working));
+    assert!(offset > 0, "offset should advance past first line");
+
+    // Read again from same offset — no new content
+    let (state, offset2) = parse_session_log_from(&log_path, offset);
+    assert_eq!(state, None, "no new content should return None");
+    assert_eq!(offset2, offset, "offset should not change");
+
+    // Append a new line
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
+    );
+
+    // Incremental read picks up only the new line
+    let (state, offset3) = parse_session_log_from(&log_path, offset);
+    assert_eq!(state, Some(AgentState::WaitingForInput));
+    assert!(offset3 > offset, "offset should advance past new line");
+}
+
+#[test]
+fn incremental_parse_handles_truncated_file() {
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write a long initial file
+    std::fs::write(
+        &log_path,
+        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n\
+         {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Hi\"}]}}\n",
+    )
+    .unwrap();
+
+    let (_, offset) = parse_session_log_from(&log_path, 0);
+    assert!(offset > 50);
+
+    // Replace with a shorter file (simulates truncation)
+    std::fs::write(&log_path, "{\"error\":\"Rate limit exceeded\"}\n").unwrap();
+
+    // Incremental read detects truncation and re-reads from start
+    let (state, new_offset) = parse_session_log_from(&log_path, offset);
+    assert_eq!(
+        state,
+        Some(AgentState::Failed(AgentError::RateLimited)),
+        "should detect truncation and re-read from start"
+    );
+    assert!(
+        new_offset < offset,
+        "offset should be from the shorter file"
+    );
 }
