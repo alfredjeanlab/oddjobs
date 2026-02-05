@@ -533,8 +533,8 @@ async fn handle_request(
 
 /// Load a runbook, falling back to the known project root for the namespace.
 ///
-/// Tries `load_fn(project_root)` first; if that fails, looks up the known root
-/// for the namespace in materialized state (supports `--project` from a different
+/// When the requested namespace differs from what would be resolved from `project_root`,
+/// prefers the known project root for that namespace (supports `--project` from a different
 /// directory). On total failure, calls `suggest_fn` to generate a "did you mean" hint.
 fn load_runbook_with_fallback(
     project_root: &Path,
@@ -543,16 +543,32 @@ fn load_runbook_with_fallback(
     load_fn: impl Fn(&Path) -> Result<oj_runbook::Runbook, String>,
     suggest_fn: impl FnOnce() -> String,
 ) -> Result<(oj_runbook::Runbook, PathBuf), Response> {
-    match load_fn(project_root) {
-        Ok(rb) => Ok((rb, project_root.to_path_buf())),
+    // Check if the requested namespace differs from what project_root would resolve to.
+    // This handles `--project <ns>` invoked from a different project directory.
+    let project_namespace = oj_core::namespace::resolve_namespace(project_root);
+    let known_root = {
+        let st = state.lock();
+        st.project_root_for_namespace(namespace)
+    };
+
+    // Determine the preferred root: use known root when namespace doesn't match project_root
+    let (preferred_root, fallback_root) = if !namespace.is_empty() && namespace != project_namespace
+    {
+        // Namespace mismatch: prefer known root for the requested namespace
+        match known_root.as_deref() {
+            Some(known) => (known, Some(project_root)),
+            None => (project_root, None),
+        }
+    } else {
+        // Namespace matches or is empty: use project_root, fallback to known
+        (project_root, known_root.as_deref())
+    };
+
+    match load_fn(preferred_root) {
+        Ok(rb) => Ok((rb, preferred_root.to_path_buf())),
         Err(e) => {
-            let known_root = {
-                let st = state.lock();
-                st.project_root_for_namespace(namespace)
-            };
-            let alt_result = known_root
-                .as_deref()
-                .filter(|alt| *alt != project_root)
+            let alt_result = fallback_root
+                .filter(|alt| *alt != preferred_root)
                 .and_then(|alt| load_fn(alt).ok().map(|rb| (rb, alt.to_path_buf())));
             match alt_result {
                 Some(result) => Ok(result),

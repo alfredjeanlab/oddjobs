@@ -3,7 +3,7 @@
 
 //! Worker request handlers.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -127,7 +127,9 @@ fn handle_worker_start_all(
     event_bus: &EventBus,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
-    let runbook_dir = project_root.join(".oj/runbooks");
+    // Resolve the effective project root: prefer known root when namespace doesn't match
+    let effective_root = resolve_effective_project_root(project_root, namespace, state);
+    let runbook_dir = effective_root.join(".oj/runbooks");
     let workers = oj_runbook::collect_all_workers(&runbook_dir).unwrap_or_default();
 
     let mut started = Vec::new();
@@ -135,7 +137,7 @@ fn handle_worker_start_all(
 
     for (worker_name, _) in workers {
         match handle_worker_start(
-            project_root,
+            &effective_root,
             namespace,
             &worker_name,
             false,
@@ -158,6 +160,28 @@ fn handle_worker_start_all(
     }
 
     Ok(Response::WorkersStarted { started, skipped })
+}
+
+/// Resolve the effective project root based on namespace.
+///
+/// When the requested namespace differs from what would be resolved from `project_root`,
+/// returns the known project root for that namespace if available.
+fn resolve_effective_project_root(
+    project_root: &Path,
+    namespace: &str,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> PathBuf {
+    let project_namespace = oj_core::namespace::resolve_namespace(project_root);
+    if !namespace.is_empty() && namespace != project_namespace {
+        let known_root = {
+            let st = state.lock();
+            st.project_root_for_namespace(namespace)
+        };
+        if let Some(known) = known_root {
+            return known;
+        }
+    }
+    project_root.to_path_buf()
 }
 
 /// Handle a WorkerStop request.
