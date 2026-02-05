@@ -170,12 +170,12 @@ fn test_pipe_now_supported() {
     // Pipes are now supported, so this should parse successfully
     let result = Parser::parse("cmd1 | cmd2").unwrap();
     assert_eq!(result.commands.len(), 1);
-    // The result is a pipeline
+    // The result is a job
     let and_or = &result.commands[0];
     assert!(and_or.rest.is_empty());
     match &and_or.first.command {
-        Command::Pipeline(p) => assert_eq!(p.commands.len(), 2),
-        _ => panic!("Expected pipeline"),
+        Command::Job(p) => assert_eq!(p.commands.len(), 2),
+        _ => panic!("Expected job"),
     }
 }
 
@@ -380,7 +380,7 @@ fn test_nested_subshell_requires_separator() {
 }
 
 #[test]
-fn test_subshell_not_in_pipeline_segment() {
+fn test_subshell_not_in_job_segment() {
     // Subshell followed by pipe is not supported in this parser
     // (subshells are compound commands, not simple commands)
     let err = Parser::parse("(echo hello) | cat").unwrap_err();

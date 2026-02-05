@@ -8,7 +8,7 @@ use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, PipelineId, PromptType,
+    AgentId, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, JobId, PromptType,
     QuestionData, SessionId, TimerId,
 };
 use std::collections::HashMap;
@@ -68,45 +68,45 @@ where
             }
         }
 
-        // Look up pipeline ID for this agent
-        let Some(pipeline_id) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+        // Look up job ID for this agent
+        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
             tracing::warn!(agent_id = %agent_id, "received AgentStateChanged for unknown agent");
             return Ok(vec![]);
         };
 
-        let pipeline = self.require_pipeline(&pipeline_id)?;
+        let job = self.require_job(&job_id)?;
 
-        if pipeline.is_terminal() {
+        if job.is_terminal() {
             return Ok(vec![]);
         }
 
         // Verify this event is for the current step's agent, not a stale event
         // from a previous step's agent that hasn't been cleaned up yet.
-        let current_agent_id = pipeline
+        let current_agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_deref());
         if current_agent_id != Some(agent_id.as_str()) {
             tracing::debug!(
                 agent_id = %agent_id,
-                pipeline_id = %pipeline.id,
-                step = %pipeline.step,
+                job_id = %job.id,
+                step = %job.step,
                 current_agent = ?current_agent_id,
                 "dropping stale agent event (agent_id mismatch)"
             );
             return Ok(vec![]);
         }
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let agent_def = match monitor::get_agent_def(&runbook, &pipeline) {
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let agent_def = match monitor::get_agent_def(&runbook, &job) {
             Ok(def) => def.clone(),
             Err(_) => {
-                // Pipeline already advanced past the agent step
+                // Job already advanced past the agent step
                 return Ok(vec![]);
             }
         };
-        self.handle_monitor_state(&pipeline, &agent_def, MonitorState::from_agent_state(state))
+        self.handle_monitor_state(&job, &agent_def, MonitorState::from_agent_state(state))
             .await
     }
 
@@ -173,40 +173,40 @@ where
             }
         }
 
-        let Some(pipeline_id) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
             tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
             return Ok(vec![]);
         };
 
-        let pipeline = self.require_pipeline(&pipeline_id)?;
+        let job = self.require_job(&job_id)?;
 
-        // If pipeline already advanced, has a signal, or is already waiting for a decision, ignore
-        if pipeline.is_terminal()
-            || pipeline.action_tracker.agent_signal.is_some()
-            || pipeline.step_status.is_waiting()
+        // If job already advanced, has a signal, or is already waiting for a decision, ignore
+        if job.is_terminal()
+            || job.action_tracker.agent_signal.is_some()
+            || job.step_status.is_waiting()
         {
             return Ok(vec![]);
         }
 
         // Stale agent check
-        let current_agent_id = pipeline
+        let current_agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_deref());
         if current_agent_id != Some(agent_id.as_str()) {
             tracing::debug!(
                 agent_id = %agent_id,
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 "dropping stale agent:idle (agent_id mismatch)"
             );
             return Ok(vec![]);
         }
 
         // Deduplicate: if grace timer already pending, skip
-        if pipeline.idle_grace_log_size.is_some() {
+        if job.idle_grace_log_size.is_some() {
             tracing::debug!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 "idle grace timer already pending, deduplicating"
             );
             return Ok(vec![]);
@@ -218,15 +218,15 @@ where
             .get_session_log_size(agent_id)
             .await
             .unwrap_or(0);
-        let pid = PipelineId::new(&pipeline.id);
+        let pid = JobId::new(&job.id);
         self.lock_state_mut(|state| {
-            if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+            if let Some(p) = state.jobs.get_mut(pid.as_str()) {
                 p.idle_grace_log_size = Some(log_size);
             }
         });
 
         tracing::debug!(
-            pipeline_id = %pipeline.id,
+            job_id = %job.id,
             log_size,
             "setting idle grace timer"
         );
@@ -280,40 +280,40 @@ where
             }
         }
 
-        let Some(pipeline_id) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
             tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
             return Ok(vec![]);
         };
 
-        let pipeline = self.require_pipeline(&pipeline_id)?;
+        let job = self.require_job(&job_id)?;
 
-        // If pipeline already advanced, has a signal, or is already waiting for a decision, ignore
-        if pipeline.is_terminal()
-            || pipeline.action_tracker.agent_signal.is_some()
-            || pipeline.step_status.is_waiting()
+        // If job already advanced, has a signal, or is already waiting for a decision, ignore
+        if job.is_terminal()
+            || job.action_tracker.agent_signal.is_some()
+            || job.step_status.is_waiting()
         {
             return Ok(vec![]);
         }
 
         // Stale agent check
-        let current_agent_id = pipeline
+        let current_agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_deref());
         if current_agent_id != Some(agent_id.as_str()) {
             tracing::debug!(
                 agent_id = %agent_id,
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 "dropping stale agent:prompt (agent_id mismatch)"
             );
             return Ok(vec![]);
         }
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let agent_def = monitor::get_agent_def(&runbook, &pipeline)?.clone();
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let agent_def = monitor::get_agent_def(&runbook, &job)?.clone();
         self.handle_monitor_state(
-            &pipeline,
+            &job,
             &agent_def,
             MonitorState::Prompting {
                 prompt_type: prompt_type.clone(),
@@ -325,7 +325,7 @@ where
 
     /// Handle agent:stop — fired when on_stop=escalate and agent tries to exit.
     ///
-    /// Escalates to human: sends notification and sets pipeline/agent_run to waiting.
+    /// Escalates to human: sends notification and sets job/agent_run to waiting.
     /// Idempotent: skips if already in waiting/escalated status.
     pub(crate) async fn handle_agent_stop_hook(
         &self,
@@ -361,42 +361,42 @@ where
             }
         }
 
-        // Pipeline agent
-        let Some(pipeline_id_str) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+        // Job agent
+        let Some(job_id_str) = self.agent_jobs.lock().get(agent_id).cloned() else {
             return Ok(vec![]);
         };
-        let pipeline = self.require_pipeline(&pipeline_id_str)?;
+        let job = self.require_job(&job_id_str)?;
 
-        if pipeline.is_terminal() || pipeline.step_status.is_waiting() {
+        if job.is_terminal() || job.step_status.is_waiting() {
             return Ok(vec![]); // Already escalated or terminal — no-op
         }
 
         // Stale agent check
-        let current_agent_id = pipeline
+        let current_agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_deref());
         if current_agent_id != Some(agent_id.as_str()) {
             return Ok(vec![]);
         }
 
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
         let effects = vec![
             Effect::Notify {
-                title: format!("Pipeline needs attention: {}", pipeline.name),
+                title: format!("Job needs attention: {}", job.name),
                 message: "Agent tried to stop without signaling completion".to_string(),
             },
             Effect::Emit {
                 event: Event::StepWaiting {
-                    pipeline_id: pipeline_id.clone(),
-                    step: pipeline.step.clone(),
+                    job_id: job_id.clone(),
+                    step: job.step.clone(),
                     reason: Some("on_stop: escalate".to_string()),
                     decision_id: None,
                 },
             },
             Effect::CancelTimer {
-                id: TimerId::exit_deferred(&pipeline_id),
+                id: TimerId::exit_deferred(&job_id),
             },
         ];
         Ok(self.executor.execute_all(effects).await?)
@@ -405,14 +405,14 @@ where
     /// Handle resume for agent step: nudge if alive, recover if dead
     pub(crate) async fn handle_agent_resume(
         &self,
-        pipeline: &oj_core::Pipeline,
+        job: &oj_core::Job,
         step: &str,
         _agent_name: &str,
         message: &str,
         input: &HashMap<String, String>,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Get agent_id from step history (it's a UUID stored when the agent was spawned)
-        let agent_id = pipeline
+        let agent_id = job
             .step_history
             .iter()
             .rfind(|r| r.name == step)
@@ -428,7 +428,7 @@ where
         match agent_state {
             Some(AgentState::Working) | Some(AgentState::WaitingForInput) => {
                 // Agent alive: nudge
-                let session_id = pipeline
+                let session_id = job
                     .session_id
                     .as_ref()
                     .ok_or_else(|| RuntimeError::InvalidRequest("no session for nudge".into()))?;
@@ -441,11 +441,11 @@ where
                     .await?;
 
                 // Update status to Running
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let job_id = JobId::new(&job.id);
                 self.executor
                     .execute(Effect::Emit {
                         event: Event::StepStarted {
-                            pipeline_id: pipeline_id.clone(),
+                            job_id: job_id.clone(),
                             step: step.to_string(),
                             agent_id: None,
                             agent_name: None,
@@ -456,12 +456,12 @@ where
                 // Restart liveness monitoring
                 self.executor
                     .execute(Effect::SetTimer {
-                        id: TimerId::liveness(&pipeline_id),
+                        id: TimerId::liveness(&job_id),
                         duration: crate::spawn::LIVENESS_INTERVAL,
                     })
                     .await?;
 
-                tracing::info!(pipeline_id = %pipeline.id, "nudged agent");
+                tracing::info!(job_id = %job.id, "nudged agent");
                 Ok(vec![])
             }
             _ => {
@@ -475,7 +475,7 @@ where
                 );
 
                 // Kill old session if it exists
-                if let Some(session_id) = &pipeline.session_id {
+                if let Some(session_id) = &job.session_id {
                     let _ = self
                         .executor
                         .execute(Effect::KillSession {
@@ -485,13 +485,13 @@ where
                 }
 
                 // Re-spawn agent in same workspace
-                let execution_dir = self.execution_dir(pipeline);
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let execution_dir = self.execution_dir(job);
+                let job_id = JobId::new(&job.id);
                 let result = self
-                    .start_step(&pipeline_id, step, &new_inputs, &execution_dir)
+                    .start_step(&job_id, step, &new_inputs, &execution_dir)
                     .await?;
 
-                tracing::info!(pipeline_id = %pipeline.id, "resumed agent");
+                tracing::info!(job_id = %job.id, "resumed agent");
                 Ok(result)
             }
         }

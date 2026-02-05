@@ -121,11 +121,11 @@ async fn sequential_file_creation_chain() {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3: Pipeline and Redirection Tests
+// Phase 3: Job and Redirection Tests
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn pipeline_with_grep() {
+async fn job_with_grep() {
     // Pattern: echo content | grep pattern
     let result = ShellExecutor::new()
         .execute_str("echo 'hello world' | grep world")
@@ -144,7 +144,7 @@ async fn pipeline_with_grep() {
 }
 
 #[tokio::test]
-async fn pipeline_multi_stage() {
+async fn job_multi_stage() {
     // Pattern: cat file | grep pattern | wc -l
     let dir = test_dir();
     let file = abs_path(&dir, "data.txt");
@@ -165,8 +165,8 @@ async fn pipeline_multi_stage() {
 }
 
 #[tokio::test]
-async fn pipeline_exit_from_last_command() {
-    // Pattern: verify exit code semantics from last pipeline stage
+async fn job_exit_from_last_command() {
+    // Pattern: verify exit code semantics from last job stage
 
     // `echo hello | true` → exit 0
     let result = ShellExecutor::new()
@@ -633,7 +633,7 @@ async fn uat_style_artifact_creation() {
 }
 
 #[tokio::test]
-async fn complex_pipeline_with_variables() {
+async fn complex_job_with_variables() {
     // Combine variables, pipes, and redirects
     let dir = test_dir();
     let file = abs_path(&dir, "data.txt");
@@ -703,7 +703,7 @@ EOF"#,
 }
 
 #[tokio::test]
-async fn subshell_with_pipeline() {
+async fn subshell_with_job() {
     // Pattern: (cmd1 | cmd2)
     let result = ShellExecutor::new()
         .execute_str("(echo hello world | grep hello)")

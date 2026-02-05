@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use oj_core::{Event, PipelineId};
+use oj_core::{Event, JobId};
 
 #[test]
 fn cron_started_creates_record() {
@@ -12,8 +12,8 @@ fn cron_started_creates_record() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
 
@@ -24,7 +24,7 @@ fn cron_started_creates_record() {
     assert_eq!(record.namespace, "myns");
     assert_eq!(record.status, "running");
     assert_eq!(record.interval, "30m");
-    assert_eq!(record.pipeline_name, "cleanup");
+    assert_eq!(record.job_name, "cleanup");
 }
 
 #[test]
@@ -35,8 +35,8 @@ fn cron_stopped_updates_status() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -60,8 +60,8 @@ fn cron_started_is_idempotent() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -71,8 +71,8 @@ fn cron_started_is_idempotent() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "def456".to_string(),
         interval: "1h".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -89,8 +89,8 @@ fn cron_deleted_removes_record() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
 
@@ -117,8 +117,8 @@ fn cron_deleted_empty_namespace() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -146,7 +146,7 @@ fn cron_fired_is_noop_for_state() {
     let mut state = MaterializedState::default();
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
-        pipeline_id: PipelineId::new("pipe-123"),
+        job_id: JobId::new("pipe-123"),
         agent_run_id: None,
         namespace: String::new(),
     });
@@ -162,8 +162,8 @@ fn cron_fired_updates_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -171,7 +171,7 @@ fn cron_fired_updates_last_fired_at() {
 
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
-        pipeline_id: PipelineId::new("pipe-123"),
+        job_id: JobId::new("pipe-123"),
         agent_run_id: None,
         namespace: String::new(),
     });
@@ -187,8 +187,8 @@ fn cron_started_sets_started_at_ms() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
@@ -203,14 +203,14 @@ fn cron_restart_preserves_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 
     state.apply_event(&Event::CronFired {
         cron_name: "janitor".to_string(),
-        pipeline_id: PipelineId::new("pipe-123"),
+        job_id: JobId::new("pipe-123"),
         agent_run_id: None,
         namespace: String::new(),
     });
@@ -224,8 +224,8 @@ fn cron_restart_preserves_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        pipeline_name: "cleanup".to_string(),
-        run_target: "pipeline:cleanup".to_string(),
+        job_name: "cleanup".to_string(),
+        run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
 

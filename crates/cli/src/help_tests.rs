@@ -47,7 +47,7 @@ fn all_commands_assigned_to_section() {
             Commands::Show { .. } => "Actions",
             Commands::Peek { .. } => "Actions",
             Commands::Attach { .. } => "Actions",
-            Commands::Pipeline(_) => "Resources",
+            Commands::Job(_) => "Resources",
             Commands::Agent(_) => "Resources",
             Commands::Session(_) => "Resources",
             Commands::Workspace(_) => "Resources",
@@ -132,8 +132,8 @@ fn commands_has_resources_section() {
         "Should have Resources section"
     );
     assert!(
-        result.contains("  pipeline "),
-        "Resources should contain pipeline"
+        result.contains("  job "),
+        "Resources should contain job"
     );
     assert!(
         result.contains("  agent "),

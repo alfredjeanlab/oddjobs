@@ -4,7 +4,7 @@
 use crate::{parse_runbook, parse_runbook_with_format, Format, ParseError};
 
 // ============================================================================
-// Error: pipeline-only namespaces rejected in command.run
+// Error: job-only namespaces rejected in command.run
 // ============================================================================
 
 #[test]
@@ -67,8 +67,8 @@ run = "echo ${local.repo}"
         msg
     );
     assert!(
-        msg.contains("pipeline"),
-        "error should mention pipeline context: {}",
+        msg.contains("job"),
+        "error should mention job context: {}",
         msg
     );
 }
@@ -172,25 +172,25 @@ fn parse_command_run_allows_simple_vars() {
     let toml = r#"
 [command.build]
 args = "<name>"
-run = "echo ${name} ${pipeline_id}"
+run = "echo ${name} ${job_id}"
 "#;
     let runbook = parse_runbook(toml).unwrap();
     assert!(runbook.commands.contains_key("build"));
 }
 
 #[test]
-fn parse_command_pipeline_directive_allows_var_namespace() {
-    // ${var.*} in pipeline steps is fine — it's the pipeline's concern, not the command's
+fn parse_command_job_directive_allows_var_namespace() {
+    // ${var.*} in job steps is fine — it's the job's concern, not the command's
     let toml = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 vars = ["name"]
 name = "${var.name}"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo ${var.name}"
 "#;

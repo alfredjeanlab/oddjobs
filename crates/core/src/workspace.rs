@@ -5,7 +5,7 @@
 //!
 //! WorkspaceId is distinct from the workspace path (the workspace directory).
 //! A workspace represents a managed directory that may be used by one or more
-//! pipelines and has its own lifecycle independent of pipeline completion.
+//! jobs and has its own lifecycle independent of job completion.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,8 +13,8 @@ use std::fmt;
 crate::define_id! {
     /// Unique identifier for a workspace instance.
     ///
-    /// Workspaces are managed directories that can outlive pipelines (for debugging
-    /// failed runs) or be shared across related pipeline invocations.
+    /// Workspaces are managed directories that can outlive jobs (for debugging
+    /// failed runs) or be shared across related job invocations.
     pub struct WorkspaceId;
 }
 
@@ -26,9 +26,9 @@ pub enum WorkspaceStatus {
     Creating,
     /// Workspace is ready for use
     Ready,
-    /// Workspace is actively being used by a pipeline or agent
+    /// Workspace is actively being used by a job or agent
     InUse {
-        /// ID of the pipeline or agent using this workspace
+        /// ID of the job or agent using this workspace
         by: String,
     },
     /// Workspace is being cleaned up (directory removal in progress)

@@ -5,24 +5,24 @@
 
 use crate::prelude::*;
 
-/// Runbook: persisted queue + worker + shell-only pipeline.
-/// Pipeline steps: work → done.
+/// Runbook: persisted queue + worker + shell-only job.
+/// Job steps: work → done.
 /// `work` runs a command provided via the queue item's `cmd` var.
 /// `done` always succeeds (echo done).
-const QUEUE_PIPELINE_RUNBOOK: &str = r#"
+const QUEUE_JOB_RUNBOOK: &str = r#"
 [queue.tasks]
 type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
 source = { queue = "tasks" }
-handler = { pipeline = "process" }
+handler = { job = "process" }
 concurrency = 1
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
@@ -35,7 +35,7 @@ vars = ["cmd"]
 "#;
 
 /// Scenario for a slow agent that sleeps for a while.
-/// The sleep gives us time to kill the daemon mid-pipeline.
+/// The sleep gives us time to kill the daemon mid-job.
 const SLOW_AGENT_SCENARIO: &str = r#"
 name = "slow-agent"
 trusted = true
@@ -57,9 +57,9 @@ mode = "live"
 auto_approve = true
 "#;
 
-/// Queue-driven agent pipeline for crash recovery testing.
+/// Queue-driven agent job for crash recovery testing.
 /// Worker takes queue items and runs an agent that sleeps.
-/// on_dead = "done" advances the pipeline when the agent exits after crash.
+/// on_dead = "done" advances the job when the agent exits after crash.
 fn crash_recovery_queue_runbook(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
@@ -69,13 +69,13 @@ vars = ["name"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ pipeline = "process" }}
+handler = {{ job = "process" }}
 concurrency = 1
 
-[pipeline.process]
+[job.process]
 vars = ["name"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = {{ agent = "slow" }}
 
@@ -96,7 +96,7 @@ on_dead = "done"
 fn completed_queue_items_persist_across_restart() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -151,7 +151,7 @@ fn completed_queue_items_persist_across_restart() {
 fn dead_queue_items_persist_across_restart() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -262,7 +262,7 @@ fn pending_queue_items_persist_across_restart() {
 fn worker_resumes_and_processes_new_items_after_restart() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -317,9 +317,9 @@ fn worker_resumes_and_processes_new_items_after_restart() {
 // Test 5: Active queue item completes after daemon crash recovery
 // =============================================================================
 
-/// When the daemon crashes while a queue item's pipeline is running an agent,
+/// When the daemon crashes while a queue item's job is running an agent,
 /// restarting the daemon triggers reconciliation which detects the dead agent,
-/// fires on_dead = "done" to advance the pipeline, and the worker marks the
+/// fires on_dead = "done" to advance the job, and the worker marks the
 /// queue item as completed.
 #[test]
 fn active_queue_item_completes_after_daemon_crash() {
@@ -342,19 +342,19 @@ fn active_queue_item_completes_after_daemon_crash() {
         .args(&["queue", "push", "tasks", r#"{"name": "crash-test"}"#])
         .passes();
 
-    // Wait for the queue item to become active and the pipeline to reach running
+    // Wait for the queue item to become active and the job to reach running
     let active = wait_for(SPEC_WAIT_MAX_MS, || {
         let items = temp
             .oj()
             .args(&["queue", "show", "tasks"])
             .passes()
             .stdout();
-        let pipelines = temp.oj().args(&["pipeline", "list"]).passes().stdout();
-        items.contains("active") && pipelines.contains("running")
+        let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
+        items.contains("active") && jobs.contains("running")
     });
     assert!(
         active,
-        "queue item should be active with a running pipeline"
+        "queue item should be active with a running job"
     );
 
     // Kill the daemon with SIGKILL (simulates crash)
@@ -379,7 +379,7 @@ fn active_queue_item_completes_after_daemon_crash() {
     // Restart the daemon — triggers reconciliation
     temp.oj().args(&["daemon", "start"]).passes();
 
-    // Wait for the pipeline to complete via recovery (on_dead = "done")
+    // Wait for the job to complete via recovery (on_dead = "done")
     // and the queue item to reach completed status
     let item_completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         let out = temp
@@ -400,8 +400,8 @@ fn active_queue_item_completes_after_daemon_crash() {
                 .stdout()
         );
         eprintln!(
-            "=== PIPELINES ===\n{}\n=== END PIPELINES ===",
-            temp.oj().args(&["pipeline", "list"]).passes().stdout()
+            "=== JOBS ===\n{}\n=== END JOBS ===",
+            temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
     assert!(

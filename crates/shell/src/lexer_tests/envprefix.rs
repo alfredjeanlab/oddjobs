@@ -127,7 +127,7 @@ lex_tests! {
         TokenKind::Word("cmd".into()),
         TokenKind::Word("VAR=value".into()),
     ],
-    assignment_in_pipeline: "VAR=value cmd | other" => [
+    assignment_in_job: "VAR=value cmd | other" => [
         TokenKind::Word("VAR=value".into()),
         TokenKind::Word("cmd".into()),
         TokenKind::Pipe,

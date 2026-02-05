@@ -10,10 +10,10 @@
 
 cron "architect" {
   interval = "24h"
-  run      = { pipeline = "architect-review" }
+  run      = { job = "architect-review" }
 }
 
-pipeline "architect-review" {
+job "architect-review" {
   notify {
     on_fail = "Architect review failed"
   }

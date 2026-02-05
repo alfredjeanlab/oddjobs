@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Session monitoring for agent pipelines.
+//! Session monitoring for agent jobs.
 //!
 //! Handles detection of agent state from session logs and triggers
 //! appropriate actions (nudge, resume, escalate, etc.).
@@ -9,7 +9,7 @@
 use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::RuntimeError;
 use oj_core::{
-    AgentError, AgentState, Effect, Event, Pipeline, PipelineId, PromptType, QuestionData,
+    AgentError, AgentState, Effect, Event, Job, JobId, PromptType, QuestionData,
     SessionId, TimerId,
 };
 use oj_runbook::{ActionConfig, AgentAction, AgentDef, ErrorType, RunDirective, Runbook};
@@ -102,17 +102,17 @@ pub fn agent_failure_to_error_type(failure: &AgentError) -> Option<ErrorType> {
     }
 }
 
-/// Get the current agent definition for a pipeline step
+/// Get the current agent definition for a job step
 pub fn get_agent_def<'a>(
     runbook: &'a Runbook,
-    pipeline: &Pipeline,
+    job: &Job,
 ) -> Result<&'a AgentDef, RuntimeError> {
-    let pipeline_def = runbook
-        .get_pipeline(&pipeline.kind)
-        .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline.kind.clone()))?;
+    let job_def = runbook
+        .get_job(&job.kind)
+        .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
-    let step_def = pipeline_def.get_step(&pipeline.step).ok_or_else(|| {
-        RuntimeError::PipelineNotFound(format!("step {} not found", pipeline.step))
+    let step_def = job_def.get_step(&job.step).ok_or_else(|| {
+        RuntimeError::JobNotFound(format!("step {} not found", job.step))
     })?;
 
     // Extract agent name from run directive
@@ -120,7 +120,7 @@ pub fn get_agent_def<'a>(
         RunDirective::Agent { agent, .. } => agent,
         _ => {
             return Err(RuntimeError::InvalidRunDirective {
-                context: format!("step {}", pipeline.step),
+                context: format!("step {}", job.step),
                 directive: "not an agent step".to_string(),
             })
         }
@@ -133,7 +133,7 @@ pub fn get_agent_def<'a>(
 
 /// Build effects for an agent action (nudge, recover, escalate, etc.)
 pub fn build_action_effects(
-    pipeline: &Pipeline,
+    job: &Job,
     agent_def: &AgentDef,
     action_config: &ActionConfig,
     trigger: &str,
@@ -142,10 +142,10 @@ pub fn build_action_effects(
 ) -> Result<ActionEffects, RuntimeError> {
     let action = action_config.action();
     let message = action_config.message();
-    let pipeline_id = PipelineId::new(&pipeline.id);
+    let job_id = JobId::new(&job.id);
 
     tracing::info!(
-        pipeline_id = %pipeline.id,
+        job_id = %job.id,
         trigger = trigger,
         action = ?action,
         "building agent action effects"
@@ -153,10 +153,10 @@ pub fn build_action_effects(
 
     match action {
         AgentAction::Nudge => {
-            let session_id = pipeline
+            let session_id = job
                 .session_id
                 .as_ref()
-                .ok_or_else(|| RuntimeError::PipelineNotFound("no session".into()))?;
+                .ok_or_else(|| RuntimeError::JobNotFound("no session".into()))?;
 
             let nudge_message = message.unwrap_or("Please continue with the task.");
             Ok(ActionEffects::Nudge {
@@ -167,9 +167,9 @@ pub fn build_action_effects(
             })
         }
 
-        AgentAction::Done => Ok(ActionEffects::AdvancePipeline),
+        AgentAction::Done => Ok(ActionEffects::AdvanceJob),
 
-        AgentAction::Fail => Ok(ActionEffects::FailPipeline {
+        AgentAction::Fail => Ok(ActionEffects::FailJob {
             error: trigger.to_string(),
         }),
 
@@ -190,14 +190,14 @@ pub fn build_action_effects(
             }
 
             // Look up previous Claude session ID from step history
-            let resume_session_id = pipeline
+            let resume_session_id = job
                 .step_history
                 .iter()
-                .rfind(|r| r.name == pipeline.step)
+                .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.clone());
 
             Ok(ActionEffects::Resume {
-                kill_session: pipeline.session_id.clone(),
+                kill_session: job.session_id.clone(),
                 agent_name: agent_def.name.clone(),
                 input: new_inputs,
                 resume_session_id: if use_resume { resume_session_id } else { None },
@@ -206,7 +206,7 @@ pub fn build_action_effects(
 
         AgentAction::Escalate => {
             tracing::warn!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 trigger = trigger,
                 message = ?message,
                 "escalating to human — creating decision"
@@ -248,27 +248,27 @@ pub fn build_action_effects(
             };
 
             let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
-                pipeline_id.clone(),
-                pipeline.name.clone(),
+                job_id.clone(),
+                job.name.clone(),
                 escalation_trigger,
             )
-            .agent_id(pipeline.session_id.clone().unwrap_or_default())
-            .namespace(pipeline.namespace.clone())
+            .agent_id(job.session_id.clone().unwrap_or_default())
+            .namespace(job.namespace.clone())
             .build();
 
             let effects = vec![
-                // Emit DecisionCreated (this also sets pipeline to Waiting)
+                // Emit DecisionCreated (this also sets job to Waiting)
                 Effect::Emit {
                     event: decision_event,
                 },
                 // Desktop notification on decision created
                 Effect::Notify {
-                    title: format!("Decision needed: {}", pipeline.name),
-                    message: format!("Pipeline requires attention ({})", trigger),
+                    title: format!("Decision needed: {}", job.name),
+                    message: format!("Job requires attention ({})", trigger),
                 },
                 // Cancel exit-deferred timer (agent may still be alive)
                 Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&pipeline_id),
+                    id: TimerId::exit_deferred(&job_id),
                 },
             ];
 
@@ -279,7 +279,7 @@ pub fn build_action_effects(
             let command = action_config
                 .run()
                 .ok_or_else(|| RuntimeError::InvalidRunDirective {
-                    context: format!("pipeline {}", pipeline.id),
+                    context: format!("job {}", job.id),
                     directive: "gate action requires a 'run' field".to_string(),
                 })?
                 .to_string();
@@ -425,21 +425,21 @@ pub fn build_agent_run_notify_effect(
 
 /// Build an agent notification effect if a message template is configured.
 pub fn build_agent_notify_effect(
-    pipeline: &Pipeline,
+    job: &Job,
     agent_def: &AgentDef,
     message_template: Option<&String>,
 ) -> Option<Effect> {
     let template = message_template?;
-    let mut vars: HashMap<String, String> = pipeline
+    let mut vars: HashMap<String, String> = job
         .vars
         .iter()
         .map(|(k, v)| (format!("var.{}", k), v.clone()))
         .collect();
-    vars.insert("pipeline_id".to_string(), pipeline.id.clone());
-    vars.insert("name".to_string(), pipeline.name.clone());
+    vars.insert("job_id".to_string(), job.id.clone());
+    vars.insert("name".to_string(), job.name.clone());
     vars.insert("agent".to_string(), agent_def.name.clone());
-    vars.insert("step".to_string(), pipeline.step.clone());
-    if let Some(err) = &pipeline.error {
+    vars.insert("step".to_string(), job.step.clone());
+    if let Some(err) = &job.error {
         vars.insert("error".to_string(), err.clone());
     }
 
@@ -455,10 +455,10 @@ pub fn build_agent_notify_effect(
 pub enum ActionEffects {
     /// Send nudge message to session
     Nudge { effects: Vec<Effect> },
-    /// Advance to next pipeline step
-    AdvancePipeline,
-    /// Fail the pipeline with an error
-    FailPipeline { error: String },
+    /// Advance to next job step
+    AdvanceJob,
+    /// Fail the job with an error
+    FailJob { error: String },
     /// Resume by re-spawning agent with --resume (keeps workspace, preserves conversation)
     Resume {
         kill_session: Option<String>,

@@ -15,8 +15,8 @@ use thiserror::Error;
 #[path = "protocol_status.rs"]
 mod status;
 pub use status::{
-    AgentEntry, AgentStatusEntry, CronEntry, CronSummary, NamespaceStatus, OrphanAgent,
-    OrphanSummary, PipelineEntry, PipelineStatusEntry, ProjectSummary, QueueItemEntry, QueueStatus,
+    AgentEntry, AgentStatusEntry, CronEntry, CronSummary, JobEntry, JobStatusEntry,
+    NamespaceStatus, OrphanAgent, OrphanSummary, ProjectSummary, QueueItemEntry, QueueStatus,
     WorkerEntry,
 };
 
@@ -52,8 +52,8 @@ pub enum Request {
     /// Send input to an agent
     AgentSend { agent_id: String, message: String },
 
-    /// Resume monitoring for an escalated pipeline
-    PipelineResume {
+    /// Resume monitoring for an escalated job
+    JobResume {
         id: String,
         /// Message for nudge/recovery (required for agent steps)
         message: Option<String>,
@@ -62,8 +62,8 @@ pub enum Request {
         vars: HashMap<String, String>,
     },
 
-    /// Cancel one or more running pipelines
-    PipelineCancel { ids: Vec<String> },
+    /// Cancel one or more running jobs
+    JobCancel { ids: Vec<String> },
 
     /// Run a command from a project's runbook
     RunCommand {
@@ -102,14 +102,14 @@ pub enum Request {
         with_color: bool,
     },
 
-    /// Prune old terminal pipelines and their log files
-    PipelinePrune {
-        /// Prune all terminal pipelines regardless of age
+    /// Prune old terminal jobs and their log files
+    JobPrune {
+        /// Prune all terminal jobs regardless of age
         all: bool,
-        /// Prune all failed pipelines regardless of age
+        /// Prune all failed jobs regardless of age
         #[serde(default)]
         failed: bool,
-        /// Prune orphaned pipelines (breadcrumb exists but no daemon state)
+        /// Prune orphaned jobs (breadcrumb exists but no daemon state)
         #[serde(default)]
         orphans: bool,
         /// Preview only -- don't actually delete
@@ -119,15 +119,15 @@ pub enum Request {
         namespace: Option<String>,
     },
 
-    /// Prune agent logs from terminal pipelines
+    /// Prune agent logs from terminal jobs
     AgentPrune {
-        /// Prune all agents from terminal pipelines regardless of age
+        /// Prune all agents from terminal jobs regardless of age
         all: bool,
         /// Preview only -- don't actually delete
         dry_run: bool,
     },
 
-    /// Prune old workspaces from terminal pipelines
+    /// Prune old workspaces from terminal jobs
     WorkspacePrune {
         /// Prune all terminal workspaces regardless of age
         all: bool,
@@ -214,7 +214,7 @@ pub enum Request {
         dry_run: bool,
     },
 
-    /// Run the cron's pipeline once immediately (no timer)
+    /// Run the cron's job once immediately (no timer)
     CronOnce {
         project_root: PathBuf,
         #[serde(default)]
@@ -315,8 +315,8 @@ pub enum Request {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum Query {
-    ListPipelines,
-    GetPipeline {
+    ListJobs,
+    GetJob {
         id: String,
     },
     ListSessions,
@@ -328,13 +328,13 @@ pub enum Query {
     GetWorkspace {
         id: String,
     },
-    GetPipelineLogs {
+    GetJobLogs {
         id: String,
         /// Number of most recent lines to return (0 = all)
         lines: usize,
     },
     GetAgentLogs {
-        /// Pipeline ID (not agent_id anymore)
+        /// Job ID (not agent_id anymore)
         id: String,
         /// Optional step filter (None = all steps)
         #[serde(default)]
@@ -364,11 +364,11 @@ pub enum Query {
     GetAgent {
         agent_id: String,
     },
-    /// List agents across all pipelines
+    /// List agents across all jobs
     ListAgents {
-        /// Filter by pipeline ID prefix
+        /// Filter by job ID prefix
         #[serde(default)]
-        pipeline_id: Option<String>,
+        job_id: Option<String>,
         /// Filter by status (e.g. "running", "completed", "failed", "waiting")
         #[serde(default)]
         status: Option<String>,
@@ -402,9 +402,9 @@ pub enum Query {
     StatusOverview,
     /// List all projects with active work
     ListProjects,
-    /// List orphaned pipelines detected from breadcrumbs at startup
+    /// List orphaned jobs detected from breadcrumbs at startup
     ListOrphans,
-    /// Dismiss an orphaned pipeline by ID
+    /// Dismiss an orphaned job by ID
     DismissOrphan {
         id: String,
     },
@@ -446,13 +446,11 @@ pub enum Response {
     /// Event was processed
     Event { accepted: bool },
 
-    /// List of pipelines
-    Pipelines { pipelines: Vec<PipelineSummary> },
+    /// List of jobs
+    Jobs { jobs: Vec<JobSummary> },
 
-    /// Single pipeline details
-    Pipeline {
-        pipeline: Option<Box<PipelineDetail>>,
-    },
+    /// Single job details
+    Job { job: Option<Box<JobDetail>> },
 
     /// List of agents
     Agents { agents: Vec<AgentSummary> },
@@ -479,7 +477,7 @@ pub enum Response {
     /// Daemon status
     Status {
         uptime_secs: u64,
-        pipelines_active: usize,
+        jobs_active: usize,
         sessions_active: usize,
         #[serde(default)]
         orphan_count: usize,
@@ -489,10 +487,7 @@ pub enum Response {
     Error { message: String },
 
     /// Command started successfully
-    CommandStarted {
-        pipeline_id: String,
-        pipeline_name: String,
-    },
+    CommandStarted { job_id: String, job_name: String },
 
     /// Standalone agent run started successfully
     AgentRunStarted {
@@ -503,8 +498,8 @@ pub enum Response {
     /// Workspace(s) deleted
     WorkspacesDropped { dropped: Vec<WorkspaceEntry> },
 
-    /// Pipeline log contents
-    PipelineLogs {
+    /// Job log contents
+    JobLogs {
         /// Path to the log file (for --follow mode)
         log_path: PathBuf,
         /// Log content (most recent N lines)
@@ -526,9 +521,9 @@ pub enum Response {
     /// Session pane snapshot
     SessionPeek { output: String },
 
-    /// Pipeline prune result
-    PipelinesPruned {
-        pruned: Vec<PipelineEntry>,
+    /// Job prune result
+    JobsPruned {
+        pruned: Vec<JobEntry>,
         skipped: usize,
     },
 
@@ -563,10 +558,10 @@ pub enum Response {
     },
 
     /// Response for bulk cancel operations
-    PipelinesCancelled {
-        /// IDs of successfully cancelled pipelines
+    JobsCancelled {
+        /// IDs of successfully cancelled jobs
         cancelled: Vec<String>,
-        /// IDs of pipelines that were already terminal (no-op)
+        /// IDs of jobs that were already terminal (no-op)
         already_terminal: Vec<String>,
         /// IDs that were not found
         not_found: Vec<String>,
@@ -642,7 +637,7 @@ pub enum Response {
         namespaces: Vec<NamespaceStatus>,
     },
 
-    /// List of orphaned pipelines detected from breadcrumbs
+    /// List of orphaned jobs detected from breadcrumbs
     Orphans { orphans: Vec<OrphanSummary> },
 
     /// List of projects with active work
@@ -676,9 +671,9 @@ pub enum Response {
     },
 }
 
-/// Summary of a pipeline for listing
+/// Summary of a job for listing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PipelineSummary {
+pub struct JobSummary {
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -695,9 +690,9 @@ pub struct PipelineSummary {
     pub retry_count: u32,
 }
 
-/// Detailed pipeline information
+/// Detailed job information
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PipelineDetail {
+pub struct JobDetail {
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -757,8 +752,8 @@ impl From<&StepRecord> for StepRecordDetail {
 pub struct AgentDetail {
     pub agent_id: String,
     pub agent_name: Option<String>,
-    pub pipeline_id: String,
-    pub pipeline_name: String,
+    pub job_id: String,
+    pub job_name: String,
     pub step_name: String,
     pub namespace: Option<String>,
     pub status: String,
@@ -774,12 +769,12 @@ pub struct AgentDetail {
     pub updated_at_ms: u64,
 }
 
-/// Summary of agent activity for a pipeline step
+/// Summary of agent activity for a job step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentSummary {
-    /// Pipeline that owns this agent
+    /// Job that owns this agent
     #[serde(default)]
-    pub pipeline_id: String,
+    pub job_id: String,
     /// Step name that spawned this agent
     pub step_name: String,
     /// Agent instance ID
@@ -811,8 +806,8 @@ pub struct SessionSummary {
     pub id: String,
     #[serde(default)]
     pub namespace: String,
-    pub pipeline_id: Option<String>,
-    /// Most recent activity timestamp (from associated pipeline)
+    pub job_id: Option<String>,
+    /// Most recent activity timestamp (from associated job)
     #[serde(default)]
     pub updated_at_ms: u64,
 }
@@ -877,8 +872,8 @@ pub struct QueueSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionSummary {
     pub id: String,
-    pub pipeline_id: String,
-    pub pipeline_name: String,
+    pub job_id: String,
+    pub job_name: String,
     pub source: String,
     pub summary: String,
     pub created_at_ms: u64,
@@ -890,8 +885,8 @@ pub struct DecisionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionDetail {
     pub id: String,
-    pub pipeline_id: String,
-    pub pipeline_name: String,
+    pub job_id: String,
+    pub job_name: String,
     pub agent_id: Option<String>,
     pub source: String,
     pub context: String,
@@ -923,7 +918,7 @@ pub struct WorkerSummary {
     pub status: String,
     pub active: usize,
     pub concurrency: u32,
-    /// Most recent activity timestamp (from active pipelines)
+    /// Most recent activity timestamp (from active jobs)
     #[serde(default)]
     pub updated_at_ms: u64,
 }

@@ -6,10 +6,10 @@ queue "github-prs" {
 
 worker "github-merge" {
   source  = { queue = "github-prs" }
-  handler = { pipeline = "merge" }
+  handler = { job = "merge" }
 }
 
-pipeline "merge" {
+job "merge" {
   vars = ["pull"]
 
   step "rebase" {

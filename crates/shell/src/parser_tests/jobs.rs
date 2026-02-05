@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Tests for pipelines, logical operators, and precedence.
+//! Tests for jobs, logical operators, and precedence.
 
-use super::helpers::{cmd_name, get_pipeline, get_simple_command};
-use super::macros::pipeline_tests;
+use super::helpers::{cmd_name, get_job, get_simple_command};
+use super::macros::job_tests;
 use crate::ast::{Command, LogicalOp, WordPart};
 use crate::parser::{ParseError, Parser};
 use crate::token::TokenKind;
 
 // =============================================================================
-// Macro-based Pipeline Tests
+// Macro-based Job Tests
 // =============================================================================
 
-pipeline_tests! {
-    macro_two_pipe: "a | b" => pipeline_cmds: 2,
-    macro_three_pipe: "a | b | c" => pipeline_cmds: 3,
-    macro_four_pipe: "a | b | c | d" => pipeline_cmds: 4,
+job_tests! {
+    macro_two_pipe: "a | b" => job_cmds: 2,
+    macro_three_pipe: "a | b | c" => job_cmds: 3,
+    macro_four_pipe: "a | b | c | d" => job_cmds: 4,
 }
 
 // ============================================================================
-// Basic Pipeline Tests
+// Basic Job Tests
 // ============================================================================
 
 #[test]
@@ -28,10 +28,10 @@ fn test_simple_pipe() {
     let result = Parser::parse("cmd1 | cmd2").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 2);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "cmd1");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "cmd2");
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 2);
+    assert_eq!(cmd_name(&job.commands[0]), "cmd1");
+    assert_eq!(cmd_name(&job.commands[1]), "cmd2");
 }
 
 #[test]
@@ -39,11 +39,11 @@ fn test_pipe_chain() {
     let result = Parser::parse("cmd1 | cmd2 | cmd3").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 3);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "cmd1");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "cmd2");
-    assert_eq!(cmd_name(&pipeline.commands[2]), "cmd3");
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 3);
+    assert_eq!(cmd_name(&job.commands[0]), "cmd1");
+    assert_eq!(cmd_name(&job.commands[1]), "cmd2");
+    assert_eq!(cmd_name(&job.commands[2]), "cmd3");
 }
 
 #[test]
@@ -51,32 +51,32 @@ fn test_pipe_with_args() {
     let result = Parser::parse("ls -la | grep foo | wc -l").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 3);
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 3);
 
-    assert_eq!(cmd_name(&pipeline.commands[0]), "ls");
-    assert_eq!(pipeline.commands[0].args.len(), 1);
+    assert_eq!(cmd_name(&job.commands[0]), "ls");
+    assert_eq!(job.commands[0].args.len(), 1);
     assert_eq!(
-        pipeline.commands[0].args[0].parts,
+        job.commands[0].args[0].parts,
         vec![WordPart::literal("-la")]
     );
 
-    assert_eq!(cmd_name(&pipeline.commands[1]), "grep");
-    assert_eq!(pipeline.commands[1].args.len(), 1);
+    assert_eq!(cmd_name(&job.commands[1]), "grep");
+    assert_eq!(job.commands[1].args.len(), 1);
 
-    assert_eq!(cmd_name(&pipeline.commands[2]), "wc");
-    assert_eq!(pipeline.commands[2].args.len(), 1);
+    assert_eq!(cmd_name(&job.commands[2]), "wc");
+    assert_eq!(job.commands[2].args.len(), 1);
 }
 
 #[test]
-fn test_variable_in_pipeline() {
+fn test_variable_in_job() {
     let result = Parser::parse("$CMD | cmd2").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 2);
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 2);
     assert!(matches!(
-        &pipeline.commands[0].name.parts[0],
+        &job.commands[0].name.parts[0],
         WordPart::Variable { name, .. } if name == "CMD"
     ));
 }
@@ -84,11 +84,11 @@ fn test_variable_in_pipeline() {
 #[test]
 fn test_pipe_span() {
     let result = Parser::parse("cat foo | grep bar").unwrap();
-    let pipeline = get_pipeline(&result.commands[0]);
+    let job = get_job(&result.commands[0]);
 
     // Span should cover from 'cat' to 'bar'
-    assert_eq!(pipeline.span.start, 0);
-    assert_eq!(pipeline.span.end, 18);
+    assert_eq!(job.span.start, 0);
+    assert_eq!(job.span.end, 18);
 }
 
 #[test]
@@ -124,15 +124,15 @@ fn test_simple_background() {
 }
 
 #[test]
-fn test_pipeline_background() {
+fn test_job_background() {
     let result = Parser::parse("cmd1 | cmd2 &").unwrap();
     assert_eq!(result.commands.len(), 1);
 
     let and_or = &result.commands[0];
     assert!(and_or.first.background);
 
-    let Command::Pipeline(p) = &and_or.first.command else {
-        panic!("Expected pipeline");
+    let Command::Job(p) = &and_or.first.command else {
+        panic!("Expected job");
     };
     assert_eq!(p.commands.len(), 2);
 }
@@ -351,13 +351,13 @@ fn test_pipe_binds_tighter_than_and() {
     assert_eq!(result.commands.len(), 1);
 
     let and_or = &result.commands[0];
-    // First item should be a pipeline
-    let Command::Pipeline(pipeline) = &and_or.first.command else {
-        panic!("Expected pipeline on left of AND");
+    // First item should be a job
+    let Command::Job(job) = &and_or.first.command else {
+        panic!("Expected job on left of AND");
     };
-    assert_eq!(pipeline.commands.len(), 2);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "a");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "b");
+    assert_eq!(job.commands.len(), 2);
+    assert_eq!(cmd_name(&job.commands[0]), "a");
+    assert_eq!(cmd_name(&job.commands[1]), "b");
 
     // Second item (after &&) should be simple command
     assert_eq!(and_or.rest.len(), 1);
@@ -381,15 +381,15 @@ fn test_pipe_binds_tighter_than_or() {
     };
     assert_eq!(cmd_name(a), "a");
 
-    // Second item (after ||) should be a pipeline
+    // Second item (after ||) should be a job
     assert_eq!(and_or.rest.len(), 1);
     assert_eq!(and_or.rest[0].0, LogicalOp::Or);
-    let Command::Pipeline(pipeline) = &and_or.rest[0].1.command else {
-        panic!("Expected pipeline on right of OR");
+    let Command::Job(job) = &and_or.rest[0].1.command else {
+        panic!("Expected job on right of OR");
     };
-    assert_eq!(pipeline.commands.len(), 2);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "b");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "c");
+    assert_eq!(job.commands.len(), 2);
+    assert_eq!(cmd_name(&job.commands[0]), "b");
+    assert_eq!(cmd_name(&job.commands[1]), "c");
 }
 
 #[test]
@@ -403,23 +403,23 @@ fn test_complex_precedence() {
     // Should be: (a | b), &&, (c | d), ||, (e | f)
     assert_eq!(and_or.rest.len(), 2);
 
-    // First: pipeline a | b
-    let Command::Pipeline(p1) = &and_or.first.command else {
-        panic!("Expected pipeline");
+    // First: job a | b
+    let Command::Job(p1) = &and_or.first.command else {
+        panic!("Expected job");
     };
     assert_eq!(p1.commands.len(), 2);
 
     // && (c | d)
     assert_eq!(and_or.rest[0].0, LogicalOp::And);
-    let Command::Pipeline(p2) = &and_or.rest[0].1.command else {
-        panic!("Expected pipeline");
+    let Command::Job(p2) = &and_or.rest[0].1.command else {
+        panic!("Expected job");
     };
     assert_eq!(p2.commands.len(), 2);
 
     // || (e | f)
     assert_eq!(and_or.rest[1].0, LogicalOp::Or);
-    let Command::Pipeline(p3) = &and_or.rest[1].1.command else {
-        panic!("Expected pipeline");
+    let Command::Job(p3) = &and_or.rest[1].1.command else {
+        panic!("Expected job");
     };
     assert_eq!(p3.commands.len(), 2);
 }
@@ -433,17 +433,17 @@ fn test_pipe_chain_with_and() {
 
     let and_or = &result.commands[0];
 
-    // First: pipeline a | b | c
-    let Command::Pipeline(p1) = &and_or.first.command else {
-        panic!("Expected pipeline");
+    // First: job a | b | c
+    let Command::Job(p1) = &and_or.first.command else {
+        panic!("Expected job");
     };
     assert_eq!(p1.commands.len(), 3);
 
     // && (d | e)
     assert_eq!(and_or.rest.len(), 1);
     assert_eq!(and_or.rest[0].0, LogicalOp::And);
-    let Command::Pipeline(p2) = &and_or.rest[0].1.command else {
-        panic!("Expected pipeline");
+    let Command::Job(p2) = &and_or.rest[0].1.command else {
+        panic!("Expected job");
     };
     assert_eq!(p2.commands.len(), 2);
 }
@@ -486,11 +486,11 @@ fn test_background_separates_sequence() {
         Command::Simple(_)
     ));
 
-    // Second is 'b | c' pipeline
+    // Second is 'b | c' job
     assert!(!result.commands[1].first.background);
     assert!(matches!(
         &result.commands[1].first.command,
-        Command::Pipeline(_)
+        Command::Job(_)
     ));
 }
 
@@ -526,12 +526,12 @@ fn test_pipe_filter_pattern() {
     let result = Parser::parse("ps aux | grep nginx | awk something | xargs kill").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 4);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "ps");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "grep");
-    assert_eq!(cmd_name(&pipeline.commands[2]), "awk");
-    assert_eq!(cmd_name(&pipeline.commands[3]), "xargs");
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 4);
+    assert_eq!(cmd_name(&job.commands[0]), "ps");
+    assert_eq!(cmd_name(&job.commands[1]), "grep");
+    assert_eq!(cmd_name(&job.commands[2]), "awk");
+    assert_eq!(cmd_name(&job.commands[3]), "xargs");
 }
 
 #[test]
@@ -552,24 +552,24 @@ fn test_conditional_pipe() {
 
     // && (cat file | wc -l)
     assert_eq!(and_or.rest[0].0, LogicalOp::And);
-    let Command::Pipeline(pipeline) = &and_or.rest[0].1.command else {
-        panic!("Expected pipeline");
+    let Command::Job(job) = &and_or.rest[0].1.command else {
+        panic!("Expected job");
     };
-    assert_eq!(pipeline.commands.len(), 2);
-    assert_eq!(cmd_name(&pipeline.commands[0]), "cat");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "wc");
+    assert_eq!(job.commands.len(), 2);
+    assert_eq!(cmd_name(&job.commands[0]), "cat");
+    assert_eq!(cmd_name(&job.commands[1]), "wc");
 
     // || echo nofile
     assert_eq!(and_or.rest[1].0, LogicalOp::Or);
 }
 
 #[test]
-fn test_real_world_pipeline() {
+fn test_real_world_job() {
     let result = Parser::parse("ps aux | grep nginx | head -10").unwrap();
     assert_eq!(result.commands.len(), 1);
 
-    let pipeline = get_pipeline(&result.commands[0]);
-    assert_eq!(pipeline.commands.len(), 3);
+    let job = get_job(&result.commands[0]);
+    assert_eq!(job.commands.len(), 3);
 }
 
 #[test]
@@ -599,16 +599,16 @@ fn test_all_operators_combined() {
 
     let and_or = &result.commands[0];
 
-    // First: cmd1 | cmd2 (pipeline)
-    assert!(matches!(&and_or.first.command, Command::Pipeline(_)));
+    // First: cmd1 | cmd2 (job)
+    assert!(matches!(&and_or.first.command, Command::Job(_)));
 
     // && cmd3 (simple)
     assert_eq!(and_or.rest[0].0, LogicalOp::And);
     assert!(matches!(&and_or.rest[0].1.command, Command::Simple(_)));
 
-    // || cmd4 | cmd5 (pipeline) with background
+    // || cmd4 | cmd5 (job) with background
     assert_eq!(and_or.rest[1].0, LogicalOp::Or);
-    assert!(matches!(&and_or.rest[1].1.command, Command::Pipeline(_)));
+    assert!(matches!(&and_or.rest[1].1.command, Command::Job(_)));
     assert!(and_or.rest[1].1.background);
 }
 

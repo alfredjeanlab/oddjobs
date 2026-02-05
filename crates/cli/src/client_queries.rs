@@ -10,11 +10,11 @@ use oj_daemon::{Query, Request, Response};
 
 use super::{AgentSignalResponse, CancelResult, ClientError, DaemonClient};
 
-/// Result from running a command — either a pipeline or a standalone agent
+/// Result from running a command — either a job or a standalone agent
 pub enum RunCommandResult {
-    Pipeline {
-        pipeline_id: String,
-        pipeline_name: String,
+    Job {
+        job_id: String,
+        job_name: String,
     },
     AgentRun {
         agent_run_id: String,
@@ -23,27 +23,27 @@ pub enum RunCommandResult {
 }
 
 impl DaemonClient {
-    /// Query for pipelines
-    pub async fn list_pipelines(&self) -> Result<Vec<oj_daemon::PipelineSummary>, ClientError> {
+    /// Query for jobs
+    pub async fn list_jobs(&self) -> Result<Vec<oj_daemon::JobSummary>, ClientError> {
         let query = Request::Query {
-            query: Query::ListPipelines,
+            query: Query::ListJobs,
         };
         match self.send(&query).await? {
-            Response::Pipelines { pipelines } => Ok(pipelines),
+            Response::Jobs { jobs } => Ok(jobs),
             other => Self::reject(other),
         }
     }
 
-    /// Query for a specific pipeline
-    pub async fn get_pipeline(
+    /// Query for a specific job
+    pub async fn get_job(
         &self,
         id: &str,
-    ) -> Result<Option<oj_daemon::PipelineDetail>, ClientError> {
+    ) -> Result<Option<oj_daemon::JobDetail>, ClientError> {
         let request = Request::Query {
-            query: Query::GetPipeline { id: id.to_string() },
+            query: Query::GetJob { id: id.to_string() },
         };
         match self.send(&request).await? {
-            Response::Pipeline { pipeline } => Ok(pipeline.map(|b| *b)),
+            Response::Job { job } => Ok(job.map(|b| *b)),
             other => Self::reject(other),
         }
     }
@@ -53,10 +53,10 @@ impl DaemonClient {
         match self.send(&Request::Status).await? {
             Response::Status {
                 uptime_secs,
-                pipelines_active,
+                jobs_active,
                 sessions_active,
                 orphan_count,
-            } => Ok((uptime_secs, pipelines_active, sessions_active, orphan_count)),
+            } => Ok((uptime_secs, jobs_active, sessions_active, orphan_count)),
             other => Self::reject(other),
         }
     }
@@ -96,15 +96,15 @@ impl DaemonClient {
         }
     }
 
-    /// Query for agents across all pipelines
+    /// Query for agents across all jobs
     pub async fn list_agents(
         &self,
-        pipeline_id: Option<&str>,
+        job_id: Option<&str>,
         status: Option<&str>,
     ) -> Result<Vec<oj_daemon::AgentSummary>, ClientError> {
         let query = Request::Query {
             query: Query::ListAgents {
-                pipeline_id: pipeline_id.map(|s| s.to_string()),
+                job_id: job_id.map(|s| s.to_string()),
                 status: status.map(|s| s.to_string()),
             },
         };
@@ -149,14 +149,14 @@ impl DaemonClient {
         self.send_simple(&request).await
     }
 
-    /// Resume monitoring for an escalated pipeline
-    pub async fn pipeline_resume(
+    /// Resume monitoring for an escalated job
+    pub async fn job_resume(
         &self,
         id: &str,
         message: Option<&str>,
         vars: &HashMap<String, String>,
     ) -> Result<(), ClientError> {
-        let request = Request::PipelineResume {
+        let request = Request::JobResume {
             id: id.to_string(),
             message: message.map(String::from),
             vars: vars.clone(),
@@ -164,11 +164,11 @@ impl DaemonClient {
         self.send_simple(&request).await
     }
 
-    /// Cancel one or more pipelines by ID
-    pub async fn pipeline_cancel(&self, ids: &[String]) -> Result<CancelResult, ClientError> {
-        let request = Request::PipelineCancel { ids: ids.to_vec() };
+    /// Cancel one or more jobs by ID
+    pub async fn job_cancel(&self, ids: &[String]) -> Result<CancelResult, ClientError> {
+        let request = Request::JobCancel { ids: ids.to_vec() };
         match self.send(&request).await? {
-            Response::PipelinesCancelled {
+            Response::JobsCancelled {
                 cancelled,
                 already_terminal,
                 not_found,
@@ -238,20 +238,20 @@ impl DaemonClient {
         }
     }
 
-    /// Get pipeline logs
-    pub async fn get_pipeline_logs(
+    /// Get job logs
+    pub async fn get_job_logs(
         &self,
         id: &str,
         lines: usize,
     ) -> Result<(PathBuf, String), ClientError> {
         let request = Request::Query {
-            query: Query::GetPipelineLogs {
+            query: Query::GetJobLogs {
                 id: id.to_string(),
                 lines,
             },
         };
         match self.send(&request).await? {
-            Response::PipelineLogs { log_path, content } => Ok((log_path, content)),
+            Response::JobLogs { log_path, content } => Ok((log_path, content)),
             other => Self::reject(other),
         }
     }
@@ -300,11 +300,11 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::CommandStarted {
-                pipeline_id,
-                pipeline_name,
-            } => Ok(RunCommandResult::Pipeline {
-                pipeline_id,
-                pipeline_name,
+                job_id,
+                job_name,
+            } => Ok(RunCommandResult::Job {
+                job_id,
+                job_name,
             }),
             Response::AgentRunStarted {
                 agent_run_id,
@@ -348,16 +348,16 @@ impl DaemonClient {
         }
     }
 
-    /// Prune old terminal pipelines and their log files
-    pub async fn pipeline_prune(
+    /// Prune old terminal jobs and their log files
+    pub async fn job_prune(
         &self,
         all: bool,
         failed: bool,
         orphans: bool,
         dry_run: bool,
         namespace: Option<&str>,
-    ) -> Result<(Vec<oj_daemon::PipelineEntry>, usize), ClientError> {
-        let req = Request::PipelinePrune {
+    ) -> Result<(Vec<oj_daemon::JobEntry>, usize), ClientError> {
+        let req = Request::JobPrune {
             all,
             failed,
             orphans,
@@ -365,12 +365,12 @@ impl DaemonClient {
             namespace: namespace.map(String::from),
         };
         match self.send(&req).await? {
-            Response::PipelinesPruned { pruned, skipped } => Ok((pruned, skipped)),
+            Response::JobsPruned { pruned, skipped } => Ok((pruned, skipped)),
             other => Self::reject(other),
         }
     }
 
-    /// Prune agent logs from terminal pipelines
+    /// Prune agent logs from terminal jobs
     pub async fn agent_prune(
         &self,
         all: bool,
@@ -382,7 +382,7 @@ impl DaemonClient {
         }
     }
 
-    /// Prune old workspaces from terminal pipelines
+    /// Prune old workspaces from terminal jobs
     pub async fn workspace_prune(
         &self,
         all: bool,
@@ -508,7 +508,7 @@ impl DaemonClient {
         }
     }
 
-    /// List orphaned pipelines detected at startup
+    /// List orphaned jobs detected at startup
     pub async fn list_orphans(&self) -> Result<Vec<oj_daemon::OrphanSummary>, ClientError> {
         let request = Request::Query {
             query: Query::ListOrphans,
@@ -590,7 +590,7 @@ impl DaemonClient {
         }
     }
 
-    /// Dismiss an orphaned pipeline by deleting its breadcrumb
+    /// Dismiss an orphaned job by deleting its breadcrumb
     pub async fn dismiss_orphan(&self, id: &str) -> Result<(), ClientError> {
         let request = Request::Query {
             query: Query::DismissOrphan { id: id.to_string() },

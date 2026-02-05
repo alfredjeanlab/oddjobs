@@ -30,23 +30,20 @@ pub fn extract_process_name(command: &str) -> String {
         .to_string()
 }
 
-/// Generate a friendly tmux session name from pipeline context.
+/// Generate a friendly tmux session name from job context.
 ///
-/// Format: `{pipeline}-{step}-{random}` (oj- prefix added by TmuxAdapter)
+/// Format: `{job}-{step}-{random}` (oj- prefix added by TmuxAdapter)
 ///
 /// Sanitizes names for tmux compatibility:
 /// - Replaces invalid characters with hyphens
 /// - Truncates to reasonable length
 /// - Adds 4-char random suffix for uniqueness
-fn generate_session_name(pipeline_name: &str, step_name: &str) -> String {
-    let sanitized_pipeline = sanitize_for_tmux(pipeline_name, 20);
+fn generate_session_name(job_name: &str, step_name: &str) -> String {
+    let sanitized_job = sanitize_for_tmux(job_name, 20);
     let sanitized_step = sanitize_for_tmux(step_name, 15);
     let random_suffix = generate_short_random(4);
 
-    format!(
-        "{}-{}-{}",
-        sanitized_pipeline, sanitized_step, random_suffix
-    )
+    format!("{}-{}-{}", sanitized_job, sanitized_step, random_suffix)
 }
 
 /// Sanitize a string for use in tmux session names.
@@ -378,7 +375,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         let env = config.env.clone();
 
         // 4. Generate friendly session name (UUID still used for --session-id flag)
-        let session_name = generate_session_name(&config.pipeline_name, &config.agent_name);
+        let session_name = generate_session_name(&config.job_name, &config.agent_name);
 
         // 5. Spawn the underlying session
         let command = augment_command_for_skip_permissions(&config.command);

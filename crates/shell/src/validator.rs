@@ -7,7 +7,7 @@
 //! checking for completeness and detecting common errors.
 
 use super::ast::{
-    AstVisitor, BraceGroup, Command, CommandItem, CommandList, Pipeline, SimpleCommand, Subshell,
+    AstVisitor, BraceGroup, Command, CommandItem, CommandList, Job, SimpleCommand, Subshell,
     WordPart,
 };
 use super::token::Span;
@@ -174,14 +174,14 @@ impl AstVisitor for Validator {
         self.walk_simple_command(cmd);
     }
 
-    fn visit_pipeline(&mut self, pipeline: &Pipeline) {
-        // Check for empty pipeline segments (commands with no name)
-        for cmd in &pipeline.commands {
+    fn visit_job(&mut self, job: &Job) {
+        // Check for empty job segments (commands with no name)
+        for cmd in &job.commands {
             if !Self::has_command_name(cmd) {
-                self.report(ValidationError::EmptyPipelineSegment { span: cmd.span });
+                self.report(ValidationError::EmptyJobSegment { span: cmd.span });
             }
         }
-        self.walk_pipeline(pipeline);
+        self.walk_job(job);
     }
 
     fn visit_subshell(&mut self, subshell: &Subshell) {

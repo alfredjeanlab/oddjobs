@@ -11,16 +11,16 @@ const RUNBOOK_SHELL_COMMAND: &str = r#"
 args = "<name>"
 run = "echo hello"
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
 
 #[tokio::test]
-async fn command_with_shell_directive_creates_pipeline() {
+async fn command_with_shell_directive_creates_job() {
     let ctx = setup_with_runbook(RUNBOOK_SHELL_COMMAND).await;
 
     ctx.runtime
@@ -36,10 +36,10 @@ async fn command_with_shell_directive_creates_pipeline() {
         .await
         .unwrap();
 
-    // Pipeline should be created with kind = command name
-    let pipeline = ctx.runtime.get_pipeline("pipe-1").unwrap();
-    assert_eq!(pipeline.kind, "shell_cmd");
-    assert_eq!(pipeline.step, "run");
+    // Job should be created with kind = command name
+    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    assert_eq!(job.kind, "shell_cmd");
+    assert_eq!(job.step, "run");
 }
 
 #[tokio::test]
@@ -63,12 +63,12 @@ async fn command_with_shell_directive_completes_on_exit() {
     let event = ctx.event_rx.recv().await.unwrap();
     assert!(matches!(event, Event::ShellExited { exit_code: 0, .. }));
 
-    // Process the ShellExited event - pipeline should auto-complete (no next step)
+    // Process the ShellExited event - job should auto-complete (no next step)
     ctx.runtime.handle_event(event).await.unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline("pipe-1").unwrap();
-    assert_eq!(pipeline.step, "done");
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    assert_eq!(job.step, "done");
+    assert!(job.is_terminal());
 }
 
 /// Runbook with a command that uses args.* namespace interpolation in shell directive
@@ -77,10 +77,10 @@ const RUNBOOK_SHELL_ARGS_NAMESPACE: &str = r#"
 args = "<description>"
 run = "test '${args.description}' = 'button broken'"
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
@@ -113,7 +113,7 @@ async fn command_shell_directive_interpolates_args_namespace() {
 }
 
 /// Runbook with a command that uses input.* namespace is now rejected at parse time.
-/// The parser validates that command.run does not use pipeline-only namespaces.
+/// The parser validates that command.run does not use job-only namespaces.
 /// See crates/runbook/src/parser_tests for parse-time validation tests.
 ///
 /// Previously this was a runtime test that checked ${input.*} wasn't interpolated;
@@ -129,10 +129,10 @@ run = { agent = "worker" }
 run = 'claude'
 prompt = "Hello"
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
@@ -181,10 +181,10 @@ max_concurrency = 1
 run = 'claude'
 prompt = "Hello"
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
@@ -234,30 +234,30 @@ async fn command_agent_max_concurrency_error() {
     );
 }
 
-/// Runbook with a step that uses pipeline run directive
-const RUNBOOK_PIPELINE_STEP: &str = r#"
+/// Runbook with a step that uses job run directive
+const RUNBOOK_JOB_STEP: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
-run = { pipeline = "nested" }
+run = { job = "nested" }
 
-[pipeline.nested]
+[job.nested]
 input  = []
 
-[[pipeline.nested.step]]
+[[job.nested.step]]
 name = "init"
 run = "echo nested"
 "#;
 
 #[tokio::test]
-async fn step_with_pipeline_directive_errors() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_STEP).await;
+async fn step_with_job_directive_errors() {
+    let ctx = setup_with_runbook(RUNBOOK_JOB_STEP).await;
 
     // This will error when it tries to start the init step
     let result = ctx
@@ -275,5 +275,5 @@ async fn step_with_pipeline_directive_errors() {
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("nested pipeline"));
+    assert!(err.contains("nested job"));
 }

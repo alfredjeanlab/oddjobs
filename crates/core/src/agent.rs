@@ -5,7 +5,7 @@
 //!
 //! AgentId is distinct from session_id (internal to adapters) and workspace_id
 //! (the git worktree path). An agent represents a single invocation of an AI
-//! agent within a pipeline step.
+//! agent within a job step.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -13,7 +13,7 @@ use std::fmt;
 crate::define_id! {
     /// Unique identifier for an agent instance.
     ///
-    /// Typically formatted as `{pipeline_id}-{step}` but the format is opaque
+    /// Typically formatted as `{job_id}-{step}` but the format is opaque
     /// to consumers. Session IDs are hidden inside the AgentAdapter implementation.
     pub struct AgentId;
 }

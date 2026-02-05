@@ -21,14 +21,14 @@
 
 command "gt-witness-patrol" {
   args = "[--rig <rig>]"
-  run  = { pipeline = "witness-patrol" }
+  run  = { job = "witness-patrol" }
 
   defaults = {
     rig = "default"
   }
 }
 
-pipeline "witness-patrol" {
+job "witness-patrol" {
   name      = "witness-${var.rig}"
   vars      = ["rig"]
   workspace = "ephemeral"
@@ -90,8 +90,8 @@ agent "witness-agent" {
     "echo '## oj CLI Reference'",
     "oj --help 2>/dev/null",
     "echo ''",
-    "echo '## Active Pipelines'",
-    "oj pipeline list --no-limit -o json 2>/dev/null || echo '[]'",
+    "echo '## Active Jobs'",
+    "oj job list --no-limit -o json 2>/dev/null || echo '[]'",
     "echo ''",
     "echo '## Workers'",
     "oj worker list -o json 2>/dev/null || echo '[]'",
@@ -99,8 +99,8 @@ agent "witness-agent" {
     "echo '## Pending Witness Mail'",
     "bd list -t message --label to:witness --status open --json 2>/dev/null || echo '[]'",
     "echo ''",
-    "echo '## Escalated Pipelines'",
-    "oj pipeline list --status escalated -o json 2>/dev/null || echo '[]'",
+    "echo '## Escalated Jobs'",
+    "oj job list --status escalated -o json 2>/dev/null || echo '[]'",
   ]
 
   prompt = <<-PROMPT
@@ -108,14 +108,14 @@ agent "witness-agent" {
 
     ## Patrol Cycle
 
-    1. Review the pipeline list from your prime context
-    2. For each running pipeline, assess health:
+    1. Review the job list from your prime context
+    2. For each running job, assess health:
        - **Working**: recent step activity → leave alone
        - **Stalled**: agent stuck, no progress → nudge with `oj agent send <agent-id> "Keep working."`
-       - **Failed/Escalated**: check pipeline details with `oj pipeline show <id>`
-    3. For escalated pipelines: investigate with `oj pipeline logs <id>`, then either:
-       - Resume: `oj pipeline resume <id>` if the issue is transient
-       - Cancel: `oj pipeline cancel <id>` if unrecoverable
+       - **Failed/Escalated**: check job details with `oj job show <id>`
+    3. For escalated jobs: investigate with `oj job logs <id>`, then either:
+       - Resume: `oj job resume <id>` if the issue is transient
+       - Cancel: `oj job cancel <id>` if unrecoverable
     4. Check that workers are running: `oj worker list`
        - If a worker is stopped, start it: `oj worker start <name>`
     5. Check for dead queue items: `oj queue show <queue-name>`

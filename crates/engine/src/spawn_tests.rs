@@ -4,15 +4,15 @@
 //! Tests for agent spawning
 
 use super::*;
-use oj_core::{PipelineId, StepStatus};
+use oj_core::{JobId, StepStatus};
 use oj_runbook::PrimeDef;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 use tempfile::TempDir;
 
-fn test_pipeline() -> Pipeline {
-    Pipeline {
+fn test_job() -> Job {
+    Job {
         id: "pipe-1".to_string(),
         name: "test-feature".to_string(),
         kind: "build".to_string(),
@@ -52,13 +52,13 @@ fn test_agent_def() -> AgentDef {
 fn build_spawn_effects_creates_agent_and_timer() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [("prompt".to_string(), "Build feature".to_string())]
         .into_iter()
         .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -84,13 +84,13 @@ fn build_spawn_effects_creates_agent_and_timer() {
 fn build_spawn_effects_interpolates_variables() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [("prompt".to_string(), "Build feature".to_string())]
         .into_iter()
         .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -104,7 +104,7 @@ fn build_spawn_effects_interpolates_variables() {
 
     // Check the SpawnAgent effect has interpolated command
     // The command uses ${prompt} which now gets the rendered agent prompt
-    // Agent prompt is "Do the task: ${name}" where ${name} is pipeline.name ("test-feature")
+    // Agent prompt is "Do the task: ${name}" where ${name} is job.name ("test-feature")
     if let Effect::SpawnAgent { command, .. } = &effects[0] {
         // Command should have the rendered prompt interpolated
         assert!(command.contains("Do the task: test-feature"));
@@ -118,10 +118,10 @@ fn build_spawn_effects_uses_absolute_cwd() {
     let workspace = TempDir::new().unwrap();
     let mut agent = test_agent_def();
     agent.cwd = Some("/absolute/path".to_string());
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -145,10 +145,10 @@ fn build_spawn_effects_uses_relative_cwd() {
     let workspace = TempDir::new().unwrap();
     let mut agent = test_agent_def();
     agent.cwd = Some("subdir".to_string());
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -171,10 +171,10 @@ fn build_spawn_effects_uses_relative_cwd() {
 fn build_spawn_effects_prepares_workspace() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     build_spawn_effects(
         &agent,
         &ctx,
@@ -200,10 +200,10 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
     let mut agent = test_agent_def();
     agent.prompt = None;
     agent.prompt_file = Some(PathBuf::from("/nonexistent/prompt.txt"));
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let result = build_spawn_effects(
         &agent,
         &ctx,
@@ -223,13 +223,13 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
 fn build_spawn_effects_carries_full_config() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [("prompt".to_string(), "Build feature".to_string())]
         .into_iter()
         .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -245,7 +245,7 @@ fn build_spawn_effects_carries_full_config() {
     if let Effect::SpawnAgent {
         agent_id,
         agent_name,
-        pipeline_id,
+        job_id,
         command,
         cwd,
         input: effect_inputs,
@@ -259,14 +259,14 @@ fn build_spawn_effects_carries_full_config() {
             agent_id
         );
         assert_eq!(agent_name, "worker");
-        assert_eq!(pipeline_id, "pipe-1");
+        assert_eq!(job_id, "pipe-1");
         assert!(!command.is_empty());
         assert!(cwd.is_some());
         // System vars are not namespaced
-        assert!(effect_inputs.contains_key("pipeline_id"));
+        assert!(effect_inputs.contains_key("job_id"));
         assert!(effect_inputs.contains_key("name"));
         assert!(effect_inputs.contains_key("workspace"));
-        // Pipeline vars are namespaced under "var."
+        // Job vars are namespaced under "var."
         assert!(effect_inputs.contains_key("var.prompt"));
         // Rendered prompt is added as "prompt"
         assert!(effect_inputs.contains_key("prompt"));
@@ -279,10 +279,10 @@ fn build_spawn_effects_carries_full_config() {
 fn build_spawn_effects_timer_uses_liveness_interval() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -303,22 +303,22 @@ fn build_spawn_effects_timer_uses_liveness_interval() {
 }
 
 #[test]
-fn build_spawn_effects_namespaces_pipeline_inputs() {
+fn build_spawn_effects_namespaces_job_inputs() {
     let workspace = TempDir::new().unwrap();
-    // Agent uses ${var.prompt} to access pipeline vars
+    // Agent uses ${var.prompt} to access job vars
     let agent = AgentDef {
         name: "worker".to_string(),
         run: "claude --print \"${prompt}\"".to_string(),
         prompt: Some("Task: ${var.prompt}".to_string()),
         ..Default::default()
     };
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [("prompt".to_string(), "Add authentication".to_string())]
         .into_iter()
         .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -336,7 +336,7 @@ fn build_spawn_effects_namespaces_pipeline_inputs() {
         ..
     } = &effects[0]
     {
-        // Pipeline vars are namespaced under "var."
+        // Job vars are namespaced under "var."
         assert_eq!(
             effect_inputs.get("var.prompt"),
             Some(&"Add authentication".to_string())
@@ -363,7 +363,7 @@ fn build_spawn_effects_inputs_namespace_in_prompt() {
         prompt: Some("Fix: ${var.bug.title} (id: ${var.bug.id})".to_string()),
         ..Default::default()
     };
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [
         ("bug.title".to_string(), "Button color wrong".to_string()),
         ("bug.id".to_string(), "proj-abc1".to_string()),
@@ -371,8 +371,8 @@ fn build_spawn_effects_inputs_namespace_in_prompt() {
     .into_iter()
     .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -422,10 +422,10 @@ fn build_spawn_effects_escapes_backticks_in_prompt() {
         prompt: Some("Write to `plans/${name}.md`".to_string()),
         ..Default::default()
     };
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -457,10 +457,10 @@ fn build_spawn_effects_with_prime_succeeds() {
         "echo hello".to_string(),
         "git status".to_string(),
     ]));
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -482,10 +482,10 @@ fn build_spawn_effects_with_prime_script_succeeds() {
     let workspace = TempDir::new().unwrap();
     let mut agent = test_agent_def();
     agent.prime = Some(PrimeDef::Script("echo ${name} ${workspace}".to_string()));
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-prime-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-prime-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -512,7 +512,7 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
         prompt: Some("Branch: ${local.branch}, Title: ${local.title}".to_string()),
         ..Default::default()
     };
-    let pipeline = test_pipeline();
+    let job = test_job();
     let input: HashMap<String, String> = [
         ("local.branch".to_string(), "fix/bug-123".to_string()),
         ("local.title".to_string(), "fix: button color".to_string()),
@@ -521,8 +521,8 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
     .into_iter()
     .collect();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -558,10 +558,10 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
         .into_iter()
         .collect();
 
-    let empty_pipeline_id = PipelineId::new("");
+    let empty_job_id = JobId::new("");
     let agent_run_id = oj_core::AgentRunId::new("ar-test-1");
     let ctx = SpawnContext {
-        pipeline_id: &empty_pipeline_id,
+        job_id: &empty_job_id,
         agent_run_id: Some(&agent_run_id),
         name: "fixer",
         namespace: "",
@@ -580,7 +580,7 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
     // SpawnAgent should carry the agent_run_id
     if let Effect::SpawnAgent {
         agent_run_id: effect_ar_id,
-        pipeline_id,
+        job_id,
         command,
         input: effect_inputs,
         ..
@@ -590,7 +590,7 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
             effect_ar_id.as_ref().map(|id| id.as_str()),
             Some("ar-test-1")
         );
-        assert_eq!(pipeline_id.as_str(), "");
+        assert_eq!(job_id.as_str(), "");
         // Command args should be accessible via var. namespace
         assert_eq!(
             effect_inputs.get("var.description"),
@@ -615,11 +615,11 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
 fn build_spawn_effects_includes_default_status() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let mut pipeline = test_pipeline();
-    pipeline.namespace = "myproject".to_string();
+    let mut job = test_job();
+    job.namespace = "myproject".to_string();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -681,11 +681,11 @@ fn build_spawn_effects_explicit_session_overrides_defaults() {
             }),
         },
     );
-    let mut pipeline = test_pipeline();
-    pipeline.namespace = "ns".to_string();
+    let mut job = test_job();
+    job.namespace = "ns".to_string();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -724,14 +724,14 @@ fn build_spawn_effects_always_passes_oj_state_dir() {
     let workspace = TempDir::new().unwrap();
     let state_dir = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
     // Ensure OJ_STATE_DIR is NOT set in the current environment
     // (simulates daemon that resolved state_dir via XDG_STATE_HOME or $HOME fallback)
     std::env::remove_var("OJ_STATE_DIR");
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -763,10 +763,10 @@ fn build_spawn_effects_always_passes_oj_state_dir() {
 fn build_spawn_effects_no_session_block_gets_defaults() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -809,11 +809,11 @@ fn build_spawn_effects_injects_user_env_vars() {
     crate::env::write_env_file(&crate::env::global_env_path(state_dir.path()), &global).unwrap();
 
     let agent = test_agent_def();
-    let mut pipeline = test_pipeline();
-    pipeline.namespace = "testproject".to_string();
+    let mut job = test_job();
+    job.namespace = "testproject".to_string();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -847,11 +847,11 @@ fn build_spawn_effects_user_env_does_not_override_system_vars() {
     crate::env::write_env_file(&crate::env::global_env_path(state_dir.path()), &global).unwrap();
 
     let agent = test_agent_def();
-    let mut pipeline = test_pipeline();
-    pipeline.namespace = "real-ns".to_string();
+    let mut job = test_job();
+    job.namespace = "real-ns".to_string();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -896,11 +896,11 @@ fn build_spawn_effects_project_env_overrides_global() {
     .unwrap();
 
     let agent = test_agent_def();
-    let mut pipeline = test_pipeline();
-    pipeline.namespace = "myns".to_string();
+    let mut job = test_job();
+    job.namespace = "myns".to_string();
 
-    let pid = PipelineId::new("pipe-1");
-    let ctx = SpawnContext::from_pipeline(&pipeline, &pid);
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,

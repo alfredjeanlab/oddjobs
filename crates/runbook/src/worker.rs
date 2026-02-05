@@ -9,7 +9,7 @@ fn default_concurrency() -> u32 {
     1
 }
 
-/// A worker definition that polls a queue and dispatches items to a pipeline.
+/// A worker definition that polls a queue and dispatches items to a job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerDef {
     /// Worker name (injected from map key)
@@ -17,9 +17,9 @@ pub struct WorkerDef {
     pub name: String,
     /// Source reference: { queue = "name" }
     pub source: WorkerSource,
-    /// Handler reference: { pipeline = "name" }
+    /// Handler reference: { job = "name" }
     pub handler: WorkerHandler,
-    /// Max concurrent pipeline instances (default 1)
+    /// Max concurrent job instances (default 1)
     #[serde(default = "default_concurrency")]
     pub concurrency: u32,
 }
@@ -34,6 +34,6 @@ pub struct WorkerSource {
 /// Handler configuration for a worker
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerHandler {
-    /// Name of the pipeline to dispatch items to
-    pub pipeline: String,
+    /// Name of the job to dispatch items to
+    pub job: String,
 }

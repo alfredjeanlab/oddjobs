@@ -19,7 +19,7 @@ pub(super) fn handle_list_projects(state: &Arc<Mutex<MaterializedState>>) -> Res
     let mut ns_roots: BTreeMap<String, std::path::PathBuf> = BTreeMap::new();
     let mut ns_workers: BTreeMap<String, usize> = BTreeMap::new();
     let mut ns_crons: BTreeMap<String, usize> = BTreeMap::new();
-    let mut ns_pipelines: BTreeMap<String, usize> = BTreeMap::new();
+    let mut ns_jobs: BTreeMap<String, usize> = BTreeMap::new();
     let mut ns_agents: BTreeMap<String, usize> = BTreeMap::new();
 
     for w in state.workers.values() {
@@ -40,9 +40,9 @@ pub(super) fn handle_list_projects(state: &Arc<Mutex<MaterializedState>>) -> Res
         }
     }
 
-    for p in state.pipelines.values() {
+    for p in state.jobs.values() {
         if !p.is_terminal() {
-            *ns_pipelines.entry(p.namespace.clone()).or_default() += 1;
+            *ns_jobs.entry(p.namespace.clone()).or_default() += 1;
 
             // Count active agents from the current step
             if let Some(last_step) = p.step_history.last() {
@@ -74,13 +74,13 @@ pub(super) fn handle_list_projects(state: &Arc<Mutex<MaterializedState>>) -> Res
     let mut all_ns: HashSet<String> = HashSet::new();
     all_ns.extend(ns_workers.keys().cloned());
     all_ns.extend(ns_crons.keys().cloned());
-    all_ns.extend(ns_pipelines.keys().cloned());
+    all_ns.extend(ns_jobs.keys().cloned());
 
     let mut projects: Vec<ProjectSummary> = all_ns
         .into_iter()
         .map(|ns| ProjectSummary {
             root: ns_roots.get(&ns).cloned().unwrap_or_default(),
-            active_pipelines: ns_pipelines.get(&ns).copied().unwrap_or(0),
+            active_jobs: ns_jobs.get(&ns).copied().unwrap_or(0),
             active_agents: ns_agents.get(&ns).copied().unwrap_or(0),
             workers: ns_workers.get(&ns).copied().unwrap_or(0),
             crons: ns_crons.get(&ns).copied().unwrap_or(0),

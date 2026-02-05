@@ -6,7 +6,7 @@
 //!
 //! The executor provides per-command tracing, structured error reporting with
 //! span info, and fine-grained exit code visibility.  Each [`SimpleCommand`]
-//! is spawned individually, pipelines wire stdout→stdin between processes,
+//! is spawned individually, jobs wire stdout→stdin between processes,
 //! and `&&`/`||` chains short-circuit based on exit codes.
 //!
 //! # Example
@@ -86,7 +86,7 @@ pub struct ShellExecutor {
     variables: HashMap<String, String>,
     /// Max bytes to capture per stream for snippets in [`CommandTrace`].
     snippet_limit: usize,
-    /// Enable pipefail semantics for pipelines.
+    /// Enable pipefail semantics for jobs.
     pipefail: bool,
 }
 
@@ -151,7 +151,7 @@ impl ShellExecutor {
 
     /// Enable or disable pipefail mode.
     ///
-    /// When enabled, a pipeline returns the exit code of the rightmost
+    /// When enabled, a job returns the exit code of the rightmost
     /// command that failed (non-zero), rather than just the last command.
     /// If all commands succeed, returns 0.
     pub fn pipefail(mut self, enabled: bool) -> Self {

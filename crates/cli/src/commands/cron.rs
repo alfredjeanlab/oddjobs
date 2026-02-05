@@ -37,7 +37,7 @@ pub enum CronCommand {
         /// Cron name from runbook
         name: String,
     },
-    /// Run the cron's pipeline once now (ignores interval)
+    /// Run the cron's job once now (ignores interval)
     Once {
         /// Cron name from runbook
         name: String,
@@ -136,10 +136,10 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::CommandStarted {
-                    pipeline_id,
-                    pipeline_name,
+                    job_id,
+                    job_name,
                 } => {
-                    println!("Pipeline '{}' started ({})", pipeline_name, pipeline_id);
+                    println!("Job '{}' started ({})", job_name, job_id);
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -212,7 +212,7 @@ pub async fn handle(
                                 }
                                 cols.extend([
                                     Column::left("INTERVAL"),
-                                    Column::left("PIPELINE"),
+                                    Column::left("JOB"),
                                     Column::left("TIME"),
                                     Column::status("STATUS"),
                                 ]);
@@ -225,7 +225,7 @@ pub async fn handle(
                                     }
                                     cells.extend([
                                         c.interval.clone(),
-                                        c.pipeline.clone(),
+                                        c.job.clone(),
                                         c.time.clone(),
                                         c.status.clone(),
                                     ]);

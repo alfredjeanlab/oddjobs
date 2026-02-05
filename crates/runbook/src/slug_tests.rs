@@ -139,12 +139,12 @@ fn non_consecutive_duplicates_preserved() {
     assert_eq!(slugify("foo bar foo", 28), "foo-bar-foo");
 }
 
-// pipeline_display_name tests
+// job_display_name tests
 
 #[test]
 fn display_name_normal() {
     assert_eq!(
-        pipeline_display_name("fix-login-button", "a1b2c3d4", ""),
+        job_display_name("fix-login-button", "a1b2c3d4", ""),
         "fix-login-button-a1b2c3d4"
     );
 }
@@ -152,7 +152,7 @@ fn display_name_normal() {
 #[test]
 fn display_name_empty_slug() {
     assert_eq!(
-        pipeline_display_name("the a an", "a1b2c3d4", ""),
+        job_display_name("the a an", "a1b2c3d4", ""),
         "a1b2c3d4"
     );
 }
@@ -160,7 +160,7 @@ fn display_name_empty_slug() {
 #[test]
 fn display_name_with_special_chars() {
     assert_eq!(
-        pipeline_display_name("Fix the Login Button!", "abcd1234", ""),
+        job_display_name("Fix the Login Button!", "abcd1234", ""),
         "fix-login-button-abcd1234"
     );
 }
@@ -168,7 +168,7 @@ fn display_name_with_special_chars() {
 #[test]
 fn display_name_truncation() {
     // Long input should be truncated to 28 chars before nonce
-    let result = pipeline_display_name(
+    let result = job_display_name(
         "implement user authentication system for the app",
         "12345678",
         "",
@@ -182,7 +182,7 @@ fn display_name_truncation() {
 #[test]
 fn display_name_strips_namespace_prefix() {
     assert_eq!(
-        pipeline_display_name("oj-queue-list-shows-queues", "90158779", "oj"),
+        job_display_name("oj-queue-list-shows-queues", "90158779", "oj"),
         "queue-list-shows-queues-90158779"
     );
 }
@@ -190,7 +190,7 @@ fn display_name_strips_namespace_prefix() {
 #[test]
 fn display_name_no_strip_without_prefix() {
     assert_eq!(
-        pipeline_display_name("queue-list-shows-queues", "90158779", "oj"),
+        job_display_name("queue-list-shows-queues", "90158779", "oj"),
         "queue-list-shows-queues-90158779"
     );
 }
@@ -198,7 +198,7 @@ fn display_name_no_strip_without_prefix() {
 #[test]
 fn display_name_empty_namespace() {
     assert_eq!(
-        pipeline_display_name("oj-queue-list", "90158779", ""),
+        job_display_name("oj-queue-list", "90158779", ""),
         "oj-queue-list-90158779"
     );
 }

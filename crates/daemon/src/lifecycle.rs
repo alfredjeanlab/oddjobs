@@ -15,7 +15,7 @@ use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, SessionAdapter, TmuxAdapter, TracedAgent,
     TracedSession,
 };
-use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, PipelineId, SystemClock};
+use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, SystemClock};
 use oj_engine::breadcrumb::{self, Breadcrumb};
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps};
 use oj_storage::{load_snapshot, Checkpointer, MaterializedState, Wal};
@@ -53,7 +53,7 @@ pub struct Config {
     pub snapshot_path: PathBuf,
     /// Path to workspaces directory
     pub workspaces_path: PathBuf,
-    /// Path to per-pipeline log files
+    /// Path to per-job log files
     pub logs_path: PathBuf,
 }
 
@@ -96,7 +96,7 @@ pub struct DaemonState {
     pub event_bus: EventBus,
     /// When daemon started
     pub start_time: Instant,
-    /// Orphaned pipelines detected from breadcrumbs at startup
+    /// Orphaned jobs detected from breadcrumbs at startup
     pub orphans: Arc<Mutex<Vec<Breadcrumb>>>,
 }
 
@@ -125,8 +125,8 @@ pub struct ReconcileContext {
     pub session_adapter: TracedSession<TmuxAdapter>,
     /// Channel for emitting events discovered during reconciliation
     pub event_tx: mpsc::Sender<Event>,
-    /// Number of non-terminal pipelines to reconcile
-    pub pipeline_count: usize,
+    /// Number of non-terminal jobs to reconcile
+    pub job_count: usize,
     /// Number of workers with status "running" to reconcile
     pub worker_count: usize,
     /// Number of crons with status "running" to reconcile
@@ -142,7 +142,7 @@ impl DaemonState {
     /// engine loop on the next iteration. We deliberately do NOT process them
     /// locally to avoid double-delivery: the engine loop already reads every
     /// WAL entry exactly once, so processing here as well would cause handlers
-    /// to fire twice (e.g. duplicate pipeline creation from WorkerPollComplete).
+    /// to fire twice (e.g. duplicate job creation from WorkerPollComplete).
     pub async fn process_event(&mut self, event: Event) -> Result<(), LifecycleError> {
         // Apply the incoming event to materialized state so queries see it.
         // (Effect::Emit events are also applied in the executor for immediate
@@ -316,9 +316,9 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     let (mut state, processed_seq) = match load_snapshot(&config.snapshot_path)? {
         Some(snapshot) => {
             info!(
-                "Loaded snapshot at seq {}: {} pipelines, {} sessions, {} workspaces",
+                "Loaded snapshot at seq {}: {} jobs, {} sessions, {} workspaces",
                 snapshot.seq,
-                snapshot.state.pipelines.len(),
+                snapshot.state.jobs.len(),
                 snapshot.state.sessions.len(),
                 snapshot.state.workspaces.len()
             );
@@ -347,8 +347,8 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     }
 
     info!(
-        "Recovered state: {} pipelines, {} sessions, {} workspaces, {} agent_runs",
-        state.pipelines.len(),
+        "Recovered state: {} jobs, {} sessions, {} workspaces, {} agent_runs",
+        state.jobs.len(),
         state.sessions.len(),
         state.workspaces.len(),
         state.agent_runs.len()
@@ -377,24 +377,22 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     let listener = UnixListener::bind(&config.socket_path)
         .map_err(|e| LifecycleError::BindFailed(config.socket_path.clone(), e))?;
 
-    // 7b. Detect orphaned pipelines from breadcrumb files
+    // 7b. Detect orphaned jobs from breadcrumb files
     let breadcrumbs = breadcrumb::scan_breadcrumbs(&config.logs_path);
     let stale_threshold = std::time::Duration::from_secs(7 * 24 * 60 * 60); // 7 days
     let mut orphans = Vec::new();
     for bc in breadcrumbs {
-        if let Some(pipeline) = state.pipelines.get(&bc.pipeline_id) {
-            // Pipeline exists in recovered state — clean up stale breadcrumbs
-            // for terminal pipelines (crash between terminal and breadcrumb delete)
-            if pipeline.is_terminal() {
-                let path =
-                    oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.pipeline_id);
+        if let Some(job) = state.jobs.get(&bc.job_id) {
+            // Job exists in recovered state — clean up stale breadcrumbs
+            // for terminal jobs (crash between terminal and breadcrumb delete)
+            if job.is_terminal() {
+                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             }
         } else {
-            // No matching pipeline — check if breadcrumb is stale (> 7 days)
+            // No matching job — check if breadcrumb is stale (> 7 days)
             let is_stale = {
-                let path =
-                    oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.pipeline_id);
+                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 match path.metadata() {
                     Ok(meta) => meta
                         .modified()
@@ -407,19 +405,18 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             };
             if is_stale {
                 warn!(
-                    pipeline_id = %bc.pipeline_id,
+                    job_id = %bc.job_id,
                     "auto-dismissing stale orphan breadcrumb (> 7 days old)"
                 );
-                let path =
-                    oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.pipeline_id);
+                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             } else {
                 warn!(
-                    pipeline_id = %bc.pipeline_id,
+                    job_id = %bc.job_id,
                     project = %bc.project,
                     kind = %bc.kind,
                     step = %bc.current_step,
-                    "orphaned pipeline detected"
+                    "orphaned job detected"
                 );
                 orphans.push(bc);
             }
@@ -427,7 +424,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     }
     if !orphans.is_empty() {
         warn!(
-            "{} orphaned pipeline(s) detected from breadcrumbs",
+            "{} orphaned job(s) detected from breadcrumbs",
             orphans.len()
         );
     }
@@ -461,8 +458,8 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         let state_guard = state.lock();
         state_guard.clone()
     };
-    let pipeline_count = state_snapshot
-        .pipelines
+    let job_count = state_snapshot
+        .jobs
         .values()
         .filter(|p| !p.is_terminal())
         .count();
@@ -501,7 +498,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             state_snapshot,
             session_adapter,
             event_tx: internal_tx,
-            pipeline_count,
+            job_count,
             worker_count,
             cron_count,
             agent_run_count,
@@ -560,7 +557,7 @@ fn cleanup_on_failure(config: &Config) {
 
 /// Reconcile persisted state with actual world state after daemon restart.
 ///
-/// For each non-terminal pipeline, checks whether its tmux session and agent
+/// For each non-terminal job, checks whether its tmux session and agent
 /// process are still alive, then either reconnects monitoring or triggers
 /// appropriate exit handling through the event channel.
 pub(crate) async fn reconcile_state(
@@ -623,7 +620,7 @@ pub(crate) async fn reconcile_state(
                 project_root: cron.project_root.clone(),
                 runbook_hash: cron.runbook_hash.clone(),
                 interval: cron.interval.clone(),
-                pipeline_name: cron.pipeline_name.clone(),
+                job_name: cron.job_name.clone(),
                 run_target: cron.run_target.clone(),
                 namespace: cron.namespace.clone(),
             })
@@ -729,42 +726,38 @@ pub(crate) async fn reconcile_state(
         }
     }
 
-    // Reconcile pipelines
-    let non_terminal: Vec<_> = state
-        .pipelines
-        .values()
-        .filter(|p| !p.is_terminal())
-        .collect();
+    // Reconcile jobs
+    let non_terminal: Vec<_> = state.jobs.values().filter(|p| !p.is_terminal()).collect();
 
     if non_terminal.is_empty() {
         return;
     }
 
-    info!("Reconciling {} non-terminal pipelines", non_terminal.len());
+    info!("Reconciling {} non-terminal jobs", non_terminal.len());
 
-    for pipeline in &non_terminal {
-        // Skip pipelines in Waiting status — already escalated to human
-        if pipeline.step_status.is_waiting() {
+    for job in &non_terminal {
+        // Skip jobs in Waiting status — already escalated to human
+        if job.step_status.is_waiting() {
             info!(
-                pipeline_id = %pipeline.id,
-                "skipping Waiting pipeline (already escalated)"
+                job_id = %job.id,
+                "skipping Waiting job (already escalated)"
             );
             continue;
         }
 
         // Determine the tmux session ID
-        let Some(session_id) = &pipeline.session_id else {
-            warn!(pipeline_id = %pipeline.id, "no session_id, skipping");
+        let Some(session_id) = &job.session_id else {
+            warn!(job_id = %job.id, "no session_id, skipping");
             continue;
         };
 
         // Extract agent_id from step_history (stored when agent was spawned).
         // This must match the UUID used during spawn — using any other format
         // causes the handler's stale-event check to drop the event.
-        let agent_id_str = pipeline
+        let agent_id_str = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.clone());
 
         // Check tmux session liveness
@@ -779,13 +772,13 @@ pub(crate) async fn reconcile_state(
             if is_running {
                 // Case 1: tmux alive + agent running → reconnect watcher
                 info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     session_id,
                     "recovering: agent still running, reconnecting watcher"
                 );
-                if let Err(e) = runtime.recover_agent(pipeline).await {
+                if let Err(e) = runtime.recover_agent(job).await {
                     warn!(
-                        pipeline_id = %pipeline.id,
+                        job_id = %job.id,
                         error = %e,
                         "failed to recover agent, triggering exit"
                     );
@@ -793,7 +786,7 @@ pub(crate) async fn reconcile_state(
                     // so if it failed, use our extracted agent_id (or a fallback).
                     let aid = agent_id_str
                         .clone()
-                        .unwrap_or_else(|| format!("{}-{}", pipeline.id, pipeline.step));
+                        .unwrap_or_else(|| format!("{}-{}", job.id, job.step));
                     let agent_id = AgentId::new(aid);
                     let _ = event_tx.send(Event::AgentGone { agent_id }).await;
                 }
@@ -801,22 +794,19 @@ pub(crate) async fn reconcile_state(
                 // Case 2: tmux alive, agent dead → trigger on_dead
                 let Some(ref aid) = agent_id_str else {
                     warn!(
-                        pipeline_id = %pipeline.id,
+                        job_id = %job.id,
                         "no agent_id in step_history, cannot route exit event"
                     );
                     continue;
                 };
                 info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     session_id,
                     "recovering: agent exited while daemon was down"
                 );
                 let agent_id = AgentId::new(aid);
                 // Register mapping so handle_agent_state_changed can find it
-                runtime.register_agent_pipeline(
-                    agent_id.clone(),
-                    PipelineId::new(pipeline.id.to_string()),
-                );
+                runtime.register_agent_job(agent_id.clone(), JobId::new(job.id.to_string()));
                 let _ = event_tx
                     .send(Event::AgentExited {
                         agent_id,
@@ -828,18 +818,18 @@ pub(crate) async fn reconcile_state(
             // Case 3: tmux dead → trigger session gone
             let Some(ref aid) = agent_id_str else {
                 warn!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     "no agent_id in step_history, cannot route gone event"
                 );
                 continue;
             };
             info!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 session_id,
                 "recovering: tmux session died while daemon was down"
             );
             let agent_id = AgentId::new(aid);
-            runtime.register_agent_pipeline(agent_id.clone(), PipelineId::new(pipeline.id.clone()));
+            runtime.register_agent_job(agent_id.clone(), JobId::new(job.id.clone()));
             let _ = event_tx.send(Event::AgentGone { agent_id }).await;
         }
     }

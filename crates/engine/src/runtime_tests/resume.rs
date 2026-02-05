@@ -1,31 +1,31 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Tests for smart pipeline resume functionality
+//! Tests for smart job resume functionality
 
 use super::*;
-use oj_core::{AgentState, PipelineId, StepStatus};
+use oj_core::{AgentState, JobId, StepStatus};
 
 /// Runbook for testing resume functionality with a shell step and an agent step
 const RESUME_RUNBOOK: &str = r#"
 [command.test]
 args = "<name>"
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 input  = ["name", "prompt"]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "setup"
 run = "echo setup"
 on_done = "work"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "done"
 run = "echo done"
 
@@ -37,7 +37,7 @@ async fn setup_resume() -> TestContext {
     setup_with_runbook(RESUME_RUNBOOK).await
 }
 
-async fn create_test_pipeline(ctx: &TestContext, pipeline_id: &str) -> String {
+async fn create_test_job(ctx: &TestContext, job_id: &str) -> String {
     let args: HashMap<String, String> = [
         ("name".to_string(), "test".to_string()),
         ("prompt".to_string(), "Do the work".to_string()),
@@ -47,7 +47,7 @@ async fn create_test_pipeline(ctx: &TestContext, pipeline_id: &str) -> String {
 
     ctx.runtime
         .handle_event(command_event(
-            pipeline_id,
+            job_id,
             "test",
             "test",
             args,
@@ -56,14 +56,14 @@ async fn create_test_pipeline(ctx: &TestContext, pipeline_id: &str) -> String {
         .await
         .unwrap();
 
-    pipeline_id.to_string()
+    job_id.to_string()
 }
 
-/// Helper to advance pipeline to the agent step (work) by completing the setup step
-async fn advance_to_agent_step(ctx: &TestContext, pipeline_id: &str) {
+/// Helper to advance job to the agent step (work) by completing the setup step
+async fn advance_to_agent_step(ctx: &TestContext, job_id: &str) {
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id),
+            job_id: JobId::new(job_id),
             step: "setup".to_string(),
             exit_code: 0,
             stdout: None,
@@ -76,20 +76,20 @@ async fn advance_to_agent_step(ctx: &TestContext, pipeline_id: &str) {
 #[tokio::test]
 async fn resume_agent_without_message_fails() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-1").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-1").await;
 
     // Advance to agent step
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
     // Verify we're at the agent step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
     // Try to resume without message - should fail
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
         })
@@ -109,27 +109,27 @@ async fn resume_agent_alive_sends_nudge() {
     use oj_adapters::SessionAdapter;
 
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-2").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-2").await;
 
     // Advance to agent step (this spawns the agent with a UUID)
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
     // Get the agent_id that was registered during spawn
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to Working (alive)
     ctx.agents.set_agent_state(&agent_id, AgentState::Working);
 
-    // Spawn a session for the pipeline (simulating agent startup)
+    // Spawn a session for the job (simulating agent startup)
     let session_id = ctx
         .sessions
         .spawn("test", std::path::Path::new("/tmp"), "echo test", &[])
         .await
         .unwrap();
 
-    // Update the pipeline's session_id in state
+    // Update the job's session_id in state
     ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+        if let Some(p) = state.jobs.get_mut(&job_id) {
             p.session_id = Some(session_id.clone());
         }
     });
@@ -137,8 +137,8 @@ async fn resume_agent_alive_sends_nudge() {
     // Resume with message
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("I fixed the import, try again".to_string()),
             vars: HashMap::new(),
         })
@@ -146,18 +146,18 @@ async fn resume_agent_alive_sends_nudge() {
 
     assert!(result.is_ok());
 
-    // Verify pipeline status is Running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Verify job status is Running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 #[tokio::test]
 async fn resume_agent_dead_attempts_recovery() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-3").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-3").await;
 
     // Advance to agent step
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
     // Don't spawn an agent - get_state will return NotFound, treating as dead
 
@@ -167,8 +167,8 @@ async fn resume_agent_dead_attempts_recovery() {
     // (i.e., agent not found = dead = recovery needed)
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("I fixed the issue, try again".to_string()),
             vars: HashMap::new(),
         })
@@ -187,25 +187,25 @@ async fn resume_agent_dead_attempts_recovery() {
         );
     }
 
-    // Pipeline should still be on the same step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    // Job should still be on the same step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 }
 
 #[tokio::test]
 async fn resume_shell_reruns_command() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-4").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-4").await;
 
-    // Pipeline starts at "setup" step which is a shell step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "setup");
+    // Job starts at "setup" step which is a shell step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "setup");
 
     // Resume the shell step (no message needed)
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
         })
@@ -213,25 +213,25 @@ async fn resume_shell_reruns_command() {
 
     assert!(result.is_ok());
 
-    // Pipeline should still be at setup step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "setup");
+    // Job should still be at setup step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "setup");
 }
 
 #[tokio::test]
 async fn resume_shell_with_message_succeeds_with_warning() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-5").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-5").await;
 
-    // Pipeline starts at "setup" step which is a shell step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "setup");
+    // Job starts at "setup" step which is a shell step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "setup");
 
     // Resume shell step with message (should still work, just log warning)
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("This message will be ignored".to_string()),
             vars: HashMap::new(),
         })
@@ -244,17 +244,17 @@ async fn resume_shell_with_message_succeeds_with_warning() {
 #[tokio::test]
 async fn resume_persists_input_updates() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-6").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-6").await;
 
-    // Pipeline starts at "setup" step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(!pipeline.vars.contains_key("new_key"));
+    // Job starts at "setup" step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(!job.vars.contains_key("new_key"));
 
     // Resume with input updates
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: None,
             vars: [
                 ("new_key".to_string(), "new_value".to_string()),
@@ -274,13 +274,13 @@ async fn resume_persists_input_updates() {
 #[tokio::test]
 async fn resume_agent_session_gone_recovers() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-7").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-7").await;
 
     // Advance to agent step (spawns agent with UUID)
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
     // Get the agent_id that was registered during spawn
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent as SessionGone (dead)
     ctx.agents
@@ -289,16 +289,16 @@ async fn resume_agent_session_gone_recovers() {
     // Resume with message
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("Session died, recovering".to_string()),
             vars: HashMap::new(),
         })
         .await;
 
     assert!(result.is_ok());
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 }
 
 #[tokio::test]
@@ -306,28 +306,28 @@ async fn resume_agent_waiting_nudges() {
     use oj_adapters::SessionAdapter;
 
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-8").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-8").await;
 
     // Advance to agent step (spawns agent with UUID)
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
     // Get the agent_id that was registered during spawn
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent to WaitingForInput (alive, but idle)
     ctx.agents
         .set_agent_state(&agent_id, AgentState::WaitingForInput);
 
-    // Spawn a session for the pipeline
+    // Spawn a session for the job
     let session_id = ctx
         .sessions
         .spawn("test", std::path::Path::new("/tmp"), "echo test", &[])
         .await
         .unwrap();
 
-    // Update the pipeline's session_id in state
+    // Update the job's session_id in state
     ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+        if let Some(p) = state.jobs.get_mut(&job_id) {
             p.session_id = Some(session_id.clone());
         }
     });
@@ -335,8 +335,8 @@ async fn resume_agent_waiting_nudges() {
     // Resume with message - should nudge (send to session)
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("Continue with the work".to_string()),
             vars: HashMap::new(),
         })
@@ -344,24 +344,24 @@ async fn resume_agent_waiting_nudges() {
 
     assert!(result.is_ok());
 
-    // Pipeline should be running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should be running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 #[tokio::test]
 async fn resume_from_terminal_failure_shell_step() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-tf-1").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-tf-1").await;
 
-    // Pipeline starts at "setup" (shell step)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "setup");
+    // Job starts at "setup" (shell step)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "setup");
 
     // Fail the shell step (non-zero exit, no on_fail → terminal "failed")
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "setup".to_string(),
             exit_code: 1,
             stdout: None,
@@ -370,17 +370,17 @@ async fn resume_from_terminal_failure_shell_step() {
         .await
         .unwrap();
 
-    // Verify pipeline is in terminal "failed" state
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
-    assert_eq!(pipeline.step_status, StepStatus::Failed);
-    assert!(pipeline.error.is_some());
+    // Verify job is in terminal "failed" state
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
+    assert_eq!(job.step_status, StepStatus::Failed);
+    assert!(job.error.is_some());
 
     // Resume from terminal failure — should reset to the failed step and re-run
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
         })
@@ -388,39 +388,39 @@ async fn resume_from_terminal_failure_shell_step() {
 
     assert!(result.is_ok());
 
-    // Pipeline should be back at "setup" step and running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "setup");
-    assert!(pipeline.error.is_none());
+    // Job should be back at "setup" step and running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "setup");
+    assert!(job.error.is_none());
 }
 
 #[tokio::test]
 async fn resume_from_terminal_failure_agent_step() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-tf-2").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-tf-2").await;
 
     // Advance to agent step
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
-    // Fail the pipeline at the agent step (simulating agent terminal failure)
+    // Fail the job at the agent step (simulating agent terminal failure)
     ctx.runtime
-        .fail_pipeline(&pipeline, "agent crashed")
+        .fail_job(&job, "agent crashed")
         .await
         .unwrap();
 
-    // Verify pipeline is in terminal "failed" state
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
-    assert_eq!(pipeline.step_status, StepStatus::Failed);
+    // Verify job is in terminal "failed" state
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
+    assert_eq!(job.step_status, StepStatus::Failed);
 
     // Resume from terminal failure with message — should reset to "work" and recover
     let result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("Try again with the fix".to_string()),
             vars: HashMap::new(),
         })
@@ -442,57 +442,57 @@ async fn resume_from_terminal_failure_agent_step() {
         );
     }
 
-    // Pipeline should have been reset to "work" (even if spawn failed afterward)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.error.is_none());
+    // Job should have been reset to "work" (even if spawn failed afterward)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert!(job.error.is_none());
 }
 
 #[tokio::test]
 async fn resume_from_terminal_failure_clears_stale_session() {
     let ctx = setup_resume().await;
-    let pipeline_id = create_test_pipeline(&ctx, "pipe-resume-tf-3").await;
+    let job_id = create_test_job(&ctx, "pipe-resume-tf-3").await;
 
     // Advance to agent step
-    advance_to_agent_step(&ctx, &pipeline_id).await;
+    advance_to_agent_step(&ctx, &job_id).await;
 
-    // Set a stale session_id on the pipeline
+    // Set a stale session_id on the job
     ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.pipelines.get_mut(&pipeline_id) {
+        if let Some(p) = state.jobs.get_mut(&job_id) {
             p.session_id = Some("stale-session-123".to_string());
         }
     });
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.session_id.is_some());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert!(job.session_id.is_some());
 
-    // Fail the pipeline
+    // Fail the job
     ctx.runtime
-        .fail_pipeline(&pipeline, "agent died")
+        .fail_job(&job, "agent died")
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
 
     // Resume from terminal failure
     let _result = ctx
         .runtime
-        .handle_event(Event::PipelineResume {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobResume {
+            id: JobId::new(job_id.clone()),
             message: Some("Retry".to_string()),
             vars: HashMap::new(),
         })
         .await;
 
     // After reset, session_id should be cleared (stale session cleaned up)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
     assert!(
-        pipeline.session_id.is_none()
-            || pipeline.session_id.as_deref() != Some("stale-session-123"),
+        job.session_id.is_none()
+            || job.session_id.as_deref() != Some("stale-session-123"),
         "stale session_id should be cleared on resume, got: {:?}",
-        pipeline.session_id
+        job.session_id
     );
 }

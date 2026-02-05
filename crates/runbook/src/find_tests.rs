@@ -49,40 +49,40 @@ agent "planner" {
 }
 
 #[test]
-fn validate_duplicate_pipeline_across_files() {
+fn validate_duplicate_job_across_files() {
     let tmp = TempDir::new().unwrap();
-    let pipeline_hcl = r#"
-pipeline "build" {
+    let job_hcl = r#"
+job "build" {
   step "run" {
     run = "echo build"
   }
 }
 "#;
-    write_hcl(tmp.path(), "a.hcl", pipeline_hcl);
-    write_hcl(tmp.path(), "b.hcl", pipeline_hcl);
+    write_hcl(tmp.path(), "a.hcl", job_hcl);
+    write_hcl(tmp.path(), "b.hcl", job_hcl);
 
     let errs = validate_runbook_dir(tmp.path()).unwrap_err();
     assert!(!errs.is_empty());
     let msg = errs[0].to_string();
     assert!(
-        msg.contains("pipeline") && msg.contains("build"),
-        "expected duplicate pipeline error, got: {msg}"
+        msg.contains("job") && msg.contains("build"),
+        "expected duplicate job error, got: {msg}"
     );
 }
 
 #[test]
 fn validate_same_name_different_entity_types_is_ok() {
     let tmp = TempDir::new().unwrap();
-    // "build" used as both a command and a pipeline - different types, should be fine
+    // "build" used as both a command and a job - different types, should be fine
     write_hcl(
         tmp.path(),
         "a.hcl",
         r#"
 command "build" {
-  run = { pipeline = "build" }
+  run = { job = "build" }
 }
 
-pipeline "build" {
+job "build" {
   step "run" {
     run = "echo build"
   }
@@ -144,10 +144,10 @@ queue "tasks" {
 
 worker "builder" {
   source  = { queue = "tasks" }
-  handler = { pipeline = "build" }
+  handler = { job = "build" }
 }
 
-pipeline "build" {
+job "build" {
   step "run" {
     run = "echo build"
   }
@@ -461,10 +461,10 @@ fn collect_all_commands_single_line_comment_used_as_description() {
 const CRON_RUNBOOK: &str = r#"
 cron "daily-backup" {
   interval = "24h"
-  run      = { pipeline = "backup" }
+  run      = { job = "backup" }
 }
 
-pipeline "backup" {
+job "backup" {
   step "run" {
     run = "echo backup"
   }
@@ -480,10 +480,10 @@ queue "issues" {
 
 worker "triager" {
   source  = { queue = "issues" }
-  handler = { pipeline = "triage" }
+  handler = { job = "triage" }
 }
 
-pipeline "triage" {
+job "triage" {
   step "run" {
     run = "echo triage"
   }

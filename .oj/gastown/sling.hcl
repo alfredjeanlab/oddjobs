@@ -9,7 +9,7 @@
 #   1. Create issue bead in beads (or use existing bead ID)
 #   2. Instantiate polecat-work molecule (creates step beads)
 #   3. Hook the molecule to a polecat (set assignee + hook label)
-#   4. Spawn polecat pipeline in ephemeral workspace
+#   4. Spawn polecat job in ephemeral workspace
 #   5. Optionally create a convoy for tracking
 #
 # Examples:
@@ -18,7 +18,7 @@
 
 command "gt-sling" {
   args = "<issue> <instructions> [--base <branch>] [--rig <rig>]"
-  run  = { pipeline = "sling" }
+  run  = { job = "sling" }
 
   defaults = {
     base = "main"
@@ -26,7 +26,7 @@ command "gt-sling" {
   }
 }
 
-pipeline "sling" {
+job "sling" {
   name      = "${var.issue}"
   vars      = ["issue", "instructions", "base", "rig"]
   workspace = "ephemeral"
@@ -124,7 +124,7 @@ pipeline "sling" {
   step "reopen" {
     run = <<-SHELL
       BEAD_ID="$(cat ${workspace.root}/.bead-id 2>/dev/null || echo '')"
-      test -n "$BEAD_ID" && bd reopen "$BEAD_ID" --reason "Sling pipeline failed" 2>/dev/null || true
+      test -n "$BEAD_ID" && bd reopen "$BEAD_ID" --reason "Sling job failed" 2>/dev/null || true
     SHELL
     on_done = { step = "cleanup" }
   }

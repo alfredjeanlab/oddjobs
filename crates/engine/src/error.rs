@@ -11,12 +11,12 @@ use thiserror::Error;
 pub enum RuntimeError {
     #[error("execute error: {0}")]
     Execute(#[from] ExecuteError),
-    #[error("pipeline not found: {0}")]
-    PipelineNotFound(String),
+    #[error("job not found: {0}")]
+    JobNotFound(String),
     #[error("command not found: {0}")]
     CommandNotFound(String),
-    #[error("pipeline definition not found: {0}")]
-    PipelineDefNotFound(String),
+    #[error("job definition not found: {0}")]
+    JobDefNotFound(String),
     #[error("agent not found: {0}")]
     AgentNotFound(String),
     #[error("prompt error for agent {agent}: {message}")]

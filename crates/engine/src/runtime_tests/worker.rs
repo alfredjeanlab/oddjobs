@@ -8,17 +8,17 @@ use super::*;
 const WORKER_RUNBOOK: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -28,7 +28,7 @@ take = "echo taken"
 
 [worker.fixer]
 source = { queue = "bugs" }
-handler = { pipeline = "build" }
+handler = { job = "build" }
 concurrency = 1
 "#;
 
@@ -100,10 +100,10 @@ async fn runbook_loaded_event_populates_cache_for_worker_started() {
     );
 }
 
-/// After daemon restart, WorkerStarted must restore active_pipelines from
+/// After daemon restart, WorkerStarted must restore active_jobs from
 /// MaterializedState so concurrency limits are enforced.
 #[tokio::test]
-async fn worker_restart_restores_active_pipelines_from_persisted_state() {
+async fn worker_restart_restores_active_jobs_from_persisted_state() {
     let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
 
     let runbook = oj_runbook::parse_runbook(WORKER_RUNBOOK).unwrap();
@@ -116,7 +116,7 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
     };
 
     // Populate MaterializedState as if WAL replay already ran:
-    // a worker with one active pipeline dispatched before restart.
+    // a worker with one active job dispatched before restart.
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::RunbookLoaded {
             hash: runbook_hash.clone(),
@@ -134,7 +134,7 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            pipeline_id: oj_core::PipelineId::new("pipe-running"),
+            job_id: oj_core::JobId::new("pipe-running"),
             namespace: String::new(),
         });
     });
@@ -162,28 +162,28 @@ async fn worker_restart_restores_active_pipelines_from_persisted_state() {
         .await
         .unwrap();
 
-    // Verify in-memory WorkerState has the active pipeline restored
+    // Verify in-memory WorkerState has the active job restored
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").expect("worker state should exist");
     assert_eq!(
-        state.active_pipelines.len(),
+        state.active_jobs.len(),
         1,
-        "active_pipelines should be restored from persisted state"
+        "active_jobs should be restored from persisted state"
     );
     assert!(
         state
-            .active_pipelines
-            .contains(&oj_core::PipelineId::new("pipe-running")),
-        "should contain the pipeline that was running before restart"
+            .active_jobs
+            .contains(&oj_core::JobId::new("pipe-running")),
+        "should contain the job that was running before restart"
     );
 }
 
 /// After daemon restart with a namespaced worker, WorkerStarted must restore
-/// active_pipelines using the scoped key (namespace/worker_name) from
+/// active_jobs using the scoped key (namespace/worker_name) from
 /// MaterializedState. Regression test for queue items stuck in Active status
 /// when namespace scoping was missing from the persisted state lookup.
 #[tokio::test]
-async fn worker_restart_restores_active_pipelines_with_namespace() {
+async fn worker_restart_restores_active_jobs_with_namespace() {
     let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
 
     let runbook = oj_runbook::parse_runbook(WORKER_RUNBOOK).unwrap();
@@ -198,7 +198,7 @@ async fn worker_restart_restores_active_pipelines_with_namespace() {
     let namespace = "myproject";
 
     // Populate MaterializedState as if WAL replay already ran:
-    // a namespaced worker with one active pipeline dispatched before restart.
+    // a namespaced worker with one active job dispatched before restart.
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::RunbookLoaded {
             hash: runbook_hash.clone(),
@@ -216,7 +216,7 @@ async fn worker_restart_restores_active_pipelines_with_namespace() {
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            pipeline_id: oj_core::PipelineId::new("pipe-running"),
+            job_id: oj_core::JobId::new("pipe-running"),
             namespace: namespace.to_string(),
         });
     });
@@ -244,19 +244,19 @@ async fn worker_restart_restores_active_pipelines_with_namespace() {
         .await
         .unwrap();
 
-    // Verify in-memory WorkerState has the active pipeline restored
+    // Verify in-memory WorkerState has the active job restored
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").expect("worker state should exist");
     assert_eq!(
-        state.active_pipelines.len(),
+        state.active_jobs.len(),
         1,
-        "active_pipelines should be restored from persisted state with namespace"
+        "active_jobs should be restored from persisted state with namespace"
     );
     assert!(
         state
-            .active_pipelines
-            .contains(&oj_core::PipelineId::new("pipe-running")),
-        "should contain the pipeline that was running before restart"
+            .active_jobs
+            .contains(&oj_core::JobId::new("pipe-running")),
+        "should contain the job that was running before restart"
     );
 }
 
@@ -365,15 +365,15 @@ async fn worker_picks_up_runbook_edits_on_poll() {
 
 /// Runbook with a persisted queue and concurrency = 2
 const CONCURRENT_WORKER_RUNBOOK: &str = r#"
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -383,7 +383,7 @@ vars = ["title"]
 
 [worker.fixer]
 source = { queue = "bugs" }
-handler = { pipeline = "build" }
+handler = { job = "build" }
 concurrency = 2
 "#;
 
@@ -438,12 +438,12 @@ fn count_dispatched(events: &[Event]) -> usize {
         .count()
 }
 
-/// Collect pipeline IDs from WorkerItemDispatched events.
-fn dispatched_pipeline_ids(events: &[Event]) -> Vec<PipelineId> {
+/// Collect job IDs from WorkerItemDispatched events.
+fn dispatched_job_ids(events: &[Event]) -> Vec<JobId> {
     events
         .iter()
         .filter_map(|e| match e {
-            Event::WorkerItemDispatched { pipeline_id, .. } => Some(pipeline_id.clone()),
+            Event::WorkerItemDispatched { job_id, .. } => Some(job_id.clone()),
             _ => None,
         })
         .collect()
@@ -496,7 +496,7 @@ async fn concurrency_2_dispatches_two_items_simultaneously() {
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(state.active_pipelines.len(), 2);
+        assert_eq!(state.active_jobs.len(), 2);
     }
 
     let pending_count = ctx.runtime.lock_state(|state| {
@@ -532,24 +532,24 @@ async fn concurrency_1_still_dispatches_one_item() {
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(state.active_pipelines.len(), 1);
+    assert_eq!(state.active_jobs.len(), 1);
 }
 
-/// When one of two active pipelines completes, the worker re-polls and fills the free slot.
+/// When one of two active jobs completes, the worker re-polls and fills the free slot.
 #[tokio::test]
-async fn pipeline_completion_triggers_repoll_and_fills_slot() {
+async fn job_completion_triggers_repoll_and_fills_slot() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 3);
 
     let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
-    let dispatched = dispatched_pipeline_ids(&events);
+    let dispatched = dispatched_job_ids(&events);
     let completed_id = &dispatched[0];
 
     let completion_events = ctx
         .runtime
-        .handle_event(Event::PipelineAdvanced {
+        .handle_event(Event::JobAdvanced {
             id: completed_id.clone(),
             step: "done".to_string(),
         })
@@ -573,22 +573,22 @@ async fn pipeline_completion_triggers_repoll_and_fills_slot() {
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
     assert_eq!(
-        state.active_pipelines.len(),
+        state.active_jobs.len(),
         2,
-        "worker should have 2 active pipelines again"
+        "worker should have 2 active jobs again"
     );
 }
 
-/// Stopping a worker marks it stopped but lets active pipelines finish.
+/// Stopping a worker marks it stopped but lets active jobs finish.
 #[tokio::test]
-async fn worker_stop_leaves_active_pipelines_running() {
+async fn worker_stop_leaves_active_jobs_running() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 2);
 
     let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
-    let dispatched = dispatched_pipeline_ids(&events);
+    let dispatched = dispatched_job_ids(&events);
 
     let stop_events = ctx
         .runtime
@@ -599,23 +599,23 @@ async fn worker_stop_leaves_active_pipelines_running() {
         .await
         .unwrap();
 
-    // No pipelines should be cancelled
+    // No jobs should be cancelled
     let cancelled_count = stop_events
         .iter()
-        .filter(|e| matches!(e, Event::PipelineAdvanced { step, .. } if step == "cancelled"))
+        .filter(|e| matches!(e, Event::JobAdvanced { step, .. } if step == "cancelled"))
         .count();
     assert_eq!(
         cancelled_count, 0,
-        "stop should not cancel active pipelines"
+        "stop should not cancel active jobs"
     );
 
-    // Worker should be stopped but still tracking active pipelines
+    // Worker should be stopped but still tracking active jobs
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
     assert_eq!(state.status, WorkerStatus::Stopped);
-    assert_eq!(state.active_pipelines.len(), 2);
+    assert_eq!(state.active_jobs.len(), 2);
     for pid in &dispatched {
-        assert!(state.active_pipelines.contains(pid));
+        assert!(state.active_jobs.contains(pid));
     }
 }
 
@@ -699,13 +699,13 @@ async fn worker_at_capacity_does_not_dispatch() {
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(state.active_pipelines.len(), 2);
+    assert_eq!(state.active_jobs.len(), 2);
 }
 
-/// After daemon restart, a worker with concurrency=2 and 2 active pipelines
+/// After daemon restart, a worker with concurrency=2 and 2 active jobs
 /// should restore both and not dispatch new items.
 #[tokio::test]
-async fn worker_restart_restores_multiple_active_pipelines() {
+async fn worker_restart_restores_multiple_active_jobs() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     let hash = load_runbook_hash(&ctx, CONCURRENT_WORKER_RUNBOOK);
 
@@ -721,13 +721,13 @@ async fn worker_restart_restores_multiple_active_pipelines() {
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            pipeline_id: PipelineId::new("pipe-a"),
+            job_id: JobId::new("pipe-a"),
             namespace: String::new(),
         });
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "item-2".to_string(),
-            pipeline_id: PipelineId::new("pipe-b"),
+            job_id: JobId::new("pipe-b"),
             namespace: String::new(),
         });
     });
@@ -751,12 +751,12 @@ async fn worker_restart_restores_multiple_active_pipelines() {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
         assert_eq!(
-            state.active_pipelines.len(),
+            state.active_jobs.len(),
             2,
-            "should restore 2 active pipelines from persisted state"
+            "should restore 2 active jobs from persisted state"
         );
-        assert!(state.active_pipelines.contains(&PipelineId::new("pipe-a")));
-        assert!(state.active_pipelines.contains(&PipelineId::new("pipe-b")));
+        assert!(state.active_jobs.contains(&JobId::new("pipe-a")));
+        assert!(state.active_jobs.contains(&JobId::new("pipe-b")));
     }
 
     let mut all_events = Vec::new();
@@ -847,10 +847,10 @@ fn queue_item_status(
     })
 }
 
-/// When a worker pipeline completes ("done"), the queue item should transition
+/// When a worker job completes ("done"), the queue item should transition
 /// from Active to Completed.
 #[tokio::test]
-async fn queue_item_completed_on_pipeline_done() {
+async fn queue_item_completed_on_job_done() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 1);
 
@@ -864,13 +864,13 @@ async fn queue_item_completed_on_pipeline_done() {
         "item should be Active after dispatch"
     );
 
-    let dispatched = dispatched_pipeline_ids(&events);
-    let pipeline_id = &dispatched[0];
+    let dispatched = dispatched_job_ids(&events);
+    let job_id = &dispatched[0];
 
-    // Complete the pipeline
+    // Complete the job
     ctx.runtime
-        .handle_event(Event::PipelineAdvanced {
-            id: pipeline_id.clone(),
+        .handle_event(Event::JobAdvanced {
+            id: job_id.clone(),
             step: "done".to_string(),
         })
         .await
@@ -880,14 +880,14 @@ async fn queue_item_completed_on_pipeline_done() {
     assert_eq!(
         queue_item_status(&ctx, "bugs", "item-1"),
         Some(oj_storage::QueueItemStatus::Completed),
-        "item should be Completed after pipeline done"
+        "item should be Completed after job done"
     );
 }
 
-/// When a worker pipeline fails, the queue item should transition from Active
+/// When a worker job fails, the queue item should transition from Active
 /// to Failed (and then Dead if no retry config).
 #[tokio::test]
-async fn queue_item_failed_on_pipeline_failure() {
+async fn queue_item_failed_on_job_failure() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 1);
 
@@ -899,13 +899,13 @@ async fn queue_item_failed_on_pipeline_failure() {
         Some(oj_storage::QueueItemStatus::Active),
     );
 
-    let dispatched = dispatched_pipeline_ids(&events);
-    let pipeline_id = &dispatched[0];
+    let dispatched = dispatched_job_ids(&events);
+    let job_id = &dispatched[0];
 
-    // Simulate shell failure which triggers fail_pipeline
+    // Simulate shell failure which triggers fail_job
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: pipeline_id.clone(),
+            job_id: job_id.clone(),
             step: "init".to_string(),
             exit_code: 1,
             stdout: None,
@@ -918,15 +918,15 @@ async fn queue_item_failed_on_pipeline_failure() {
     let status = queue_item_status(&ctx, "bugs", "item-1");
     assert!(
         status != Some(oj_storage::QueueItemStatus::Active),
-        "item should not be Active after pipeline failure, got {:?}",
+        "item should not be Active after job failure, got {:?}",
         status
     );
 }
 
-/// When a worker pipeline is cancelled, the queue item should transition from
+/// When a worker job is cancelled, the queue item should transition from
 /// Active to Failed (and then Dead if no retry config).
 #[tokio::test]
-async fn queue_item_failed_on_pipeline_cancel() {
+async fn queue_item_failed_on_job_cancel() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 1);
 
@@ -938,13 +938,13 @@ async fn queue_item_failed_on_pipeline_cancel() {
         Some(oj_storage::QueueItemStatus::Active),
     );
 
-    let dispatched = dispatched_pipeline_ids(&events);
-    let pipeline_id = &dispatched[0];
+    let dispatched = dispatched_job_ids(&events);
+    let job_id = &dispatched[0];
 
-    // Cancel the pipeline
+    // Cancel the job
     ctx.runtime
-        .handle_event(Event::PipelineCancel {
-            id: pipeline_id.clone(),
+        .handle_event(Event::JobCancel {
+            id: job_id.clone(),
         })
         .await
         .unwrap();
@@ -953,7 +953,7 @@ async fn queue_item_failed_on_pipeline_cancel() {
     let status = queue_item_status(&ctx, "bugs", "item-1");
     assert!(
         status != Some(oj_storage::QueueItemStatus::Active),
-        "item should not be Active after pipeline cancel, got {:?}",
+        "item should not be Active after job cancel, got {:?}",
         status
     );
 }
@@ -961,10 +961,10 @@ async fn queue_item_failed_on_pipeline_cancel() {
 // -- Duplicate dispatch prevention tests --
 
 /// Stale WorkerPollComplete events whose items were already dispatched should
-/// not create duplicate pipelines. This guards against overlapping polls that
+/// not create duplicate jobs. This guards against overlapping polls that
 /// carry the same items when multiple QueuePushed events trigger rapid re-polls.
 #[tokio::test]
-async fn stale_poll_does_not_create_duplicate_pipelines() {
+async fn stale_poll_does_not_create_duplicate_jobs() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
     push_persisted_items(&ctx, "bugs", 2);
 
@@ -972,11 +972,11 @@ async fn stale_poll_does_not_create_duplicate_pipelines() {
     let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
-    // Complete both pipelines so active_pipelines goes to 0
-    let dispatched = dispatched_pipeline_ids(&events);
+    // Complete both jobs so active_jobs goes to 0
+    let dispatched = dispatched_job_ids(&events);
     for pid in &dispatched {
         ctx.runtime
-            .handle_event(Event::PipelineAdvanced {
+            .handle_event(Event::JobAdvanced {
                 id: pid.clone(),
                 step: "done".to_string(),
             })
@@ -994,11 +994,11 @@ async fn stale_poll_does_not_create_duplicate_pipelines() {
         Some(oj_storage::QueueItemStatus::Completed),
     );
 
-    // active_pipelines should be 0
+    // active_jobs should be 0
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(state.active_pipelines.len(), 0);
+        assert_eq!(state.active_jobs.len(), 0);
     }
 
     // Simulate a stale WorkerPollComplete with the same items
@@ -1021,12 +1021,12 @@ async fn stale_poll_does_not_create_duplicate_pipelines() {
     assert_eq!(
         count_dispatched(&stale_events),
         0,
-        "stale poll should not create duplicate pipelines for non-Pending items"
+        "stale poll should not create duplicate jobs for non-Pending items"
     );
 }
 
 /// When items are Active (dispatched but not yet completed), a stale poll
-/// should skip them instead of creating duplicate pipelines.
+/// should skip them instead of creating duplicate jobs.
 #[tokio::test]
 async fn stale_poll_skips_active_items() {
     let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
@@ -1036,11 +1036,11 @@ async fn stale_poll_skips_active_items() {
     let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
-    // Complete one pipeline to free a slot
-    let dispatched = dispatched_pipeline_ids(&events);
+    // Complete one job to free a slot
+    let dispatched = dispatched_job_ids(&events);
     let completion_events = ctx
         .runtime
-        .handle_event(Event::PipelineAdvanced {
+        .handle_event(Event::JobAdvanced {
             id: dispatched[0].clone(),
             step: "done".to_string(),
         })
@@ -1087,15 +1087,15 @@ async fn stale_poll_skips_active_items() {
 
 /// Runbook with an external queue and concurrency > 1
 const EXTERNAL_CONCURRENT_RUNBOOK: &str = r#"
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -1105,7 +1105,7 @@ take = "echo taken"
 
 [worker.fixer]
 source = { queue = "bugs" }
-handler = { pipeline = "build" }
+handler = { job = "build" }
 concurrency = 3
 "#;
 

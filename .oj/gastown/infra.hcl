@@ -19,7 +19,7 @@ queue "merge-requests" {
 
 worker "refinery" {
   source      = { queue = "merge-requests" }
-  handler     = { pipeline = "refinery-patrol" }
+  handler     = { job = "refinery-patrol" }
   concurrency = 1
 }
 
@@ -35,7 +35,7 @@ queue "bugs" {
 
 worker "bugfix" {
   source      = { queue = "bugs" }
-  handler     = { pipeline = "polecat-work" }
+  handler     = { job = "polecat-work" }
   concurrency = 1
 }
 

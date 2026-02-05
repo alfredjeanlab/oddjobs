@@ -14,34 +14,34 @@ mod template_refs;
 const SAMPLE_RUNBOOK_NEW: &str = r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 [command.build.defaults]
 branch = "main"
 
-[pipeline.build]
+[job.build]
 vars  = ["name", "prompt"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "git worktree add worktrees/${name} -b feature/${name}"
 on_done = "plan"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan"
 run = { agent = "planner" }
 on_done = "execute"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = { agent = "executor" }
 on_done = "done"
 on_fail = "failed"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "failed"
 run = "echo failed"
 
@@ -63,26 +63,26 @@ fn parse_new_format_runbook() {
     // Commands
     assert!(runbook.commands.contains_key("build"));
     let cmd = &runbook.commands["build"];
-    assert!(cmd.run.is_pipeline());
-    assert_eq!(cmd.run.pipeline_name(), Some("build"));
+    assert!(cmd.run.is_job());
+    assert_eq!(cmd.run.job_name(), Some("build"));
     assert_eq!(cmd.args.positional.len(), 2);
     assert_eq!(cmd.args.positional[0].name, "name");
     assert_eq!(cmd.args.positional[1].name, "prompt");
     assert_eq!(cmd.defaults.get("branch"), Some(&"main".to_string()));
 
-    // Pipelines
-    assert!(runbook.pipelines.contains_key("build"));
-    let pipeline = &runbook.pipelines["build"];
-    assert_eq!(pipeline.vars, vec!["name", "prompt"]);
-    assert_eq!(pipeline.steps.len(), 5);
+    // Jobs
+    assert!(runbook.jobs.contains_key("build"));
+    let job = &runbook.jobs["build"];
+    assert_eq!(job.vars, vec!["name", "prompt"]);
+    assert_eq!(job.steps.len(), 5);
 
     // Step checks
-    assert_eq!(pipeline.steps[0].name, "init");
-    assert!(pipeline.steps[0].run.is_shell());
+    assert_eq!(job.steps[0].name, "init");
+    assert!(job.steps[0].run.is_shell());
 
-    assert_eq!(pipeline.steps[1].name, "plan");
-    assert!(pipeline.steps[1].run.is_agent());
-    assert_eq!(pipeline.steps[1].agent_name(), Some("planner"));
+    assert_eq!(job.steps[1].name, "plan");
+    assert!(job.steps[1].run.is_agent());
+    assert_eq!(job.steps[1].agent_name(), Some("planner"));
 
     // Agents
     assert!(runbook.agents.contains_key("planner"));
@@ -95,7 +95,7 @@ fn parse_new_format_runbook() {
 fn parse_empty_runbook() {
     let runbook = parse_runbook("").unwrap();
     assert!(runbook.commands.is_empty());
-    assert!(runbook.pipelines.is_empty());
+    assert!(runbook.jobs.is_empty());
 }
 
 #[test]
@@ -146,8 +146,8 @@ args = "<name>"
 #[test]
 fn error_missing_step_name() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 run = "echo test"
 "#;
     let err = parse_runbook(toml).unwrap_err();
@@ -159,8 +159,8 @@ run = "echo test"
 #[test]
 fn error_missing_step_run() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "build"
 "#;
     let err = parse_runbook(toml).unwrap_err();
@@ -196,8 +196,8 @@ run = "echo 'unterminated"
 #[test]
 fn error_unterminated_subshell_in_step() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "broken"
 run = "echo $(incomplete"
 "#;
@@ -205,7 +205,7 @@ run = "echo $(incomplete"
     assert!(matches!(err, ParseError::ShellError { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("pipeline.test.step[0](broken).run"),
+        msg.contains("job.test.step[0](broken).run"),
         "error should mention location: {}",
         msg
     );
@@ -252,9 +252,9 @@ run = { invalid = "key" }
 }
 
 #[test]
-fn error_pipeline_not_table() {
+fn error_job_not_table() {
     let toml = r#"
-[pipeline]
+[job]
 build = "not a table"
 "#;
     let err = parse_runbook(toml).unwrap_err();
@@ -458,7 +458,7 @@ run = "claude --dangerously-skip-permissions"
 
 #[test]
 fn parse_agent_prompt_reference_without_field() {
-    // ${prompt} in run without a prompt field is valid — the value comes from pipeline input
+    // ${prompt} in run without a prompt field is valid — the value comes from job input
     let toml = r#"
 [agent.plan]
 run = "claude -p \"${prompt}\""
@@ -515,13 +515,13 @@ const SAMPLE_JSON_RUNBOOK: &str = r#"
   "command": {
     "build": {
       "args": "<name> <prompt>",
-      "run": { "pipeline": "build" },
+      "run": { "job": "build" },
       "defaults": {
         "branch": "main"
       }
     }
   },
-  "pipeline": {
+  "job": {
     "build": {
       "input": ["name", "prompt"],
       "step": [
@@ -574,38 +574,38 @@ fn parse_json_runbook() {
     // Commands
     assert!(runbook.commands.contains_key("build"));
     let cmd = &runbook.commands["build"];
-    assert!(cmd.run.is_pipeline());
-    assert_eq!(cmd.run.pipeline_name(), Some("build"));
+    assert!(cmd.run.is_job());
+    assert_eq!(cmd.run.job_name(), Some("build"));
     assert_eq!(cmd.args.positional.len(), 2);
     assert_eq!(cmd.args.positional[0].name, "name");
     assert_eq!(cmd.args.positional[1].name, "prompt");
     assert_eq!(cmd.defaults.get("branch"), Some(&"main".to_string()));
 
-    // Pipelines
-    assert!(runbook.pipelines.contains_key("build"));
-    let pipeline = &runbook.pipelines["build"];
-    assert_eq!(pipeline.vars, vec!["name", "prompt"]);
-    assert_eq!(pipeline.steps.len(), 5);
+    // Jobs
+    assert!(runbook.jobs.contains_key("build"));
+    let job = &runbook.jobs["build"];
+    assert_eq!(job.vars, vec!["name", "prompt"]);
+    assert_eq!(job.steps.len(), 5);
 
-    assert_eq!(pipeline.steps[0].name, "init");
-    assert!(pipeline.steps[0].run.is_shell());
+    assert_eq!(job.steps[0].name, "init");
+    assert!(job.steps[0].run.is_shell());
 
-    assert_eq!(pipeline.steps[1].name, "plan");
-    assert!(pipeline.steps[1].run.is_agent());
-    assert_eq!(pipeline.steps[1].agent_name(), Some("planner"));
+    assert_eq!(job.steps[1].name, "plan");
+    assert!(job.steps[1].run.is_agent());
+    assert_eq!(job.steps[1].agent_name(), Some("planner"));
 
-    assert_eq!(pipeline.steps[2].name, "execute");
+    assert_eq!(job.steps[2].name, "execute");
     assert_eq!(
-        pipeline.steps[2].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
         Some("done")
     );
     assert_eq!(
-        pipeline.steps[2].on_fail.as_ref().map(|t| t.step_name()),
+        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
         Some("failed")
     );
 
-    assert_eq!(pipeline.steps[3].name, "done");
-    assert_eq!(pipeline.steps[4].name, "failed");
+    assert_eq!(job.steps[3].name, "done");
+    assert_eq!(job.steps[4].name, "failed");
 
     // Agents
     assert!(runbook.agents.contains_key("planner"));
@@ -618,7 +618,7 @@ fn parse_json_runbook() {
 fn parse_json_empty_runbook() {
     let runbook = parse_runbook_with_format("{}", Format::Json).unwrap();
     assert!(runbook.commands.is_empty());
-    assert!(runbook.pipelines.is_empty());
+    assert!(runbook.jobs.is_empty());
 }
 
 // ============================================================================
@@ -628,14 +628,14 @@ fn parse_json_empty_runbook() {
 const SAMPLE_HCL_RUNBOOK: &str = r#"
 command "build" {
   args = "<name> <prompt>"
-  run  = { pipeline = "build" }
+  run  = { job = "build" }
 
   defaults = {
     branch = "main"
   }
 }
 
-pipeline "build" {
+job "build" {
   vars  = ["name", "prompt"]
 
   step "init" {
@@ -684,39 +684,39 @@ fn parse_hcl_runbook() {
     // Commands
     assert!(runbook.commands.contains_key("build"));
     let cmd = &runbook.commands["build"];
-    assert!(cmd.run.is_pipeline());
-    assert_eq!(cmd.run.pipeline_name(), Some("build"));
+    assert!(cmd.run.is_job());
+    assert_eq!(cmd.run.job_name(), Some("build"));
     assert_eq!(cmd.args.positional.len(), 2);
     assert_eq!(cmd.args.positional[0].name, "name");
     assert_eq!(cmd.args.positional[1].name, "prompt");
     assert_eq!(cmd.defaults.get("branch"), Some(&"main".to_string()));
 
-    // Pipelines
-    assert!(runbook.pipelines.contains_key("build"));
-    let pipeline = &runbook.pipelines["build"];
-    assert_eq!(pipeline.vars, vec!["name", "prompt"]);
-    assert_eq!(pipeline.steps.len(), 5);
+    // Jobs
+    assert!(runbook.jobs.contains_key("build"));
+    let job = &runbook.jobs["build"];
+    assert_eq!(job.vars, vec!["name", "prompt"]);
+    assert_eq!(job.steps.len(), 5);
 
     // Steps get name from block label
-    assert_eq!(pipeline.steps[0].name, "init");
-    assert!(pipeline.steps[0].run.is_shell());
+    assert_eq!(job.steps[0].name, "init");
+    assert!(job.steps[0].run.is_shell());
 
-    assert_eq!(pipeline.steps[1].name, "plan");
-    assert!(pipeline.steps[1].run.is_agent());
-    assert_eq!(pipeline.steps[1].agent_name(), Some("planner"));
+    assert_eq!(job.steps[1].name, "plan");
+    assert!(job.steps[1].run.is_agent());
+    assert_eq!(job.steps[1].agent_name(), Some("planner"));
 
-    assert_eq!(pipeline.steps[2].name, "execute");
+    assert_eq!(job.steps[2].name, "execute");
     assert_eq!(
-        pipeline.steps[2].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
         Some("done")
     );
     assert_eq!(
-        pipeline.steps[2].on_fail.as_ref().map(|t| t.step_name()),
+        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
         Some("failed")
     );
 
-    assert_eq!(pipeline.steps[3].name, "done");
-    assert_eq!(pipeline.steps[4].name, "failed");
+    assert_eq!(job.steps[3].name, "done");
+    assert_eq!(job.steps[4].name, "failed");
 
     // Agents
     assert!(runbook.agents.contains_key("planner"));
@@ -729,13 +729,13 @@ fn parse_hcl_runbook() {
 fn parse_hcl_empty_runbook() {
     let runbook = parse_runbook_with_format("", Format::Hcl).unwrap();
     assert!(runbook.commands.is_empty());
-    assert!(runbook.pipelines.is_empty());
+    assert!(runbook.jobs.is_empty());
 }
 
 #[test]
 fn parse_hcl_step_names_from_block_labels() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
   vars  = ["env"]
 
   step "build" {
@@ -754,15 +754,15 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = &runbook.pipelines["deploy"];
-    assert_eq!(pipeline.steps.len(), 3);
-    assert_eq!(pipeline.steps[0].name, "build");
-    assert_eq!(pipeline.steps[1].name, "test");
+    let job = &runbook.jobs["deploy"];
+    assert_eq!(job.steps.len(), 3);
+    assert_eq!(job.steps[0].name, "build");
+    assert_eq!(job.steps[1].name, "test");
     assert_eq!(
-        pipeline.steps[1].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[1].on_done.as_ref().map(|t| t.step_name()),
         Some("deploy")
     );
-    assert_eq!(pipeline.steps[2].name, "deploy");
+    assert_eq!(job.steps[2].name, "deploy");
 }
 
 #[test]
@@ -1088,14 +1088,14 @@ right = "abc12345"
 const EPIC_HCL_RUNBOOK: &str = r#"
 command "epic" {
   args = "<name> <instructions> [--blocked-by <ids>]"
-  run  = { pipeline = "epic" }
+  run  = { job = "epic" }
 
   defaults = {
     blocked-by = ""
   }
 }
 
-pipeline "epic" {
+job "epic" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "blocked-by"]
   workspace = "ephemeral"
@@ -1179,7 +1179,7 @@ agent "epic-builder" {
 "#;
 
 use crate::agent::{AgentAction, Attempts, PrimeDef};
-use crate::pipeline::{WorkspaceConfig, WorkspaceType};
+use crate::job::{WorkspaceConfig, WorkspaceType};
 
 #[test]
 fn parse_epic_hcl_command() {
@@ -1187,8 +1187,8 @@ fn parse_epic_hcl_command() {
 
     // Command
     let cmd = &runbook.commands["epic"];
-    assert!(cmd.run.is_pipeline());
-    assert_eq!(cmd.run.pipeline_name(), Some("epic"));
+    assert!(cmd.run.is_job());
+    assert_eq!(cmd.run.job_name(), Some("epic"));
     assert_eq!(cmd.args.positional.len(), 2);
     assert_eq!(cmd.args.positional[0].name, "name");
     assert_eq!(cmd.args.positional[1].name, "instructions");
@@ -1198,62 +1198,62 @@ fn parse_epic_hcl_command() {
 }
 
 #[test]
-fn parse_epic_hcl_pipeline() {
+fn parse_epic_hcl_job() {
     let runbook = parse_runbook_with_format(EPIC_HCL_RUNBOOK, Format::Hcl).unwrap();
 
-    let pipeline = &runbook.pipelines["epic"];
-    assert_eq!(pipeline.name.as_deref(), Some("${var.name}"));
-    assert_eq!(pipeline.vars, vec!["name", "instructions", "blocked-by"]);
+    let job = &runbook.jobs["epic"];
+    assert_eq!(job.name.as_deref(), Some("${var.name}"));
+    assert_eq!(job.vars, vec!["name", "instructions", "blocked-by"]);
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
     );
-    assert_eq!(pipeline.steps.len(), 5);
+    assert_eq!(job.steps.len(), 5);
 
     // Step names and transitions
-    assert_eq!(pipeline.steps[0].name, "init");
-    assert!(pipeline.steps[0].run.is_shell());
+    assert_eq!(job.steps[0].name, "init");
+    assert!(job.steps[0].run.is_shell());
     assert_eq!(
-        pipeline.steps[0].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[0].on_done.as_ref().map(|t| t.step_name()),
         Some("decompose")
     );
 
-    assert_eq!(pipeline.steps[1].name, "decompose");
-    assert!(pipeline.steps[1].run.is_agent());
-    assert_eq!(pipeline.steps[1].agent_name(), Some("decompose"));
+    assert_eq!(job.steps[1].name, "decompose");
+    assert!(job.steps[1].run.is_agent());
+    assert_eq!(job.steps[1].agent_name(), Some("decompose"));
     assert_eq!(
-        pipeline.steps[1].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[1].on_done.as_ref().map(|t| t.step_name()),
         Some("build")
     );
 
-    assert_eq!(pipeline.steps[2].name, "build");
-    assert!(pipeline.steps[2].run.is_agent());
-    assert_eq!(pipeline.steps[2].agent_name(), Some("epic-builder"));
+    assert_eq!(job.steps[2].name, "build");
+    assert!(job.steps[2].run.is_agent());
+    assert_eq!(job.steps[2].agent_name(), Some("epic-builder"));
     assert_eq!(
-        pipeline.steps[2].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
         Some("submit")
     );
 
-    assert_eq!(pipeline.steps[3].name, "submit");
-    assert!(pipeline.steps[3].run.is_shell());
+    assert_eq!(job.steps[3].name, "submit");
+    assert!(job.steps[3].run.is_shell());
     assert_eq!(
-        pipeline.steps[3].on_done.as_ref().map(|t| t.step_name()),
+        job.steps[3].on_done.as_ref().map(|t| t.step_name()),
         Some("cleanup")
     );
 
-    assert_eq!(pipeline.steps[4].name, "cleanup");
-    assert!(pipeline.steps[4].run.is_shell());
-    assert!(pipeline.steps[4].on_done.is_none()); // terminal step
+    assert_eq!(job.steps[4].name, "cleanup");
+    assert!(job.steps[4].run.is_shell());
+    assert!(job.steps[4].on_done.is_none()); // terminal step
 
     // Locals
-    assert!(pipeline.locals.contains_key("repo"));
-    assert!(pipeline.locals.contains_key("branch"));
-    assert!(pipeline.locals.contains_key("title"));
+    assert!(job.locals.contains_key("repo"));
+    assert!(job.locals.contains_key("branch"));
+    assert!(job.locals.contains_key("title"));
 
     // Notify
-    assert!(pipeline.notify.on_start.is_some());
-    assert!(pipeline.notify.on_done.is_some());
-    assert!(pipeline.notify.on_fail.is_some());
+    assert!(job.notify.on_start.is_some());
+    assert!(job.notify.on_done.is_some());
+    assert!(job.notify.on_fail.is_some());
 }
 
 #[test]

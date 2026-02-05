@@ -203,11 +203,11 @@ async fn handle_request(
             mutations::handle_agent_send(state, event_bus, agent_id, message).await
         }
 
-        Request::PipelineResume { id, message, vars } => {
-            mutations::handle_pipeline_resume(state, orphans, event_bus, id, message, vars)
+        Request::JobResume { id, message, vars } => {
+            mutations::handle_job_resume(state, orphans, event_bus, id, message, vars)
         }
 
-        Request::PipelineCancel { ids } => mutations::handle_pipeline_cancel(state, event_bus, ids),
+        Request::JobCancel { ids } => mutations::handle_job_cancel(state, event_bus, ids),
 
         Request::RunCommand {
             project_root,
@@ -250,7 +250,7 @@ async fn handle_request(
             mutations::handle_workspace_drop(state, event_bus, None, false, true).await
         }
 
-        Request::PipelinePrune {
+        Request::JobPrune {
             all,
             failed,
             orphans: prune_orphans,
@@ -262,7 +262,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_pipeline_prune(
+            mutations::handle_job_prune(
                 state,
                 event_bus,
                 logs_path,

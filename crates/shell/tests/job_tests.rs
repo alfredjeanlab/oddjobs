@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Integration tests for complex pipeline execution.
+//! Integration tests for complex job execution.
 //!
-//! These tests complement the basic pipeline tests in `exec_tests.rs` by
-//! covering multi-stage pipelines, mixed success/failure scenarios, large data
-//! throughput, pipelines combined with redirections, and pipefail behavior
+//! These tests complement the basic job tests in `exec_tests.rs` by
+//! covering multi-stage jobs, mixed success/failure scenarios, large data
+//! throughput, jobs combined with redirections, and pipefail behavior
 //! verification.
 
 use oj_shell::exec::{ExecError, ShellExecutor};
@@ -20,18 +20,18 @@ fn executor() -> ShellExecutor {
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("oj_pipeline_test_{name}"));
+    let dir = std::env::temp_dir().join(format!("oj_job_test_{name}"));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
 // ===========================================================================
-// Phase 2: Multi-Stage Pipeline Tests (5+ Stages)
+// Phase 2: Multi-Stage Job Tests (5+ Stages)
 // ===========================================================================
 
 #[tokio::test]
-async fn five_stage_pipeline_data_flow() {
+async fn five_stage_job_data_flow() {
     // echo "hello" | cat | cat | cat | cat
     // Verify data passes through all stages unchanged
     let result = executor()
@@ -49,7 +49,7 @@ async fn five_stage_pipeline_data_flow() {
 
 #[tokio::test]
 async fn seven_stage_transform_chain() {
-    // Real-world-ish pipeline: generate lines, transform, filter, count
+    // Real-world-ish job: generate lines, transform, filter, count
     // printf "a\nb\nc\na\nb\n" | cat | sort | uniq | cat | cat | wc -l
     let result = executor()
         .execute_str("printf 'a\\nb\\nc\\na\\nb\\n' | cat | sort | uniq | cat | cat | wc -l")
@@ -71,7 +71,7 @@ async fn seven_stage_transform_chain() {
 }
 
 #[tokio::test]
-async fn pipeline_preserves_order() {
+async fn job_preserves_order() {
     // Numbers should come out in the same order (no transformations)
     let result = executor()
         .execute_str("printf '1\\n2\\n3\\n4\\n5\\n' | cat | cat | cat | cat | cat")
@@ -87,7 +87,7 @@ async fn pipeline_preserves_order() {
 }
 
 #[tokio::test]
-async fn long_pipeline_all_traces_recorded() {
+async fn long_job_all_traces_recorded() {
     // Verify all 5+ stages appear in traces
     let result = executor()
         .execute_str("echo x | cat | cat | cat | cat | cat")
@@ -103,13 +103,13 @@ async fn long_pipeline_all_traces_recorded() {
 }
 
 // ===========================================================================
-// Phase 3: Mixed Success/Failure Pipeline Tests
+// Phase 3: Mixed Success/Failure Job Tests
 // ===========================================================================
 
 #[tokio::test]
-async fn first_stage_fails_pipeline_continues() {
+async fn first_stage_fails_job_continues() {
     // false | echo success - false exits 1, but echo runs and succeeds
-    // Pipeline exit = last command = 0
+    // Job exit = last command = 0
     let result = executor()
         .execute_str("false | echo success")
         .await
@@ -122,7 +122,7 @@ async fn first_stage_fails_pipeline_continues() {
 }
 
 #[tokio::test]
-async fn middle_stage_fails_pipeline_continues() {
+async fn middle_stage_fails_job_continues() {
     // echo hello | sh -c "exit 42" | cat
     // Middle stage fails with 42, but cat still runs
     let result = executor()
@@ -136,7 +136,7 @@ async fn middle_stage_fails_pipeline_continues() {
 
 #[tokio::test]
 async fn last_stage_fails_returns_failure() {
-    // echo hello | false - pipeline fails because last command fails
+    // echo hello | false - job fails because last command fails
     let err = executor()
         .execute_str("echo hello | false")
         .await
@@ -163,7 +163,7 @@ async fn all_stages_fail_except_last() {
 }
 
 #[tokio::test]
-async fn false_head_of_pipeline() {
+async fn false_head_of_job() {
     // `false | true` returns 0
     let result = executor().execute_str("false | true").await.unwrap();
     assert_eq!(result.exit_code, 0);
@@ -241,7 +241,7 @@ async fn line_count_preserved() {
 
 #[tokio::test]
 async fn binary_data_passthrough() {
-    // Test that binary-ish data (all byte values) survives pipeline
+    // Test that binary-ish data (all byte values) survives job
     // Generate bytes 0-255 repeatedly using printf and verify count
     let result = executor()
         .execute_str("seq 1 1000 | cat | cat | wc -l")
@@ -261,12 +261,12 @@ async fn binary_data_passthrough() {
 }
 
 // ===========================================================================
-// Phase 5: Pipeline with Redirection Tests
+// Phase 5: Job with Redirection Tests
 // ===========================================================================
 
 #[tokio::test]
-async fn pipeline_output_to_file() {
-    let dir = temp_dir("pipeline_out");
+async fn job_output_to_file() {
+    let dir = temp_dir("job_out");
     let file = dir.join("output.txt");
 
     let script = format!("echo hello | tr 'h' 'H' > {}", file.display());
@@ -280,8 +280,8 @@ async fn pipeline_output_to_file() {
 }
 
 #[tokio::test]
-async fn pipeline_input_from_file() {
-    let dir = temp_dir("pipeline_in");
+async fn job_input_from_file() {
+    let dir = temp_dir("job_in");
     let file = dir.join("input.txt");
     std::fs::write(&file, "line1\nline2\nline3\n").unwrap();
 
@@ -305,7 +305,7 @@ async fn pipeline_input_from_file() {
 }
 
 #[tokio::test]
-async fn pipeline_with_heredoc() {
+async fn job_with_heredoc() {
     let script = "cat << EOF | wc -l\nline1\nline2\nEOF";
     let result = executor().execute_str(script).await.unwrap();
 
@@ -324,8 +324,8 @@ async fn pipeline_with_heredoc() {
 }
 
 #[tokio::test]
-async fn pipeline_stderr_redirect() {
-    // Redirect stderr to /dev/null, pipeline should still work
+async fn job_stderr_redirect() {
+    // Redirect stderr to /dev/null, job should still work
     let result = executor()
         .execute_str("echo hello 2>/dev/null | cat")
         .await
@@ -339,7 +339,7 @@ async fn pipeline_stderr_redirect() {
 }
 
 #[tokio::test]
-async fn complex_pipeline_with_redirections() {
+async fn complex_job_with_redirections() {
     let dir = temp_dir("complex_redir");
     let infile = dir.join("input.txt");
     let outfile = dir.join("output.txt");
@@ -364,7 +364,7 @@ async fn complex_pipeline_with_redirections() {
 // Phase 6: Pipefail Behavior Verification Tests
 // ===========================================================================
 
-/// Document current behavior: pipeline exit code = last command's exit code.
+/// Document current behavior: job exit code = last command's exit code.
 /// This is standard shell behavior without pipefail.
 #[tokio::test]
 async fn pipefail_not_enabled_default_behavior() {
@@ -407,7 +407,7 @@ async fn multiple_failures_last_success() {
 
 #[tokio::test]
 async fn exit_codes_from_all_stages_available() {
-    // Even though pipeline succeeds, we can inspect individual stage failures
+    // Even though job succeeds, we can inspect individual stage failures
     let result = executor()
         .execute_str("sh -c 'exit 1' | sh -c 'exit 2' | sh -c 'exit 3' | true")
         .await
@@ -424,7 +424,7 @@ async fn exit_codes_from_all_stages_available() {
 #[tokio::test]
 async fn sigpipe_when_downstream_closes_early() {
     // Large output piped to head - upstream gets SIGPIPE when downstream closes
-    // This should not cause the pipeline to fail (head succeeds)
+    // This should not cause the job to fail (head succeeds)
     let result = executor()
         .execute_str("seq 1 100000 | head -1")
         .await

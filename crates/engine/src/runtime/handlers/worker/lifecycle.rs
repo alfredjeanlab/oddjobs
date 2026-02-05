@@ -7,7 +7,7 @@ use super::{WorkerState, WorkerStatus};
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, PipelineId, TimerId};
+use oj_core::{scoped_name, Clock, Effect, Event, JobId, TimerId};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::{HashMap, HashSet};
@@ -43,21 +43,21 @@ where
 
         let queue_type = queue_def.queue_type;
 
-        // Restore active pipelines from persisted state (survives daemon restart)
+        // Restore active jobs from persisted state (survives daemon restart)
         let (persisted_active, persisted_item_map, persisted_inflight) = self.lock_state(|state| {
             let scoped = scoped_name(namespace, worker_name);
-            let active: HashSet<PipelineId> = state
+            let active: HashSet<JobId> = state
                 .workers
                 .get(&scoped)
-                .map(|w| w.active_pipeline_ids.iter().map(PipelineId::new).collect())
+                .map(|w| w.active_job_ids.iter().map(JobId::new).collect())
                 .unwrap_or_default();
 
-            // Build pipeline→item map from persisted pipeline vars
-            let item_map: HashMap<PipelineId, String> = active
+            // Build job→item map from persisted job vars
+            let item_map: HashMap<JobId, String> = active
                 .iter()
                 .filter_map(|pid| {
                     state
-                        .pipelines
+                        .jobs
                         .get(pid.as_str())
                         .and_then(|p| p.vars.get("item.id"))
                         .map(|item_id| (pid.clone(), item_id.clone()))
@@ -81,12 +81,12 @@ where
             project_root: project_root.to_path_buf(),
             runbook_hash: runbook_hash.to_string(),
             queue_name: worker_def.source.queue.clone(),
-            pipeline_kind: worker_def.handler.pipeline.clone(),
+            job_kind: worker_def.handler.job.clone(),
             concurrency: worker_def.concurrency,
-            active_pipelines: persisted_active,
+            active_jobs: persisted_active,
             status: WorkerStatus::Running,
             queue_type,
-            item_pipeline_map: persisted_item_map,
+            item_job_map: persisted_item_map,
             namespace: namespace.to_string(),
             poll_interval: poll_interval.clone(),
             pending_takes: 0,
@@ -107,8 +107,8 @@ where
             ),
         );
 
-        // Reconcile: release queue items whose pipelines are already terminal.
-        // This handles the case where the daemon crashed after a pipeline completed
+        // Reconcile: release queue items whose jobs are already terminal.
+        // This handles the case where the daemon crashed after a job completed
         // but before the QueueCompleted/QueueFailed event was persisted.
         if queue_type == QueueType::Persisted {
             self.reconcile_queue_items(worker_name, namespace, &runbook)
@@ -183,9 +183,9 @@ where
     /// Reconcile queue items after daemon recovery.
     ///
     /// Handles two cases:
-    /// 1. Active pipelines that already reached terminal state — calls
-    ///    `check_worker_pipeline_complete` to emit the missing queue events.
-    /// 2. Active queue items with no corresponding pipeline (pruned/lost) —
+    /// 1. Active jobs that already reached terminal state — calls
+    ///    `check_worker_job_complete` to emit the missing queue events.
+    /// 2. Active queue items with no corresponding job (pruned/lost) —
     ///    fails them with retry-or-dead logic.
     async fn reconcile_queue_items(
         &self,
@@ -193,20 +193,20 @@ where
         namespace: &str,
         runbook: &oj_runbook::Runbook,
     ) -> Result<(), RuntimeError> {
-        // 1. Release queue items whose pipelines are already terminal
-        let active_pids: Vec<PipelineId> = {
+        // 1. Release queue items whose jobs are already terminal
+        let active_pids: Vec<JobId> = {
             let workers = self.worker_states.lock();
             workers
                 .get(worker_name)
-                .map(|s| s.active_pipelines.iter().cloned().collect())
+                .map(|s| s.active_jobs.iter().cloned().collect())
                 .unwrap_or_default()
         };
-        let terminal_pipelines: Vec<(PipelineId, String)> = self.lock_state(|state| {
+        let terminal_jobs: Vec<(JobId, String)> = self.lock_state(|state| {
             active_pids
                 .iter()
                 .filter_map(|pid| {
                     state
-                        .pipelines
+                        .jobs
                         .get(pid.as_str())
                         .filter(|p| p.is_terminal())
                         .map(|p| (pid.clone(), p.step.clone()))
@@ -214,19 +214,19 @@ where
                 .collect()
         });
 
-        for (pid, terminal_step) in terminal_pipelines {
+        for (pid, terminal_step) in terminal_jobs {
             tracing::info!(
                 worker = worker_name,
-                pipeline = pid.as_str(),
+                job = pid.as_str(),
                 step = terminal_step.as_str(),
-                "reconciling terminal pipeline for queue item"
+                "reconciling terminal job for queue item"
             );
             let _ = self
-                .check_worker_pipeline_complete(&pid, &terminal_step)
+                .check_worker_job_complete(&pid, &terminal_step)
                 .await;
         }
 
-        // 2. Fail active queue items with no corresponding pipeline
+        // 2. Fail active queue items with no corresponding job
         let queue_name = {
             let workers = self.worker_states.lock();
             workers
@@ -239,7 +239,7 @@ where
             let workers = self.worker_states.lock();
             workers
                 .get(worker_name)
-                .map(|s| s.item_pipeline_map.values().cloned().collect())
+                .map(|s| s.item_job_map.values().cloned().collect())
                 .unwrap_or_default()
         };
 
@@ -265,7 +265,7 @@ where
             tracing::info!(
                 worker = worker_name,
                 item_id = item_id.as_str(),
-                "reconciling orphaned queue item (no pipeline)"
+                "reconciling orphaned queue item (no job)"
             );
 
             self.executor
@@ -273,7 +273,7 @@ where
                     event: Event::QueueFailed {
                         queue_name: queue_name.clone(),
                         item_id: item_id.clone(),
-                        error: "pipeline lost during daemon recovery".to_string(),
+                        error: "job lost during daemon recovery".to_string(),
                         namespace: namespace.to_string(),
                     },
                 }])

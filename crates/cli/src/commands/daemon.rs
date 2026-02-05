@@ -56,9 +56,9 @@ pub enum DaemonCommand {
         #[arg(long, short)]
         follow: bool,
     },
-    /// List orphaned pipelines detected at startup
+    /// List orphaned jobs detected at startup
     Orphans {
-        /// Dismiss an orphaned pipeline by ID (or prefix)
+        /// Dismiss an orphaned job by ID (or prefix)
         #[arg(long)]
         dismiss: Option<String>,
     },
@@ -216,7 +216,7 @@ async fn status(format: OutputFormat) -> Result<()> {
     };
 
     // Handle connection errors (socket exists but daemon not running)
-    let (uptime, pipelines, sessions, orphan_count) = match client.status().await {
+    let (uptime, jobs, sessions, orphan_count) = match client.status().await {
         Ok(result) => result,
         Err(crate::client::ClientError::DaemonNotRunning) => return not_running(),
         Err(crate::client::ClientError::Io(ref e))
@@ -240,12 +240,12 @@ async fn status(format: OutputFormat) -> Result<()> {
             println!("Status: running");
             println!("Version: {}", version);
             println!("Uptime: {}", uptime_str);
-            println!("Pipelines: {} active", pipelines);
+            println!("Jobs: {} active", jobs);
             println!("Sessions: {} active", sessions);
             if orphan_count > 0 {
                 println!();
                 println!(
-                    "\u{26a0} {} orphaned pipeline(s) detected (missing from WAL/snapshot)",
+                    "\u{26a0} {} orphaned job(s) detected (missing from WAL/snapshot)",
                     orphan_count
                 );
                 println!("  Run `oj daemon orphans` for details");
@@ -257,7 +257,7 @@ async fn status(format: OutputFormat) -> Result<()> {
                 "version": version,
                 "uptime_secs": uptime,
                 "uptime": format_uptime(uptime),
-                "pipelines_active": pipelines,
+                "jobs_active": jobs,
                 "sessions_active": sessions,
                 "orphan_count": orphan_count,
             });
@@ -301,18 +301,18 @@ async fn orphans(format: OutputFormat) -> Result<()> {
     match format {
         OutputFormat::Text => {
             if orphans.is_empty() {
-                println!("No orphaned pipelines detected.");
+                println!("No orphaned jobs detected.");
                 return Ok(());
             }
 
-            println!("Orphaned Pipelines (not in recovered state):\n");
+            println!("Orphaned Jobs (not in recovered state):\n");
             println!(
                 "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} LAST UPDATED",
                 "ID", "PROJECT", "KIND", "NAME", "STEP", "STATUS"
             );
 
             for o in &orphans {
-                let short_id = o.pipeline_id.short(8);
+                let short_id = o.job_id.short(8);
                 println!(
                     "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} {}",
                     short_id,
@@ -326,11 +326,11 @@ async fn orphans(format: OutputFormat) -> Result<()> {
             }
 
             println!("\nCommands (replace <id> with an orphan ID above):");
-            println!("  oj pipeline peek <id>              # View last tmux output");
-            println!("  oj pipeline attach <id>            # Attach to tmux session");
-            println!("  oj pipeline logs <id>              # View pipeline log");
+            println!("  oj job peek <id>              # View last tmux output");
+            println!("  oj job attach <id>            # Attach to tmux session");
+            println!("  oj job logs <id>              # View job log");
             println!("  oj daemon orphans --dismiss <id>   # Dismiss after investigation");
-            println!("  oj pipeline prune --orphans        # Dismiss all orphans");
+            println!("  oj job prune --orphans        # Dismiss all orphans");
         }
         OutputFormat::Json => {
             let obj = serde_json::json!({ "orphans": orphans });

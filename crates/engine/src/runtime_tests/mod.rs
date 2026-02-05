@@ -18,7 +18,7 @@ mod worker;
 use super::*;
 use crate::{RuntimeConfig, RuntimeDeps};
 use oj_adapters::{FakeAgentAdapter, FakeNotifyAdapter, FakeSessionAdapter};
-use oj_core::{AgentId, FakeClock, PipelineId};
+use oj_core::{AgentId, FakeClock, JobId};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
@@ -38,15 +38,15 @@ struct TestContext {
 }
 
 fn command_event(
-    pipeline_id: &str,
-    pipeline_name: &str,
+    job_id: &str,
+    job_name: &str,
     command: &str,
     args: HashMap<String, String>,
     project_root: &Path,
 ) -> Event {
     Event::CommandRun {
-        pipeline_id: PipelineId::new(pipeline_id),
-        pipeline_name: pipeline_name.to_string(),
+        job_id: JobId::new(job_id),
+        job_name: job_name.to_string(),
         project_root: project_root.to_path_buf(),
         invoke_dir: project_root.to_path_buf(),
         command: command.to_string(),
@@ -58,37 +58,37 @@ fn command_event(
 const TEST_RUNBOOK: &str = r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name", "prompt"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 on_done = "plan"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan"
 run = { agent = "planner" }
 on_done = "execute"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = { agent = "executor" }
 on_done = "merge"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "merge"
 run = "echo merge"
 on_done = "done"
 on_fail = "cleanup"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "cleanup"
 run = "echo cleanup"
 
@@ -148,22 +148,22 @@ async fn setup_with_runbook(runbook_content: &str) -> TestContext {
     }
 }
 
-async fn create_pipeline(ctx: &TestContext) -> String {
-    create_pipeline_with_id(ctx, "pipe-1").await
+async fn create_job(ctx: &TestContext) -> String {
+    create_job_with_id(ctx, "pipe-1").await
 }
 
-/// Get the agent_id for a pipeline's current step from step history.
-fn get_agent_id(ctx: &TestContext, pipeline_id: &str) -> Option<AgentId> {
-    let pipeline = ctx.runtime.get_pipeline(pipeline_id)?;
-    pipeline
+/// Get the agent_id for a job's current step from step history.
+fn get_agent_id(ctx: &TestContext, job_id: &str) -> Option<AgentId> {
+    let job = ctx.runtime.get_job(job_id)?;
+    job
         .step_history
         .iter()
-        .rfind(|r| r.name == pipeline.step)
+        .rfind(|r| r.name == job.step)
         .and_then(|r| r.agent_id.clone())
         .map(AgentId::new)
 }
 
-async fn create_pipeline_with_id(ctx: &TestContext, pipeline_id: &str) -> String {
+async fn create_job_with_id(ctx: &TestContext, job_id: &str) -> String {
     let args: HashMap<String, String> = [
         ("name".to_string(), "test-feature".to_string()),
         ("prompt".to_string(), "Add login".to_string()),
@@ -173,7 +173,7 @@ async fn create_pipeline_with_id(ctx: &TestContext, pipeline_id: &str) -> String
 
     ctx.runtime
         .handle_event(command_event(
-            pipeline_id,
+            job_id,
             "build",
             "build",
             args,
@@ -182,35 +182,35 @@ async fn create_pipeline_with_id(ctx: &TestContext, pipeline_id: &str) -> String
         .await
         .unwrap();
 
-    pipeline_id.to_string()
+    job_id.to_string()
 }
 
 #[tokio::test]
 async fn runtime_handle_command() {
     let ctx = setup().await;
-    let _pipeline_id = create_pipeline(&ctx).await;
+    let _job_id = create_job(&ctx).await;
 
-    let pipelines = ctx.runtime.pipelines();
-    assert_eq!(pipelines.len(), 1);
+    let jobs = ctx.runtime.jobs();
+    assert_eq!(jobs.len(), 1);
 
-    let pipeline = pipelines.values().next().unwrap();
-    assert_eq!(pipeline.name, "test-feature");
-    assert_eq!(pipeline.kind, "build");
+    let job = jobs.values().next().unwrap();
+    assert_eq!(job.name, "test-feature");
+    assert_eq!(job.kind, "build");
 }
 
 #[tokio::test]
 async fn shell_completion_advances_step() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
-    // Pipeline starts at init step (shell)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "init");
+    // Job starts at init step (shell)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "init");
 
     // Simulate shell completion
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -219,19 +219,19 @@ async fn shell_completion_advances_step() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 }
 
 #[tokio::test]
 async fn agent_done_advances_step() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to plan step (agent)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -240,12 +240,12 @@ async fn agent_done_advances_step() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    // Advance pipeline (orchestrator-driven)
-    ctx.runtime.advance_pipeline(&pipeline).await.unwrap();
+    // Advance job (orchestrator-driven)
+    ctx.runtime.advance_job(&job).await.unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "execute");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "execute");
 }

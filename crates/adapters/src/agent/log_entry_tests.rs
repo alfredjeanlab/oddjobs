@@ -102,7 +102,7 @@ fn parse_bash_command() {
 #[test]
 fn parse_oj_call() {
     let file = jsonl_lines(&[
-        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"oj pipeline list"}}],"stop_reason":"tool_use"},"isoTimestamp":"2026-01-30T08:17:45Z"}"#,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"oj job list"}}],"stop_reason":"tool_use"},"isoTimestamp":"2026-01-30T08:17:45Z"}"#,
     ]);
 
     let (entries, _) = parse_entries_from(file.path(), 0);
@@ -110,7 +110,7 @@ fn parse_oj_call() {
     assert_eq!(
         entries[0].kind,
         EntryKind::OjCall {
-            args: vec!["pipeline".to_string(), "list".to_string()],
+            args: vec!["job".to_string(), "list".to_string()],
         }
     );
 }
@@ -270,10 +270,10 @@ fn display_entry_kinds() {
     );
     assert_eq!(
         EntryKind::OjCall {
-            args: vec!["pipeline".to_string(), "list".to_string()],
+            args: vec!["job".to_string(), "list".to_string()],
         }
         .to_string(),
-        "oj: pipeline list"
+        "oj: job list"
     );
     assert_eq!(
         EntryKind::TurnComplete {

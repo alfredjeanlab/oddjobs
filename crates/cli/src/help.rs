@@ -42,15 +42,15 @@ pub fn commands() -> String {
     "\
 Actions:
   run         Run a command from the runbook
-  cancel      Cancel one or more running pipelines
-  resume      Resume an escalated pipeline
+  cancel      Cancel one or more running jobs
+  resume      Resume an escalated job
   status      Show overview of active work across all projects
-  show        Show details of a pipeline, agent, session, or queue
+  show        Show details of a job, agent, session, or queue
   peek        Peek at the active tmux session
   attach      Attach to a tmux session
 
 Resources:
-  pipeline    Pipeline management
+  job    Job management
   agent       Agent management
   session     Session management
   workspace   Workspace management
@@ -62,7 +62,7 @@ Resources:
 
 System:
   env         Environment variable management
-  logs        View logs for a pipeline or agent
+  logs        View logs for a job or agent
   emit        Emit events to the daemon
   daemon      Daemon management"
         .to_string()

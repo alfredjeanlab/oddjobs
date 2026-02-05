@@ -1,28 +1,28 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline breadcrumb files for orphan detection.
+//! Job breadcrumb files for orphan detection.
 //!
 //! Breadcrumbs are write-only during normal operation. They capture a snapshot
-//! of pipeline state on creation and each step transition, written as
-//! `<pipeline-id>.crumb.json` alongside pipeline log files.
+//! of job state on creation and each step transition, written as
+//! `<job-id>.crumb.json` alongside job log files.
 //!
 //! On daemon startup, breadcrumbs are scanned and cross-referenced with
-//! recovered WAL/snapshot state to detect orphaned pipelines.
+//! recovered WAL/snapshot state to detect orphaned jobs.
 
 use crate::log_paths;
-use oj_core::Pipeline;
+use oj_core::Job;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// Breadcrumb snapshot written to disk on pipeline creation and step transitions.
+/// Breadcrumb snapshot written to disk on job creation and step transitions.
 ///
 /// Write-only during normal operation; read-only during orphan detection at startup.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Breadcrumb {
-    pub pipeline_id: String,
+    pub job_id: String,
     pub project: String,
     pub kind: String,
     pub name: String,
@@ -49,9 +49,9 @@ pub struct BreadcrumbAgent {
     pub log_path: PathBuf,
 }
 
-/// Writes breadcrumb files alongside pipeline logs.
+/// Writes breadcrumb files alongside job logs.
 ///
-/// Each write atomically replaces the previous breadcrumb for that pipeline.
+/// Each write atomically replaces the previous breadcrumb for that job.
 /// Failures are logged via tracing but never propagate — breadcrumbs must not
 /// break the engine.
 pub struct BreadcrumbWriter {
@@ -63,10 +63,10 @@ impl BreadcrumbWriter {
         Self { logs_dir }
     }
 
-    /// Write a breadcrumb snapshot for the given pipeline.
-    pub fn write(&self, pipeline: &Pipeline) {
-        let breadcrumb = self.build_breadcrumb(pipeline);
-        let path = log_paths::breadcrumb_path(&self.logs_dir, &breadcrumb.pipeline_id);
+    /// Write a breadcrumb snapshot for the given job.
+    pub fn write(&self, job: &Job) {
+        let breadcrumb = self.build_breadcrumb(job);
+        let path = log_paths::breadcrumb_path(&self.logs_dir, &breadcrumb.job_id);
         let tmp_path = path.with_extension("crumb.tmp");
 
         if let Err(e) = std::fs::create_dir_all(&self.logs_dir).and_then(|_| {
@@ -75,20 +75,20 @@ impl BreadcrumbWriter {
             std::fs::rename(&tmp_path, &path)
         }) {
             tracing::warn!(
-                pipeline_id = %breadcrumb.pipeline_id,
+                job_id = %breadcrumb.job_id,
                 error = %e,
                 "failed to write breadcrumb"
             );
         }
     }
 
-    /// Delete the breadcrumb file for a terminal pipeline.
-    pub fn delete(&self, pipeline_id: &str) {
-        let path = log_paths::breadcrumb_path(&self.logs_dir, pipeline_id);
+    /// Delete the breadcrumb file for a terminal job.
+    pub fn delete(&self, job_id: &str) {
+        let path = log_paths::breadcrumb_path(&self.logs_dir, job_id);
         if path.exists() {
             if let Err(e) = std::fs::remove_file(&path) {
                 tracing::warn!(
-                    pipeline_id,
+                    job_id,
                     error = %e,
                     "failed to delete breadcrumb"
                 );
@@ -96,17 +96,17 @@ impl BreadcrumbWriter {
         }
     }
 
-    fn build_breadcrumb(&self, pipeline: &Pipeline) -> Breadcrumb {
+    fn build_breadcrumb(&self, job: &Job) -> Breadcrumb {
         let mut agents = Vec::new();
 
         // Collect agents from step history
-        for record in &pipeline.step_history {
+        for record in &job.step_history {
             if let Some(ref agent_id) = record.agent_id {
-                let is_current_step = record.name == pipeline.step;
+                let is_current_step = record.name == job.step;
                 agents.push(BreadcrumbAgent {
                     agent_id: agent_id.clone(),
                     session_name: if is_current_step {
-                        pipeline.session_id.clone()
+                        job.session_id.clone()
                     } else {
                         None
                     },
@@ -116,19 +116,19 @@ impl BreadcrumbWriter {
         }
 
         Breadcrumb {
-            pipeline_id: pipeline.id.clone(),
-            project: pipeline.namespace.clone(),
-            kind: pipeline.kind.clone(),
-            name: pipeline.name.clone(),
-            vars: pipeline.vars.clone(),
-            current_step: pipeline.step.clone(),
-            step_status: pipeline.step_status.to_string(),
+            job_id: job.id.clone(),
+            project: job.namespace.clone(),
+            kind: job.kind.clone(),
+            name: job.name.clone(),
+            vars: job.vars.clone(),
+            current_step: job.step.clone(),
+            step_status: job.step_status.to_string(),
             agents,
-            workspace_id: pipeline.workspace_id.as_ref().map(|w| w.to_string()),
-            workspace_root: pipeline.workspace_path.clone(),
+            workspace_id: job.workspace_id.as_ref().map(|w| w.to_string()),
+            workspace_root: job.workspace_path.clone(),
             updated_at: format_utc_now(),
-            runbook_hash: pipeline.runbook_hash.clone(),
-            cwd: Some(pipeline.cwd.clone()),
+            runbook_hash: job.runbook_hash.clone(),
+            cwd: Some(job.cwd.clone()),
         }
     }
 }

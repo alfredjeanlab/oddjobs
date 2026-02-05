@@ -33,12 +33,12 @@ fn agent_runbook_print(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -58,12 +58,12 @@ fn agent_runbook_interactive(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -78,11 +78,11 @@ env = {{ OJ_STEP = "work" }}
 }
 
 /// Verifies the agent spawn flow with -p (print) mode:
-/// - Pipeline starts and reaches agent step
+/// - Job starts and reaches agent step
 /// - Effect::Spawn creates tmux session via TmuxAdapter
 /// - Workspace is prepared with CLAUDE.md
 /// - Agent (claudeless -p) runs and exits after one response
-/// - on_dead = "done" advances the pipeline
+/// - on_dead = "done" advances the job
 #[test]
 fn agent_spawn_creates_session_and_completes() {
     let temp = Project::empty();
@@ -99,22 +99,22 @@ fn agent_spawn_creates_session_and_completes() {
     // claudeless -p exits immediately. Detection requires liveness poll + deferred timer.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete via agent spawn path");
+    assert!(done, "job should complete via agent spawn path");
 
     temp.oj()
-        .args(&["pipeline", "list"])
+        .args(&["job", "list"])
         .passes()
         .stdout_has("completed");
 }
 
 /// Verifies the agent spawn flow with interactive mode (no -p):
 /// - Agent stays alive and idles after responding
-/// - on_idle = "done" advances the pipeline
+/// - on_idle = "done" advances the job
 #[test]
 fn agent_spawn_interactive_idle_completes() {
     let temp = Project::empty();
@@ -130,20 +130,20 @@ fn agent_spawn_interactive_idle_completes() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete via on_idle = done");
+    assert!(done, "job should complete via on_idle = done");
 }
 
-/// Tests multi-step pipeline: shell init → agent plan (gate) → agent implement (gate) → done.
+/// Tests multi-step job: shell init → agent plan (gate) → agent implement (gate) → done.
 ///
 /// Each agent uses on_dead = gate with a shell check command. The gate verifies
 /// the agent's work (file creation) before advancing to the next step.
 #[test]
-fn multi_step_pipeline_with_gates_completes() {
+fn multi_step_job_with_gates_completes() {
     let temp = Project::empty();
     temp.git_init();
 
@@ -201,22 +201,22 @@ auto_approve = true
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "mkdir -p output"
 on_done = "plan"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan"
 run = {{ agent = "planner" }}
 on_done = "implement"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "implement"
 run = {{ agent = "implementer" }}
 
@@ -241,12 +241,12 @@ on_dead = {{ action = "gate", run = "test -f output/impl.txt" }}
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "multi-step pipeline should complete via gates");
+    assert!(done, "multi-step job should complete via gates");
 }
 
 /// Tests that trusted scenario completes without the trust prompt handler blocking.
@@ -268,14 +268,14 @@ fn agent_spawn_graceful_when_no_trust_prompt() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete - no trust prompt shown for trusted scenario"
+        "job should complete - no trust prompt shown for trusted scenario"
     );
 }
 
@@ -301,12 +301,12 @@ fn agent_spawn_auto_accepts_bypass_permissions_prompt() {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -324,14 +324,14 @@ on_idle = "done"
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete - bypass permissions prompt was auto-accepted"
+        "job should complete - bypass permissions prompt was auto-accepted"
     );
 }
 
@@ -356,13 +356,13 @@ fn agent_spawn_auto_accepts_trust_prompt() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete - trust prompt was auto-acknowledged"
+        "job should complete - trust prompt was auto-acknowledged"
     );
 }

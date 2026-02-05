@@ -2,14 +2,14 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use oj_core::{Pipeline, PipelineConfig, StepOutcome, SystemClock};
+use oj_core::{Job, JobConfig, StepOutcome, SystemClock};
 use std::collections::HashMap;
 use tempfile::TempDir;
 
-fn test_pipeline() -> Pipeline {
-    let config = PipelineConfig {
-        id: "test-pipeline-001".to_string(),
-        name: "test-pipeline".to_string(),
+fn test_job() -> Job {
+    let config = JobConfig {
+        id: "test-job-001".to_string(),
+        name: "test-job".to_string(),
         kind: "deploy".to_string(),
         vars: HashMap::from([("branch".to_string(), "main".to_string())]),
         runbook_hash: "abc123".to_string(),
@@ -18,27 +18,27 @@ fn test_pipeline() -> Pipeline {
         namespace: "myproject".to_string(),
         cron_name: None,
     };
-    Pipeline::new(config, &SystemClock)
+    Job::new(config, &SystemClock)
 }
 
 #[test]
 fn write_produces_valid_json() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    writer.write(&pipeline);
+    writer.write(&job);
 
-    let path = log_paths::breadcrumb_path(dir.path(), "test-pipeline-001");
+    let path = log_paths::breadcrumb_path(dir.path(), "test-job-001");
     assert!(path.exists());
 
     let content = std::fs::read_to_string(&path).unwrap();
     let breadcrumb: Breadcrumb = serde_json::from_str(&content).unwrap();
 
-    assert_eq!(breadcrumb.pipeline_id, "test-pipeline-001");
+    assert_eq!(breadcrumb.job_id, "test-job-001");
     assert_eq!(breadcrumb.project, "myproject");
     assert_eq!(breadcrumb.kind, "deploy");
-    assert_eq!(breadcrumb.name, "test-pipeline");
+    assert_eq!(breadcrumb.name, "test-job");
     assert_eq!(breadcrumb.current_step, "build");
     assert_eq!(breadcrumb.step_status, "pending");
     assert_eq!(breadcrumb.vars.get("branch").unwrap(), "main");
@@ -51,14 +51,14 @@ fn write_produces_valid_json() {
 fn delete_removes_file() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    writer.write(&pipeline);
+    writer.write(&job);
 
-    let path = log_paths::breadcrumb_path(dir.path(), "test-pipeline-001");
+    let path = log_paths::breadcrumb_path(dir.path(), "test-job-001");
     assert!(path.exists());
 
-    writer.delete("test-pipeline-001");
+    writer.delete("test-job-001");
     assert!(!path.exists());
 }
 
@@ -67,7 +67,7 @@ fn delete_nonexistent_is_noop() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
     // Should not panic
-    writer.delete("nonexistent-pipeline");
+    writer.delete("nonexistent-job");
 }
 
 #[test]
@@ -75,21 +75,21 @@ fn scan_breadcrumbs_finds_files() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
 
-    let mut p1 = test_pipeline();
-    p1.id = "pipeline-aaa".to_string();
+    let mut p1 = test_job();
+    p1.id = "job-aaa".to_string();
     writer.write(&p1);
 
-    let mut p2 = test_pipeline();
-    p2.id = "pipeline-bbb".to_string();
+    let mut p2 = test_job();
+    p2.id = "job-bbb".to_string();
     p2.step = "deploy".to_string();
     writer.write(&p2);
 
     let breadcrumbs = scan_breadcrumbs(dir.path());
     assert_eq!(breadcrumbs.len(), 2);
 
-    let ids: Vec<&str> = breadcrumbs.iter().map(|b| b.pipeline_id.as_str()).collect();
-    assert!(ids.contains(&"pipeline-aaa"));
-    assert!(ids.contains(&"pipeline-bbb"));
+    let ids: Vec<&str> = breadcrumbs.iter().map(|b| b.job_id.as_str()).collect();
+    assert!(ids.contains(&"job-aaa"));
+    assert!(ids.contains(&"job-bbb"));
 }
 
 #[test]
@@ -98,8 +98,8 @@ fn scan_skips_corrupt_files() {
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
 
     // Write a valid breadcrumb
-    let pipeline = test_pipeline();
-    writer.write(&pipeline);
+    let job = test_job();
+    writer.write(&job);
 
     // Write a corrupt breadcrumb file
     let corrupt_path = dir.path().join("corrupt-id.crumb.json");
@@ -107,7 +107,7 @@ fn scan_skips_corrupt_files() {
 
     let breadcrumbs = scan_breadcrumbs(dir.path());
     assert_eq!(breadcrumbs.len(), 1);
-    assert_eq!(breadcrumbs[0].pipeline_id, "test-pipeline-001");
+    assert_eq!(breadcrumbs[0].job_id, "test-job-001");
 }
 
 #[test]
@@ -128,28 +128,28 @@ fn round_trip_write_scan() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
 
-    let mut pipeline = test_pipeline();
-    pipeline.id = "rt-001".to_string();
-    pipeline.namespace = "proj".to_string();
-    pipeline.kind = "ci".to_string();
-    pipeline.name = "my-build".to_string();
+    let mut job = test_job();
+    job.id = "rt-001".to_string();
+    job.namespace = "proj".to_string();
+    job.kind = "ci".to_string();
+    job.name = "my-build".to_string();
     // Push a new step record matching the current step
-    pipeline.push_step("test", 2000);
-    pipeline.step = "test".to_string();
+    job.push_step("test", 2000);
+    job.step = "test".to_string();
 
     // Add an agent to the current step
-    if let Some(record) = pipeline.step_history.last_mut() {
+    if let Some(record) = job.step_history.last_mut() {
         record.agent_id = Some("rt-001-test".to_string());
     }
-    pipeline.session_id = Some("oj-rt-001-test".to_string());
+    job.session_id = Some("oj-rt-001-test".to_string());
 
-    writer.write(&pipeline);
+    writer.write(&job);
 
     let breadcrumbs = scan_breadcrumbs(dir.path());
     assert_eq!(breadcrumbs.len(), 1);
 
     let b = &breadcrumbs[0];
-    assert_eq!(b.pipeline_id, "rt-001");
+    assert_eq!(b.job_id, "rt-001");
     assert_eq!(b.project, "proj");
     assert_eq!(b.kind, "ci");
     assert_eq!(b.name, "my-build");
@@ -164,9 +164,9 @@ fn write_captures_agents_from_history() {
     let dir = TempDir::new().unwrap();
     let writer = BreadcrumbWriter::new(dir.path().to_path_buf());
 
-    let mut pipeline = test_pipeline();
-    // Simulate a pipeline with two steps, each with an agent
-    pipeline.step_history = vec![
+    let mut job = test_job();
+    // Simulate a job with two steps, each with an agent
+    job.step_history = vec![
         oj_core::StepRecord {
             name: "build".to_string(),
             started_at_ms: 1000,
@@ -184,10 +184,10 @@ fn write_captures_agents_from_history() {
             agent_name: None,
         },
     ];
-    pipeline.step = "test".to_string();
-    pipeline.session_id = Some("oj-p-001-test".to_string());
+    job.step = "test".to_string();
+    job.session_id = Some("oj-p-001-test".to_string());
 
-    writer.write(&pipeline);
+    writer.write(&job);
 
     let breadcrumbs = scan_breadcrumbs(dir.path());
     let b = &breadcrumbs[0];

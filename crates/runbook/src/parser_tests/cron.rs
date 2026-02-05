@@ -6,7 +6,7 @@ use crate::{parse_runbook, parse_runbook_with_format, Format, ParseError};
 #[test]
 fn parse_hcl_cron_valid() {
     let hcl = r#"
-pipeline "cleanup" {
+job "cleanup" {
   step "run" {
     run = "echo cleanup"
   }
@@ -14,7 +14,7 @@ pipeline "cleanup" {
 
 cron "janitor" {
   interval = "30m"
-  run      = { pipeline = "cleanup" }
+  run      = { job = "cleanup" }
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
@@ -22,33 +22,33 @@ cron "janitor" {
     let cron = &runbook.crons["janitor"];
     assert_eq!(cron.name, "janitor");
     assert_eq!(cron.interval, "30m");
-    assert_eq!(cron.run.pipeline_name(), Some("cleanup"));
+    assert_eq!(cron.run.job_name(), Some("cleanup"));
 }
 
 #[test]
 fn parse_toml_cron_valid() {
     let toml = r#"
-[pipeline.deploy]
-[[pipeline.deploy.step]]
+[job.deploy]
+[[job.deploy.step]]
 name = "run"
 run = "echo deploy"
 
 [cron.nightly]
 interval = "24h"
-run = { pipeline = "deploy" }
+run = { job = "deploy" }
 "#;
     let runbook = parse_runbook(toml).unwrap();
     assert!(runbook.crons.contains_key("nightly"));
     let cron = &runbook.crons["nightly"];
     assert_eq!(cron.name, "nightly");
     assert_eq!(cron.interval, "24h");
-    assert_eq!(cron.run.pipeline_name(), Some("deploy"));
+    assert_eq!(cron.run.job_name(), Some("deploy"));
 }
 
 #[test]
 fn error_cron_invalid_interval() {
     let hcl = r#"
-pipeline "cleanup" {
+job "cleanup" {
   step "run" {
     run = "echo cleanup"
   }
@@ -56,7 +56,7 @@ pipeline "cleanup" {
 
 cron "janitor" {
   interval = "invalid"
-  run      = { pipeline = "cleanup" }
+  run      = { job = "cleanup" }
 }
 "#;
     let err = parse_runbook_with_format(hcl, Format::Hcl).unwrap_err();
@@ -70,7 +70,7 @@ cron "janitor" {
 }
 
 #[test]
-fn error_cron_non_pipeline_run() {
+fn error_cron_non_job_run() {
     let hcl = r#"
 cron "janitor" {
   interval = "30m"
@@ -81,8 +81,8 @@ cron "janitor" {
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("cron run must reference a pipeline or agent"),
-        "error should mention pipeline/agent requirement: {}",
+        msg.contains("cron run must reference a job or agent"),
+        "error should mention job/agent requirement: {}",
         msg
     );
 }
@@ -177,19 +177,19 @@ agent "doctor" {
 }
 
 #[test]
-fn error_cron_unknown_pipeline() {
+fn error_cron_unknown_job() {
     let hcl = r#"
 cron "janitor" {
   interval = "30m"
-  run      = { pipeline = "nonexistent" }
+  run      = { job = "nonexistent" }
 }
 "#;
     let err = parse_runbook_with_format(hcl, Format::Hcl).unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("references unknown pipeline 'nonexistent'"),
-        "error should mention unknown pipeline: {}",
+        msg.contains("references unknown job 'nonexistent'"),
+        "error should mention unknown job: {}",
         msg
     );
 }

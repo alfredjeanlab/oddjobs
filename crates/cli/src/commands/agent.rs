@@ -19,7 +19,7 @@ use crate::exit_error::ExitError;
 use crate::output::{display_log, print_prune_results, should_use_color, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
-use super::pipeline::parse_duration;
+use super::job::parse_duration;
 
 #[derive(Args)]
 pub struct AgentArgs {
@@ -29,11 +29,11 @@ pub struct AgentArgs {
 
 #[derive(Subcommand)]
 pub enum AgentCommand {
-    /// List agents across all pipelines
+    /// List agents across all jobs
     List {
-        /// Filter by pipeline ID (or prefix)
+        /// Filter by job ID (or prefix)
         #[arg(long)]
-        pipeline: Option<String>,
+        job: Option<String>,
 
         /// Filter by status (e.g. "running", "completed", "failed", "waiting")
         #[arg(long)]
@@ -54,14 +54,14 @@ pub enum AgentCommand {
     },
     /// Send a message to a running agent
     Send {
-        /// Agent ID or pipeline ID (or prefix)
+        /// Agent ID or job ID (or prefix)
         agent_id: String,
         /// Message to send
         message: String,
     },
     /// View agent activity log
     Logs {
-        /// Pipeline ID (or prefix)
+        /// Job ID (or prefix)
         id: String,
         /// Show only a specific step's log
         #[arg(long, short = 's')]
@@ -91,9 +91,9 @@ pub enum AgentCommand {
         /// Agent ID (or prefix)
         id: String,
     },
-    /// Remove agent logs from completed/failed/cancelled pipelines
+    /// Remove agent logs from completed/failed/cancelled jobs
     Prune {
-        /// Remove all agent logs from terminal pipelines regardless of age
+        /// Remove all agent logs from terminal jobs regardless of age
         #[arg(long)]
         all: bool,
         /// Show what would be pruned without doing it
@@ -177,13 +177,13 @@ pub async fn handle(
 ) -> Result<()> {
     match command {
         AgentCommand::List {
-            pipeline,
+            job,
             status,
             limit,
             no_limit,
         } => {
             let mut agents = client
-                .list_agents(pipeline.as_deref(), status.as_deref())
+                .list_agents(job.as_deref(), status.as_deref())
                 .await?;
 
             // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
@@ -213,7 +213,7 @@ pub async fn handle(
                             cols.push(Column::left("PROJECT"));
                         }
                         cols.extend([
-                            Column::left("PIPELINE").with_max(8),
+                            Column::left("JOB").with_max(8),
                             Column::left("STEP"),
                             Column::status("STATUS"),
                             Column::right("READ"),
@@ -224,10 +224,10 @@ pub async fn handle(
 
                         for a in &agents {
                             let name = a.agent_name.as_deref().unwrap_or("-").to_string();
-                            let pipeline_col = if a.pipeline_id.is_empty() {
+                            let job_col = if a.job_id.is_empty() {
                                 "-".to_string()
                             } else {
-                                a.pipeline_id.clone()
+                                a.job_id.clone()
                             };
                             let step_col = if a.step_name.is_empty() {
                                 "-".to_string()
@@ -239,7 +239,7 @@ pub async fn handle(
                                 cells.push(project_cell(a.namespace.as_deref().unwrap_or("")));
                             }
                             cells.extend([
-                                pipeline_col,
+                                job_col,
                                 step_col,
                                 a.status.clone(),
                                 a.files_read.to_string(),
@@ -276,14 +276,14 @@ pub async fn handle(
                                 println!("  {} {}", color::context("Project:"), ns);
                             }
                         }
-                        if a.pipeline_id.is_empty() {
+                        if a.job_id.is_empty() {
                             println!("  {} standalone", color::context("Source:"));
                         } else {
                             println!(
                                 "  {} {} ({})",
-                                color::context("Pipeline:"),
-                                a.pipeline_id,
-                                a.pipeline_name
+                                color::context("Job:"),
+                                a.job_id,
+                                a.job_name
                             );
                             println!("  {} {}", color::context("Step:"), a.step_name);
                         }
@@ -416,14 +416,14 @@ pub async fn handle(
                 dry_run,
                 format,
                 "agent",
-                "pipeline(s) skipped",
+                "job(s) skipped",
                 |entry| {
-                    if entry.pipeline_id.is_empty() {
+                    if entry.job_id.is_empty() {
                         // Standalone agent run
                         format!("agent {} ({})", entry.agent_id.short(8), entry.step_name)
                     } else {
-                        // Pipeline-embedded agent
-                        let short_pid = entry.pipeline_id.short(8);
+                        // Job-embedded agent
+                        let short_pid = entry.job_id.short(8);
                         format!(
                             "agent {} ({}, {})",
                             entry.agent_id.short(8),
@@ -533,15 +533,15 @@ fn append_agent_log(agent_id: &str, message: &str) {
     }
 }
 
-/// Find an agent by ID (or prefix) across all pipelines.
-/// Returns `(pipeline_id, agent_id)` on match, or None.
+/// Find an agent by ID (or prefix) across all jobs.
+/// Returns `(job_id, agent_id)` on match, or None.
 async fn find_agent(
     client: &DaemonClient,
     agent_id: &str,
 ) -> Result<Option<(String, String)>, anyhow::Error> {
-    let pipelines = client.list_pipelines().await?;
-    for summary in &pipelines {
-        if let Some(detail) = client.get_pipeline(&summary.id).await? {
+    let jobs = client.list_jobs().await?;
+    for summary in &jobs {
+        if let Some(detail) = client.get_job(&summary.id).await? {
             for agent in &detail.agents {
                 if agent.agent_id == agent_id || agent.agent_id.starts_with(agent_id) {
                     return Ok(Some((summary.id.clone(), agent.agent_id.clone())));
@@ -557,20 +557,20 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
     let poll_interval = crate::client::wait_poll_interval();
     let start = Instant::now();
 
-    // Resolve agent to a pipeline on first iteration; re-scan if not found yet
-    let mut resolved_pipeline_id: Option<String> = None;
+    // Resolve agent to a job on first iteration; re-scan if not found yet
+    let mut resolved_job_id: Option<String> = None;
     let mut resolved_agent_id: Option<String> = None;
 
     loop {
         // If we haven't found the agent yet, search for it
-        if resolved_pipeline_id.is_none() {
+        if resolved_job_id.is_none() {
             if let Some((pid, aid)) = find_agent(client, agent_id).await? {
-                resolved_pipeline_id = Some(pid);
+                resolved_job_id = Some(pid);
                 resolved_agent_id = Some(aid);
             }
         }
 
-        let pipeline_id = match &resolved_pipeline_id {
+        let job_id = match &resolved_job_id {
             Some(id) => id.clone(),
             None => {
                 // Agent not found yet; check timeout before retrying
@@ -594,15 +594,15 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
 
         let full_agent_id = resolved_agent_id.as_deref().unwrap_or(agent_id);
 
-        let detail = client.get_pipeline(&pipeline_id).await?;
+        let detail = client.get_job(&job_id).await?;
         match detail {
             None => {
                 return Err(
-                    ExitError::new(3, format!("Pipeline {} disappeared", pipeline_id)).into(),
+                    ExitError::new(3, format!("Job {} disappeared", job_id)).into(),
                 );
             }
             Some(p) => {
-                // Find our specific agent in the pipeline
+                // Find our specific agent in the job
                 let agent = p.agents.iter().find(|a| a.agent_id == full_agent_id);
 
                 match agent {
@@ -649,23 +649,23 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
                         }
                     }
                     None => {
-                        // Agent no longer in the pipeline's agent list — it finished
-                        // and the pipeline moved on. Treat as completed.
+                        // Agent no longer in the job's agent list — it finished
+                        // and the job moved on. Treat as completed.
                         println!("Agent {} completed (no longer active)", full_agent_id);
                         break;
                     }
                 }
 
-                // Also check pipeline-level terminal states as a fallback
+                // Also check job-level terminal states as a fallback
                 if p.step == "failed" {
                     let msg = p.error.as_deref().unwrap_or("unknown error");
                     return Err(
-                        ExitError::new(1, format!("Pipeline {} failed: {}", p.name, msg)).into(),
+                        ExitError::new(1, format!("Job {} failed: {}", p.name, msg)).into(),
                     );
                 }
                 if p.step == "cancelled" {
                     return Err(
-                        ExitError::new(4, format!("Pipeline {} was cancelled", p.name)).into(),
+                        ExitError::new(4, format!("Job {} was cancelled", p.name)).into(),
                     );
                 }
             }

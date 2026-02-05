@@ -2,13 +2,13 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use oj_core::{DecisionSource, Event, PipelineId, QuestionData, QuestionEntry, QuestionOption};
+use oj_core::{DecisionSource, Event, JobId, QuestionData, QuestionEntry, QuestionOption};
 
 #[test]
 fn test_idle_trigger_builds_correct_options() {
     let (id, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Idle,
     )
     .build();
@@ -37,8 +37,8 @@ fn test_idle_trigger_builds_correct_options() {
 #[test]
 fn test_dead_trigger_builds_correct_options() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Dead {
             exit_code: Some(137),
         },
@@ -67,8 +67,8 @@ fn test_dead_trigger_builds_correct_options() {
 #[test]
 fn test_error_trigger_builds_correct_options() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Error {
             error_type: "OutOfCredits".to_string(),
             message: "API quota exceeded".to_string(),
@@ -96,8 +96,8 @@ fn test_error_trigger_builds_correct_options() {
 #[test]
 fn test_gate_failure_includes_command_and_stderr() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::GateFailed {
             command: "./check.sh".to_string(),
             exit_code: 1,
@@ -122,8 +122,8 @@ fn test_gate_failure_includes_command_and_stderr() {
 #[test]
 fn test_prompt_trigger_builds_correct_options() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Prompt {
             prompt_type: "permission".to_string(),
         },
@@ -151,8 +151,8 @@ fn test_prompt_trigger_builds_correct_options() {
 #[test]
 fn test_builder_with_agent_id_and_namespace() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Idle,
     )
     .agent_id("agent-123")
@@ -175,8 +175,8 @@ fn test_builder_with_agent_id_and_namespace() {
 #[test]
 fn test_builder_with_agent_log_tail() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Idle,
     )
     .agent_log_tail("last few lines of output")
@@ -194,8 +194,8 @@ fn test_builder_with_agent_log_tail() {
 #[test]
 fn test_dead_trigger_without_exit_code() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Dead { exit_code: None },
     )
     .build();
@@ -212,8 +212,8 @@ fn test_dead_trigger_without_exit_code() {
 #[test]
 fn test_gate_failure_empty_stderr() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::GateFailed {
             command: "./check.sh".to_string(),
             exit_code: 1,
@@ -253,8 +253,8 @@ fn test_question_trigger_with_data() {
     };
 
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Question {
             question_data: Some(question_data),
         },
@@ -289,8 +289,8 @@ fn test_question_trigger_with_data() {
 #[test]
 fn test_question_trigger_without_data() {
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Question {
             question_data: None,
         },
@@ -345,8 +345,8 @@ fn test_question_trigger_multi_question_context() {
     };
 
     let (_, event) = EscalationDecisionBuilder::new(
-        PipelineId::new("pipe-1"),
-        "test-pipeline".to_string(),
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
         EscalationTrigger::Question {
             question_data: Some(question_data),
         },

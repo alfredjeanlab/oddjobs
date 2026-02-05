@@ -44,7 +44,7 @@ Claude Code runs in tmux sessions (via `SessionAdapter`) for:
 - **Input injection**: Send messages to nudge stuck agents
 - **Clean termination**: Kill sessions when stuck or complete
 
-Session names follow the format `oj-{pipeline}-{agent_name}-{random}`, where the `oj-` prefix is added by `TmuxAdapter`, pipeline and agent names are sanitized and truncated (20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness. The agent UUID is used as `--session-id` for Claude's log file, while the friendly tmux session name is used for all tmux operations.
+Session names follow the format `oj-{job}-{agent_name}-{random}`, where the `oj-` prefix is added by `TmuxAdapter`, job and agent names are sanitized and truncated (20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness. The agent UUID is used as `--session-id` for Claude's log file, while the friendly tmux session name is used for all tmux operations.
 
 The orchestrator creates, monitors, and destroys sessions. Claude Code doesn't manage its own lifecycle.
 
@@ -119,7 +119,7 @@ Idle Grace Timer Flow:
 | Streaming text response | JSONL entry written when response completes; if still generating, previous tool_use/result is last line → Working |
 | Race: tool started after AgentIdle queued | Grace timer re-checks `get_agent_state()` → sees Working → no-op |
 
-**Cross-agent isolation**: Each agent has its own session log. Agent A dispatching work via `oj run` creates a separate pipeline/agent. Agent A's idle detection is independent — its session log reflects its own activity, not child agents'.
+**Cross-agent isolation**: Each agent has its own session log. Agent A dispatching work via `oj run` creates a separate job/agent. Agent A's idle detection is independent — its session log reflects its own activity, not child agents'.
 
 **Timelines:**
 
@@ -169,7 +169,7 @@ Nudging works because Claude Code accepts user input via the terminal. A nudge m
 ```bash
 oj session attach <id>         # Attach to see what's happening
 oj session send <id> "message" # Send follow-up message
-oj pipeline resume <id>        # Resume monitoring
+oj job resume <id>        # Resume monitoring
 ```
 
 **Failure detection:**
@@ -191,10 +191,10 @@ Expose orchestration via allowed shell commands in agent settings:
 
 Then agents signal completion:
 ```bash
-# Signal successful completion (advances pipeline to next step)
+# Signal successful completion (advances job to next step)
 oj emit agent:signal --agent <id> '{"kind": "complete"}'
 
-# Signal escalation (pauses pipeline, notifies human)
+# Signal escalation (pauses job, notifies human)
 oj emit agent:signal --agent <id> '{"kind": "escalate", "message": "Need human review"}'
 
 # Signal continue (no-op acknowledgement — agent is still working)

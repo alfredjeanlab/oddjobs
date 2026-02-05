@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline lifecycle event handling (resume, cancel, workspace, shell)
+//! Job lifecycle event handling (resume, cancel, workspace, shell)
 
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, PipelineId, SessionId, ShortId, StepOutcome, WorkspaceId};
+use oj_core::{Clock, Effect, Event, JobId, SessionId, ShortId, StepOutcome, WorkspaceId};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -16,20 +16,20 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    pub(crate) async fn handle_pipeline_resume(
+    pub(crate) async fn handle_job_resume(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         message: Option<&str>,
         vars: &HashMap<String, String>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = self.require_pipeline(pipeline_id.as_str())?;
+        let job = self.require_job(job_id.as_str())?;
 
-        // If pipeline is in terminal "failed" state, find the last failed step
-        // from history and reset the pipeline to that step so it can be retried.
+        // If job is in terminal "failed" state, find the last failed step
+        // from history and reset the job to that step so it can be retried.
         // We track the step name separately because the event may not be applied
         // to state immediately.
-        let resume_step = if pipeline.step == "failed" {
-            let failed_step = pipeline
+        let resume_step = if job.step == "failed" {
+            let failed_step = job
                 .step_history
                 .iter()
                 .rev()
@@ -40,15 +40,15 @@ where
                 })?;
 
             tracing::info!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 failed_step = %failed_step,
                 "resuming from terminal failure: resetting to failed step"
             );
 
             self.executor
                 .execute(Effect::Emit {
-                    event: Event::PipelineAdvanced {
-                        id: pipeline_id.clone(),
+                    event: Event::JobAdvanced {
+                        id: job_id.clone(),
                         step: failed_step.clone(),
                     },
                 })
@@ -56,15 +56,15 @@ where
 
             failed_step
         } else {
-            pipeline.step.clone()
+            job.step.clone()
         };
 
         // Persist var updates if any
         if !vars.is_empty() {
             self.executor
                 .execute(Effect::Emit {
-                    event: Event::PipelineUpdated {
-                        id: PipelineId::new(&pipeline.id),
+                    event: Event::JobUpdated {
+                        id: JobId::new(&job.id),
                         vars: vars.clone(),
                     },
                 })
@@ -72,7 +72,7 @@ where
         }
 
         // Merge vars for this resume operation
-        let merged_inputs: HashMap<String, String> = pipeline
+        let merged_inputs: HashMap<String, String> = job
             .vars
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -80,11 +80,11 @@ where
             .collect();
 
         // Determine step type from runbook
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let pipeline_def = runbook
-            .get_pipeline(&pipeline.kind)
-            .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline.kind.clone()))?;
-        let step_def = pipeline_def
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook
+            .get_job(&job.kind)
+            .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
+        let step_def = job_def
             .get_step(&resume_step)
             .ok_or_else(|| RuntimeError::StepNotFound(resume_step.clone()))?;
 
@@ -93,8 +93,8 @@ where
             let msg = message.ok_or_else(|| {
                 RuntimeError::InvalidRequest(format!(
                     "agent steps require --message for resume. Example:\n  \
-                     oj pipeline resume {} -m \"I fixed the import, try again\"",
-                    pipeline.id.short(12)
+                     oj job resume {} -m \"I fixed the import, try again\"",
+                    job.id.short(12)
                 ))
             })?;
 
@@ -102,13 +102,13 @@ where
                 .agent_name()
                 .ok_or_else(|| RuntimeError::AgentNotFound("no agent name in step".into()))?;
 
-            self.handle_agent_resume(&pipeline, &resume_step, agent_name, msg, &merged_inputs)
+            self.handle_agent_resume(&job, &resume_step, agent_name, msg, &merged_inputs)
                 .await
         } else if step_def.is_shell() {
             // Shell step: re-run command
             if message.is_some() {
                 tracing::warn!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     "resume --message ignored for shell steps"
                 );
             }
@@ -117,7 +117,7 @@ where
                 .shell_command()
                 .ok_or_else(|| RuntimeError::InvalidRequest("no shell command in step".into()))?;
 
-            self.handle_shell_resume(&pipeline, &resume_step, command)
+            self.handle_shell_resume(&job, &resume_step, command)
                 .await
         } else {
             Err(RuntimeError::InvalidRequest(format!(
@@ -127,14 +127,14 @@ where
         }
     }
 
-    pub(crate) async fn handle_pipeline_cancel(
+    pub(crate) async fn handle_job_cancel(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = self
-            .get_pipeline(pipeline_id.as_str())
-            .ok_or_else(|| RuntimeError::PipelineNotFound(pipeline_id.to_string()))?;
-        self.cancel_pipeline(&pipeline).await
+        let job = self
+            .get_job(job_id.as_str())
+            .ok_or_else(|| RuntimeError::JobNotFound(job_id.to_string()))?;
+        self.cancel_job(&job).await
     }
 
     pub(crate) async fn handle_workspace_drop(
@@ -155,12 +155,12 @@ where
     /// Handle resume for shell step: re-run the command
     pub(crate) async fn handle_shell_resume(
         &self,
-        pipeline: &oj_core::Pipeline,
+        job: &oj_core::Job,
         step: &str,
         _command: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Kill existing session if any
-        if let Some(session_id) = &pipeline.session_id {
+        if let Some(session_id) = &job.session_id {
             let _ = self
                 .executor
                 .execute(Effect::KillSession {
@@ -170,32 +170,32 @@ where
         }
 
         // Re-run the shell command
-        let execution_dir = self.execution_dir(pipeline);
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let execution_dir = self.execution_dir(job);
+        let job_id = JobId::new(&job.id);
         let result = self
-            .start_step(&pipeline_id, step, &pipeline.vars, &execution_dir)
+            .start_step(&job_id, step, &job.vars, &execution_dir)
             .await?;
 
-        tracing::info!(pipeline_id = %pipeline.id, "re-running shell step");
+        tracing::info!(job_id = %job.id, "re-running shell step");
         Ok(result)
     }
 
     pub(crate) async fn handle_shell_exited(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         step: &str,
         exit_code: i32,
         stdout: Option<&str>,
         stderr: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = self.require_pipeline(pipeline_id.as_str())?;
+        let job = self.require_job(job_id.as_str())?;
 
         // Verify we're in the expected step
-        if pipeline.step != step {
+        if job.step != step {
             tracing::warn!(
-                pipeline_id = %pipeline_id,
+                job_id = %job_id,
                 expected = step,
-                actual = %pipeline.step,
+                actual = %job.step,
                 "shell completed for unexpected step"
             );
             return Ok(vec![]);
@@ -204,27 +204,27 @@ where
         // Write captured output before the status line
         if let Some(out) = stdout {
             self.logger
-                .append_fenced(pipeline_id.as_str(), step, "stdout", out);
+                .append_fenced(job_id.as_str(), step, "stdout", out);
         }
         if let Some(err) = stderr {
             self.logger
-                .append_fenced(pipeline_id.as_str(), step, "stderr", err);
+                .append_fenced(job_id.as_str(), step, "stderr", err);
         }
 
         if exit_code == 0 {
             self.logger.append(
-                pipeline_id.as_str(),
+                job_id.as_str(),
                 step,
                 &format!("shell completed (exit {})", exit_code),
             );
-            self.advance_pipeline(&pipeline).await
+            self.advance_job(&job).await
         } else {
             self.logger.append(
-                pipeline_id.as_str(),
+                job_id.as_str(),
                 step,
                 &format!("shell failed (exit {})", exit_code),
             );
-            self.fail_pipeline(&pipeline, &format!("shell exit code: {}", exit_code))
+            self.fail_job(&job, &format!("shell exit code: {}", exit_code))
                 .await
         }
     }

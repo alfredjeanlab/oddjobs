@@ -58,27 +58,27 @@ When listing commands, `oj run` shows warnings for any runbook files that failed
 
 ## Resources
 
-### oj pipeline
+### oj job
 
-Manage running pipelines.
+Manage running jobs.
 
 ```bash
-oj pipeline list                     # List all pipelines
-oj pipeline list build               # Filter by runbook name
-oj pipeline list --status running    # Filter by status
-oj pipeline list -n 50               # Limit results (default: 20)
-oj pipeline list --no-limit          # Show all results
-oj pipeline show <id>                # Shows Project: field when namespace is set
-oj pipeline resume <id>
-oj pipeline resume <id> -m "message" --var key=value
-oj pipeline cancel <id> [id...]
-oj pipeline attach <id>              # Attach to active agent session
-oj pipeline peek <id>                # View agent session output
-oj pipeline logs <id>                # View pipeline logs
-oj pipeline logs <id> --follow       # Stream logs (alias: -f)
-oj pipeline logs <id> -n 100         # Limit lines (default: 50)
-oj pipeline wait <id>                # Wait for pipeline completion
-oj pipeline wait <id> --timeout 30m  # With timeout (human-readable duration)
+oj job list                     # List all jobs
+oj job list build               # Filter by runbook name
+oj job list --status running    # Filter by status
+oj job list -n 50               # Limit results (default: 20)
+oj job list --no-limit          # Show all results
+oj job show <id>                # Shows Project: field when namespace is set
+oj job resume <id>
+oj job resume <id> -m "message" --var key=value
+oj job cancel <id> [id...]
+oj job attach <id>              # Attach to active agent session
+oj job peek <id>                # View agent session output
+oj job logs <id>                # View job logs
+oj job logs <id> --follow       # Stream logs (alias: -f)
+oj job logs <id> -n 100         # Limit lines (default: 50)
+oj job wait <id>                # Wait for job completion
+oj job wait <id> --timeout 30m  # With timeout (human-readable duration)
 ```
 
 ### oj agent
@@ -86,10 +86,10 @@ oj pipeline wait <id> --timeout 30m  # With timeout (human-readable duration)
 Manage agent sessions.
 
 ```bash
-oj agent logs <pipeline-id>          # View agent logs
-oj agent logs <pipeline-id> -s plan  # Filter by step name
-oj agent logs <pipeline-id> --follow # Stream logs (alias: -f)
-oj agent logs <pipeline-id> -n 100   # Limit lines (default: 50)
+oj agent logs <job-id>          # View agent logs
+oj agent logs <job-id> -s plan  # Filter by step name
+oj agent logs <job-id> --follow # Stream logs (alias: -f)
+oj agent logs <job-id> -n 100   # Limit lines (default: 50)
 oj agent wait <agent-id>             # Wait for agent to idle or exit
 oj agent wait <agent-id> --timeout 5m  # With timeout (human-readable duration)
 oj agent hook stop <agent-id>        # Claude Code stop hook integration
@@ -151,7 +151,7 @@ oj worker list                       # List all workers
 oj worker list -o json               # JSON output
 ```
 
-Workers poll their source queue and dispatch items to their handler pipeline. `oj worker start` is idempotent — it loads the runbook, validates definitions, and begins the poll-dispatch loop. If the worker is already running, it triggers an immediate poll instead.
+Workers poll their source queue and dispatch items to their handler job. `oj worker start` is idempotent — it loads the runbook, validates definitions, and begins the poll-dispatch loop. If the worker is already running, it triggers an immediate poll instead.
 
 ### oj cron
 
@@ -170,7 +170,7 @@ oj cron logs <name> -n 100           # Limit lines (default: 50)
 oj cron prune                        # Remove stopped crons from daemon state
 ```
 
-Crons run their associated pipeline on a recurring schedule. `oj cron start` is idempotent — it loads the runbook, validates the cron definition, and begins the interval timer.
+Crons run their associated job on a recurring schedule. `oj cron start` is idempotent — it loads the runbook, validates the cron definition, and begins the interval timer.
 
 ### oj decision
 
@@ -185,7 +185,7 @@ oj decision resolve <id> 1           # Pick option #1
 oj decision resolve <id> -m "msg"    # Resolve with freeform message
 ```
 
-Decisions are created when pipelines escalate (via `on_idle`, `on_dead`, or `on_error` with `escalate` action) and require human input to continue. Each decision has a context message and optional numbered choices.
+Decisions are created when jobs escalate (via `on_idle`, `on_dead`, or `on_error` with `escalate` action) and require human input to continue. Each decision has a context message and optional numbered choices.
 
 ## Events
 
@@ -194,10 +194,10 @@ Decisions are created when pipelines escalate (via `on_idle`, `on_dead`, or `on_
 Emit events to the daemon.
 
 ```bash
-# Signal successful completion (advances pipeline to next step)
+# Signal successful completion (advances job to next step)
 oj emit agent:signal --agent <id> '{"kind": "complete"}'
 
-# Signal escalation (pauses pipeline, notifies human)
+# Signal escalation (pauses job, notifies human)
 oj emit agent:signal --agent <id> '{"kind": "escalate", "message": "..."}'
 ```
 
@@ -205,20 +205,20 @@ The `kind` field also accepts the alias `action`. The JSON payload can also be p
 
 ## Namespace Isolation
 
-A single daemon serves all projects. Resources (pipelines, workers, queues) are scoped by a project namespace to prevent collisions. The namespace is resolved in priority order:
+A single daemon serves all projects. Resources (jobs, workers, queues) are scoped by a project namespace to prevent collisions. The namespace is resolved in priority order:
 
 1. `--project <name>` flag (on commands that support it)
 2. `OJ_NAMESPACE` environment variable (set automatically for nested `oj` calls from agents)
 3. `.oj/config.toml` `[project].name` field
 4. Directory basename of the project root
 
-When multiple namespaces are present, `oj pipeline list` shows a `PROJECT` column. `oj pipeline show` includes a `Project:` line when the namespace is set.
+When multiple namespaces are present, `oj job list` shows a `PROJECT` column. `oj job show` includes a `Project:` line when the namespace is set.
 
 ## JSON Output
 
 Most commands support `-o json` / `--output json` for programmatic use:
 
 ```bash
-oj pipeline list -o json
+oj job list -o json
 oj workspace list -o json
 ```

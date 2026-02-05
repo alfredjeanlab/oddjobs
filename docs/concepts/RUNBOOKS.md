@@ -1,6 +1,6 @@
 # Runbook Concepts
 
-A runbook is a file that defines **commands** (user-facing entrypoints) and the **building blocks** they use (pipelines, agents, queues, and workers).
+A runbook is a file that defines **commands** (user-facing entrypoints) and the **building blocks** they use (jobs, agents, queues, and workers).
 
 ## Summary
 
@@ -8,16 +8,16 @@ A runbook is a file that defines **commands** (user-facing entrypoints) and the 
 ┌─────────────────────────────────────────────────────────────┐
 │ ENTRYPOINTS (things that run)                               │
 │                                                             │
-│   command ──► user invokes, runs pipeline or shell command  │
-│   worker ───► polls a queue, dispatches items to pipelines  │
-│   cron ─────► runs a pipeline on a recurring schedule       │
+│   command ──► user invokes, runs job or shell command       │
+│   worker ───► polls a queue, dispatches items to jobs       │
+│   cron ─────► runs a job on a recurring schedule            │
 └─────────────────────────────────────────────────────────────┘
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ BUILDING BLOCKS (composed by entrypoints)                   │
 │                                                             │
-│   pipeline ─► stepped execution                             │
+│   job ─► stepped execution                                  │
 │   agent ────► AI agent invocation                           │
 │   queue ────► work items to be processed                    │
 └─────────────────────────────────────────────────────────────┘
@@ -40,7 +40,7 @@ All formats express the same primitives.
 All string fields in runbooks support two-step interpolation:
 
 1. **Environment expansion**: `${VAR:-default}` expands from environment variables with fallback
-2. **Variable substitution**: `${var.name}` expands from pipeline vars and context
+2. **Variable substitution**: `${var.name}` expands from job vars and context
 
 Variable names support dotted notation (e.g., `${var.bug.title}`) and unknown variables are left as-is.
 
@@ -53,10 +53,10 @@ Available variable namespaces:
 
 | Prefix | Source | Example |
 |--------|--------|---------|
-| `var.*` | Pipeline vars | `${var.bug.title}` |
+| `var.*` | Job vars | `${var.bug.title}` |
 | `args.*` | Command arguments | `${args.description}` |
 | `item.*` | Queue item fields | `${item.id}` |
-| `local.*` | Pipeline locals | `${local.repo}` |
+| `local.*` | Job locals | `${local.repo}` |
 | `workspace.*` | Workspace context | `${workspace.root}` |
 | `invoke.*` | CLI invocation context | `${invoke.dir}` |
 
@@ -67,14 +67,14 @@ User-facing entrypoint. Accepts arguments, runs once.
 ```hcl
 command "build" {
   args = "<name> <instructions>"
-  run  = { pipeline = "build" }
+  run  = { job = "build" }
 }
 ```
 
 Invoked: `oj run build auth "Add authentication"`
 
 The `run` field specifies what to execute:
-- Pipeline: `run = { pipeline = "build" }`
+- Job: `run = { job = "build" }`
 - Shell: `run = "echo hello"`
 
 Commands also support a `defaults` map for default argument values:
@@ -83,7 +83,7 @@ Commands also support a `defaults` map for default argument values:
 command "build" {
   args     = "<name> <instructions> [--base <branch>]"
   defaults = { base = "main" }
-  run      = { pipeline = "build" }
+  run      = { job = "build" }
 }
 ```
 
@@ -101,12 +101,12 @@ command "build" {
 | `[--opt <val>]` | Optional flag with value |
 | `[-o/--opt <val>]` | Optional flag with value and short alias |
 
-## Pipeline
+## Job
 
-Stepped execution with state tracking. Commands and workers invoke pipelines.
+Stepped execution with state tracking. Commands and workers invoke jobs.
 
 ```hcl
-pipeline "fix" {
+job "bug" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
 
@@ -141,39 +141,39 @@ pipeline "fix" {
 }
 ```
 
-Pipeline fields:
-- **name**: Optional name template for human-readable pipeline names (supports `${var.*}` interpolation; the result is slugified and suffixed with a unique nonce)
+Job fields:
+- **name**: Optional name template for human-readable job names (supports `${var.*}` interpolation; the result is slugified and suffixed with a unique nonce)
 - **vars** (alias: `input`): List of required variable names
 - **defaults**: Default values for vars
-- **locals**: Map of local variables computed once at pipeline creation time (see [Locals](#locals) below)
+- **locals**: Map of local variables computed once at job creation time (see [Locals](#locals) below)
 - **cwd**: Base directory for execution (supports template interpolation)
 - **workspace**: Workspace type -- `"folder"` (plain directory) or `workspace { git = "worktree" }` (engine-managed git worktree). Workspaces are deleted on completion (success or cancellation), kept on failure for debugging. Optional fields: `branch` (worktree branch name template, default `ws-<nonce>`) and `ref` (start point for worktree, default `HEAD`, supports `$(...)` shell expressions).
-- **notify**: Desktop notification templates for pipeline lifecycle (see [Desktop Integration](../interface/DESKTOP.md))
+- **notify**: Desktop notification templates for job lifecycle (see [Desktop Integration](../interface/DESKTOP.md))
 - **on_done**: Default step to route to when a step completes without an explicit `on_done`
 - **on_fail**: Default step to route to when a step fails without an explicit `on_fail`
-- **on_cancel**: Step to route to when the pipeline is cancelled (for cleanup)
+- **on_cancel**: Step to route to when the job is cancelled (for cleanup)
 
 ### Name Templates
 
-The optional `name` field provides a human-readable display name for pipeline instances. The template is interpolated with `${var.*}` variables, then slugified (lowercased, non-alphanumeric characters replaced with hyphens, stop words removed, truncated to 24 characters) and suffixed with a unique 8-character nonce.
+The optional `name` field provides a human-readable display name for job instances. The template is interpolated with `${var.*}` variables, then slugified (lowercased, non-alphanumeric characters replaced with hyphens, stop words removed, truncated to 24 characters) and suffixed with a unique 8-character nonce.
 
 ```hcl
-pipeline "build" {
+job "build" {
   name = "${var.name}"
   # ...
 }
 ```
 
-`oj run build auth "Add authentication"` creates a pipeline displayed as `auth-a1b2c3d4` instead of `build-a1b2c3d4`.
+`oj run build auth "Add authentication"` creates a job displayed as `auth-a1b2c3d4` instead of `build-a1b2c3d4`.
 
 ### Locals
 
-The `locals` block defines variables computed once at pipeline creation time. Local values support `${var.*}`, `${workspace.*}`, and `${invoke.*}` interpolation. Once evaluated, locals are available in all step templates as `${local.*}`.
+The `locals` block defines variables computed once at job creation time. Local values support `${var.*}`, `${workspace.*}`, and `${invoke.*}` interpolation. Once evaluated, locals are available in all step templates as `${local.*}`.
 
 Locals containing shell expressions (`$(...)`) use shell-safe interpolation: variable values with `$`, backticks, or double quotes are escaped before substitution, so user-provided input won't be interpreted as shell syntax.
 
 ```hcl
-pipeline "build" {
+job "build" {
   vars      = ["name", "instructions"]
 
   workspace {
@@ -202,20 +202,20 @@ workspace {
 }
 ```
 
-For pipelines that need fully custom worktree management (e.g., checking out an existing remote branch), use `workspace = "folder"` with manual git worktree commands in the init step.
+For jobs that need fully custom worktree management (e.g., checking out an existing remote branch), use `workspace = "folder"` with manual git worktree commands in the init step.
 
 ### Steps
 
 The step `run` field specifies what to execute:
 - Shell command: `run = "make check"`
 - Agent reference: `run = { agent = "fix" }`
-- Pipeline reference: `run = { pipeline = "deploy" }`
+- Job reference: `run = { job = "deploy" }`
 
 Step transitions use structured references:
 - `on_done = { step = "next" }` -- next step on success
 - `on_fail = { step = "recover" }` -- step to go to on failure
 
-If `on_done` is omitted, the pipeline completes when the step succeeds. Steps without `on_fail` propagate failures up to the pipeline level.
+If `on_done` is omitted, the job completes when the step succeeds. Steps without `on_fail` propagate failures up to the job level.
 
 ## Agent
 
@@ -253,7 +253,7 @@ Agent fields:
 - **prime**: Shell commands to run at session start for context injection (string or array)
 - **on_idle**: What to do when agent is waiting for input after a 60-second grace period (default: `"escalate"`)
 - **on_dead**: What to do when agent process exits (default: `"escalate"`)
-- **on_stop**: What to do when agent tries to exit via Stop hook (default: `"signal"` for pipeline, `"escalate"` for standalone)
+- **on_stop**: What to do when agent tries to exit via Stop hook (default: `"signal"` for job, `"escalate"` for standalone)
 - **on_error**: What to do on API errors (default: `"escalate"`)
 
 Valid actions per trigger:
@@ -361,7 +361,7 @@ The `vars` field declares required fields. `defaults` provides fallback values. 
 
 ### Retry and Dead Letter
 
-Persisted queues support automatic retry with dead letter semantics. When a pipeline fails after processing a queue item, the item can be retried automatically before being moved to a terminal `Dead` status.
+Persisted queues support automatic retry with dead letter semantics. When a job fails after processing a queue item, the item can be retried automatically before being moved to a terminal `Dead` status.
 
 ```hcl
 queue "bugs" {
@@ -398,48 +398,48 @@ queue "bugs" {
 
 ## Worker
 
-Polls a queue and dispatches each item to a pipeline for processing.
+Polls a queue and dispatches each item to a job for processing.
 
 ```hcl
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { pipeline = "merge" }
+  handler     = { job = "merge" }
   concurrency = 1
 }
 ```
 
 Worker fields:
 - **source**: Which queue to consume from (`{ queue = "name" }`)
-- **handler**: Which pipeline to run per item (`{ pipeline = "name" }`)
-- **concurrency**: Maximum concurrent pipeline instances (default: 1)
+- **handler**: Which job to run per item (`{ job = "name" }`)
+- **concurrency**: Maximum concurrent job instances (default: 1)
 
 Workers are started via `oj worker start <name>`. The command is idempotent — if the worker is already running, it wakes it to poll immediately.
 
-When a worker takes an item from the queue, the item's fields are mapped into the pipeline's first declared var as a namespace. For example, if the pipeline declares `vars = ["mr"]` and the queue item has `{"branch": "fix-123"}`, the pipeline receives `var.mr.branch = "fix-123"`.
+When a worker takes an item from the queue, the item's fields are mapped into the job's first declared var as a namespace. For example, if the job declares `vars = ["mr"]` and the queue item has `{"branch": "fix-123"}`, the job receives `var.mr.branch = "fix-123"`.
 
 ## Cron
 
-Time-driven entrypoint. Runs a pipeline on a recurring schedule.
+Time-driven entrypoint. Runs a job on a recurring schedule.
 
 ```hcl
 cron "janitor" {
   interval    = "30m"
-  run         = { pipeline = "cleanup" }
+  run         = { job = "cleanup" }
   concurrency = 1
 }
 ```
 
 Cron fields:
 - **interval**: How often to run (e.g., `"30m"`, `"6h"`, `"24h"`)
-- **run**: What to execute (`{ pipeline = "name" }`)
-- **concurrency**: Maximum concurrent pipeline instances (default: 1 — singleton)
+- **run**: What to execute (`{ job = "name" }`)
+- **concurrency**: Maximum concurrent job instances (default: 1 — singleton)
 
 Crons are the third entrypoint type alongside commands and workers:
 
 ```text
-User ─── oj run ───► Command ───► Pipeline (direct)
-Queue ──────────────► Worker ────► Pipeline (background)
-Timer ──────────────► Cron ──────► Pipeline (scheduled)
+User ─── oj run ───► Command ───► Job (direct)
+Queue ──────────────► Worker ────► Job (background)
+Timer ──────────────► Cron ──────► Job (scheduled)
 ```
 
 Managed via `oj cron start <name>`, `oj cron stop <name>`, `oj cron once <name>`. Use cases range from simple shell-step cleanup (janitor) to agent-driven periodic analysis.
@@ -451,8 +451,8 @@ Agent lifecycle actions handle different states:
 | Action | Effect |
 |--------|--------|
 | `nudge` | Send message prompting agent to continue |
-| `done` | Treat as success, advance pipeline |
-| `fail` | Mark pipeline as failed |
+| `done` | Treat as success, advance job |
+| `fail` | Mark job as failed |
 | `recover` | Re-spawn agent with modified prompt |
 | `escalate` | Alert for human intervention |
 | `gate` | Run a shell command; advance if exit 0, escalate otherwise |
@@ -463,10 +463,10 @@ Each runbook file defines related primitives:
 
 | File | Defines | Description |
 |------|---------|-------------|
-| `build.hcl` | command, pipeline, agents | Feature development: plan, execute, merge |
-| `bugfix.hcl` | command, pipeline, queue, worker, agent | Bug fix workflow with worker pool |
-| `merge/local.hcl` | queue, worker, pipeline, agent | Local merge queue with conflict resolution |
-| `merge/github.hcl` | queue, worker, pipeline | GitHub PR merge queue |
-| `maintenance.hcl` | cron, pipeline | Scheduled cleanup and maintenance tasks |
+| `build.hcl` | command, job, agents | Feature development: plan, execute, merge |
+| `bugfix.hcl` | command, job, queue, worker, agent | Bug fix workflow with worker pool |
+| `merge/local.hcl` | queue, worker, job, agent | Local merge queue with conflict resolution |
+| `merge/github.hcl` | queue, worker, job | GitHub PR merge queue |
+| `maintenance.hcl` | cron, job | Scheduled cleanup and maintenance tasks |
 
 Primitives are referenced by name within a runbook.

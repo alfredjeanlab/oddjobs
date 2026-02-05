@@ -43,23 +43,23 @@ auto_approve = true
 /// If socket propagation works:
 ///   1. `oj emit agent:signal` connects to daemon via OJ_STATE_DIR → succeeds
 ///   2. `touch emit-ok` runs (due to &&) → file created
-///   3. Gate `test -f emit-ok` passes → pipeline completes
+///   3. Gate `test -f emit-ok` passes → job completes
 ///
 /// If socket propagation is broken:
 ///   1. `oj emit agent:signal` fails (wrong/missing socket) → non-zero exit
 ///   2. `touch emit-ok` skipped (due to &&) → no file
-///   3. Gate `test -f emit-ok` fails → pipeline escalates to waiting
+///   3. Gate `test -f emit-ok` fails → job escalates to waiting
 fn runbook_stop_hook_socket(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -82,7 +82,7 @@ env = {{ AGENT_ID = "${{agent_id}}" }}
 ///
 /// Lifecycle: agent spawns in tmux → Bash tool runs `oj emit agent:signal`
 /// (which connects to daemon via OJ_STATE_DIR) → emit succeeds → marker file
-/// created → agent exits (-p mode) → on_dead gate checks marker → pipeline
+/// created → agent exits (-p mode) → on_dead gate checks marker → job
 /// completes.
 ///
 /// This proves the full socket propagation chain:
@@ -101,21 +101,21 @@ fn agent_stop_hook_socket_propagation() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "socket-test"]).passes();
 
-    // Wait for pipeline to complete. If socket propagation works, the agent
+    // Wait for job to complete. If socket propagation works, the agent
     // successfully calls `oj emit` and the gate passes. If broken, the gate
-    // fails and the pipeline escalates to "waiting" instead of "completed".
+    // fails and the job escalates to "waiting" instead of "completed".
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete via gate after successful oj emit \
-         (proves OJ_STATE_DIR socket propagation)\npipeline list:\n{}\ndaemon log:\n{}",
-        temp.oj().args(&["pipeline", "list"]).passes().stdout(),
+        "job should complete via gate after successful oj emit \
+         (proves OJ_STATE_DIR socket propagation)\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
 }

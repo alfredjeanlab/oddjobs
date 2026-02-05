@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Append-only logger for per-pipeline activity logs.
+//! Append-only logger for per-job activity logs.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -10,18 +10,18 @@ use std::path::{Path, PathBuf};
 use crate::log_paths;
 use crate::time_fmt::format_utc_now;
 
-/// Append-only logger for per-pipeline activity logs.
+/// Append-only logger for per-job activity logs.
 ///
 /// Writes human-readable timestamped lines to:
-///   `<log_dir>/pipeline/<pipeline_id>.log`
+///   `<log_dir>/job/<job_id>.log`
 ///
 /// Each `append()` call opens, writes, and closes the file.
-/// This is safe for the low write frequency of pipeline events.
-pub struct PipelineLogger {
+/// This is safe for the low write frequency of job events.
+pub struct JobLogger {
     log_dir: PathBuf,
 }
 
-impl PipelineLogger {
+impl JobLogger {
     pub fn new(log_dir: PathBuf) -> Self {
         Self { log_dir }
     }
@@ -31,19 +31,19 @@ impl PipelineLogger {
         &self.log_dir
     }
 
-    /// Append a log line for the given pipeline.
+    /// Append a log line for the given job.
     ///
     /// Format: `2026-01-30T08:14:09Z [step] message`
     ///
     /// Failures are logged via tracing but do not propagate — logging
     /// must not break the engine.
-    pub fn append(&self, pipeline_id: &str, step: &str, message: &str) {
-        let path = log_paths::pipeline_log_path(&self.log_dir, pipeline_id);
+    pub fn append(&self, job_id: &str, step: &str, message: &str) {
+        let path = log_paths::job_log_path(&self.log_dir, job_id);
         if let Err(e) = self.write_line(&path, step, message) {
             tracing::warn!(
-                pipeline_id,
+                job_id,
                 error = %e,
-                "failed to write pipeline log"
+                "failed to write job log"
             );
         }
     }
@@ -51,10 +51,10 @@ impl PipelineLogger {
     /// Append a pointer line to the agent log for a step.
     ///
     /// Format: `2026-01-30T08:17:00Z [step] agent log: /full/path/to/logs/agent/<agent_id>.log`
-    pub fn append_agent_pointer(&self, pipeline_id: &str, step: &str, agent_id: &str) {
+    pub fn append_agent_pointer(&self, job_id: &str, step: &str, agent_id: &str) {
         let log_path = log_paths::agent_log_path(&self.log_dir, agent_id);
         let message = format!("agent log: {}", log_path.display());
-        self.append(pipeline_id, step, &message);
+        self.append(job_id, step, &message);
     }
 
     /// Copy the agent's session.jsonl to the logs directory.
@@ -91,7 +91,7 @@ impl PipelineLogger {
         }
     }
 
-    /// Append a fenced block to the pipeline log.
+    /// Append a fenced block to the job log.
     ///
     /// Format:
     /// ```text
@@ -99,13 +99,13 @@ impl PipelineLogger {
     /// {content}
     /// {timestamp} [{step}] ```
     /// ```
-    pub fn append_fenced(&self, pipeline_id: &str, step: &str, label: &str, content: &str) {
-        let path = log_paths::pipeline_log_path(&self.log_dir, pipeline_id);
+    pub fn append_fenced(&self, job_id: &str, step: &str, label: &str, content: &str) {
+        let path = log_paths::job_log_path(&self.log_dir, job_id);
         if let Err(e) = self.write_fenced(&path, step, label, content) {
             tracing::warn!(
-                pipeline_id,
+                job_id,
                 error = %e,
-                "failed to write pipeline log"
+                "failed to write job log"
             );
         }
     }
@@ -171,5 +171,5 @@ impl PipelineLogger {
 }
 
 #[cfg(test)]
-#[path = "pipeline_logger_tests.rs"]
+#[path = "job_logger_tests.rs"]
 mod tests;

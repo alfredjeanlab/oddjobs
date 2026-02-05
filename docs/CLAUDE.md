@@ -5,7 +5,7 @@ docs/
 ├── GUIDE.md                  # Runbook patterns, best practices, examples
 │
 ├── concepts/                 # What things are
-│   ├── RUNBOOKS.md           # Primitives: command, pipeline, agent, cron
+│   ├── RUNBOOKS.md           # Primitives: command, job, agent, cron
 │   └── EXECUTION.md          # Workspace and session abstractions
 │
 ├── interface/                # User-facing
@@ -23,7 +23,7 @@ docs/
 │   └── 06-adapter-claude.md  # How Claude Code runs in sessions
 │
 └── future/                   # Planned additions (not yet implemented)
-    ├── RUNBOOKS.md           # Adds: nested pipeline vars
+    ├── RUNBOOKS.md           # Adds: nested job vars
     ├── CLI.md                # Adds: worker stop, session prune
     ├── CANCELLATION.md       # Handler cancellation on client disconnect
     ├── CHECKPOINT.md         # Checkpoint lock contention at scale

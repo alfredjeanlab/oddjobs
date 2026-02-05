@@ -286,19 +286,19 @@ fn multiple_spaces_separate() {
 
 #[test]
 fn concatenation_stops_at_pipe() {
-    // foo$VAR|bar → Pipeline with 2 commands, each a single word
+    // foo$VAR|bar → Job with 2 commands, each a single word
     let result = Parser::parse("foo$VAR|bar").unwrap();
     assert_eq!(result.commands.len(), 1);
 
     let cmd = &result.commands[0].first.command;
-    let pipeline = match cmd {
-        crate::ast::Command::Pipeline(p) => p,
-        _ => panic!("expected pipeline"),
+    let job = match cmd {
+        crate::ast::Command::Job(p) => p,
+        _ => panic!("expected job"),
     };
 
-    assert_eq!(pipeline.commands.len(), 2);
+    assert_eq!(job.commands.len(), 2);
     assert_eq!(
-        pipeline.commands[0].name.parts,
+        job.commands[0].name.parts,
         vec![
             WordPart::literal("foo"),
             WordPart::Variable {
@@ -308,7 +308,7 @@ fn concatenation_stops_at_pipe() {
         ]
     );
     assert_eq!(
-        pipeline.commands[1].name.parts,
+        job.commands[1].name.parts,
         vec![WordPart::literal("bar")]
     );
 }
@@ -415,19 +415,19 @@ fn single_variable_word() {
 }
 
 #[test]
-fn pipeline_with_concatenation() {
-    // echo $HOME/bin | cat → Pipeline with correct word parts
+fn job_with_concatenation() {
+    // echo $HOME/bin | cat → Job with correct word parts
     let result = Parser::parse("echo $HOME/bin | cat").unwrap();
     let cmd = &result.commands[0].first.command;
-    let pipeline = match cmd {
-        crate::ast::Command::Pipeline(p) => p,
-        _ => panic!("expected pipeline"),
+    let job = match cmd {
+        crate::ast::Command::Job(p) => p,
+        _ => panic!("expected job"),
     };
 
-    assert_eq!(pipeline.commands.len(), 2);
+    assert_eq!(job.commands.len(), 2);
     // First command has concatenated arg
     assert_eq!(
-        pipeline.commands[0].args[0].parts,
+        job.commands[0].args[0].parts,
         vec![
             WordPart::Variable {
                 name: "HOME".into(),
@@ -497,7 +497,7 @@ fn collect_variables_from_concatenated_word() {
 }
 
 #[test]
-fn concatenation_in_pipeline() {
+fn concatenation_in_job() {
     // Variables in piped commands
     let result = Parser::parse("echo $A$B | cat $C$D").unwrap();
     let vars = result.collect_variables();

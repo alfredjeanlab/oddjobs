@@ -27,7 +27,7 @@ impl CommandList {
 
     /// Count the total number of simple commands in the AST.
     ///
-    /// This includes commands in pipelines, subshells, brace groups,
+    /// This includes commands in jobs, subshells, brace groups,
     /// and command substitutions.
     ///
     /// # Examples
@@ -39,7 +39,7 @@ impl CommandList {
     /// let ast = Parser::parse("echo hello")?;
     /// assert_eq!(ast.count_simple_commands(), 1);
     ///
-    /// // Pipeline counts each stage
+    /// // Job counts each stage
     /// let ast = Parser::parse("cat file | grep pattern | wc -l")?;
     /// assert_eq!(ast.count_simple_commands(), 3);
     ///

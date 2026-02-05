@@ -4,7 +4,7 @@
 //! Visitor pattern for traversing the AST.
 
 use super::{
-    AndOrList, BraceGroup, Command, CommandItem, CommandList, EnvAssignment, Pipeline, Redirection,
+    AndOrList, BraceGroup, Command, CommandItem, CommandList, EnvAssignment, Job, Redirection,
     SimpleCommand, Subshell, SubstitutionBody, Word, WordPart,
 };
 
@@ -91,9 +91,9 @@ pub trait AstVisitor {
         self.walk_simple_command(cmd);
     }
 
-    /// Visit a pipeline.
-    fn visit_pipeline(&mut self, pipeline: &Pipeline) {
-        self.walk_pipeline(pipeline);
+    /// Visit a job.
+    fn visit_job(&mut self, job: &Job) {
+        self.walk_job(job);
     }
 
     /// Visit a subshell.
@@ -152,7 +152,7 @@ pub trait AstVisitor {
     fn walk_command(&mut self, command: &Command) {
         match command {
             Command::Simple(cmd) => self.visit_simple_command(cmd),
-            Command::Pipeline(p) => self.visit_pipeline(p),
+            Command::Job(p) => self.visit_job(p),
             Command::Subshell(s) => self.visit_subshell(s),
             Command::BraceGroup(b) => self.visit_brace_group(b),
         }
@@ -193,9 +193,9 @@ pub trait AstVisitor {
         }
     }
 
-    /// Walk a pipeline, visiting all commands.
-    fn walk_pipeline(&mut self, pipeline: &Pipeline) {
-        for cmd in &pipeline.commands {
+    /// Walk a job, visiting all commands.
+    fn walk_job(&mut self, job: &Job) {
+        for cmd in &job.commands {
             self.visit_simple_command(cmd);
         }
     }

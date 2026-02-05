@@ -118,30 +118,30 @@ fn flag_equals_value() {
 }
 
 // =============================================================================
-// Assignment in Pipeline
+// Assignment in Job
 // =============================================================================
 
 #[test]
-fn assignment_in_pipeline() {
+fn assignment_in_job() {
     // VAR=value cmd | other → assignment applies to first command only
     let ast = Parser::parse("VAR=value cmd | other").unwrap();
     assert_eq!(ast.commands.len(), 1);
 
-    let pipeline = match &ast.commands[0].first.command {
-        crate::ast::Command::Pipeline(p) => p,
-        _ => panic!("Expected pipeline"),
+    let job = match &ast.commands[0].first.command {
+        crate::ast::Command::Job(p) => p,
+        _ => panic!("Expected job"),
     };
 
-    assert_eq!(pipeline.commands.len(), 2);
+    assert_eq!(job.commands.len(), 2);
 
     // First command has env assignment
-    let first_cmd = &pipeline.commands[0];
+    let first_cmd = &job.commands[0];
     assert_eq!(first_cmd.env.len(), 1);
     assert_eq!(first_cmd.env[0].name, "VAR");
     assert_eq!(cmd_name(first_cmd), "cmd");
 
     // Second command has no assignment
-    let second_cmd = &pipeline.commands[1];
+    let second_cmd = &job.commands[1];
     assert!(second_cmd.env.is_empty());
     assert_eq!(cmd_name(second_cmd), "other");
 }

@@ -12,13 +12,13 @@
 //! # ID Hierarchy
 //!
 //! ```text
-//! workspace_id  - Git worktree path (may outlive pipeline)
+//! workspace_id  - Git worktree path (may outlive job)
 //!      │
 //!      └── agent_id  - Agent instance (UUID, used as --session-id for claude)
 //!               │
 //!               └── session_id  - Internal to AgentAdapter (hidden)
 //!
-//! pipeline_id  - Pipeline execution (references workspace)
+//! job_id  - Job execution (references workspace)
 //! ```
 
 mod claude;
@@ -83,10 +83,10 @@ pub struct AgentSpawnConfig {
     pub cwd: Option<PathBuf>,
     /// Initial prompt for the agent
     pub prompt: String,
-    /// Name of the pipeline
-    pub pipeline_name: String,
-    /// Pipeline ID
-    pub pipeline_id: String,
+    /// Name of the job
+    pub job_name: String,
+    /// Job ID
+    pub job_id: String,
     /// Root of the project
     pub project_root: PathBuf,
     /// Adapter-specific session configuration (provider -> config as JSON)

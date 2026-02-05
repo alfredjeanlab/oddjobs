@@ -9,11 +9,11 @@ pub enum Effect {
     // Event emission
     Emit { event: Event },
 
-    // Agent-level effects (preferred for pipeline operations)
+    // Agent-level effects (preferred for job operations)
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        pipeline_id: PipelineId,
+        job_id: JobId,
         workspace_path: PathBuf,
         input: HashMap<String, String>,
         command: String,
@@ -42,7 +42,7 @@ pub enum Effect {
 
     // Shell effects
     Shell {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
         command: String,
         cwd: PathBuf,
@@ -139,7 +139,7 @@ Timers schedule future events:
 ```rust
 // State machine returns timer effect
 Effect::SetTimer {
-    id: TimerId::liveness(&pipeline_id),
+    id: TimerId::liveness(&job_id),
     duration: Duration::from_secs(30),
 }
 
@@ -148,6 +148,6 @@ Event::TimerStart { id: TimerId }
 ```
 
 Timer IDs use structured constructors on `TimerId`:
-- `TimerId::liveness(pipeline_id)` -- `"liveness:{pipeline_id}"`
-- `TimerId::exit_deferred(pipeline_id)` -- `"exit-deferred:{pipeline_id}"`
-- `TimerId::cooldown(pipeline_id, trigger, chain_pos)` -- `"cooldown:{pipeline_id}:{trigger}:{chain_pos}"`
+- `TimerId::liveness(job_id)` -- `"liveness:{job_id}"`
+- `TimerId::exit_deferred(job_id)` -- `"exit-deferred:{job_id}"`
+- `TimerId::cooldown(job_id, trigger, chain_pos)` -- `"cooldown:{job_id}:{trigger}:{chain_pos}"`

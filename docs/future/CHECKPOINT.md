@@ -17,7 +17,7 @@ let (state_clone, processed_seq) = {
 While both locks are held, the event loop cannot `apply_event()` (needs
 state lock) and the flush task cannot `flush()` (needs WAL lock). The
 duration depends on the cost of `state_guard.clone()`, which grows with
-the number of pipelines, step histories, and workspace records.
+the number of jobs, step histories, and workspace records.
 
 After the clone, the task saves the snapshot to disk (`serde_json::to_writer`
 + `sync_all`) and then re-acquires the WAL lock to truncate:
@@ -32,7 +32,7 @@ WAL lock for the full I/O duration.
 
 ## Current Impact
 
-At current scale (tens of pipelines, small step histories), the state clone
+At current scale (tens of jobs, small step histories), the state clone
 completes in microseconds and the snapshot write in low milliseconds. No
 stalls have been observed. The checkpoint runs every 60 seconds, so even
 a brief stall occurs infrequently.
@@ -41,7 +41,7 @@ a brief stall occurs infrequently.
 
 This becomes a concern when:
 
-- Hundreds of concurrent pipelines with large step histories make the
+- Hundreds of concurrent jobs with large step histories make the
   state clone expensive (10ms+)
 - Large WAL files make truncation slow on rotational storage
 - The 60-second interval coincides with a long-running effect chain,

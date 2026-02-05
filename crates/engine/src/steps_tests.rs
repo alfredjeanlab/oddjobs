@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Tests for pipeline step transition effects
+//! Tests for job step transition effects
 
 use super::*;
-use oj_core::{Effect, Pipeline, StepStatus};
+use oj_core::{Effect, Job, StepStatus};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 
-fn test_pipeline() -> Pipeline {
-    Pipeline {
+fn test_job() -> Job {
+    Job {
         id: "pipe-1".to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "build".to_string(),
         step: "execute".to_string(),
         step_status: StepStatus::Running,
@@ -57,8 +57,8 @@ fn has_session_deleted_event(effects: &[Effect], expected_id: &str) -> bool {
 
 #[test]
 fn completion_effects_cancels_liveness_timer() {
-    let pipeline = test_pipeline();
-    let effects = completion_effects(&pipeline);
+    let job = test_job();
+    let effects = completion_effects(&job);
     assert!(
         has_cancel_timer(&effects, "liveness:pipe-1"),
         "completion_effects must cancel the liveness timer"
@@ -67,8 +67,8 @@ fn completion_effects_cancels_liveness_timer() {
 
 #[test]
 fn completion_effects_cancels_exit_deferred_timer() {
-    let pipeline = test_pipeline();
-    let effects = completion_effects(&pipeline);
+    let job = test_job();
+    let effects = completion_effects(&job);
     assert!(
         has_cancel_timer(&effects, "exit-deferred:pipe-1"),
         "completion_effects must cancel the exit-deferred timer"
@@ -77,8 +77,8 @@ fn completion_effects_cancels_exit_deferred_timer() {
 
 #[test]
 fn failure_effects_cancels_liveness_timer() {
-    let pipeline = test_pipeline();
-    let effects = failure_effects(&pipeline, "something went wrong");
+    let job = test_job();
+    let effects = failure_effects(&job, "something went wrong");
     assert!(
         has_cancel_timer(&effects, "liveness:pipe-1"),
         "failure_effects must cancel the liveness timer"
@@ -87,8 +87,8 @@ fn failure_effects_cancels_liveness_timer() {
 
 #[test]
 fn failure_effects_cancels_exit_deferred_timer() {
-    let pipeline = test_pipeline();
-    let effects = failure_effects(&pipeline, "something went wrong");
+    let job = test_job();
+    let effects = failure_effects(&job, "something went wrong");
     assert!(
         has_cancel_timer(&effects, "exit-deferred:pipe-1"),
         "failure_effects must cancel the exit-deferred timer"
@@ -97,9 +97,9 @@ fn failure_effects_cancels_exit_deferred_timer() {
 
 #[test]
 fn failure_effects_kills_session_when_set() {
-    let mut pipeline = test_pipeline();
-    pipeline.session_id = Some("sess-agent-1".to_string());
-    let effects = failure_effects(&pipeline, "something went wrong");
+    let mut job = test_job();
+    job.session_id = Some("sess-agent-1".to_string());
+    let effects = failure_effects(&job, "something went wrong");
     assert!(
         has_kill_session(&effects, "sess-agent-1"),
         "failure_effects must kill session when session_id is set"
@@ -112,9 +112,9 @@ fn failure_effects_kills_session_when_set() {
 
 #[test]
 fn failure_effects_no_kill_session_when_none() {
-    let pipeline = test_pipeline();
-    assert!(pipeline.session_id.is_none());
-    let effects = failure_effects(&pipeline, "something went wrong");
+    let job = test_job();
+    assert!(job.session_id.is_none());
+    let effects = failure_effects(&job, "something went wrong");
     assert!(
         !effects
             .iter()
@@ -125,9 +125,9 @@ fn failure_effects_no_kill_session_when_none() {
 
 #[test]
 fn completion_effects_kills_session_when_set() {
-    let mut pipeline = test_pipeline();
-    pipeline.session_id = Some("sess-agent-2".to_string());
-    let effects = completion_effects(&pipeline);
+    let mut job = test_job();
+    job.session_id = Some("sess-agent-2".to_string());
+    let effects = completion_effects(&job);
     assert!(
         has_kill_session(&effects, "sess-agent-2"),
         "completion_effects must kill session when session_id is set"
@@ -140,9 +140,9 @@ fn completion_effects_kills_session_when_set() {
 
 #[test]
 fn cancellation_effects_kills_session_when_set() {
-    let mut pipeline = test_pipeline();
-    pipeline.session_id = Some("sess-agent-3".to_string());
-    let effects = cancellation_effects(&pipeline);
+    let mut job = test_job();
+    job.session_id = Some("sess-agent-3".to_string());
+    let effects = cancellation_effects(&job);
     assert!(
         has_kill_session(&effects, "sess-agent-3"),
         "cancellation_effects must kill session when session_id is set"
@@ -155,8 +155,8 @@ fn cancellation_effects_kills_session_when_set() {
 
 #[test]
 fn cancellation_transition_effects_emits_step_failed_and_advance() {
-    let pipeline = test_pipeline();
-    let effects = cancellation_transition_effects(&pipeline, "cleanup");
+    let job = test_job();
+    let effects = cancellation_transition_effects(&job, "cleanup");
 
     // Should emit StepFailed with "cancelled" error
     let has_step_failed = effects.iter().any(|e| {
@@ -172,26 +172,26 @@ fn cancellation_transition_effects_emits_step_failed_and_advance() {
         "cancellation_transition_effects must emit StepFailed with 'cancelled' error"
     );
 
-    // Should emit PipelineAdvanced to the target step
+    // Should emit JobAdvanced to the target step
     let has_advanced = effects.iter().any(|e| {
         matches!(
             e,
             Effect::Emit {
-                event: Event::PipelineAdvanced { step, .. }
+                event: Event::JobAdvanced { step, .. }
             } if step == "cleanup"
         )
     });
     assert!(
         has_advanced,
-        "cancellation_transition_effects must emit PipelineAdvanced to cleanup step"
+        "cancellation_transition_effects must emit JobAdvanced to cleanup step"
     );
 }
 
 #[test]
 fn cancellation_transition_effects_does_not_cancel_timers_or_kill_sessions() {
-    let mut pipeline = test_pipeline();
-    pipeline.session_id = Some("sess-agent-4".to_string());
-    let effects = cancellation_transition_effects(&pipeline, "cleanup");
+    let mut job = test_job();
+    job.session_id = Some("sess-agent-4".to_string());
+    let effects = cancellation_transition_effects(&job, "cleanup");
 
     // Should NOT cancel timers (runtime handles that separately)
     assert!(

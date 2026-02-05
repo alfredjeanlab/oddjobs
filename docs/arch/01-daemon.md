@@ -9,7 +9,7 @@ The core purpose of oj is **background work dispatch** - running agents in isola
 1. Receives commands from CLI
 2. Runs the event loop
 3. Spawns and monitors agents
-4. Drives pipelines through steps
+4. Drives jobs through steps
 5. Persists state for crash recovery
 
 ## Process Architecture
@@ -46,7 +46,7 @@ The core purpose of oj is **background work dispatch** - running agents in isola
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
 │  Owns:                                                      │
-│  - State (pipelines, sessions, workspaces)                  │
+│  - State (jobs, sessions, workspaces)                  │
 │  - Adapters (tmux, git)                                     │
 │  - Storage (WAL)                                            │
 └─────────────────────────────────────────────────────────────┘
@@ -65,8 +65,8 @@ One daemon serves all projects for a user:
 ├── snapshot.json        # State snapshot
 ├── wal/
 │   └── events.wal       # Write-ahead log
-├── logs/                # Per-pipeline and per-agent logs
-│   ├── <pipeline-id>.log
+├── logs/                # Per-job and per-agent logs
+│   ├── <job-id>.log
 │   └── agent/
 │       ├── <agent-id>.log
 │       └── <agent-id>/  # Agent session JSONL
@@ -76,7 +76,7 @@ One daemon serves all projects for a user:
 
 **Why user-level:**
 - Simpler architecture (single daemon process)
-- Cross-project visibility (one place to see all pipelines)
+- Cross-project visibility (one place to see all jobs)
 - CLI passes `project_root` with each `RunCommand` request
 
 ## Why a Daemon?
@@ -111,8 +111,8 @@ enum Request {
     RunCommand { project_root, invoke_dir, namespace, command, args, named_args }
     SessionSend { id, input }           // Send input to a session
     PeekSession { session_id, with_color }  // Capture tmux pane output
-    PipelineResume { id, message, vars }  // Resume escalated pipeline
-    PipelineCancel { ids }              // Cancel pipelines by ID
+    JobResume { id, message, vars }  // Resume escalated job
+    JobCancel { ids }              // Cancel jobs by ID
     WorkspaceDrop { id }                // Delete workspace by ID
     WorkspaceDropFailed                 // Delete failed workspaces
     WorkspaceDropAll                    // Delete all workspaces
@@ -124,9 +124,9 @@ enum Request {
 }
 
 enum Query {
-    ListPipelines
-    GetPipeline { id }
-    GetPipelineLogs { id, lines }       // Fetch pipeline logs
+    ListJobs
+    GetJob { id }
+    GetJobLogs { id, lines }       // Fetch job logs
     GetAgentLogs { id, step, lines }    // Fetch agent logs
     ListSessions
     ListWorkspaces
@@ -141,19 +141,19 @@ enum Response {
     Hello { version }
     Ok
     Event { accepted }
-    Pipelines { pipelines }
-    Pipeline { pipeline }               // Option (null if not found)
-    PipelineLogs { log_path, content }
+    Jobs { jobs }
+    Job { job }               // Option (null if not found)
+    JobLogs { log_path, content }
     AgentLogs { log_path, content, steps }
     Sessions { sessions }
     SessionPeek { output }
     Workspaces { workspaces }
     Workspace { workspace }             // Option (null if not found)
     WorkspacesPruned { pruned, skipped }
-    Status { uptime_secs, pipelines_active, sessions_active }
+    Status { uptime_secs, jobs_active, sessions_active }
     Error { message }
-    CommandStarted { pipeline_id, pipeline_name }
-    PipelinesCancelled { cancelled, already_terminal, not_found }
+    CommandStarted { job_id, job_name }
+    JobsCancelled { cancelled, already_terminal, not_found }
     WorkspacesDropped { dropped }
     AgentSignal { signaled, kind, message }
     WorkerStarted { worker_name }
@@ -240,7 +240,7 @@ This ensures runbook parse errors, permission issues, etc. are visible to the us
 
 By default, `oj daemon stop` preserves tmux sessions. Agents continue running
 independently — on next startup, the reconciliation flow reconnects to survivors
-and resumes pipeline progression. This is critical for long-running agents that
+and resumes job progression. This is critical for long-running agents that
 may take hours; a daemon restart (e.g., for version upgrade) should not kill work
 in progress.
 
@@ -266,7 +266,7 @@ On restart after crash (or normal restart with surviving sessions):
 2. Reconcile:
    - Check which tmux sessions are still alive
    - Check which agent processes are running
-   - Identify in-progress pipelines
+   - Identify in-progress jobs
 3. Reconnect watchers or trigger on_dead actions
 ```
 
@@ -404,7 +404,7 @@ flowchart LR
 
 10. **Reconcile agents** (background)
     - Spawned AFTER ready—doesn't block CLI
-    - For each non-terminal pipeline, check agent state:
+    - For each non-terminal job, check agent state:
 
     | Condition | Action |
     |-----------|--------|
@@ -412,7 +412,7 @@ flowchart LR
     | Session alive, agent dead | Emit `AgentExited` |
     | Session dead | Emit `AgentGone` |
 
-    - Pipelines in `Waiting` state skipped (already escalated to human)
+    - Jobs in `Waiting` state skipped (already escalated to human)
 
 ### Atomic Writes and Durability
 
@@ -444,7 +444,7 @@ continue processing         └→ completion signal
 truncate WAL
 ```
 
-At 1-2k pipelines, this keeps main thread blocking under 10ms while the full
+At 1-2k jobs, this keeps main thread blocking under 10ms while the full
 checkpoint (including compression and fsyncs) takes ~200ms in the background.
 
 ## Daemon Management
@@ -499,8 +499,8 @@ This provides seamless UX - users don't need to think about daemon lifecycle for
 | `OJ_TIMEOUT_CONNECT_MS` | `5000` | Timeout for waiting for daemon to start when auto-starting. |
 | `OJ_TIMEOUT_EXIT_MS` | `2000` | Timeout for graceful process exit before force-kill. |
 | `OJ_CONNECT_POLL_MS` | `50` | Polling interval for connection retries to daemon socket. |
-| `OJ_RUN_WAIT_MS` | `10000` | Initial wait after `oj run` spawns a pipeline before returning. |
-| `OJ_WAIT_POLL_MS` | `1000` | Polling interval for `oj pipeline wait` and `oj agent wait`. |
+| `OJ_RUN_WAIT_MS` | `10000` | Initial wait after `oj run` spawns a job before returning. |
+| `OJ_WAIT_POLL_MS` | `1000` | Polling interval for `oj job wait` and `oj agent wait`. |
 
 ### Daemon / Adapters
 

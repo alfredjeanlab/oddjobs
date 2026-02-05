@@ -9,8 +9,8 @@ use parking_lot::Mutex;
 use tempfile::tempdir;
 
 use oj_core::{
-    AgentRun, AgentRunStatus, Decision, DecisionId, DecisionSource, Pipeline, StepOutcome,
-    StepRecord, StepStatus,
+    AgentRun, AgentRunStatus, Decision, DecisionId, DecisionSource, Job, StepOutcome, StepRecord,
+    StepStatus,
 };
 use oj_storage::{CronRecord, MaterializedState, QueueItem, QueueItemStatus, WorkerRecord};
 
@@ -28,7 +28,7 @@ fn empty_orphans() -> Arc<Mutex<Vec<Breadcrumb>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-fn make_pipeline(
+fn make_job(
     id: &str,
     name: &str,
     namespace: &str,
@@ -37,8 +37,8 @@ fn make_pipeline(
     outcome: StepOutcome,
     agent_id: Option<&str>,
     started_at_ms: u64,
-) -> Pipeline {
-    Pipeline {
+) -> Job {
+    Job {
         id: id.to_string(),
         name: name.to_string(),
         kind: "command".to_string(),
@@ -79,7 +79,7 @@ fn make_worker(name: &str, namespace: &str, queue: &str, active: usize) -> Worke
         project_root: std::path::PathBuf::from("/tmp"),
         runbook_hash: String::new(),
         status: "running".to_string(),
-        active_pipeline_ids: (0..active).map(|i| format!("p{}", i)).collect(),
+        active_job_ids: (0..active).map(|i| format!("p{}", i)).collect(),
         queue_name: queue.to_string(),
         concurrency: 3,
     }
@@ -129,9 +129,9 @@ fn status_overview_groups_by_namespace() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/login",
                 "oddjobs",
@@ -142,9 +142,9 @@ fn status_overview_groups_by_namespace() {
                 1000,
             ),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "p2".to_string(),
-            make_pipeline(
+            make_job(
                 "p2",
                 "feat/auth",
                 "gastown",
@@ -171,11 +171,11 @@ fn status_overview_groups_by_namespace() {
             assert_eq!(namespaces[0].namespace, "gastown");
             assert_eq!(namespaces[1].namespace, "oddjobs");
 
-            assert_eq!(namespaces[0].active_pipelines.len(), 1);
-            assert_eq!(namespaces[0].active_pipelines[0].name, "feat/auth");
+            assert_eq!(namespaces[0].active_jobs.len(), 1);
+            assert_eq!(namespaces[0].active_jobs[0].name, "feat/auth");
 
-            assert_eq!(namespaces[1].active_pipelines.len(), 1);
-            assert_eq!(namespaces[1].active_pipelines[0].name, "fix/login");
+            assert_eq!(namespaces[1].active_jobs.len(), 1);
+            assert_eq!(namespaces[1].active_jobs[0].name, "fix/login");
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -189,9 +189,9 @@ fn status_overview_separates_escalated() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/login",
                 "oddjobs",
@@ -202,9 +202,9 @@ fn status_overview_separates_escalated() {
                 1000,
             ),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "p2".to_string(),
-            make_pipeline(
+            make_job(
                 "p2",
                 "feat/auth",
                 "oddjobs",
@@ -229,12 +229,12 @@ fn status_overview_separates_escalated() {
             assert_eq!(namespaces.len(), 1);
             let ns = &namespaces[0];
             assert_eq!(ns.namespace, "oddjobs");
-            assert_eq!(ns.active_pipelines.len(), 1);
-            assert_eq!(ns.active_pipelines[0].name, "fix/login");
-            assert_eq!(ns.escalated_pipelines.len(), 1);
-            assert_eq!(ns.escalated_pipelines[0].name, "feat/auth");
+            assert_eq!(ns.active_jobs.len(), 1);
+            assert_eq!(ns.active_jobs[0].name, "fix/login");
+            assert_eq!(ns.escalated_jobs.len(), 1);
+            assert_eq!(ns.escalated_jobs[0].name, "feat/auth");
             assert_eq!(
-                ns.escalated_pipelines[0].waiting_reason.as_deref(),
+                ns.escalated_jobs[0].waiting_reason.as_deref(),
                 Some("gate check failed (exit 1)")
             );
         }
@@ -250,10 +250,10 @@ fn status_overview_excludes_terminal() {
 
     {
         let mut s = state.lock();
-        // Terminal pipeline — should be excluded
-        s.pipelines.insert(
+        // Terminal job — should be excluded
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/done",
                 "oddjobs",
@@ -264,10 +264,10 @@ fn status_overview_excludes_terminal() {
                 1000,
             ),
         );
-        // Active pipeline — should be included
-        s.pipelines.insert(
+        // Active job — should be included
+        s.jobs.insert(
             "p2".to_string(),
-            make_pipeline(
+            make_job(
                 "p2",
                 "fix/active",
                 "oddjobs",
@@ -290,9 +290,9 @@ fn status_overview_excludes_terminal() {
     match response {
         Response::StatusOverview { namespaces, .. } => {
             assert_eq!(namespaces.len(), 1);
-            assert_eq!(namespaces[0].active_pipelines.len(), 1);
-            assert_eq!(namespaces[0].active_pipelines[0].name, "fix/active");
-            assert!(namespaces[0].escalated_pipelines.is_empty());
+            assert_eq!(namespaces[0].active_jobs.len(), 1);
+            assert_eq!(namespaces[0].active_jobs[0].name, "fix/active");
+            assert!(namespaces[0].escalated_jobs.is_empty());
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -401,9 +401,9 @@ fn status_overview_includes_active_agents() {
     }
 }
 
-fn make_breadcrumb(pipeline_id: &str, name: &str, project: &str, step: &str) -> Breadcrumb {
+fn make_breadcrumb(job_id: &str, name: &str, project: &str, step: &str) -> Breadcrumb {
     Breadcrumb {
-        pipeline_id: pipeline_id.to_string(),
+        job_id: job_id.to_string(),
         project: project.to_string(),
         kind: "command".to_string(),
         name: name.to_string(),
@@ -424,7 +424,7 @@ fn make_breadcrumb(pipeline_id: &str, name: &str, project: &str, step: &str) -> 
 }
 
 #[test]
-fn list_pipelines_includes_orphans() {
+fn list_jobs_includes_orphans() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
@@ -435,22 +435,22 @@ fn list_pipelines_includes_orphans() {
         "work",
     )]));
 
-    let response = handle_query(Query::ListPipelines, &state, &orphans, temp.path(), start);
+    let response = handle_query(Query::ListJobs, &state, &orphans, temp.path(), start);
     match response {
-        Response::Pipelines { pipelines } => {
-            assert_eq!(pipelines.len(), 1);
-            assert_eq!(pipelines[0].id, "orphan-1234");
-            assert_eq!(pipelines[0].name, "fix/orphan");
-            assert_eq!(pipelines[0].step_status, "orphaned");
-            assert_eq!(pipelines[0].namespace, "oddjobs");
-            assert!(pipelines[0].updated_at_ms > 0);
+        Response::Jobs { jobs } => {
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(jobs[0].id, "orphan-1234");
+            assert_eq!(jobs[0].name, "fix/orphan");
+            assert_eq!(jobs[0].step_status, "orphaned");
+            assert_eq!(jobs[0].namespace, "oddjobs");
+            assert!(jobs[0].updated_at_ms > 0);
         }
         other => panic!("unexpected response: {:?}", other),
     }
 }
 
 #[test]
-fn get_pipeline_falls_back_to_orphan() {
+fn get_job_falls_back_to_orphan() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
@@ -462,7 +462,7 @@ fn get_pipeline_falls_back_to_orphan() {
     )]));
 
     let response = handle_query(
-        Query::GetPipeline {
+        Query::GetJob {
             id: "orphan-5678".to_string(),
         },
         &state,
@@ -471,8 +471,8 @@ fn get_pipeline_falls_back_to_orphan() {
         start,
     );
     match response {
-        Response::Pipeline { pipeline } => {
-            let p = pipeline.expect("should find orphan pipeline");
+        Response::Job { job } => {
+            let p = job.expect("should find orphan job");
             assert_eq!(p.id, "orphan-5678");
             assert_eq!(p.step_status, "orphaned");
             assert_eq!(p.session_id.as_deref(), Some("tmux-orphan-1"));
@@ -485,17 +485,17 @@ fn get_pipeline_falls_back_to_orphan() {
 }
 
 #[test]
-fn get_pipeline_prefers_state_over_orphan() {
+fn get_job_prefers_state_over_orphan() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
-    // Add pipeline to both state and orphans with same ID
+    // Add job to both state and orphans with same ID
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "shared-id".to_string(),
-            make_pipeline(
+            make_job(
                 "shared-id",
                 "fix/real",
                 "oddjobs",
@@ -515,7 +515,7 @@ fn get_pipeline_prefers_state_over_orphan() {
     )]));
 
     let response = handle_query(
-        Query::GetPipeline {
+        Query::GetJob {
             id: "shared-id".to_string(),
         },
         &state,
@@ -524,8 +524,8 @@ fn get_pipeline_prefers_state_over_orphan() {
         start,
     );
     match response {
-        Response::Pipeline { pipeline } => {
-            let p = pipeline.expect("should find pipeline");
+        Response::Job { job } => {
+            let p = job.expect("should find job");
             // State version should be returned, not orphan
             assert_eq!(p.name, "fix/real");
             assert_ne!(p.step_status, "orphaned");
@@ -552,17 +552,17 @@ fn status_overview_includes_orphans() {
             assert_eq!(namespaces.len(), 1);
             let ns = &namespaces[0];
             assert_eq!(ns.namespace, "oddjobs");
-            assert_eq!(ns.orphaned_pipelines.len(), 1);
-            assert_eq!(ns.orphaned_pipelines[0].id, "orphan-status-1");
-            assert_eq!(ns.orphaned_pipelines[0].step_status, "orphaned");
-            assert!(ns.orphaned_pipelines[0].elapsed_ms > 0);
+            assert_eq!(ns.orphaned_jobs.len(), 1);
+            assert_eq!(ns.orphaned_jobs[0].id, "orphan-status-1");
+            assert_eq!(ns.orphaned_jobs[0].step_status, "orphaned");
+            assert!(ns.orphaned_jobs[0].elapsed_ms > 0);
         }
         other => panic!("unexpected response: {:?}", other),
     }
 }
 
 #[test]
-fn get_pipeline_orphan_prefix_match() {
+fn get_job_orphan_prefix_match() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
@@ -575,7 +575,7 @@ fn get_pipeline_orphan_prefix_match() {
 
     // Use prefix to match
     let response = handle_query(
-        Query::GetPipeline {
+        Query::GetJob {
             id: "orphan-abcdef".to_string(),
         },
         &state,
@@ -584,8 +584,8 @@ fn get_pipeline_orphan_prefix_match() {
         start,
     );
     match response {
-        Response::Pipeline { pipeline } => {
-            let p = pipeline.expect("should find orphan by prefix");
+        Response::Job { job } => {
+            let p = job.expect("should find orphan by prefix");
             assert_eq!(p.id, "orphan-abcdef123456");
             assert_eq!(p.step_status, "orphaned");
         }
@@ -601,8 +601,8 @@ fn make_cron(name: &str, namespace: &str, project_root: &str) -> CronRecord {
         runbook_hash: String::new(),
         status: "running".to_string(),
         interval: "5m".to_string(),
-        pipeline_name: "check".to_string(),
-        run_target: "pipeline:check".to_string(),
+        job_name: "check".to_string(),
+        run_target: "job:check".to_string(),
         started_at_ms: 0,
         last_fired_at_ms: None,
     }
@@ -658,7 +658,7 @@ fn list_projects_from_workers() {
                 std::path::PathBuf::from("/home/user/myapp")
             );
             assert_eq!(projects[0].workers, 1);
-            assert_eq!(projects[0].active_pipelines, 0);
+            assert_eq!(projects[0].active_jobs, 0);
             assert_eq!(projects[0].crons, 0);
         }
         other => panic!("unexpected response: {:?}", other),
@@ -702,16 +702,16 @@ fn list_projects_from_crons() {
 }
 
 #[test]
-fn list_projects_from_pipelines_with_agents() {
+fn list_projects_from_jobs_with_agents() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/bug",
                 "oddjobs",
@@ -740,7 +740,7 @@ fn list_projects_from_pipelines_with_agents() {
         Response::Projects { projects } => {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0].name, "oddjobs");
-            assert_eq!(projects[0].active_pipelines, 1);
+            assert_eq!(projects[0].active_jobs, 1);
             assert_eq!(projects[0].active_agents, 1);
             assert_eq!(
                 projects[0].root,
@@ -793,7 +793,7 @@ fn list_projects_excludes_stopped_only() {
 
     {
         let mut s = state.lock();
-        // Stopped worker with no active pipelines or crons
+        // Stopped worker with no active jobs or crons
         let mut w = make_worker("w1", "inactive", "q1", 0);
         w.status = "stopped".to_string();
         w.project_root = std::path::PathBuf::from("/home/user/inactive");
@@ -819,16 +819,16 @@ fn list_projects_excludes_stopped_only() {
 }
 
 #[test]
-fn list_projects_excludes_terminal_pipelines() {
+fn list_projects_excludes_terminal_jobs() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/done",
                 "oddjobs",
@@ -852,7 +852,7 @@ fn list_projects_excludes_terminal_pipelines() {
         Response::Projects { projects } => {
             assert!(
                 projects.is_empty(),
-                "terminal pipelines should not create active projects"
+                "terminal jobs should not create active projects"
             );
         }
         other => panic!("unexpected response: {:?}", other),
@@ -922,9 +922,9 @@ fn get_agent_returns_detail_by_exact_id() {
     let agent_id = "pipe123-build";
     {
         let mut s = state.lock();
-        let mut p = make_pipeline(
+        let mut p = make_job(
             "pipe123",
-            "my-pipeline",
+            "my-job",
             "myproject",
             "build",
             StepStatus::Running,
@@ -934,7 +934,7 @@ fn get_agent_returns_detail_by_exact_id() {
         );
         p.workspace_path = Some(std::path::PathBuf::from("/tmp/ws"));
         p.session_id = Some("sess-1".to_string());
-        s.pipelines.insert("pipe123".to_string(), p);
+        s.jobs.insert("pipe123".to_string(), p);
     }
 
     let response = handle_query(
@@ -951,8 +951,8 @@ fn get_agent_returns_detail_by_exact_id() {
         Response::Agent { agent } => {
             let a = agent.expect("agent should be found");
             assert_eq!(a.agent_id, agent_id);
-            assert_eq!(a.pipeline_id, "pipe123");
-            assert_eq!(a.pipeline_name, "my-pipeline");
+            assert_eq!(a.job_id, "pipe123");
+            assert_eq!(a.job_name, "my-job");
             assert_eq!(a.step_name, "build");
             assert_eq!(a.namespace, Some("myproject".to_string()));
             assert_eq!(a.status, "running");
@@ -973,9 +973,9 @@ fn get_agent_returns_detail_by_prefix() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe999".to_string(),
-            make_pipeline(
+            make_job(
                 "pipe999",
                 "test-pipe",
                 "",
@@ -1002,7 +1002,7 @@ fn get_agent_returns_detail_by_prefix() {
         Response::Agent { agent } => {
             let a = agent.expect("agent should be found by prefix");
             assert_eq!(a.agent_id, "pipe999-deploy");
-            assert_eq!(a.pipeline_name, "test-pipe");
+            assert_eq!(a.job_name, "test-pipe");
             assert_eq!(a.step_name, "deploy");
             assert_eq!(a.status, "completed");
         }
@@ -1042,9 +1042,9 @@ fn get_agent_includes_error_for_failed_agent() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipefail".to_string(),
-            make_pipeline(
+            make_job(
                 "pipefail",
                 "fail-pipe",
                 "proj",
@@ -1079,14 +1079,14 @@ fn get_agent_includes_error_for_failed_agent() {
 }
 
 #[test]
-fn get_pipeline_orphan_session_id_from_non_first_agent() {
+fn get_job_orphan_session_id_from_non_first_agent() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
     // Breadcrumb with multiple agents; only the second has session_name set
     let orphans = Arc::new(Mutex::new(vec![Breadcrumb {
-        pipeline_id: "orphan-multi-agent".to_string(),
+        job_id: "orphan-multi-agent".to_string(),
         project: "oddjobs".to_string(),
         kind: "command".to_string(),
         name: "fix/multi".to_string(),
@@ -1113,7 +1113,7 @@ fn get_pipeline_orphan_session_id_from_non_first_agent() {
     }]));
 
     let response = handle_query(
-        Query::GetPipeline {
+        Query::GetJob {
             id: "orphan-multi-agent".to_string(),
         },
         &state,
@@ -1122,8 +1122,8 @@ fn get_pipeline_orphan_session_id_from_non_first_agent() {
         start,
     );
     match response {
-        Response::Pipeline { pipeline } => {
-            let p = pipeline.expect("should find orphan pipeline");
+        Response::Job { job } => {
+            let p = job.expect("should find orphan job");
             assert_eq!(
                 p.session_id.as_deref(),
                 Some("tmux-deploy"),
@@ -1135,13 +1135,13 @@ fn get_pipeline_orphan_session_id_from_non_first_agent() {
 }
 
 #[test]
-fn get_pipeline_logs_resolves_orphan_prefix() {
+fn get_job_logs_resolves_orphan_prefix() {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
-    // Create the pipeline log directory and file
-    let log_dir = temp.path().join("pipeline");
+    // Create the job log directory and file
+    let log_dir = temp.path().join("job");
     std::fs::create_dir_all(&log_dir).unwrap();
     std::fs::write(
         log_dir.join("orphan-logs-full-id.log"),
@@ -1158,7 +1158,7 @@ fn get_pipeline_logs_resolves_orphan_prefix() {
 
     // Use a prefix to look up logs
     let response = handle_query(
-        Query::GetPipelineLogs {
+        Query::GetJobLogs {
             id: "orphan-logs".to_string(),
             lines: 0,
         },
@@ -1168,7 +1168,7 @@ fn get_pipeline_logs_resolves_orphan_prefix() {
         start,
     );
     match response {
-        Response::PipelineLogs { log_path, content } => {
+        Response::JobLogs { log_path, content } => {
             assert!(
                 log_path.ends_with("orphan-logs-full-id.log"),
                 "log_path should use the full orphan ID, got: {:?}",
@@ -1180,10 +1180,10 @@ fn get_pipeline_logs_resolves_orphan_prefix() {
     }
 }
 
-fn make_decision(id: &str, pipeline_id: &str, created_at_ms: u64) -> Decision {
+fn make_decision(id: &str, job_id: &str, created_at_ms: u64) -> Decision {
     Decision {
         id: DecisionId::new(id),
-        pipeline_id: pipeline_id.to_string(),
+        job_id: job_id.to_string(),
         agent_id: None,
         source: DecisionSource::Idle,
         context: "test context".to_string(),
@@ -1204,10 +1204,10 @@ fn list_decisions_returns_most_recent_first() {
 
     {
         let mut s = state.lock();
-        // Insert a pipeline so the name can be resolved
-        s.pipelines.insert(
+        // Insert a job so the name can be resolved
+        s.jobs.insert(
             "p1".to_string(),
-            make_pipeline(
+            make_job(
                 "p1",
                 "fix/bug",
                 "oddjobs",

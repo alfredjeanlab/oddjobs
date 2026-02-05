@@ -497,7 +497,7 @@ pub struct CommandDef {
     /// Command name (e.g., "build", "test")
     #[serde(default)]
     pub name: String,
-    /// Short description for help text (e.g., "Run a build pipeline")
+    /// Short description for help text (e.g., "Run a build job")
     #[serde(default)]
     pub description: Option<String>,
     /// Argument specification
@@ -516,8 +516,8 @@ pub struct CommandDef {
 pub enum RunDirective {
     /// Shell command string: `run = "echo hello"`
     Shell(String),
-    /// Pipeline reference: `run = { pipeline = "build" }`
-    Pipeline { pipeline: String },
+    /// Job reference: `run = { job = "build" }`
+    Job { job: String },
     /// Agent reference: `run = { agent = "planning" }` or `run = { agent = "planning", attach = true }`
     Agent {
         agent: String,
@@ -532,9 +532,9 @@ impl RunDirective {
         matches!(self, RunDirective::Shell(_))
     }
 
-    /// Check if this is a pipeline reference
-    pub fn is_pipeline(&self) -> bool {
-        matches!(self, RunDirective::Pipeline { .. })
+    /// Check if this is a job reference
+    pub fn is_job(&self) -> bool {
+        matches!(self, RunDirective::Job { .. })
     }
 
     /// Check if this is an agent reference
@@ -550,10 +550,10 @@ impl RunDirective {
         }
     }
 
-    /// Get the pipeline name if this is a pipeline directive
-    pub fn pipeline_name(&self) -> Option<&str> {
+    /// Get the job name if this is a job directive
+    pub fn job_name(&self) -> Option<&str> {
         match self {
-            RunDirective::Pipeline { pipeline } => Some(pipeline),
+            RunDirective::Job { job } => Some(job),
             _ => None,
         }
     }

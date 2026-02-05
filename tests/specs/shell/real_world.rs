@@ -15,26 +15,26 @@ fn build_minimal_runbook_is_valid() {
         r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 vars  = ["name", "prompt"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo 'Starting build: ${name}'"
 on_done = "merge"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "merge"
 run = "git fetch origin main && git rebase origin/main && git push"
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo 'Build complete: ${name}'"
 
-[pipeline.build.events]
+[job.build.events]
 on_step = "echo '${name} -> ${step}' >> .oj/build.log"
 on_complete = "echo '${name} complete' >> .oj/build.log"
 on_fail = "echo '${name} failed: ${error}' >> .oj/build.log"
@@ -56,16 +56,16 @@ fn merge_with_remote_guard_is_valid() {
         r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 vars  = ["name", "prompt"]
 
-[pipeline.build.defaults]
+[job.build.defaults]
 branch = "feature/${name}"
 base = "main"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "merge"
 run = """
 git remote | grep -q . || exit 0
@@ -91,16 +91,16 @@ fn multiline_done_step_is_valid() {
         r#"
 [command.feature]
 args = "<name>"
-run = { pipeline = "feature" }
+run = { job = "feature" }
 
-[pipeline.feature]
+[job.feature]
 vars  = ["name"]
 
-[pipeline.feature.defaults]
+[job.feature.defaults]
 branch = "feature/${name}"
 epic = "${name}"
 
-[[pipeline.feature.step]]
+[[job.feature.step]]
 name = "done"
 run = """
 git push origin --delete ${branch}
@@ -122,19 +122,19 @@ fn event_handlers_are_valid() {
         r#"
 [command.events]
 args = "<name>"
-run = { pipeline = "events" }
+run = { job = "events" }
 
-[pipeline.events]
+[job.events]
 vars  = ["name"]
 
-[[pipeline.events.step]]
+[[job.events.step]]
 name = "work"
 run = "echo 'working'"
 
-[pipeline.events.events]
-on_step = "oj emit pipeline:advanced --id ${name} --step ${step}"
-on_complete = "oj emit pipeline:complete --id ${name}"
-on_fail = "oj emit pipeline:fail --id ${name} --error '${error}'"
+[job.events.events]
+on_step = "oj emit job:advanced --id ${name} --step ${step}"
+on_complete = "oj emit job:complete --id ${name}"
+on_fail = "oj emit job:fail --id ${name} --error '${error}'"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();

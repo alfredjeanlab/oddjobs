@@ -219,8 +219,8 @@ fn word_part_equality() {
 }
 
 #[test]
-fn pipeline() {
-    let pipeline = Pipeline {
+fn job() {
+    let job = Job {
         commands: vec![
             SimpleCommand {
                 env: vec![],
@@ -252,7 +252,7 @@ fn pipeline() {
         span: Span::new(0, 23),
     };
 
-    assert_eq!(pipeline.commands.len(), 2);
+    assert_eq!(job.commands.len(), 2);
 }
 
 #[test]

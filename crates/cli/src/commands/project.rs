@@ -72,7 +72,7 @@ async fn handle_list(client: &DaemonClient, format: OutputFormat) -> Result<()> 
             let mut table = Table::new(vec![
                 Column::left("NAME"),
                 Column::left("ROOT"),
-                Column::right("PIPELINES"),
+                Column::right("JOBS"),
                 Column::right("WORKERS"),
                 Column::right("AGENTS"),
                 Column::right("CRONS"),
@@ -86,7 +86,7 @@ async fn handle_list(client: &DaemonClient, format: OutputFormat) -> Result<()> 
                 table.row(vec![
                     p.name.clone(),
                     root,
-                    p.active_pipelines.to_string(),
+                    p.active_jobs.to_string(),
                     p.workers.to_string(),
                     p.active_agents.to_string(),
                     p.crons.to_string(),

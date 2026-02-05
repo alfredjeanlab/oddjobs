@@ -120,10 +120,10 @@ fn verify_command_item_spans(item: &CommandItem, parent: Span) {
                 verify_span_containment(cmd.span, arg.span, "arg in SimpleCommand");
             }
         }
-        Command::Pipeline(pipeline) => {
-            verify_span_containment(item.span, pipeline.span, "Pipeline");
-            for cmd in &pipeline.commands {
-                verify_span_containment(pipeline.span, cmd.span, "cmd in Pipeline");
+        Command::Job(job) => {
+            verify_span_containment(item.span, job.span, "Job");
+            for cmd in &job.commands {
+                verify_span_containment(job.span, cmd.span, "cmd in Job");
             }
         }
         Command::Subshell(subshell) => {
@@ -210,11 +210,11 @@ fn test_alternating_deep_nesting() {
 }
 
 // =============================================================================
-// Pipeline Property Tests
+// Job Property Tests
 // =============================================================================
 
 proptest! {
-    /// Invariant: N piped commands produce a pipeline with N commands.
+    /// Invariant: N piped commands produce a job with N commands.
     #[test]
     fn pipe_count_matches_command_count(
         cmds in prop::collection::vec(word_strategy(), 2..6)
@@ -225,21 +225,21 @@ proptest! {
 
         let and_or = &result.commands[0];
         match &and_or.first.command {
-            Command::Pipeline(p) => {
+            Command::Job(p) => {
                 prop_assert_eq!(p.commands.len(), cmds.len());
             }
-            _ => prop_assert!(false, "Expected pipeline for piped commands"),
+            _ => prop_assert!(false, "Expected job for piped commands"),
         }
     }
 
-    /// Invariant: Logical operators don't affect pipeline internal structure.
+    /// Invariant: Logical operators don't affect job internal structure.
     #[test]
-    fn logical_ops_preserve_pipeline_structure(
+    fn logical_ops_preserve_job_structure(
         a in word_strategy(),
         b in word_strategy(),
         c in word_strategy(),
     ) {
-        // a | b && c -> pipeline(a, b) && c
+        // a | b && c -> job(a, b) && c
         let input = format!("{} | {} && {}", a, b, c);
         let result = Parser::parse(&input).unwrap();
         prop_assert_eq!(result.commands.len(), 1);
@@ -248,10 +248,10 @@ proptest! {
         prop_assert_eq!(and_or.rest.len(), 1);
 
         match &and_or.first.command {
-            Command::Pipeline(p) => {
+            Command::Job(p) => {
                 prop_assert_eq!(p.commands.len(), 2);
             }
-            _ => prop_assert!(false, "Expected pipeline"),
+            _ => prop_assert!(false, "Expected job"),
         }
     }
 }

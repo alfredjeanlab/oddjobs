@@ -3,7 +3,7 @@
 
 //! Cross-entity ID resolution for convenience commands.
 //!
-//! Resolves an ID across pipelines, agents, and sessions by exact or prefix match,
+//! Resolves an ID across jobs, agents, and sessions by exact or prefix match,
 //! then dispatches to the appropriate typed subcommand.
 
 use anyhow::Result;
@@ -14,7 +14,7 @@ use crate::output::OutputFormat;
 /// The kind of entity matched during resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EntityKind {
-    Pipeline,
+    Job,
     Agent,
     Session,
 }
@@ -22,7 +22,7 @@ pub enum EntityKind {
 impl EntityKind {
     fn as_str(&self) -> &'static str {
         match self {
-            EntityKind::Pipeline => "pipeline",
+            EntityKind::Job => "job",
             EntityKind::Agent => "agent",
             EntityKind::Session => "session",
         }
@@ -34,7 +34,7 @@ impl EntityKind {
 pub struct EntityMatch {
     pub kind: EntityKind,
     pub id: String,
-    /// Human-readable label (e.g. pipeline name, agent step name)
+    /// Human-readable label (e.g. job name, agent step name)
     pub label: Option<String>,
 }
 
@@ -43,32 +43,32 @@ pub struct EntityMatch {
 /// Returns all matches. Exact matches take priority over prefix matches:
 /// if any exact match is found, prefix matches are discarded.
 pub async fn resolve_entity(client: &DaemonClient, query: &str) -> Result<Vec<EntityMatch>> {
-    let pipelines = client.list_pipelines().await?;
+    let jobs = client.list_jobs().await?;
     let agents = client.list_agents(None, None).await?;
     let sessions = client.list_sessions().await?;
-    Ok(resolve_from_lists(query, &pipelines, &agents, &sessions))
+    Ok(resolve_from_lists(query, &jobs, &agents, &sessions))
 }
 
 /// Pure function for entity resolution — testable without async client.
 pub fn resolve_from_lists(
     query: &str,
-    pipelines: &[oj_daemon::PipelineSummary],
+    jobs: &[oj_daemon::JobSummary],
     agents: &[oj_daemon::AgentSummary],
     sessions: &[oj_daemon::SessionSummary],
 ) -> Vec<EntityMatch> {
     let mut exact = Vec::new();
     let mut prefix = Vec::new();
 
-    for p in pipelines {
+    for p in jobs {
         if p.id == query {
             exact.push(EntityMatch {
-                kind: EntityKind::Pipeline,
+                kind: EntityKind::Job,
                 id: p.id.clone(),
                 label: Some(p.name.clone()),
             });
         } else if p.id.starts_with(query) {
             prefix.push(EntityMatch {
-                kind: EntityKind::Pipeline,
+                kind: EntityKind::Job,
                 id: p.id.clone(),
                 label: Some(p.name.clone()),
             });
@@ -155,9 +155,9 @@ fn print_ambiguous(query: &str, command_name: &str, matches: &[EntityMatch]) {
 pub async fn handle_peek(client: &DaemonClient, id: &str, format: OutputFormat) -> Result<()> {
     let entity = resolve_one(client, id, "peek").await?;
     match entity.kind {
-        EntityKind::Pipeline => {
-            super::pipeline::handle(
-                super::pipeline::PipelineCommand::Peek { id: entity.id },
+        EntityKind::Job => {
+            super::job::handle(
+                super::job::JobCommand::Peek { id: entity.id },
                 client,
                 None,
                 format,
@@ -190,9 +190,9 @@ pub async fn handle_peek(client: &DaemonClient, id: &str, format: OutputFormat) 
 pub async fn handle_attach(client: &DaemonClient, id: &str) -> Result<()> {
     let entity = resolve_one(client, id, "attach").await?;
     match entity.kind {
-        EntityKind::Pipeline => {
-            super::pipeline::handle(
-                super::pipeline::PipelineCommand::Attach { id: entity.id },
+        EntityKind::Job => {
+            super::job::handle(
+                super::job::JobCommand::Attach { id: entity.id },
                 client,
                 None,
                 OutputFormat::Text,
@@ -223,9 +223,9 @@ pub async fn handle_logs(
 ) -> Result<()> {
     let entity = resolve_one(client, id, "logs").await?;
     match entity.kind {
-        EntityKind::Pipeline => {
-            super::pipeline::handle(
-                super::pipeline::PipelineCommand::Logs {
+        EntityKind::Job => {
+            super::job::handle(
+                super::job::JobCommand::Logs {
                     id: entity.id,
                     follow,
                     limit,
@@ -269,9 +269,9 @@ pub async fn handle_show(
 ) -> Result<()> {
     let entity = resolve_one(client, id, "show").await?;
     match entity.kind {
-        EntityKind::Pipeline => {
-            super::pipeline::handle(
-                super::pipeline::PipelineCommand::Show {
+        EntityKind::Job => {
+            super::job::handle(
+                super::job::JobCommand::Show {
                     id: entity.id,
                     verbose,
                 },

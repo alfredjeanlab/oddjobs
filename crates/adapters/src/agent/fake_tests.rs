@@ -18,8 +18,8 @@ async fn spawn_and_kill() {
         workspace_path: PathBuf::from("/workspace"),
         cwd: None,
         prompt: "Test prompt".to_string(),
-        pipeline_name: "test".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
     };
@@ -45,8 +45,8 @@ async fn state_changes() {
         workspace_path: PathBuf::from("/workspace"),
         cwd: None,
         prompt: "Test".to_string(),
-        pipeline_name: "test".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
     };
@@ -98,8 +98,8 @@ async fn error_injection() {
         workspace_path: PathBuf::from("/workspace"),
         cwd: None,
         prompt: "Test".to_string(),
-        pipeline_name: "test".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
     };
@@ -121,8 +121,8 @@ async fn call_recording() {
         workspace_path: PathBuf::from("/workspace"),
         cwd: None,
         prompt: "Test".to_string(),
-        pipeline_name: "test".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
     };

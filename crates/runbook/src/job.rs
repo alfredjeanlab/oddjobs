@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline definitions
+//! Job definitions
 //!
 //! # Design Note: No Step Timeouts
 //!
@@ -10,7 +10,7 @@
 //!
 //! ## Why No Timeout Feature?
 //!
-//! **This is a dynamic, monitored system.** Agents and pipelines are actively watched by
+//! **This is a dynamic, monitored system.** Agents and jobs are actively watched by
 //! both automated handlers (`on_idle`, `on_dead`, `on_error`) and human operators. When
 //! something goes wrong, these monitoring systems detect the actual problem state—not an
 //! arbitrary time threshold.
@@ -79,13 +79,13 @@ impl<'de> Deserialize<'de> for StepTransition {
 /// Notification configuration for lifecycle events
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NotifyConfig {
-    /// Message template sent when the pipeline/agent starts
+    /// Message template sent when the job/agent starts
     #[serde(default)]
     pub on_start: Option<String>,
-    /// Message template sent when the pipeline/agent completes successfully
+    /// Message template sent when the job/agent completes successfully
     #[serde(default)]
     pub on_done: Option<String>,
-    /// Message template sent when the pipeline/agent fails
+    /// Message template sent when the job/agent fails
     #[serde(default)]
     pub on_fail: Option<String>,
 }
@@ -97,7 +97,7 @@ impl NotifyConfig {
     }
 }
 
-/// Workspace configuration for pipeline execution.
+/// Workspace configuration for job execution.
 ///
 /// Supports two forms:
 ///   `workspace = "folder"`                    — plain directory
@@ -157,7 +157,7 @@ impl WorkspaceConfig {
     }
 }
 
-/// A step within a pipeline
+/// A step within a job
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepDef {
     /// Step name (injected from map key in HCL format)
@@ -171,7 +171,7 @@ pub struct StepDef {
     /// Step to go to on failure
     #[serde(default)]
     pub on_fail: Option<StepTransition>,
-    /// Step to route to when the pipeline is cancelled during this step
+    /// Step to route to when the job is cancelled during this step
     #[serde(default)]
     pub on_cancel: Option<StepTransition>,
 }
@@ -198,15 +198,15 @@ impl StepDef {
     }
 }
 
-/// A pipeline definition from the runbook
+/// A job definition from the runbook
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PipelineDef {
-    /// Pipeline kind (injected from HCL block label, e.g. `pipeline "build"` → kind = "build")
+pub struct JobDef {
+    /// Job kind (injected from HCL block label, e.g. `job "build"` → kind = "build")
     #[serde(default)]
     pub kind: String,
-    /// Optional name template for human-readable pipeline names.
+    /// Optional name template for human-readable job names.
     /// Supports `${var.*}` interpolation. The result is slugified and
-    /// suffixed with a nonce derived from the pipeline UUID.
+    /// suffixed with a nonce derived from the job UUID.
     #[serde(default)]
     pub name: Option<String>,
     /// Required variables
@@ -221,20 +221,20 @@ pub struct PipelineDef {
     /// Workspace configuration: "folder" (plain dir) or `{ git = "worktree" }` (engine-managed)
     #[serde(default)]
     pub workspace: Option<WorkspaceConfig>,
-    /// Step to route to when the pipeline completes (no step-level on_done)
+    /// Step to route to when the job completes (no step-level on_done)
     #[serde(default)]
     pub on_done: Option<StepTransition>,
     /// Step to route to when a step fails (no step-level on_fail)
     #[serde(default)]
     pub on_fail: Option<StepTransition>,
-    /// Step to route to when the pipeline is cancelled (no step-level on_cancel)
+    /// Step to route to when the job is cancelled (no step-level on_cancel)
     #[serde(default)]
     pub on_cancel: Option<StepTransition>,
-    /// Local variables computed at pipeline creation time.
+    /// Local variables computed at job creation time.
     /// Values are template strings evaluated once, available as ${local.*}.
     #[serde(default)]
     pub locals: HashMap<String, String>,
-    /// Notification messages for pipeline lifecycle events
+    /// Notification messages for job lifecycle events
     #[serde(default)]
     pub notify: NotifyConfig,
     /// Ordered steps
@@ -244,7 +244,7 @@ pub struct PipelineDef {
 
 /// Deserialize steps from either a sequence (TOML) or a map (HCL labeled blocks).
 ///
-/// - TOML `[[pipeline.X.step]]` produces a `Vec<StepDef>`
+/// - TOML `[[job.X.step]]` produces a `Vec<StepDef>`
 /// - HCL `step "name" { }` produces an `IndexMap<String, StepDef>` (preserves insertion order)
 fn deserialize_steps<'de, D>(deserializer: D) -> Result<Vec<StepDef>, D::Error>
 where
@@ -287,7 +287,7 @@ where
     deserializer.deserialize_any(StepsVisitor)
 }
 
-impl PipelineDef {
+impl JobDef {
     /// Get a step by name
     pub fn get_step(&self, name: &str) -> Option<&StepDef> {
         self.steps.iter().find(|p| p.name == name)
@@ -300,5 +300,5 @@ impl PipelineDef {
 }
 
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
+#[path = "job_tests.rs"]
 mod tests;

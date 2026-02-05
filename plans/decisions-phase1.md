@@ -2,7 +2,7 @@
 
 ## Overview
 
-Add a first-class decision entity to the system. Decisions represent points where a pipeline is blocked and needs human input — gate failures, agent questions, idle escalations, errors, or approval requests. Phase 1 establishes the data model, event sourcing, materialized state, daemon protocol, and CLI commands. Later phases will wire escalation paths and agent hooks to emit decisions automatically.
+Add a first-class decision entity to the system. Decisions represent points where a job is blocked and needs human input — gate failures, agent questions, idle escalations, errors, or approval requests. Phase 1 establishes the data model, event sourcing, materialized state, daemon protocol, and CLI commands. Later phases will wire escalation paths and agent hooks to emit decisions automatically.
 
 ## Project Structure
 
@@ -20,7 +20,7 @@ Modified files:
 ```
 crates/core/src/lib.rs               # pub mod decision; re-exports
 crates/core/src/event.rs             # DecisionCreated, DecisionResolved events
-crates/core/src/pipeline.rs          # StepStatus::Waiting(String) with decision_id
+crates/core/src/job.rs          # StepStatus::Waiting(String) with decision_id
 crates/storage/src/state.rs          # decisions HashMap + apply_event arms
 crates/storage/src/state_tests/mod.rs # Tests for decision event application
 crates/daemon/src/protocol.rs        # Request/Response/Query variants for decisions
@@ -62,7 +62,7 @@ impl fmt::Display for DecisionId {
 }
 
 // Add From<String>, From<&str>, PartialEq<str>, Borrow<str> impls
-// following PipelineId pattern in crates/core/src/pipeline.rs
+// following JobId pattern in crates/core/src/job.rs
 
 /// Where the decision originated.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +89,7 @@ pub struct DecisionOption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Decision {
     pub id: DecisionId,
-    pub pipeline_id: String,
+    pub job_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     pub source: DecisionSource,
@@ -116,7 +116,7 @@ impl Decision {
 }
 ```
 
-**1b. Update `StepStatus` in `crates/core/src/pipeline.rs`:**
+**1b. Update `StepStatus` in `crates/core/src/job.rs`:**
 
 Change `Waiting` from a unit variant to carry an optional decision ID:
 
@@ -133,7 +133,7 @@ pub enum StepStatus {
 Using `Option<String>` rather than `Option<DecisionId>` keeps `StepStatus` simple and avoids a circular dependency issue (since `Copy` would be lost anyway). The `Option` provides backward compat: existing `StepWaiting` events without a decision produce `Waiting(None)`.
 
 **Important:** `StepStatus` currently derives `Copy`. Changing `Waiting` to carry data removes `Copy`. All sites that copy `StepStatus` need updating to use `.clone()`. Audit all uses:
-- `crates/storage/src/state.rs` — assignments like `pipeline.step_status = StepStatus::Waiting` → `StepStatus::Waiting(None)` or `StepStatus::Waiting(Some(decision_id))`
+- `crates/storage/src/state.rs` — assignments like `job.step_status = StepStatus::Waiting` → `StepStatus::Waiting(None)` or `StepStatus::Waiting(Some(decision_id))`
 - `crates/engine/src/runtime/monitor.rs:652` — comparison
 - `crates/daemon/src/lifecycle.rs:626` — comparison
 - `crates/daemon/src/listener/query.rs:606` — match arm
@@ -170,7 +170,7 @@ pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};
 #[serde(rename = "decision:created")]
 DecisionCreated {
     id: String,
-    pipeline_id: PipelineId,
+    job_id: JobId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     agent_id: Option<String>,
     source: DecisionSource,
@@ -199,8 +199,8 @@ DecisionResolved {
 
 Also update:
 - `Event::name()` — add `"decision:created"` and `"decision:resolved"` arms
-- `Event::log_summary()` — add summary lines, e.g. `"decision:created id={id} pipeline={pipeline_id} source={source:?}"`
-- `Event::pipeline_id()` — return `Some(pipeline_id)` for `DecisionCreated`
+- `Event::log_summary()` — add summary lines, e.g. `"decision:created id={id} job={job_id} source={source:?}"`
+- `Event::job_id()` — return `Some(job_id)` for `DecisionCreated`
 
 Import `DecisionSource` and `DecisionOption` from `crate::decision`.
 
@@ -225,7 +225,7 @@ Import `Decision` from `oj_core`.
 ```rust
 Event::DecisionCreated {
     id,
-    pipeline_id,
+    job_id,
     agent_id,
     source,
     context,
@@ -237,7 +237,7 @@ Event::DecisionCreated {
     if !self.decisions.contains_key(id) {
         self.decisions.insert(id.clone(), Decision {
             id: DecisionId::new(id.clone()),
-            pipeline_id: pipeline_id.to_string(),
+            job_id: job_id.to_string(),
             agent_id: agent_id.clone(),
             source: source.clone(),
             context: context.clone(),
@@ -250,9 +250,9 @@ Event::DecisionCreated {
         });
     }
 
-    // Update pipeline step status to Waiting with decision_id
-    if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-        pipeline.step_status = StepStatus::Waiting(Some(id.clone()));
+    // Update job step status to Waiting with decision_id
+    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+        job.step_status = StepStatus::Waiting(Some(id.clone()));
     }
 },
 
@@ -271,7 +271,7 @@ Event::DecisionResolved {
 },
 ```
 
-Note: `DecisionResolved` only updates the decision record. The pipeline resume (transitioning out of `Waiting`) is handled by a separate `PipelineResume` event emitted by the daemon handler after resolving — this keeps the events composable and avoids coupling decision resolution to pipeline advancement.
+Note: `DecisionResolved` only updates the decision record. The job resume (transitioning out of `Waiting`) is handled by a separate `JobResume` event emitted by the daemon handler after resolving — this keeps the events composable and avoids coupling decision resolution to job advancement.
 
 **3c. Add `get_decision` helper:**
 
@@ -331,8 +331,8 @@ Add summary/detail structs:
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionSummary {
     pub id: String,
-    pub pipeline_id: String,
-    pub pipeline_name: String,
+    pub job_id: String,
+    pub job_name: String,
     pub source: String,
     pub summary: String,       // truncated context
     pub created_at_ms: u64,
@@ -343,8 +343,8 @@ pub struct DecisionSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionDetail {
     pub id: String,
-    pub pipeline_id: String,
-    pub pipeline_name: String,
+    pub job_id: String,
+    pub job_name: String,
     pub agent_id: Option<String>,
     pub source: String,
     pub context: String,
@@ -382,7 +382,7 @@ DecisionResolve {
 
 **4b. Query handlers (`crates/daemon/src/listener/query.rs`):**
 
-Add `Query::ListDecisions` and `Query::GetDecision` arms in `handle_query()`. For `ListDecisions`, filter by namespace and return only unresolved decisions (resolved_at_ms.is_none()). Map to `DecisionSummary` with pipeline name looked up from state.
+Add `Query::ListDecisions` and `Query::GetDecision` arms in `handle_query()`. For `ListDecisions`, filter by namespace and return only unresolved decisions (resolved_at_ms.is_none()). Map to `DecisionSummary` with job name looked up from state.
 
 **4c. Mutation handler (`crates/daemon/src/listener/decisions.rs`):**
 
@@ -428,7 +428,7 @@ pub(super) fn handle_decision_resolve(
     }
 
     let full_id = decision.id.as_str().to_string();
-    let pipeline_id = decision.pipeline_id.clone();
+    let job_id = decision.job_id.clone();
     drop(state_guard);
 
     let resolved_at_ms = epoch_ms_now();
@@ -443,10 +443,10 @@ pub(super) fn handle_decision_resolve(
     };
     event_bus.send(event).map_err(|_| ConnectionError::WalError)?;
 
-    // Emit PipelineResume to advance the pipeline out of Waiting
+    // Emit JobResume to advance the job out of Waiting
     let resume_message = build_resume_message(chosen, message.as_deref(), &full_id);
-    let resume_event = Event::PipelineResume {
-        id: PipelineId::new(pipeline_id),
+    let resume_event = Event::JobResume {
+        id: JobId::new(job_id),
         message: Some(resume_message),
         vars: HashMap::new(),
     };
@@ -499,14 +499,14 @@ pub enum DecisionCommand {
 ```
 
 Handler function pattern follows `queue.rs`:
-- `List` → `Query::ListDecisions` → print table: `ID  PIPELINE  AGE  SOURCE  SUMMARY`
+- `List` → `Query::ListDecisions` → print table: `ID  JOB  AGE  SOURCE  SUMMARY`
 - `Show` → `Query::GetDecision` → print full context + numbered options
 - `Resolve` → `Request::DecisionResolve` → print confirmation
 
 For `Show` output:
 ```
 Decision: abc12345
-Pipeline: my-pipeline (def67890)
+Job: my-job (def67890)
 Source:   gate
 Age:      5m ago
 
@@ -517,7 +517,7 @@ Context:
 Options:
   1. Retry       (recommended)
   2. Skip
-  3. Cancel pipeline
+  3. Cancel job
 
 Use: oj decision resolve abc12345 <number> [-m message]
 ```
@@ -590,7 +590,7 @@ Key files:
 - `is_resolved()` returns correct values
 
 **6c. State tests (`crates/storage/src/state_tests/mod.rs`):**
-- `DecisionCreated` event creates decision in state and sets pipeline to `Waiting(Some(id))`
+- `DecisionCreated` event creates decision in state and sets job to `Waiting(Some(id))`
 - `DecisionResolved` event updates chosen/message/resolved_at
 - Idempotency: duplicate `DecisionCreated` is a no-op
 - Prefix lookup via `get_decision()`
@@ -605,7 +605,7 @@ Key files:
 ## Key Implementation Details
 
 ### Decision ID Format
-Use `uuid::Uuid::new_v4().to_string()` — same as pipeline IDs and queue item IDs. Prefix matching supported in `get_decision()`.
+Use `uuid::Uuid::new_v4().to_string()` — same as job IDs and queue item IDs. Prefix matching supported in `get_decision()`.
 
 ### StepStatus Backward Compatibility
 The `StepStatus::Waiting` change removes `Copy` from the enum. This is a compile-time-visible breaking change — all affected call sites will fail to compile until updated. Use `#[serde(deserialize_with = ...)]` or `#[serde(alias = ...)]` if needed for WAL replay of old snapshots. Alternatively, since `Waiting` is serialized as `"Waiting"` (unit variant), add a custom deserializer that maps both `"Waiting"` (old) and `{"Waiting": null}` (new with None) to `StepStatus::Waiting(None)`.
@@ -620,8 +620,8 @@ and with the new variant it would serialize as:
 ```
 A custom serde impl or `#[serde(untagged)]` approach is needed. The simplest approach: use a string-based serialization with a custom impl that handles both forms during deserialization. Alternatively, add `#[serde(alias)]` handling. The decision_id in `Waiting` is primarily in-memory state derived from events during replay, so the serialization format in snapshots can be kept simple.
 
-### DecisionResolved → PipelineResume Coupling
-When a decision is resolved, the daemon handler emits both `DecisionResolved` and `PipelineResume` events. This is intentional: the decision records the human's answer, and the pipeline resume tells the engine to continue. This two-event approach means decisions can be resolved without necessarily resuming the pipeline (future flexibility), and pipeline resumes can happen without decisions (backward compat with `oj pipeline resume`).
+### DecisionResolved → JobResume Coupling
+When a decision is resolved, the daemon handler emits both `DecisionResolved` and `JobResume` events. This is intentional: the decision records the human's answer, and the job resume tells the engine to continue. This two-event approach means decisions can be resolved without necessarily resuming the job (future flexibility), and job resumes can happen without decisions (backward compat with `oj job resume`).
 
 ### StepWaiting Event — decision_id Field
 Add an optional `decision_id` field to the existing `StepWaiting` event:
@@ -629,7 +629,7 @@ Add an optional `decision_id` field to the existing `StepWaiting` event:
 ```rust
 #[serde(rename = "step:waiting")]
 StepWaiting {
-    pipeline_id: PipelineId,
+    job_id: JobId,
     step: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
@@ -652,9 +652,9 @@ Use the existing `crate::output::format_time_ago()` helper for age column in lis
 5. **Clippy:** `cargo clippy --all -- -D warnings`
 6. **Format:** `cargo fmt --all`
 7. **Manual smoke test:**
-   - Start daemon, create a pipeline that escalates
+   - Start daemon, create a job that escalates
    - `oj decisions` — see the pending decision
    - `oj decision show <id>` — see full context
    - `oj decision resolve <id> 1 -m "looks good"` — resolve it
-   - Verify pipeline resumes
+   - Verify job resumes
 8. **Full CI:** `make check` (includes deny, quench)

@@ -8,11 +8,11 @@ use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
 };
 use oj_core::{
-    AgentRun, AgentRunId, AgentRunStatus, Event, Pipeline, PipelineConfig, PipelineId, StepOutcome,
-    StepRecord, StepStatus, SystemClock,
+    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, StepOutcome, StepRecord,
+    StepStatus, SystemClock,
 };
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
-use oj_runbook::{PipelineDef, RunDirective, Runbook, StepDef};
+use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
 use oj_storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -23,12 +23,12 @@ use parking_lot::Mutex;
 use tempfile::tempdir;
 use tokio::sync::mpsc;
 
-/// Build a minimal runbook with a single-step pipeline.
+/// Build a minimal runbook with a single-step job.
 fn test_runbook() -> Runbook {
-    let mut pipelines = HashMap::new();
-    pipelines.insert(
+    let mut jobs = HashMap::new();
+    jobs.insert(
         "test".to_string(),
-        PipelineDef {
+        JobDef {
             kind: "test".to_string(),
             name: None,
             vars: vec![],
@@ -51,7 +51,7 @@ fn test_runbook() -> Runbook {
     );
     Runbook {
         commands: HashMap::new(),
-        pipelines,
+        jobs,
         agents: HashMap::new(),
         queues: HashMap::new(),
         workers: HashMap::new(),
@@ -67,17 +67,17 @@ fn runbook_hash(runbook: &Runbook) -> String {
     format!("{:x}", digest)
 }
 
-/// Set up a DaemonState with a pipeline ready for step completion.
+/// Set up a DaemonState with a job ready for step completion.
 ///
 /// Returns the state and a WAL path for verification.
-async fn setup_daemon_with_pipeline() -> (DaemonState, PathBuf) {
-    let (daemon, _, wal_path) = setup_daemon_with_pipeline_and_reader().await;
+async fn setup_daemon_with_job() -> (DaemonState, PathBuf) {
+    let (daemon, _, wal_path) = setup_daemon_with_job_and_reader().await;
     (daemon, wal_path)
 }
 
-/// Like `setup_daemon_with_pipeline` but also returns the EventReader
+/// Like `setup_daemon_with_job` but also returns the EventReader
 /// so callers can simulate the main loop (mark_processed, etc.).
-async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, PathBuf) {
+async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, PathBuf) {
     let dir = tempdir().unwrap();
     let dir_path = dir.keep();
 
@@ -90,11 +90,11 @@ async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, P
     let hash = runbook_hash(&runbook);
     let runbook_json = serde_json::to_value(&runbook).unwrap();
 
-    // Pre-populate state with pipeline + stored runbook
+    // Pre-populate state with job + stored runbook
     let mut state = MaterializedState::default();
-    let config = PipelineConfig {
+    let config = JobConfig {
         id: "pipe-1".to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "test".to_string(),
         vars: HashMap::new(),
         runbook_hash: hash.clone(),
@@ -103,16 +103,16 @@ async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, P
         namespace: String::new(),
         cron_name: None,
     };
-    let pipeline = oj_core::Pipeline::new(config, &SystemClock);
-    state.pipelines.insert("pipe-1".to_string(), pipeline);
+    let job = oj_core::Job::new(config, &SystemClock);
+    state.jobs.insert("pipe-1".to_string(), job);
     state.apply_event(&Event::RunbookLoaded {
         hash,
         version: 1,
         runbook: runbook_json,
     });
 
-    // Mark pipeline step as running (as it would be during normal execution)
-    state.pipelines.get_mut("pipe-1").unwrap().step_status = StepStatus::Running;
+    // Mark job step as running (as it would be during normal execution)
+    state.jobs.get_mut("pipe-1").unwrap().step_status = StepStatus::Running;
 
     let state = Arc::new(Mutex::new(state));
 
@@ -164,13 +164,13 @@ async fn setup_daemon_with_pipeline_and_reader() -> (DaemonState, EventReader, P
 
 #[tokio::test]
 async fn process_event_persists_result_events_to_wal() {
-    let (mut daemon, wal_path) = setup_daemon_with_pipeline().await;
+    let (mut daemon, wal_path) = setup_daemon_with_job().await;
 
-    // Send ShellExited which triggers advance_pipeline → completion
-    // This produces PipelineAdvanced + StepUpdated result events
+    // Send ShellExited which triggers advance_job → completion
+    // This produces JobAdvanced + StepUpdated result events
     daemon
         .process_event(Event::ShellExited {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -186,43 +186,40 @@ async fn process_event_persists_result_events_to_wal() {
     let wal = Wal::open(&wal_path, 0).unwrap();
     let entries = wal.entries_after(0).unwrap();
 
-    // ShellExited → advance_pipeline (no next step) → step_transition "done" + completion
-    // Expected result events: PipelineAdvanced("done"), StepUpdated(Completed)
+    // ShellExited → advance_job (no next step) → step_transition "done" + completion
+    // Expected result events: JobAdvanced("done"), StepUpdated(Completed)
     assert!(
         !entries.is_empty(),
         "result events should be persisted to WAL"
     );
 
     // Verify we have the expected event types
-    let has_pipeline_updated = entries.iter().any(|e| {
+    let has_job_updated = entries.iter().any(|e| {
         matches!(
             &e.event,
-            Event::PipelineAdvanced { id, step } if id == "pipe-1" && step == "done"
+            Event::JobAdvanced { id, step } if id == "pipe-1" && step == "done"
         )
     });
     let has_step_completed = entries.iter().any(|e| {
         matches!(
             &e.event,
-            Event::StepCompleted { pipeline_id, .. }
-                if pipeline_id == "pipe-1"
+            Event::StepCompleted { job_id, .. }
+                if job_id == "pipe-1"
         )
     });
 
-    assert!(
-        has_pipeline_updated,
-        "PipelineAdvanced event should be in WAL"
-    );
+    assert!(has_job_updated, "JobAdvanced event should be in WAL");
     assert!(has_step_completed, "StepCompleted event should be in WAL");
 }
 
 #[tokio::test]
 async fn process_event_cancel_persists_to_wal() {
-    let (mut daemon, wal_path) = setup_daemon_with_pipeline().await;
+    let (mut daemon, wal_path) = setup_daemon_with_job().await;
 
-    // Cancel the pipeline via a typed event
+    // Cancel the job via a typed event
     daemon
-        .process_event(Event::PipelineCancel {
-            id: PipelineId::new("pipe-1"),
+        .process_event(Event::JobCancel {
+            id: JobId::new("pipe-1"),
         })
         .await
         .unwrap();
@@ -239,35 +236,32 @@ async fn process_event_cancel_persists_to_wal() {
         "cancel events should be persisted to WAL"
     );
 
-    let has_pipeline_cancelled = entries.iter().any(|e| {
+    let has_job_cancelled = entries.iter().any(|e| {
         matches!(
             &e.event,
-            Event::PipelineAdvanced { id, step } if id == "pipe-1" && step == "cancelled"
+            Event::JobAdvanced { id, step } if id == "pipe-1" && step == "cancelled"
         )
     });
     let has_step_failed = entries.iter().any(|e| {
         matches!(
             &e.event,
-            Event::StepFailed { pipeline_id, .. }
-                if pipeline_id == "pipe-1"
+            Event::StepFailed { job_id, .. }
+                if job_id == "pipe-1"
         )
     });
 
-    assert!(
-        has_pipeline_cancelled,
-        "PipelineAdvanced(cancelled) should be in WAL"
-    );
+    assert!(has_job_cancelled, "JobAdvanced(cancelled) should be in WAL");
     assert!(has_step_failed, "StepFailed event should be in WAL");
 }
 
 #[tokio::test]
-async fn cancelled_pipeline_survives_restart_as_terminal() {
-    let (mut daemon, wal_path) = setup_daemon_with_pipeline().await;
+async fn cancelled_job_survives_restart_as_terminal() {
+    let (mut daemon, wal_path) = setup_daemon_with_job().await;
 
-    // Cancel the pipeline
+    // Cancel the job
     daemon
-        .process_event(Event::PipelineCancel {
-            id: PipelineId::new("pipe-1"),
+        .process_event(Event::JobCancel {
+            id: JobId::new("pipe-1"),
         })
         .await
         .unwrap();
@@ -275,13 +269,13 @@ async fn cancelled_pipeline_survives_restart_as_terminal() {
     daemon.event_bus.flush().unwrap();
 
     // Simulate daemon restart: build fresh state from WAL replay
-    // In a real restart, the pipeline would come from a snapshot.
+    // In a real restart, the job would come from a snapshot.
     // Here we recreate it manually to simulate the snapshot baseline.
     let mut recovered_state = MaterializedState::default();
-    recovered_state.apply_event(&Event::PipelineCreated {
-        id: PipelineId::new("pipe-1"),
+    recovered_state.apply_event(&Event::JobCreated {
+        id: JobId::new("pipe-1"),
         kind: "test".to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         runbook_hash: "testhash".to_string(),
         cwd: PathBuf::from("/tmp/test"),
         vars: HashMap::new(),
@@ -298,26 +292,26 @@ async fn cancelled_pipeline_survives_restart_as_terminal() {
         recovered_state.apply_event(&entry.event);
     }
 
-    // Pipeline should be terminal after replay
-    let pipeline = recovered_state.pipelines.get("pipe-1").unwrap();
+    // Job should be terminal after replay
+    let job = recovered_state.jobs.get("pipe-1").unwrap();
     assert!(
-        pipeline.is_terminal(),
-        "cancelled pipeline should be terminal after WAL replay"
+        job.is_terminal(),
+        "cancelled job should be terminal after WAL replay"
     );
-    assert_eq!(pipeline.step, "cancelled");
-    assert_eq!(pipeline.step_status, StepStatus::Failed);
+    assert_eq!(job.step, "cancelled");
+    assert_eq!(job.step_status, StepStatus::Failed);
 }
 
 #[tokio::test]
 async fn process_event_materializes_state() {
     // Regression test: events from the WAL must be applied to MaterializedState
     // so that queries (e.g., ListWorkers) see them immediately.
-    let (mut daemon, _wal_path) = setup_daemon_with_pipeline().await;
+    let (mut daemon, _wal_path) = setup_daemon_with_job().await;
 
-    // ShellExited should update pipeline step_status in MaterializedState
+    // ShellExited should update job step_status in MaterializedState
     daemon
         .process_event(Event::ShellExited {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -327,34 +321,34 @@ async fn process_event_materializes_state() {
         .unwrap();
 
     let state = daemon.state.lock();
-    let pipeline = state.pipelines.get("pipe-1").unwrap();
-    // The pipeline should have been advanced to "done" and be terminal
+    let job = state.jobs.get("pipe-1").unwrap();
+    // The job should have been advanced to "done" and be terminal
     assert!(
-        pipeline.is_terminal(),
-        "pipeline should be terminal after ShellExited(0) is processed"
+        job.is_terminal(),
+        "job should be terminal after ShellExited(0) is processed"
     );
 }
 
 #[tokio::test]
 async fn result_events_delivered_once_through_engine_loop() {
-    // Regression test for duplicate pipeline creation (oj-3faca023).
+    // Regression test for duplicate job creation (oj-3faca023).
     //
     // process_event must NOT re-process result events locally. Result events
     // are persisted to the WAL and processed by the engine loop on the next
     // iteration. Previously, process_event had a pending_events loop that
     // both persisted AND locally re-processed result events, causing handlers
     // to fire twice — e.g., WorkerPollComplete dispatching the same queue
-    // item into two pipelines.
+    // item into two jobs.
     //
     // This test simulates the engine loop: process an event, read result
     // events from the WAL, process each, and verify the total event count
     // matches expectations (no duplicates from local re-processing).
-    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_pipeline_and_reader().await;
+    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_job_and_reader().await;
 
-    // Process ShellExited — produces StepCompleted + PipelineAdvanced result events
+    // Process ShellExited — produces StepCompleted + JobAdvanced result events
     daemon
         .process_event(Event::ShellExited {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -396,26 +390,26 @@ async fn result_events_delivered_once_through_engine_loop() {
         }
     }
 
-    // ShellExited → advance_pipeline produces:
+    // ShellExited → advance_job produces:
     //   1. StepCompleted (current step done)
-    //   2. PipelineAdvanced("done") (from completion_effects)
+    //   2. JobAdvanced("done") (from completion_effects)
     //   3. StepCompleted (from completion_effects)
     assert_eq!(
         total_wal_events, 3,
         "ShellExited should produce exactly 3 result events in WAL"
     );
 
-    // PipelineAdvanced("done") handler returns empty (no worker tracking this
-    // pipeline), and StepCompleted has no handler. So no secondary events.
+    // JobAdvanced("done") handler returns empty (no worker tracking this
+    // job), and StepCompleted has no handler. So no secondary events.
     assert_eq!(
         secondary_events, 0,
         "result event handlers should produce no secondary events (no worker)"
     );
 
-    // Pipeline should be terminal
+    // Job should be terminal
     let state = daemon.state.lock();
-    let pipeline = state.pipelines.get("pipe-1").unwrap();
-    assert!(pipeline.is_terminal());
+    let job = state.jobs.get("pipe-1").unwrap();
+    assert!(job.is_terminal());
 }
 
 #[test]
@@ -433,14 +427,14 @@ fn parking_lot_mutex_reentrant_lock_is_detected() {
 }
 
 #[test]
-fn reconcile_context_counts_non_terminal_pipelines() {
-    // Verify ReconcileContext.pipeline_count matches non-terminal pipelines.
-    // This ensures background reconciliation knows how many pipelines to process.
+fn reconcile_context_counts_non_terminal_jobs() {
+    // Verify ReconcileContext.job_count matches non-terminal jobs.
+    // This ensures background reconciliation knows how many jobs to process.
     let mut state = MaterializedState::default();
 
-    // Add a running pipeline (non-terminal)
-    let mut running = oj_core::Pipeline::new(
-        PipelineConfig {
+    // Add a running job (non-terminal)
+    let mut running = oj_core::Job::new(
+        JobConfig {
             id: "pipe-running".to_string(),
             name: "test".to_string(),
             kind: "test".to_string(),
@@ -454,11 +448,11 @@ fn reconcile_context_counts_non_terminal_pipelines() {
         &SystemClock,
     );
     running.step_status = StepStatus::Running;
-    state.pipelines.insert("pipe-running".to_string(), running);
+    state.jobs.insert("pipe-running".to_string(), running);
 
-    // Add a completed pipeline (terminal)
-    let mut done = oj_core::Pipeline::new(
-        PipelineConfig {
+    // Add a completed job (terminal)
+    let mut done = oj_core::Job::new(
+        JobConfig {
             id: "pipe-done".to_string(),
             name: "test".to_string(),
             kind: "test".to_string(),
@@ -472,11 +466,11 @@ fn reconcile_context_counts_non_terminal_pipelines() {
         &SystemClock,
     );
     done.step_status = StepStatus::Completed;
-    state.pipelines.insert("pipe-done".to_string(), done);
+    state.jobs.insert("pipe-done".to_string(), done);
 
-    // Add a failed pipeline (terminal)
-    let mut failed = oj_core::Pipeline::new(
-        PipelineConfig {
+    // Add a failed job (terminal)
+    let mut failed = oj_core::Job::new(
+        JobConfig {
             id: "pipe-failed".to_string(),
             name: "test".to_string(),
             kind: "test".to_string(),
@@ -490,19 +484,15 @@ fn reconcile_context_counts_non_terminal_pipelines() {
         &SystemClock,
     );
     failed.step_status = StepStatus::Failed;
-    state.pipelines.insert("pipe-failed".to_string(), failed);
+    state.jobs.insert("pipe-failed".to_string(), failed);
 
-    // Count non-terminal pipelines (same logic as startup_inner)
-    let pipeline_count = state
-        .pipelines
-        .values()
-        .filter(|p| !p.is_terminal())
-        .count();
+    // Count non-terminal jobs (same logic as startup_inner)
+    let job_count = state.jobs.values().filter(|p| !p.is_terminal()).count();
 
-    // Only the running pipeline is non-terminal
+    // Only the running job is non-terminal
     assert_eq!(
-        pipeline_count, 1,
-        "only running pipeline should be counted as non-terminal"
+        job_count, 1,
+        "only running job should be counted as non-terminal"
     );
 }
 
@@ -672,7 +662,7 @@ async fn reconcile_state_resumes_running_workers() {
             project_root: dir_path.clone(),
             runbook_hash: "abc123".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 2,
         },
@@ -685,7 +675,7 @@ async fn reconcile_state_resumes_running_workers() {
             project_root: dir_path.clone(),
             runbook_hash: "def456".to_string(),
             status: "stopped".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "other".to_string(),
             concurrency: 1,
         },
@@ -747,7 +737,7 @@ fn reconcile_context_counts_running_workers() {
             project_root: PathBuf::from("/tmp"),
             runbook_hash: "hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "q".to_string(),
             concurrency: 1,
         },
@@ -760,7 +750,7 @@ fn reconcile_context_counts_running_workers() {
             project_root: PathBuf::from("/tmp"),
             runbook_hash: "hash".to_string(),
             status: "stopped".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "q".to_string(),
             concurrency: 1,
         },
@@ -778,13 +768,13 @@ fn reconcile_context_counts_running_workers() {
 
 #[tokio::test]
 async fn shutdown_saves_final_snapshot() {
-    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_pipeline_and_reader().await;
+    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_job_and_reader().await;
     let snapshot_path = daemon.config.snapshot_path.clone();
 
     // Process an event so the WAL has entries
     daemon
         .process_event(Event::ShellExited {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -823,10 +813,10 @@ async fn shutdown_saves_final_snapshot() {
         snapshot.seq > 0,
         "snapshot seq should be non-zero after processing events"
     );
-    let pipeline = snapshot.state.pipelines.get("pipe-1").unwrap();
+    let job = snapshot.state.jobs.get("pipe-1").unwrap();
     assert!(
-        pipeline.is_terminal(),
-        "snapshot should contain the terminal pipeline state"
+        job.is_terminal(),
+        "snapshot should contain the terminal job state"
     );
 }
 
@@ -855,11 +845,11 @@ fn setup_reconcile_runtime(dir_path: &Path) -> (Arc<DaemonRuntime>, TracedSessio
     (runtime, session_adapter)
 }
 
-/// Helper to create a pipeline with an agent_id in step_history and a session_id.
-fn make_pipeline_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Pipeline {
-    Pipeline {
+/// Helper to create a job with an agent_id in step_history and a session_id.
+fn make_job_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Job {
+    Job {
         id: id.to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "test".to_string(),
         namespace: "proj".to_string(),
         step: step.to_string(),
@@ -892,19 +882,19 @@ fn make_pipeline_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: 
 }
 
 #[tokio::test]
-async fn reconcile_pipeline_dead_session_uses_step_history_agent_id() {
-    // When a pipeline's tmux session is dead, reconciliation should emit
+async fn reconcile_job_dead_session_uses_step_history_agent_id() {
+    // When a job's tmux session is dead, reconciliation should emit
     // AgentGone with the agent_id from step_history (a UUID), not a
-    // fabricated "{pipeline_id}-{step}" string.
+    // fabricated "{job_id}-{step}" string.
     let dir = tempdir().unwrap();
     let dir_path = dir.path().to_owned();
     let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
 
     let agent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
     let mut test_state = MaterializedState::default();
-    test_state.pipelines.insert(
+    test_state.jobs.insert(
         "pipe-1".to_string(),
-        make_pipeline_with_agent("pipe-1", "build", agent_uuid, "oj-nonexistent-session"),
+        make_job_with_agent("pipe-1", "build", agent_uuid, "oj-nonexistent-session"),
     );
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
@@ -932,7 +922,7 @@ async fn reconcile_pipeline_dead_session_uses_step_history_agent_id() {
             assert_eq!(
                 agent_id.as_str(),
                 agent_uuid,
-                "AgentGone must use UUID from step_history, not pipeline_id-step"
+                "AgentGone must use UUID from step_history, not job_id-step"
             );
         }
         _ => unreachable!(),
@@ -940,20 +930,20 @@ async fn reconcile_pipeline_dead_session_uses_step_history_agent_id() {
 }
 
 #[tokio::test]
-async fn reconcile_pipeline_no_agent_id_in_step_history_skips() {
-    // When a pipeline has no agent_id in step_history (e.g., shell step
+async fn reconcile_job_no_agent_id_in_step_history_skips() {
+    // When a job has no agent_id in step_history (e.g., shell step
     // or crashed before agent was recorded), reconciliation should skip
     // it rather than emitting events with fabricated agent_ids.
     let dir = tempdir().unwrap();
     let dir_path = dir.path().to_owned();
     let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
 
-    let mut pipeline = make_pipeline_with_agent("pipe-2", "work", "any", "oj-nonexistent");
+    let mut job = make_job_with_agent("pipe-2", "work", "any", "oj-nonexistent");
     // Clear agent_id from step_history
-    pipeline.step_history[0].agent_id = None;
+    job.step_history[0].agent_id = None;
 
     let mut test_state = MaterializedState::default();
-    test_state.pipelines.insert("pipe-2".to_string(), pipeline);
+    test_state.jobs.insert("pipe-2".to_string(), job);
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
     reconcile_state(&runtime, &test_state, &session_adapter, &event_tx).await;
@@ -964,7 +954,7 @@ async fn reconcile_pipeline_no_agent_id_in_step_history_skips() {
         events.push(event);
     }
 
-    // Should not emit any agent events for this pipeline
+    // Should not emit any agent events for this job
     let agent_events: Vec<_> = events
         .iter()
         .filter(|e| matches!(e, Event::AgentGone { .. } | Event::AgentExited { .. }))

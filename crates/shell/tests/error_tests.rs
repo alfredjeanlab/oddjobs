@@ -46,14 +46,14 @@ async fn sequential_stops_at_first_failure() {
 }
 
 #[tokio::test]
-async fn pipeline_exit_code_from_last_command() {
-    // Pipeline: all stages run concurrently, exit code from last command
+async fn job_exit_code_from_last_command() {
+    // Job: all stages run concurrently, exit code from last command
     // `echo hello | cat | false | cat` - last command is `cat` which succeeds
     let script = "echo hello | cat | false | cat";
     let result = executor().execute_str(script).await.unwrap();
 
-    // Pipeline succeeds because last command (cat) exits 0
-    // Even though `false` failed, pipeline exit is from final stage
+    // Job succeeds because last command (cat) exits 0
+    // Even though `false` failed, job exit is from final stage
     assert_eq!(result.exit_code, 0);
     assert_eq!(result.traces.len(), 4);
 
@@ -63,8 +63,8 @@ async fn pipeline_exit_code_from_last_command() {
 }
 
 #[tokio::test]
-async fn pipeline_fails_when_last_stage_fails() {
-    // Pipeline exit code is from the last command
+async fn job_fails_when_last_stage_fails() {
+    // Job exit code is from the last command
     let script = "true | false";
     let ast = Parser::parse(script).unwrap();
     let err = executor().execute(&ast).await.unwrap_err();
@@ -154,13 +154,13 @@ async fn error_span_failing_command_in_and_chain() {
 }
 
 #[tokio::test]
-async fn error_span_pipeline_last_command_failure() {
+async fn error_span_job_last_command_failure() {
     let script = "echo hi | false";
     let ast = Parser::parse(script).unwrap();
     let err = executor().execute(&ast).await.unwrap_err();
     let span = err.span();
 
-    // Span should cover the pipeline
+    // Span should cover the job
     assert!(span.start <= script.find("echo").unwrap());
 }
 
@@ -219,7 +219,7 @@ async fn traces_capture_all_successful_commands() {
 }
 
 #[tokio::test]
-async fn pipeline_traces_all_stages() {
+async fn job_traces_all_stages() {
     let script = "echo hello | cat | cat";
     let result = executor().execute_str(script).await.unwrap();
 
@@ -415,8 +415,8 @@ async fn multiple_sequential_failures() {
 }
 
 #[tokio::test]
-async fn empty_pipeline_succeeds() {
-    // Edge case: script that produces empty pipeline (unlikely in practice)
+async fn empty_job_succeeds() {
+    // Edge case: script that produces empty job (unlikely in practice)
     // Test that basic success path works
     let result = executor().execute_str("true").await.unwrap();
     assert_eq!(result.exit_code, 0);

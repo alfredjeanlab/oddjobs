@@ -3,14 +3,14 @@
 
 use super::*;
 use crate::{MaterializedState, CURRENT_SNAPSHOT_VERSION};
-use oj_core::{Pipeline, PipelineConfig, SystemClock};
+use oj_core::{Job, JobConfig, SystemClock};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
-fn test_config(id: &str, name: &str) -> PipelineConfig {
-    PipelineConfig {
+fn test_config(id: &str, name: &str) -> JobConfig {
+    JobConfig {
         id: id.to_string(),
         name: name.to_string(),
         kind: "feature".to_string(),
@@ -26,9 +26,9 @@ fn test_config(id: &str, name: &str) -> PipelineConfig {
 fn create_test_state() -> MaterializedState {
     let mut state = MaterializedState::default();
 
-    let pipeline = Pipeline::new(test_config("pipe-1", "test-pipeline"), &SystemClock);
+    let job = Job::new(test_config("pipe-1", "test-job"), &SystemClock);
 
-    state.pipelines.insert("pipe-1".to_string(), pipeline);
+    state.jobs.insert("pipe-1".to_string(), job);
     state
 }
 
@@ -47,8 +47,8 @@ fn test_snapshot_save_and_load() {
     // Load
     let loaded = Snapshot::load(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 42);
-    assert_eq!(loaded.state.pipelines.len(), 1);
-    assert!(loaded.state.pipelines.contains_key("pipe-1"));
+    assert_eq!(loaded.state.jobs.len(), 1);
+    assert!(loaded.state.jobs.contains_key("pipe-1"));
 }
 
 #[test]
@@ -89,8 +89,8 @@ fn test_snapshot_preserves_state() {
     for i in 0..3 {
         let mut config = test_config(&format!("pipe-{}", i), &format!("test-{}", i));
         config.vars = HashMap::from([("key".to_string(), format!("value-{}", i))]);
-        let pipeline = Pipeline::new(config, &SystemClock);
-        state.pipelines.insert(format!("pipe-{}", i), pipeline);
+        let job = Job::new(config, &SystemClock);
+        state.jobs.insert(format!("pipe-{}", i), job);
     }
 
     let snapshot = Snapshot::new(100, state);
@@ -98,13 +98,13 @@ fn test_snapshot_preserves_state() {
 
     let loaded = Snapshot::load(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 100);
-    assert_eq!(loaded.state.pipelines.len(), 3);
+    assert_eq!(loaded.state.jobs.len(), 3);
 
     for i in 0..3 {
         let key = format!("pipe-{}", i);
-        let pipeline = loaded.state.pipelines.get(&key).unwrap();
-        assert_eq!(pipeline.name, format!("test-{}", i));
-        assert_eq!(pipeline.vars.get("key"), Some(&format!("value-{}", i)));
+        let job = loaded.state.jobs.get(&key).unwrap();
+        assert_eq!(job.name, format!("test-{}", i));
+        assert_eq!(job.vars.get("key"), Some(&format!("value-{}", i)));
     }
 }
 
@@ -169,14 +169,14 @@ fn test_snapshot_round_trip_with_action_attempts() {
     let path = dir.path().join("snapshot.json");
 
     let mut state = MaterializedState::default();
-    let mut pipeline = Pipeline::new(test_config("pipe-1", "test-pipeline"), &SystemClock);
+    let mut job = Job::new(test_config("pipe-1", "test-job"), &SystemClock);
 
     // Populate action_attempts (previously caused serialization failure)
-    pipeline.increment_action_attempt("on_idle", 0);
-    pipeline.increment_action_attempt("on_idle", 0);
-    pipeline.increment_action_attempt("on_fail", 1);
+    job.increment_action_attempt("on_idle", 0);
+    job.increment_action_attempt("on_idle", 0);
+    job.increment_action_attempt("on_fail", 1);
 
-    state.pipelines.insert("pipe-1".to_string(), pipeline);
+    state.jobs.insert("pipe-1".to_string(), job);
 
     let snapshot = Snapshot::new(50, state);
     snapshot.save(&path).unwrap();
@@ -184,7 +184,7 @@ fn test_snapshot_round_trip_with_action_attempts() {
     let loaded = Snapshot::load(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 50);
 
-    let p = loaded.state.pipelines.get("pipe-1").unwrap();
+    let p = loaded.state.jobs.get("pipe-1").unwrap();
     assert_eq!(p.get_action_attempt("on_idle", 0), 2);
     assert_eq!(p.get_action_attempt("on_fail", 1), 1);
     assert_eq!(p.get_action_attempt("unknown", 0), 0);

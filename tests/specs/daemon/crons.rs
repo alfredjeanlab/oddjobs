@@ -5,28 +5,28 @@
 
 use crate::prelude::*;
 
-/// Runbook with a cron that fires every 500ms and runs a simple shell pipeline.
+/// Runbook with a cron that fires every 500ms and runs a simple shell job.
 const FAST_CRON_RUNBOOK: &str = r#"
 [cron.ticker]
 interval = "500ms"
-run = { pipeline = "tick" }
+run = { job = "tick" }
 
-[pipeline.tick]
+[job.tick]
 
-[[pipeline.tick.step]]
+[[job.tick.step]]
 name = "work"
 run = "echo tick"
 "#;
 
-/// Verifies the full cron lifecycle: start → fire → pipeline created → stop.
+/// Verifies the full cron lifecycle: start → fire → job created → stop.
 ///
 /// Uses a 2-second interval so the cron fires quickly. The test:
 /// 1. Starts the daemon and the cron via `oj cron start`
 /// 2. Verifies the cron appears as running in `oj cron list`
-/// 3. Waits for the cron timer to fire and create a pipeline
+/// 3. Waits for the cron timer to fire and create a job
 /// 4. Stops the cron and verifies it is no longer running
 #[test]
-fn cron_start_fires_and_creates_pipeline() {
+fn cron_start_fires_and_creates_job() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/cron.toml", FAST_CRON_RUNBOOK);
@@ -46,9 +46,9 @@ fn cron_start_fires_and_creates_pipeline() {
         .stdout_has("ticker")
         .stdout_has("running");
 
-    // Wait for the cron to fire and create a pipeline (interval is 2s)
+    // Wait for the cron to fire and create a job (interval is 2s)
     let fired = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         output.contains("tick")
     });
 
@@ -57,7 +57,7 @@ fn cron_start_fires_and_creates_pipeline() {
     }
     assert!(
         fired,
-        "cron should fire and create a pipeline within the wait period"
+        "cron should fire and create a job within the wait period"
     );
 
     // Stop the cron
@@ -73,7 +73,7 @@ fn cron_start_fires_and_creates_pipeline() {
         .stdout_has("stopped");
 }
 
-/// Verifies that `oj cron once` runs the pipeline immediately without waiting
+/// Verifies that `oj cron once` runs the job immediately without waiting
 /// for the interval timer.
 #[test]
 fn cron_once_runs_immediately() {
@@ -83,36 +83,36 @@ fn cron_once_runs_immediately() {
 
     temp.oj().args(&["daemon", "start"]).passes();
 
-    // Run the cron's pipeline once
+    // Run the cron's job once
     temp.oj()
         .args(&["cron", "once", "ticker"])
         .passes()
-        .stdout_has("Pipeline")
+        .stdout_has("Job")
         .stdout_has("started");
 
-    // Pipeline should appear quickly (no 2s interval wait)
+    // Job should appear quickly (no 2s interval wait)
     let created = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         output.contains("tick")
     });
 
-    assert!(created, "cron once should create a pipeline immediately");
+    assert!(created, "cron once should create a job immediately");
 }
 
-/// Runbook where the cron pipeline writes ${invoke.dir} to a marker file.
+/// Runbook where the cron job writes ${invoke.dir} to a marker file.
 const INVOKE_DIR_CRON_RUNBOOK: &str = r#"
 [cron.writer]
 interval = "30s"
-run = { pipeline = "write_dir" }
+run = { job = "write_dir" }
 
-[pipeline.write_dir]
+[job.write_dir]
 
-[[pipeline.write_dir.step]]
+[[job.write_dir.step]]
 name = "write"
 run = "printf '%s' '${invoke.dir}' > invoke_dir.txt"
 "#;
 
-/// Verifies that cron-triggered pipelines receive invoke.dir set to the
+/// Verifies that cron-triggered jobs receive invoke.dir set to the
 /// project root, not the daemon's working directory.
 #[test]
 fn cron_once_sets_invoke_dir_to_project_root() {
@@ -122,14 +122,14 @@ fn cron_once_sets_invoke_dir_to_project_root() {
 
     temp.oj().args(&["daemon", "start"]).passes();
 
-    // Run the cron's pipeline once
+    // Run the cron's job once
     temp.oj()
         .args(&["cron", "once", "writer"])
         .passes()
-        .stdout_has("Pipeline")
+        .stdout_has("Job")
         .stdout_has("started");
 
-    // Wait for the pipeline to complete and write the marker file.
+    // Wait for the job to complete and write the marker file.
     // Check for non-empty content, not just file existence — the shell
     // redirection `> file` creates/truncates the file before printf writes.
     let marker = temp.path().join("invoke_dir.txt");
@@ -142,7 +142,7 @@ fn cron_once_sets_invoke_dir_to_project_root() {
     if !written {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(written, "pipeline should write invoke_dir.txt");
+    assert!(written, "job should write invoke_dir.txt");
 
     let invoke_dir = std::fs::read_to_string(&marker).unwrap();
     let project_root = temp.path().to_string_lossy().to_string();

@@ -57,7 +57,7 @@ command "gt-convoy-status" {
 
 command "gt-convoy-dispatch" {
   args = "<convoy-id> [--base <branch>] [--rig <rig>]"
-  run  = { pipeline = "convoy-dispatch" }
+  run  = { job = "convoy-dispatch" }
 
   defaults = {
     base = "main"
@@ -65,7 +65,7 @@ command "gt-convoy-dispatch" {
   }
 }
 
-pipeline "convoy-dispatch" {
+job "convoy-dispatch" {
   name = "convoy-${var.convoy_id}"
   vars = ["convoy_id", "base", "rig"]
 

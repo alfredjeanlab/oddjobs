@@ -209,7 +209,7 @@ fn namespace_resolution_falls_back_to_project_root() {
 #[test]
 fn project_filter_is_some_when_flag_passed() {
     let matches = cli_command()
-        .try_get_matches_from(["oj", "--project", "wok", "pipeline", "list"])
+        .try_get_matches_from(["oj", "--project", "wok", "job", "list"])
         .unwrap();
     let cli = Cli::from_arg_matches(&matches).unwrap();
     // project_filter comes from cli.project — only Some when explicitly passed
@@ -219,7 +219,7 @@ fn project_filter_is_some_when_flag_passed() {
 #[test]
 fn project_filter_is_none_when_flag_omitted() {
     let matches = cli_command()
-        .try_get_matches_from(["oj", "pipeline", "list"])
+        .try_get_matches_from(["oj", "job", "list"])
         .unwrap();
     let cli = Cli::from_arg_matches(&matches).unwrap();
     // Even if OJ_NAMESPACE is set, cli.project is None — filtering is skipped
@@ -257,7 +257,7 @@ fn missing_subcommand_produces_help_error() {
 #[test]
 fn missing_subcommand_help_contains_commands() {
     let err = cli_command()
-        .try_get_matches_from(["oj", "pipeline"])
+        .try_get_matches_from(["oj", "job"])
         .unwrap_err();
     assert_eq!(
         err.kind(),
@@ -265,8 +265,8 @@ fn missing_subcommand_help_contains_commands() {
     );
     let help = err.to_string();
     assert!(
-        help.contains("Pipeline management"),
-        "should show pipeline description, got:\n{help}"
+        help.contains("Job management"),
+        "should show job description, got:\n{help}"
     );
 }
 

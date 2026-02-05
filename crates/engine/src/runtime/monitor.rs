@@ -11,7 +11,7 @@ use oj_adapters::agent::find_session_log;
 use oj_adapters::AgentReconnectConfig;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentSignalKind, Clock, Effect, Event, Pipeline, PipelineId, PromptType, QuestionData,
+    AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, PromptType, QuestionData,
     SessionId, TimerId,
 };
 use std::collections::HashMap;
@@ -25,39 +25,39 @@ where
 {
     /// Reconnect monitoring for an agent that survived a daemon restart.
     ///
-    /// Registers the agent→pipeline mapping and calls reconnect on the adapter.
+    /// Registers the agent→job mapping and calls reconnect on the adapter.
     /// Does NOT spawn a new session — the tmux session must already be alive.
-    pub async fn recover_agent(&self, pipeline: &Pipeline) -> Result<(), RuntimeError> {
+    pub async fn recover_agent(&self, job: &Job) -> Result<(), RuntimeError> {
         // Get agent_id from current step record (stored when agent was spawned)
-        let agent_id_str = pipeline
+        let agent_id_str = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.clone())
             .ok_or_else(|| {
-                RuntimeError::PipelineNotFound(format!(
-                    "pipeline {} step {} has no agent_id",
-                    pipeline.id, pipeline.step
+                RuntimeError::JobNotFound(format!(
+                    "job {} step {} has no agent_id",
+                    job.id, job.step
                 ))
             })?;
         let agent_id = AgentId::new(agent_id_str);
 
-        let session_id = pipeline.session_id.as_ref().ok_or_else(|| {
-            RuntimeError::PipelineNotFound(format!("pipeline {} has no session_id", pipeline.id))
+        let session_id = job.session_id.as_ref().ok_or_else(|| {
+            RuntimeError::JobNotFound(format!("job {} has no session_id", job.id))
         })?;
-        let workspace_path = self.execution_dir(pipeline);
+        let workspace_path = self.execution_dir(job);
 
-        // Register agent -> pipeline mapping
-        self.agent_pipelines
+        // Register agent -> job mapping
+        self.agent_jobs
             .lock()
-            .insert(agent_id.clone(), pipeline.id.clone());
+            .insert(agent_id.clone(), job.id.clone());
 
         // Extract process_name from the runbook's agent definition
         let process_name = self
-            .cached_runbook(&pipeline.runbook_hash)
+            .cached_runbook(&job.runbook_hash)
             .ok()
             .and_then(|rb| {
-                crate::monitor::get_agent_def(&rb, pipeline)
+                crate::monitor::get_agent_def(&rb, job)
                     .ok()
                     .map(|def| oj_adapters::extract_process_name(&def.run))
             })
@@ -73,10 +73,10 @@ where
         self.executor.reconnect_agent(config).await?;
 
         // Restore liveness timer
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
         self.executor
             .execute(Effect::SetTimer {
-                id: TimerId::liveness(&pipeline_id),
+                id: TimerId::liveness(&job_id),
                 duration: crate::spawn::LIVENESS_INTERVAL,
             })
             .await?;
@@ -84,41 +84,41 @@ where
         Ok(())
     }
 
-    /// Register an agent→pipeline mapping without reconnecting.
+    /// Register an agent→job mapping without reconnecting.
     ///
     /// Used during recovery for dead sessions where we only need to route
-    /// the AgentStateChanged event back to the correct pipeline.
-    pub fn register_agent_pipeline(&self, agent_id: AgentId, pipeline_id: PipelineId) {
-        self.agent_pipelines
+    /// the AgentStateChanged event back to the correct job.
+    pub fn register_agent_job(&self, agent_id: AgentId, job_id: JobId) {
+        self.agent_jobs
             .lock()
-            .insert(agent_id, pipeline_id.to_string());
+            .insert(agent_id, job_id.to_string());
     }
 
     pub(crate) async fn spawn_agent(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         agent_name: &str,
         input: &HashMap<String, String>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        self.spawn_agent_with_resume(pipeline_id, agent_name, input, None)
+        self.spawn_agent_with_resume(job_id, agent_name, input, None)
             .await
     }
 
     pub(crate) async fn spawn_agent_with_resume(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         agent_name: &str,
         input: &HashMap<String, String>,
         resume_session_id: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = self.require_pipeline(pipeline_id.as_str())?;
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
+        let job = self.require_job(job_id.as_str())?;
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
         let agent_def = runbook
             .get_agent(agent_name)
             .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.to_string()))?;
-        let execution_dir = self.execution_dir(&pipeline);
+        let execution_dir = self.execution_dir(&job);
 
-        let ctx = crate::spawn::SpawnContext::from_pipeline(&pipeline, pipeline_id);
+        let ctx = crate::spawn::SpawnContext::from_job(&job, job_id);
         let mut effects = crate::spawn::build_spawn_effects(
             agent_def,
             &ctx,
@@ -142,38 +142,38 @@ where
         });
         if let Some(cmd) = command {
             self.logger.append(
-                pipeline_id.as_str(),
-                &pipeline.step,
+                job_id.as_str(),
+                &job.step,
                 &format!("agent spawned: {} ({})", agent_name, cmd),
             );
         }
 
-        // Register agent -> pipeline mapping for AgentStateChanged handling
+        // Register agent -> job mapping for AgentStateChanged handling
         if let Some(ref aid) = agent_id {
-            self.agent_pipelines
+            self.agent_jobs
                 .lock()
-                .insert(aid.clone(), pipeline_id.to_string());
+                .insert(aid.clone(), job_id.to_string());
 
             // Persist agent_id to WAL via StepStarted event (for daemon crash recovery)
             effects.push(Effect::Emit {
                 event: Event::StepStarted {
-                    pipeline_id: pipeline_id.clone(),
-                    step: pipeline.step.clone(),
+                    job_id: job_id.clone(),
+                    step: job.step.clone(),
                     agent_id: Some(aid.clone()),
                     agent_name: Some(agent_name.to_string()),
                 },
             });
 
-            // Log pointer to agent log in pipeline log
+            // Log pointer to agent log in job log
             self.logger
-                .append_agent_pointer(pipeline_id.as_str(), &pipeline.step, aid.as_str());
+                .append_agent_pointer(job_id.as_str(), &job.step, aid.as_str());
         }
 
         let mut result_events = self.executor.execute_all(effects).await?;
 
         // Emit agent on_start notification if configured
         if let Some(effect) = monitor::build_agent_notify_effect(
-            &pipeline,
+            &job,
             agent_def,
             agent_def.notify.on_start.as_ref(),
         ) {
@@ -187,35 +187,35 @@ where
 
     pub(crate) async fn handle_monitor_state(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         agent_def: &oj_runbook::AgentDef,
         state: MonitorState,
     ) -> Result<Vec<Event>, RuntimeError> {
         let (action_config, trigger, qd) = match state {
             MonitorState::Working => {
                 // Cancel idle grace timer — agent is working
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let job_id = JobId::new(&job.id);
                 self.executor
                     .execute(Effect::CancelTimer {
-                        id: TimerId::idle_grace(&pipeline_id),
+                        id: TimerId::idle_grace(&job_id),
                     })
                     .await?;
 
                 // Clear idle grace state
                 self.lock_state_mut(|state| {
-                    if let Some(p) = state.pipelines.get_mut(pipeline_id.as_str()) {
+                    if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
                         p.idle_grace_log_size = None;
                     }
                 });
 
-                if pipeline.step_status.is_waiting() {
+                if job.step_status.is_waiting() {
                     // Don't auto-resume within 60s of nudge — "Working" is
                     // likely from our own nudge text, not genuine progress
-                    if let Some(nudge_at) = pipeline.last_nudge_at {
+                    if let Some(nudge_at) = job.last_nudge_at {
                         let now = self.clock().epoch_ms();
                         if now.saturating_sub(nudge_at) < 60_000 {
                             tracing::debug!(
-                                pipeline_id = %pipeline.id,
+                                job_id = %job.id,
                                 "suppressing auto-resume within 60s of nudge"
                             );
                             return Ok(vec![]);
@@ -223,20 +223,20 @@ where
                     }
 
                     tracing::info!(
-                        pipeline_id = %pipeline.id,
-                        step = %pipeline.step,
+                        job_id = %job.id,
+                        step = %job.step,
                         "agent active, auto-resuming from escalation"
                     );
                     self.logger.append(
-                        &pipeline.id,
-                        &pipeline.step,
+                        &job.id,
+                        &job.step,
                         "agent active, auto-resuming from escalation",
                     );
 
                     let effects = vec![Effect::Emit {
                         event: Event::StepStarted {
-                            pipeline_id: pipeline_id.clone(),
-                            step: pipeline.step.clone(),
+                            job_id: job_id.clone(),
+                            step: job.step.clone(),
                             agent_id: None,
                             agent_name: None,
                         },
@@ -244,7 +244,7 @@ where
 
                     // Reset action attempts — agent demonstrated progress
                     self.lock_state_mut(|state| {
-                        if let Some(p) = state.pipelines.get_mut(pipeline_id.as_str()) {
+                        if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
                             p.reset_action_attempts();
                         }
                     });
@@ -254,9 +254,9 @@ where
                 return Ok(vec![]);
             }
             MonitorState::WaitingForInput => {
-                tracing::info!(pipeline_id = %pipeline.id, step = %pipeline.step, "agent idle (on_idle)");
+                tracing::info!(job_id = %job.id, step = %job.step, "agent idle (on_idle)");
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "agent idle");
+                    .append(&job.id, &job.step, "agent idle");
                 (&agent_def.on_idle, "idle", None)
             }
             MonitorState::Prompting {
@@ -264,13 +264,13 @@ where
                 ref question_data,
             } => {
                 tracing::info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     prompt_type = ?prompt_type,
                     "agent prompting (on_prompt)"
                 );
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!("agent prompt: {:?}", prompt_type),
                 );
                 // Use distinct trigger strings so escalation can differentiate
@@ -284,17 +284,17 @@ where
                 ref message,
                 ref error_type,
             } => {
-                tracing::warn!(pipeline_id = %pipeline.id, error = %message, "agent error");
+                tracing::warn!(job_id = %job.id, error = %message, "agent error");
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!("agent error: {}", message),
                 );
                 // Write error to agent log so it's visible in `oj logs <agent>`
-                if let Some(agent_id) = pipeline
+                if let Some(agent_id) = job
                     .step_history
                     .iter()
-                    .rfind(|r| r.name == pipeline.step)
+                    .rfind(|r| r.name == job.step)
                     .and_then(|r| r.agent_id.as_deref())
                 {
                     self.logger.append_agent_error(agent_id, message);
@@ -302,7 +302,7 @@ where
                 let error_action = agent_def.on_error.action_for(error_type.as_ref());
                 return self
                     .execute_action_with_attempts(
-                        pipeline,
+                        job,
                         agent_def,
                         &error_action,
                         message,
@@ -312,26 +312,26 @@ where
                     .await;
             }
             MonitorState::Exited => {
-                tracing::info!(pipeline_id = %pipeline.id, "agent process exited");
+                tracing::info!(job_id = %job.id, "agent process exited");
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "agent exited");
-                self.copy_agent_session_log(pipeline);
+                    .append(&job.id, &job.step, "agent exited");
+                self.copy_agent_session_log(job);
                 (&agent_def.on_dead, "exit", None)
             }
             MonitorState::Gone => {
                 // Session gone is the normal exit path when tmux closes after
                 // the agent process exits. Treat it the same as Exited so
                 // that on_dead actions (done, gate, escalate, etc.) fire.
-                tracing::info!(pipeline_id = %pipeline.id, "agent session ended");
+                tracing::info!(job_id = %job.id, "agent session ended");
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "agent session ended");
-                self.copy_agent_session_log(pipeline);
+                    .append(&job.id, &job.step, "agent session ended");
+                self.copy_agent_session_log(job);
                 (&agent_def.on_dead, "exit", None)
             }
         };
 
         self.execute_action_with_attempts(
-            pipeline,
+            job,
             agent_def,
             action_config,
             trigger,
@@ -344,7 +344,7 @@ where
     /// Execute an action with attempt tracking and cooldown support
     pub(crate) async fn execute_action_with_attempts(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         agent_def: &oj_runbook::AgentDef,
         action_config: &oj_runbook::ActionConfig,
         trigger: &str,
@@ -352,19 +352,19 @@ where
         question_data: Option<&QuestionData>,
     ) -> Result<Vec<Event>, RuntimeError> {
         let attempts = action_config.attempts();
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
 
         // Increment attempt count and get new value
         let attempt_num = self.lock_state_mut(|state| {
             state
-                .pipelines
-                .get_mut(pipeline_id.as_str())
+                .jobs
+                .get_mut(job_id.as_str())
                 .map(|p| p.increment_action_attempt(trigger, chain_pos))
                 .unwrap_or(1)
         });
 
         tracing::debug!(
-            pipeline_id = %pipeline.id,
+            job_id = %job.id,
             trigger,
             chain_pos,
             attempt_num,
@@ -375,14 +375,14 @@ where
         // Check if attempts exhausted (compare against attempt count BEFORE this attempt)
         if attempts.is_exhausted(attempt_num - 1) {
             tracing::info!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 trigger,
                 attempts = attempt_num - 1,
                 "attempts exhausted, escalating"
             );
             self.logger.append(
-                &pipeline.id,
-                &pipeline.step,
+                &job.id,
+                &job.step,
                 &format!("{} attempts exhausted, escalating", trigger),
             );
             // Escalate
@@ -390,14 +390,14 @@ where
                 oj_runbook::ActionConfig::simple(oj_runbook::AgentAction::Escalate);
             return self
                 .execute_action_effects(
-                    pipeline,
+                    job,
                     agent_def,
                     monitor::build_action_effects(
-                        pipeline,
+                        job,
                         agent_def,
                         &escalate_config,
                         &format!("{}_exhausted", trigger),
-                        &pipeline.vars,
+                        &job.vars,
                         question_data,
                     )?,
                 )
@@ -413,18 +413,18 @@ where
                         cooldown_str, e
                     ))
                 })?;
-                let timer_id = TimerId::cooldown(&pipeline_id, trigger, chain_pos);
+                let timer_id = TimerId::cooldown(&job_id, trigger, chain_pos);
 
                 tracing::info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     trigger,
                     attempt = attempt_num,
                     cooldown = ?duration,
                     "scheduling cooldown before retry"
                 );
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!(
                         "{} attempt {} cooldown {:?}",
                         trigger, attempt_num, duration
@@ -445,14 +445,14 @@ where
 
         // Execute the action
         self.execute_action_effects(
-            pipeline,
+            job,
             agent_def,
             monitor::build_action_effects(
-                pipeline,
+                job,
                 agent_def,
                 action_config,
                 trigger,
-                &pipeline.vars,
+                &job.vars,
                 question_data,
             )?,
         )
@@ -466,12 +466,12 @@ where
     /// `Err(message)` otherwise with a description of the failure including stderr.
     async fn run_gate_command(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         command: &str,
         execution_dir: &std::path::Path,
     ) -> Result<(), String> {
         tracing::info!(
-            pipeline_id = %pipeline.id,
+            job_id = %job.id,
             gate = %command,
             cwd = %execution_dir.display(),
             "running gate command"
@@ -486,9 +486,9 @@ where
         {
             Ok(output) if output.status.success() => {
                 tracing::info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     gate = %command,
-                    "gate passed, advancing pipeline"
+                    "gate passed, advancing job"
                 );
                 Ok(())
             }
@@ -496,7 +496,7 @@ where
                 let exit_code = output.status.code().unwrap_or(-1);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 tracing::info!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     gate = %command,
                     exit_code,
                     stderr = %stderr,
@@ -515,7 +515,7 @@ where
             }
             Err(e) => {
                 tracing::warn!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     error = %e,
                     "gate execution error, escalating"
                 );
@@ -526,51 +526,51 @@ where
 
     pub(crate) async fn execute_action_effects(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         agent_def: &oj_runbook::AgentDef,
         effects: ActionEffects,
     ) -> Result<Vec<Event>, RuntimeError> {
         match effects {
             ActionEffects::Nudge { effects } => {
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "nudge sent");
+                    .append(&job.id, &job.step, "nudge sent");
 
                 // Record nudge timestamp to suppress auto-resume from our own nudge text
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let job_id = JobId::new(&job.id);
                 let now = self.clock().epoch_ms();
                 self.lock_state_mut(|state| {
-                    if let Some(p) = state.pipelines.get_mut(pipeline_id.as_str()) {
+                    if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
                         p.last_nudge_at = Some(now);
                     }
                 });
 
                 Ok(self.executor.execute_all(effects).await?)
             }
-            ActionEffects::AdvancePipeline => {
+            ActionEffects::AdvanceJob => {
                 // Emit agent on_done notification before advancing
                 if let Some(effect) = monitor::build_agent_notify_effect(
-                    pipeline,
+                    job,
                     agent_def,
                     agent_def.notify.on_done.as_ref(),
                 ) {
                     self.executor.execute(effect).await?;
                 }
-                self.advance_pipeline(pipeline).await
+                self.advance_job(job).await
             }
-            ActionEffects::FailPipeline { error } => {
+            ActionEffects::FailJob { error } => {
                 // Emit agent on_fail notification before failing
-                // Use the error from the FailPipeline variant since pipeline.error
+                // Use the error from the FailJob variant since job.error
                 // may not be set yet at this point
-                let mut fail_pipeline = pipeline.clone();
-                fail_pipeline.error = Some(error.clone());
+                let mut fail_job = job.clone();
+                fail_job.error = Some(error.clone());
                 if let Some(effect) = monitor::build_agent_notify_effect(
-                    &fail_pipeline,
+                    &fail_job,
                     agent_def,
                     agent_def.notify.on_fail.as_ref(),
                 ) {
                     self.executor.execute(effect).await?;
                 }
-                self.fail_pipeline(pipeline, &error).await
+                self.fail_job(job, &error).await
             }
             ActionEffects::Resume {
                 kill_session,
@@ -579,11 +579,11 @@ where
                 resume_session_id,
                 ..
             } => {
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let job_id = JobId::new(&job.id);
                 let session_id = kill_session.map(SessionId::new);
                 self.kill_and_resume(
                     session_id,
-                    &pipeline_id,
+                    &job_id,
                     &agent_name,
                     &input,
                     resume_session_id.as_deref(),
@@ -593,49 +593,49 @@ where
             ActionEffects::Escalate { effects } => Ok(self.executor.execute_all(effects).await?),
             ActionEffects::Gate { command } => {
                 // Interpolate command before logging and execution
-                let execution_dir = self.execution_dir(pipeline);
-                let pipeline_id = PipelineId::new(&pipeline.id);
+                let execution_dir = self.execution_dir(job);
+                let job_id = JobId::new(&job.id);
 
-                // Namespace pipeline vars under "var." prefix (matching spawn.rs)
-                let mut vars: HashMap<String, String> = pipeline
+                // Namespace job vars under "var." prefix (matching spawn.rs)
+                let mut vars: HashMap<String, String> = job
                     .vars
                     .iter()
                     .map(|(k, v)| (format!("var.{}", k), v.clone()))
                     .collect();
 
                 // Add system variables (not namespaced - these are always available)
-                vars.insert("pipeline_id".to_string(), pipeline_id.to_string());
-                vars.insert("name".to_string(), pipeline.name.clone());
+                vars.insert("job_id".to_string(), job_id.to_string());
+                vars.insert("name".to_string(), job.name.clone());
                 vars.insert("workspace".to_string(), execution_dir.display().to_string());
 
                 let command = oj_runbook::interpolate_shell(&command, &vars);
 
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!("gate (cwd: {}): {}", execution_dir.display(), command),
                 );
                 match self
-                    .run_gate_command(pipeline, &command, &execution_dir)
+                    .run_gate_command(job, &command, &execution_dir)
                     .await
                 {
                     Ok(()) => {
                         self.logger
-                            .append(&pipeline.id, &pipeline.step, "gate passed, advancing");
+                            .append(&job.id, &job.step, "gate passed, advancing");
                         // Emit agent on_done notification on gate pass
                         if let Some(effect) = monitor::build_agent_notify_effect(
-                            pipeline,
+                            job,
                             agent_def,
                             agent_def.notify.on_done.as_ref(),
                         ) {
                             self.executor.execute(effect).await?;
                         }
-                        self.advance_pipeline(pipeline).await
+                        self.advance_job(job).await
                     }
                     Err(gate_error) => {
                         self.logger.append(
-                            &pipeline.id,
-                            &pipeline.step,
+                            &job.id,
+                            &job.step,
                             &format!("gate failed: {}", gate_error),
                         );
 
@@ -644,16 +644,16 @@ where
 
                         // Create decision with gate failure context
                         let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
-                            pipeline_id.clone(),
-                            pipeline.name.clone(),
+                            job_id.clone(),
+                            job.name.clone(),
                             EscalationTrigger::GateFailed {
                                 command: command.clone(),
                                 exit_code,
                                 stderr,
                             },
                         )
-                        .agent_id(pipeline.session_id.clone().unwrap_or_default())
-                        .namespace(pipeline.namespace.clone())
+                        .agent_id(job.session_id.clone().unwrap_or_default())
+                        .namespace(job.namespace.clone())
                         .build();
 
                         let effects = vec![
@@ -661,7 +661,7 @@ where
                                 event: decision_event,
                             },
                             Effect::CancelTimer {
-                                id: TimerId::exit_deferred(&pipeline_id),
+                                id: TimerId::exit_deferred(&job_id),
                             },
                         ];
 
@@ -674,8 +674,8 @@ where
             | ActionEffects::FailAgentRun { .. }
             | ActionEffects::EscalateAgentRun { .. } => {
                 tracing::error!(
-                    pipeline_id = %pipeline.id,
-                    "standalone agent action effect routed to pipeline handler"
+                    job_id = %job.id,
+                    "standalone agent action effect routed to job handler"
                 );
                 Ok(vec![])
             }
@@ -685,7 +685,7 @@ where
     async fn kill_and_resume(
         &self,
         kill_session: Option<SessionId>,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         agent_name: &str,
         input: &HashMap<String, String>,
         resume_session_id: Option<&str>,
@@ -695,7 +695,7 @@ where
                 .execute(Effect::KillSession { session_id: sid })
                 .await?;
         }
-        self.spawn_agent_with_resume(pipeline_id, agent_name, input, resume_session_id)
+        self.spawn_agent_with_resume(job_id, agent_name, input, resume_session_id)
             .await
     }
 
@@ -703,18 +703,18 @@ where
     ///
     /// Finds the session log from Claude's state directory and copies it to
     /// `{logs}/agent/{agent_id}/session.jsonl` for archival.
-    fn copy_agent_session_log(&self, pipeline: &Pipeline) {
+    fn copy_agent_session_log(&self, job: &Job) {
         // Get agent_id from step history
-        let agent_id = match pipeline
+        let agent_id = match job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_ref())
         {
             Some(id) => id,
             None => {
                 tracing::debug!(
-                    pipeline_id = %pipeline.id,
+                    job_id = %job.id,
                     "no agent_id in step history, skipping session log copy"
                 );
                 return;
@@ -722,14 +722,14 @@ where
         };
 
         // Get workspace path
-        let workspace_path = self.execution_dir(pipeline);
+        let workspace_path = self.execution_dir(job);
 
         // Find the session.jsonl
         if let Some(source) = find_session_log(&workspace_path, agent_id) {
             self.logger.copy_session_log(agent_id, &source);
         } else {
             tracing::debug!(
-                pipeline_id = %pipeline.id,
+                job_id = %job.id,
                 agent_id,
                 workspace = %workspace_path.display(),
                 "session.jsonl not found, skipping copy"
@@ -755,49 +755,49 @@ where
             }
         }
 
-        let Some(pipeline_id_str) = self.agent_pipelines.lock().get(agent_id).cloned() else {
+        let Some(job_id_str) = self.agent_jobs.lock().get(agent_id).cloned() else {
             tracing::warn!(agent_id = %agent_id, "agent:signal for unknown agent");
             return Ok(vec![]);
         };
-        let pipeline = self.require_pipeline(&pipeline_id_str)?;
-        if pipeline.is_terminal() {
+        let job = self.require_job(&job_id_str)?;
+        if job.is_terminal() {
             return Ok(vec![]);
         }
 
         // Verify this signal is for the current step's agent, not a stale signal
         // from a previous step's agent.
-        let current_agent_id = pipeline
+        let current_agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.as_deref());
         if current_agent_id != Some(agent_id.as_str()) {
             tracing::debug!(
                 agent_id = %agent_id,
-                pipeline_id = %pipeline.id,
-                step = %pipeline.step,
+                job_id = %job.id,
+                step = %job.step,
                 "dropping stale agent signal (agent_id mismatch)"
             );
             return Ok(vec![]);
         }
 
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
 
         match kind {
             AgentSignalKind::Complete => {
-                // Agent explicitly signaled completion — always advance the pipeline.
+                // Agent explicitly signaled completion — always advance the job.
                 // This overrides gate escalation (StepStatus::Waiting) because the
                 // agent's explicit signal is authoritative; the gate may have failed
                 // due to environmental issues (e.g. shared target dir race).
-                tracing::info!(pipeline_id = %pipeline.id, "agent:signal complete");
+                tracing::info!(job_id = %job.id, "agent:signal complete");
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "agent:signal complete");
+                    .append(&job.id, &job.step, "agent:signal complete");
 
                 // Emit agent on_done notification
-                if let Ok(runbook) = self.cached_runbook(&pipeline.runbook_hash) {
-                    if let Ok(agent_def) = crate::monitor::get_agent_def(&runbook, &pipeline) {
+                if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
+                    if let Ok(agent_def) = crate::monitor::get_agent_def(&runbook, &job) {
                         if let Some(effect) = monitor::build_agent_notify_effect(
-                            &pipeline,
+                            &job,
                             agent_def,
                             agent_def.notify.on_done.as_ref(),
                         ) {
@@ -806,38 +806,38 @@ where
                     }
                 }
 
-                self.advance_pipeline(&pipeline).await
+                self.advance_job(&job).await
             }
             AgentSignalKind::Continue => {
-                tracing::info!(pipeline_id = %pipeline.id, "agent:signal continue");
+                tracing::info!(job_id = %job.id, "agent:signal continue");
                 self.logger
-                    .append(&pipeline.id, &pipeline.step, "agent:signal continue");
+                    .append(&job.id, &job.step, "agent:signal continue");
                 Ok(vec![])
             }
             AgentSignalKind::Escalate => {
                 let msg = message.as_deref().unwrap_or("Agent requested escalation");
-                tracing::info!(pipeline_id = %pipeline.id, message = msg, "agent:signal escalate");
+                tracing::info!(job_id = %job.id, message = msg, "agent:signal escalate");
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!("agent:signal: {}", msg),
                 );
                 let effects = vec![
                     Effect::Notify {
-                        title: pipeline.name.clone(),
+                        title: job.name.clone(),
                         message: msg.to_string(),
                     },
                     Effect::Emit {
                         event: Event::StepWaiting {
-                            pipeline_id: pipeline_id.clone(),
-                            step: pipeline.step.clone(),
+                            job_id: job_id.clone(),
+                            step: job.step.clone(),
                             reason: Some(msg.to_string()),
                             decision_id: None,
                         },
                     },
                     // Cancel exit-deferred timer (agent is still alive; liveness continues)
                     Effect::CancelTimer {
-                        id: TimerId::exit_deferred(&pipeline_id),
+                        id: TimerId::exit_deferred(&job_id),
                     },
                 ];
                 Ok(self.executor.execute_all(effects).await?)

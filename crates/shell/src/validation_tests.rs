@@ -17,7 +17,7 @@ fn validation_error_span_returns_correct_span() {
             operator: "||".to_string(),
             span,
         },
-        ValidationError::EmptyPipelineSegment { span },
+        ValidationError::EmptyJobSegment { span },
         ValidationError::EmptySubshell { span },
         ValidationError::EmptyBraceGroup { span },
         ValidationError::StandaloneAssignment {

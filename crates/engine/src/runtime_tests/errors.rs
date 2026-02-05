@@ -4,7 +4,7 @@
 //! Error handling tests
 
 use super::*;
-use oj_core::PipelineId;
+use oj_core::JobId;
 
 #[tokio::test]
 async fn command_not_found_returns_error() {
@@ -26,13 +26,13 @@ async fn command_not_found_returns_error() {
 }
 
 #[tokio::test]
-async fn shell_completed_for_unknown_pipeline_errors() {
+async fn shell_completed_for_unknown_job_errors() {
     let ctx = setup().await;
 
     let result = ctx
         .runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new("nonexistent"),
+            job_id: JobId::new("nonexistent"),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -43,16 +43,16 @@ async fn shell_completed_for_unknown_pipeline_errors() {
     assert!(result.is_err());
 }
 
-/// Runbook where a step references a nonexistent pipeline definition
-const RUNBOOK_MISSING_PIPELINE_DEF: &str = r#"
+/// Runbook where a step references a nonexistent job definition
+const RUNBOOK_MISSING_JOB_DEF: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "nonexistent" }
+run = { job = "nonexistent" }
 "#;
 
 #[tokio::test]
-async fn command_referencing_nonexistent_pipeline_errors() {
-    let ctx = setup_with_runbook(RUNBOOK_MISSING_PIPELINE_DEF).await;
+async fn command_referencing_nonexistent_job_errors() {
+    let ctx = setup_with_runbook(RUNBOOK_MISSING_JOB_DEF).await;
 
     let result = ctx
         .runtime
@@ -76,19 +76,19 @@ async fn command_referencing_nonexistent_pipeline_errors() {
 const RUNBOOK_WITH_WORKSPACE: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 workspace = "folder"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
 
 #[tokio::test]
-async fn workspace_pipeline_creates_directory() {
+async fn workspace_job_creates_directory() {
     // With the refactored workspace approach, workspace creation uses mkdir
     // which is very unlikely to fail, so we test the happy path instead.
     let ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
@@ -108,12 +108,12 @@ async fn workspace_pipeline_creates_directory() {
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result);
 
-    // Pipeline should exist and be running
-    let pipeline = ctx
+    // Job should exist and be running
+    let job = ctx
         .runtime
-        .get_pipeline("pipe-1")
-        .expect("pipeline should exist in state");
-    assert_eq!(pipeline.step, "init");
+        .get_job("pipe-1")
+        .expect("job should exist in state");
+    assert_eq!(job.step, "init");
 
     // Workspace directory should have been created
     let workspaces_dir = ctx.project_root.join("workspaces");
@@ -124,12 +124,12 @@ async fn workspace_pipeline_creates_directory() {
 const RUNBOOK_MISSING_AGENT: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = { agent = "nonexistent" }
 "#;

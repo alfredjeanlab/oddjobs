@@ -30,9 +30,9 @@ fn oj_daemon_help_shows_subcommands() {
 }
 
 #[test]
-fn oj_pipeline_help_shows_subcommands() {
+fn oj_job_help_shows_subcommands() {
     cli()
-        .args(&["pipeline", "--help"])
+        .args(&["job", "--help"])
         .passes()
         .stdout_has("list")
         .stdout_has("show");

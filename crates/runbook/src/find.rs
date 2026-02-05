@@ -358,7 +358,7 @@ pub fn collect_all_crons(runbook_dir: &Path) -> Result<Vec<(String, crate::CronD
 /// Validate all runbooks in a directory for cross-file conflicts.
 ///
 /// Returns errors for any entity name defined in multiple files within the same
-/// entity type (commands, pipelines, agents, queues, workers).
+/// entity type (commands, jobs, agents, queues, workers).
 pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
     if !runbook_dir.exists() {
         return Ok(());
@@ -391,8 +391,8 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
                 runbook.commands.keys().cloned().collect::<Vec<_>>(),
             ),
             (
-                "pipeline",
-                runbook.pipelines.keys().cloned().collect::<Vec<_>>(),
+                "job",
+                runbook.jobs.keys().cloned().collect::<Vec<_>>(),
             ),
             ("agent", runbook.agents.keys().cloned().collect::<Vec<_>>()),
             ("queue", runbook.queues.keys().cloned().collect::<Vec<_>>()),

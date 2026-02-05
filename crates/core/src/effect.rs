@@ -6,7 +6,7 @@
 use crate::agent::AgentId;
 use crate::agent_run::AgentRunId;
 use crate::event::Event;
-use crate::pipeline::PipelineId;
+use crate::job::JobId;
 use crate::session::SessionId;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
@@ -22,12 +22,12 @@ pub enum Effect {
     /// Emit an event into the system event bus
     Emit { event: Event },
 
-    // === Agent-level effects (preferred for pipeline operations) ===
+    // === Agent-level effects (preferred for job operations) ===
     /// Spawn a new agent
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        pipeline_id: PipelineId,
+        job_id: JobId,
         /// For standalone agents, the AgentRunId that owns this spawn
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_run_id: Option<AgentRunId>,
@@ -97,8 +97,8 @@ pub enum Effect {
     // === Shell effects ===
     /// Execute a shell command
     Shell {
-        /// Pipeline this belongs to
-        pipeline_id: PipelineId,
+        /// Job this belongs to
+        job_id: JobId,
         /// Step name
         step: String,
         /// Command to execute (already interpolated)
@@ -124,7 +124,7 @@ pub enum Effect {
         cwd: PathBuf,
         /// ID of the item being taken (passed through to the completion event)
         item_id: String,
-        /// Full item data (passed through to the completion event for pipeline creation)
+        /// Full item data (passed through to the completion event for job creation)
         item: serde_json::Value,
     },
 
@@ -168,7 +168,7 @@ impl Effect {
             Effect::SpawnAgent {
                 agent_id,
                 agent_name,
-                pipeline_id,
+                job_id,
                 agent_run_id,
                 workspace_path,
                 command,
@@ -178,7 +178,7 @@ impl Effect {
                 let mut fields = vec![
                     ("agent_id", agent_id.to_string()),
                     ("agent_name", agent_name.clone()),
-                    ("pipeline_id", pipeline_id.to_string()),
+                    ("job_id", job_id.to_string()),
                     ("workspace_path", workspace_path.display().to_string()),
                     ("command", command.clone()),
                     (
@@ -214,12 +214,12 @@ impl Effect {
             ],
             Effect::CancelTimer { id } => vec![("timer_id", id.to_string())],
             Effect::Shell {
-                pipeline_id,
+                job_id,
                 step,
                 cwd,
                 ..
             } => vec![
-                ("pipeline_id", pipeline_id.to_string()),
+                ("job_id", job_id.to_string()),
                 ("step", step.clone()),
                 ("cwd", cwd.display().to_string()),
             ],

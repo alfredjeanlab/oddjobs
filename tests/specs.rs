@@ -23,8 +23,8 @@ mod project_setup;
 // daemon/
 #[path = "specs/daemon/concurrency.rs"]
 mod daemon_concurrency;
-#[path = "specs/daemon/cron_pipeline.rs"]
-mod daemon_cron_pipeline;
+#[path = "specs/daemon/cron_job.rs"]
+mod daemon_cron_job;
 #[path = "specs/daemon/crons.rs"]
 mod daemon_crons;
 #[path = "specs/daemon/help.rs"]
@@ -37,8 +37,8 @@ mod daemon_lifecycle;
 mod daemon_logs;
 #[path = "specs/daemon/on_stop.rs"]
 mod daemon_on_stop;
-#[path = "specs/daemon/pipeline_queue.rs"]
-mod daemon_pipeline_queue;
+#[path = "specs/daemon/job_queue.rs"]
+mod daemon_job_queue;
 #[path = "specs/daemon/restart_queue.rs"]
 mod daemon_restart_queue;
 #[path = "specs/daemon/step_fallback.rs"]
@@ -48,13 +48,13 @@ mod daemon_stop_hook;
 #[path = "specs/daemon/timers.rs"]
 mod daemon_timers;
 
-// pipeline/
-#[path = "specs/pipeline/execution.rs"]
-mod pipeline_execution;
-#[path = "specs/pipeline/show.rs"]
-mod pipeline_show;
-#[path = "specs/pipeline/wait.rs"]
-mod pipeline_wait;
+// job/
+#[path = "specs/job/execution.rs"]
+mod job_execution;
+#[path = "specs/job/show.rs"]
+mod job_show;
+#[path = "specs/job/wait.rs"]
+mod job_wait;
 
 // agent/
 #[path = "specs/agent/config.rs"]

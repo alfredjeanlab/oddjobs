@@ -7,7 +7,7 @@
 //! event-based paths: `Agent{State}` events and liveness timer flow.
 
 use super::*;
-use oj_core::{PipelineId, TimerId};
+use oj_core::{JobId, TimerId};
 
 // =============================================================================
 // Session death tests (via liveness timer flow)
@@ -16,12 +16,12 @@ use oj_core::{PipelineId, TimerId};
 #[tokio::test]
 async fn session_death_triggers_on_dead_action() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
-    // Advance to plan (agent step) — spawn_agent registers in agent_pipelines
+    // Advance to plan (agent step) — spawn_agent registers in agent_jobs
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -30,16 +30,16 @@ async fn session_death_triggers_on_dead_action() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Session not registered in FakeSessionAdapter — is_alive returns false.
     // Fire liveness timer → schedules exit-deferred timer.
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -53,19 +53,19 @@ async fn session_death_triggers_on_dead_action() {
     // Fire exit-deferred timer → routes through on_dead (default=escalate)
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     // Default on_dead = escalate → Waiting status
-    assert_eq!(pipeline.step, "plan");
-    assert!(pipeline.step_status.is_waiting());
+    assert_eq!(job.step, "plan");
+    assert!(job.step_status.is_waiting());
 }
 
 #[tokio::test]
-async fn session_death_timer_for_nonexistent_pipeline_is_noop() {
+async fn session_death_timer_for_nonexistent_job_is_noop() {
     let ctx = setup().await;
 
     let result = ctx
@@ -79,14 +79,14 @@ async fn session_death_timer_for_nonexistent_pipeline_is_noop() {
 }
 
 #[tokio::test]
-async fn session_death_timer_on_terminal_pipeline_is_noop() {
+async fn session_death_timer_on_terminal_job_is_noop() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
-    // Fail the pipeline first
+    // Fail the job first
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 1,
             stdout: None,
@@ -95,14 +95,14 @@ async fn session_death_timer_on_terminal_pipeline_is_noop() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
 
-    // Liveness timer on terminal pipeline is a no-op
+    // Liveness timer on terminal job is a no-op
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -114,14 +114,14 @@ async fn session_death_timer_on_terminal_pipeline_is_noop() {
 // =============================================================================
 
 #[tokio::test]
-async fn agent_exited_on_terminal_pipeline_is_noop() {
+async fn agent_exited_on_terminal_job_is_noop() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to plan (agent step)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -130,14 +130,14 @@ async fn agent_exited_on_terminal_pipeline_is_noop() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Fail the pipeline to make it terminal
+    // Fail the job to make it terminal
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "plan".to_string(),
             exit_code: 1,
             stdout: None,
@@ -146,10 +146,10 @@ async fn agent_exited_on_terminal_pipeline_is_noop() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
-    // AgentExited on terminal pipeline should be a no-op
+    // AgentExited on terminal job should be a no-op
     let result = ctx
         .runtime
         .handle_event(Event::AgentExited {
@@ -184,17 +184,17 @@ async fn agent_exited_for_unknown_agent_is_noop() {
 const RUNBOOK_ON_DEAD_DONE: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -221,13 +221,13 @@ async fn agent_exited_advances_when_on_dead_is_done() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "init");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "init");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // AgentExited + on_dead = done should advance pipeline
+    // AgentExited + on_dead = done should advance job
     let result = ctx
         .runtime
         .handle_event(Event::AgentExited {
@@ -237,19 +237,19 @@ async fn agent_exited_advances_when_on_dead_is_done() {
         .await
         .unwrap();
 
-    assert!(!result.is_empty() || ctx.runtime.get_pipeline(&pipeline_id).unwrap().step == "done");
+    assert!(!result.is_empty() || ctx.runtime.get_job(&job_id).unwrap().step == "done");
 }
 
 /// Runbook with agent that has on_dead = fail
 const RUNBOOK_ON_DEAD_FAIL: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = { agent = "worker" }
 
@@ -276,10 +276,10 @@ async fn agent_exited_fails_when_on_dead_is_fail() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // AgentExited + on_dead = fail should fail the pipeline
+    // AgentExited + on_dead = fail should fail the job
     ctx.runtime
         .handle_event(Event::AgentExited {
             agent_id,
@@ -288,20 +288,20 @@ async fn agent_exited_fails_when_on_dead_is_fail() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
 }
 
 /// Runbook with agent that has default on_dead (escalate)
 const RUNBOOK_ON_DEAD_DEFAULT: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = { agent = "worker" }
 
@@ -327,8 +327,8 @@ async fn agent_exited_escalates_by_default() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // AgentExited + default on_dead (escalate) should notify human
     ctx.runtime
@@ -339,10 +339,10 @@ async fn agent_exited_escalates_by_default() {
         .await
         .unwrap();
 
-    // Escalate sets pipeline to Waiting status
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "init");
-    assert!(pipeline.step_status.is_waiting());
+    // Escalate sets job to Waiting status
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "init");
+    assert!(job.step_status.is_waiting());
 }
 
 // =============================================================================
@@ -353,17 +353,17 @@ async fn agent_exited_escalates_by_default() {
 const RUNBOOK_GATE_DEAD_PASS: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -390,13 +390,13 @@ async fn gate_dead_advances_when_command_passes() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent exits, on_dead gate runs "true" which passes → advance pipeline
+    // Agent exits, on_dead gate runs "true" which passes → advance job
     ctx.runtime
         .handle_event(Event::AgentExited {
             agent_id,
@@ -405,30 +405,30 @@ async fn gate_dead_advances_when_command_passes() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 /// Runbook where agent has on_dead = gate with a passing command, then another step
 const RUNBOOK_GATE_DEAD_CHAIN: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "plan-check"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan-check"
 run = "true"
 on_done = "implement"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "implement"
 run = { agent = "implementer" }
 
@@ -459,10 +459,10 @@ async fn gate_dead_result_events_advance_past_shell_step() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Agent exits; gate action runs "true" which passes and advances.
     ctx.runtime
@@ -473,10 +473,10 @@ async fn gate_dead_result_events_advance_past_shell_step() {
         .await
         .unwrap();
 
-    // Pipeline is at plan-check after advance, but ShellExited hasn't
+    // Job is at plan-check after advance, but ShellExited hasn't
     // been re-processed yet (it arrives via the event channel).
     assert_eq!(
-        ctx.runtime.get_pipeline(&pipeline_id).unwrap().step,
+        ctx.runtime.get_job(&job_id).unwrap().step,
         "plan-check"
     );
 
@@ -486,8 +486,8 @@ async fn gate_dead_result_events_advance_past_shell_step() {
     assert!(matches!(shell_completed, Event::ShellExited { .. }));
     ctx.runtime.handle_event(shell_completed).await.unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "implement");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "implement");
 }
 
 #[tokio::test]
@@ -507,10 +507,10 @@ async fn agent_exited_ignores_non_agent_step() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent exits via gate "true" → pipeline advances to plan-check (shell step)
+    // Agent exits via gate "true" → job advances to plan-check (shell step)
     ctx.runtime
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
@@ -520,12 +520,12 @@ async fn agent_exited_ignores_non_agent_step() {
         .unwrap();
 
     assert_eq!(
-        ctx.runtime.get_pipeline(&pipeline_id).unwrap().step,
+        ctx.runtime.get_job(&job_id).unwrap().step,
         "plan-check"
     );
 
-    // AgentExited for old agent while pipeline is at a shell step
-    // should be a no-op (pipeline already advanced past the agent step).
+    // AgentExited for old agent while job is at a shell step
+    // should be a no-op (job already advanced past the agent step).
     let result = ctx
         .runtime
         .handle_event(Event::AgentExited {
@@ -541,17 +541,17 @@ async fn agent_exited_ignores_non_agent_step() {
 const RUNBOOK_GATE_DEAD_FAIL: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -578,11 +578,11 @@ async fn gate_dead_escalates_when_command_fails() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Agent exits, on_dead gate runs "false" which fails → escalate
     ctx.runtime
@@ -593,8 +593,8 @@ async fn gate_dead_escalates_when_command_fails() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     // Gate failed → escalate → Waiting status
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.step_status.is_waiting());
+    assert_eq!(job.step, "work");
+    assert!(job.step_status.is_waiting());
 }

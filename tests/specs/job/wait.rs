@@ -1,26 +1,26 @@
-//! Pipeline wait specs
+//! Job wait specs
 //!
-//! Verify `oj pipeline wait` works with single and multiple IDs.
+//! Verify `oj job wait` works with single and multiple IDs.
 
 use std::process::{Command, Stdio};
 
 use crate::prelude::*;
 
-/// Runbook with two pipelines: one succeeds, one fails.
+/// Runbook with two jobs: one succeeds, one fails.
 const WAIT_RUNBOOK: &str = r#"
 [command.succeed]
-run = { pipeline = "succeed" }
+run = { job = "succeed" }
 
-[pipeline.succeed]
-[[pipeline.succeed.step]]
+[job.succeed]
+[[job.succeed.step]]
 name = "execute"
 run = "echo ok"
 
 [command.fail_cmd]
-run = { pipeline = "fail_cmd" }
+run = { job = "fail_cmd" }
 
-[pipeline.fail_cmd]
-[[pipeline.fail_cmd.step]]
+[job.fail_cmd]
+[[job.fail_cmd.step]]
 name = "execute"
 run = "exit 1"
 "#;
@@ -33,15 +33,15 @@ fn setup() -> Project {
     temp
 }
 
-/// Extract the pipeline ID from `oj pipeline list` output by matching a line containing the name.
-fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
-    let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+/// Extract the job ID from `oj job list` output by matching a line containing the name.
+fn extract_job_id(temp: &Project, name_filter: &str) -> String {
+    let output = temp.oj().args(&["job", "list"]).passes().stdout();
     output
         .lines()
         .find(|l| l.contains(name_filter))
         .unwrap_or_else(|| {
             panic!(
-                "no pipeline matching '{}' in output:\n{}",
+                "no job matching '{}' in output:\n{}",
                 name_filter, output
             )
         })
@@ -51,9 +51,9 @@ fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
         .to_string()
 }
 
-/// Extract all pipeline IDs from `oj pipeline list` output matching a name.
-fn extract_pipeline_ids(temp: &Project, name_filter: &str) -> Vec<String> {
-    let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+/// Extract all job IDs from `oj job list` output matching a name.
+fn extract_job_ids(temp: &Project, name_filter: &str) -> Vec<String> {
+    let output = temp.oj().args(&["job", "list"]).passes().stdout();
     output
         .lines()
         .filter(|l| l.contains(name_filter))
@@ -63,41 +63,41 @@ fn extract_pipeline_ids(temp: &Project, name_filter: &str) -> Vec<String> {
 }
 
 #[test]
-fn wait_single_pipeline_succeeds() {
+fn wait_single_job_succeeds() {
     let temp = setup();
     temp.oj().args(&["run", "succeed"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 
-    let id = extract_pipeline_id(&temp, "succeed");
+    let id = extract_job_id(&temp, "succeed");
     temp.oj()
-        .args(&["pipeline", "wait", &id])
+        .args(&["job", "wait", &id])
         .env("OJ_WAIT_POLL_MS", "10")
         .passes()
         .stdout_has("completed");
 }
 
 #[test]
-fn wait_single_pipeline_failed_exits_nonzero() {
+fn wait_single_job_failed_exits_nonzero() {
     let temp = setup();
     temp.oj().args(&["run", "fail_cmd"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("failed")
     });
-    assert!(done, "pipeline should fail");
+    assert!(done, "job should fail");
 
-    let id = extract_pipeline_id(&temp, "fail_cmd");
+    let id = extract_job_id(&temp, "fail_cmd");
     temp.oj()
-        .args(&["pipeline", "wait", &id])
+        .args(&["job", "wait", &id])
         .env("OJ_WAIT_POLL_MS", "10")
         .fails()
         .stderr_has("failed");
@@ -107,10 +107,10 @@ fn wait_single_pipeline_failed_exits_nonzero() {
 fn wait_not_found_exits_nonzero() {
     let temp = setup();
     temp.oj()
-        .args(&["pipeline", "wait", "nonexistent-id-12345"])
+        .args(&["job", "wait", "nonexistent-id-12345"])
         .env("OJ_WAIT_POLL_MS", "10")
         .fails()
-        .stderr_has("Pipeline not found");
+        .stderr_has("Job not found");
 }
 
 #[test]
@@ -120,17 +120,17 @@ fn wait_multiple_ids_any_mode() {
     temp.oj().args(&["run", "succeed"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.matches("completed").count() >= 2
     });
-    assert!(done, "both pipelines should complete");
+    assert!(done, "both jobs should complete");
 
-    let ids = extract_pipeline_ids(&temp, "succeed");
-    assert!(ids.len() >= 2, "should have at least 2 pipelines");
+    let ids = extract_job_ids(&temp, "succeed");
+    assert!(ids.len() >= 2, "should have at least 2 jobs");
 
     // Wait for any — should succeed immediately since both are done
     temp.oj()
-        .args(&["pipeline", "wait", &ids[0], &ids[1]])
+        .args(&["job", "wait", &ids[0], &ids[1]])
         .env("OJ_WAIT_POLL_MS", "10")
         .passes()
         .stdout_has("completed");
@@ -143,31 +143,31 @@ fn wait_multiple_ids_all_mode() {
     temp.oj().args(&["run", "succeed"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.matches("completed").count() >= 2
     });
-    assert!(done, "both pipelines should complete");
+    assert!(done, "both jobs should complete");
 
-    let ids = extract_pipeline_ids(&temp, "succeed");
-    assert!(ids.len() >= 2, "should have at least 2 pipelines");
+    let ids = extract_job_ids(&temp, "succeed");
+    assert!(ids.len() >= 2, "should have at least 2 jobs");
 
     // Wait for all — should print both
     let result = temp
         .oj()
-        .args(&["pipeline", "wait", "--all", &ids[0], &ids[1]])
+        .args(&["job", "wait", "--all", &ids[0], &ids[1]])
         .env("OJ_WAIT_POLL_MS", "10")
         .passes();
 
-    // Both should be mentioned in output (match final "Pipeline ... completed" lines,
+    // Both should be mentioned in output (match final "Job ... completed" lines,
     // not step progress lines like "execute completed (0s)")
     let stdout = result.stdout();
-    let pipeline_completed_count = stdout
+    let job_completed_count = stdout
         .lines()
-        .filter(|l| l.starts_with("Pipeline") && l.contains("completed"))
+        .filter(|l| l.starts_with("Job") && l.contains("completed"))
         .count();
     assert_eq!(
-        pipeline_completed_count, 2,
-        "should report both pipelines as completed, got: {}",
+        job_completed_count, 2,
+        "should report both jobs as completed, got: {}",
         stdout
     );
 }
@@ -179,30 +179,30 @@ fn wait_all_mode_mixed_outcomes_exits_nonzero() {
     temp.oj().args(&["run", "fail_cmd"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         let has_completed = out.contains("completed");
         let has_failed = out.contains("failed");
         has_completed && has_failed
     });
-    assert!(done, "pipelines should reach terminal states");
+    assert!(done, "jobs should reach terminal states");
 
-    let succeed_id = extract_pipeline_id(&temp, "succeed");
-    let fail_id = extract_pipeline_id(&temp, "fail_cmd");
+    let succeed_id = extract_job_id(&temp, "succeed");
+    let fail_id = extract_job_id(&temp, "fail_cmd");
 
     // Wait --all with mixed outcomes should fail (exit non-zero)
     temp.oj()
-        .args(&["pipeline", "wait", "--all", &succeed_id, &fail_id])
+        .args(&["job", "wait", "--all", &succeed_id, &fail_id])
         .env("OJ_WAIT_POLL_MS", "10")
         .fails();
 }
 
-/// Runbook with a long-running pipeline for signal tests.
+/// Runbook with a long-running job for signal tests.
 const SLOW_RUNBOOK: &str = r#"
 [command.slow]
-run = { pipeline = "slow" }
+run = { job = "slow" }
 
-[pipeline.slow]
-[[pipeline.slow.step]]
+[job.slow]
+[[job.slow.step]]
 name = "wait_forever"
 run = "sleep 300"
 "#;
@@ -215,22 +215,22 @@ fn wait_exits_on_sigint() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow"]).passes();
 
-    // Wait for the pipeline to appear
+    // Wait for the job to appear
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("slow")
     });
-    assert!(found, "pipeline should appear in list");
+    assert!(found, "job should appear in list");
 
-    let id = extract_pipeline_id(&temp, "slow");
+    let id = extract_job_id(&temp, "slow");
 
-    // Spawn `oj pipeline wait` in the background
+    // Spawn `oj job wait` in the background
     let mut child = temp
         .oj()
-        .args(&["pipeline", "wait", &id])
+        .args(&["job", "wait", &id])
         .env("OJ_WAIT_POLL_MS", "50")
         .command()
         .stdout(Stdio::piped())
@@ -273,7 +273,7 @@ fn wait_exits_on_sigint() {
 /// Regression test: SIGINT sent while the wait process is mid-poll (between
 /// select! iterations) must not be lost.  Previously, ctrl_c() was created
 /// fresh inside select! each iteration, so signals arriving outside select!
-/// (e.g. during get_pipeline) were silently dropped.
+/// (e.g. during get_job) were silently dropped.
 #[test]
 fn wait_sigint_during_poll_is_not_lost() {
     let temp = Project::empty();
@@ -284,20 +284,20 @@ fn wait_sigint_during_poll_is_not_lost() {
 
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("slow")
     });
-    assert!(found, "pipeline should appear in list");
+    assert!(found, "job should appear in list");
 
-    let id = extract_pipeline_id(&temp, "slow");
+    let id = extract_job_id(&temp, "slow");
 
     // Use a long poll interval so the process spends more time in the
-    // get_pipeline call (between select! iterations) than in select! itself.
+    // get_job call (between select! iterations) than in select! itself.
     let mut child = temp
         .oj()
-        .args(&["pipeline", "wait", &id])
+        .args(&["job", "wait", &id])
         .env("OJ_WAIT_POLL_MS", "500")
         .command()
         .stdout(Stdio::piped())

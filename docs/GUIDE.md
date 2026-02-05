@@ -9,10 +9,10 @@ Runbooks are written in HCL. Located in `.oj/runbooks/`.
 ```hcl
 command "deploy" {
   args = "<env>"
-  run  = { pipeline = "deploy" }
+  run  = { job = "deploy" }
 }
 
-pipeline "deploy" {
+job "deploy" {
   vars = ["env"]
 
   step "build" {
@@ -28,7 +28,7 @@ pipeline "deploy" {
 
 ## Key Patterns
 
-**Locals** — computed once at pipeline creation, available as `${local.*}`:
+**Locals** — computed once at job creation, available as `${local.*}`:
 
 ```hcl
 locals {
@@ -40,7 +40,7 @@ locals {
 
 Use `local.repo` to resolve the main repo root when using `workspace = "folder"` with manual worktree commands.
 
-**Pipeline name templates** — human-readable names: `name = "${var.name}"`
+**Job name templates** — human-readable names: `name = "${var.name}"`
 
 **Notifications** — desktop alerts on lifecycle: `notify { on_start/on_done/on_fail }`
 
@@ -48,12 +48,12 @@ Use `local.repo` to resolve the main repo root when using `workspace = "folder"`
 agent work via a shell command. No separate check step needed; the gate runs between
 nudge cycles and controls step completion.
 
-**Crons** — time-driven pipeline execution:
+**Crons** — time-driven job execution:
 
 ```hcl
 cron "janitor" {
   interval = "30m"
-  run      = { pipeline = "cleanup" }
+  run      = { job = "cleanup" }
 }
 ```
 
@@ -103,7 +103,7 @@ queue "treatments" {
 
 Agents push structured findings; humans review with `oj queue show`.
 
-**Standalone agents** — commands can run agents directly without a pipeline:
+**Standalone agents** — commands can run agents directly without a job:
 
 ```hcl
 command "mayor" {
@@ -115,7 +115,7 @@ Standalone agents are top-level WAL entities. They run in the invoking
 directory (no workspace) and are visible via `oj agent list`.
 
 **Crew** — long-lived standalone agents designed for ongoing, interactive
-roles (coordinators, triagers, reviewers). Unlike pipeline agents that
+roles (coordinators, triagers, reviewers). Unlike job agents that
 complete a task and exit, crew agents may idle waiting for user input.
 
 Key patterns for crew agents:
@@ -151,7 +151,7 @@ Key patterns for crew agents:
   for things that don't need individual error handling
 
 **Commands:**
-- `run = { pipeline = "name" }` for pipeline dispatch
+- `run = { job = "name" }` for job dispatch
 - `run = { agent = "name" }` for standalone agents
 - `run = <<-SHELL ... SHELL` for inline shell (e.g. launching crons, quick operations)
 

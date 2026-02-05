@@ -176,7 +176,7 @@ pub async fn handle(
     // Resolve attach preference: CLI override > runbook default > false
     let should_attach = attach_override.or(cmd_def.run.attach()).unwrap_or(false);
 
-    // Pipeline or Agent: dispatch to daemon
+    // Job or Agent: dispatch to daemon
     let client = DaemonClient::for_action()?;
     let result = client
         .run_command(
@@ -190,10 +190,10 @@ pub async fn handle(
         .await?;
 
     match result {
-        crate::client::RunCommandResult::Pipeline {
-            pipeline_id,
-            pipeline_name,
-        } => dispatch_pipeline(&client, namespace, command, &pipeline_id, &pipeline_name).await,
+        crate::client::RunCommandResult::Job {
+            job_id,
+            job_name,
+        } => dispatch_job(&client, namespace, command, &job_id, &job_name).await,
         crate::client::RunCommandResult::AgentRun {
             agent_run_id,
             agent_name,
@@ -251,24 +251,24 @@ fn execute_shell_inline(
     Ok(())
 }
 
-async fn dispatch_pipeline(
+async fn dispatch_job(
     client: &DaemonClient,
     namespace: &str,
     command: &str,
-    pipeline_id: &str,
-    pipeline_name: &str,
+    job_id: &str,
+    job_name: &str,
 ) -> Result<()> {
-    let short_id = pipeline_id.short(8);
+    let short_id = job_id.short(8);
     println!("{} {namespace}", color::context("Project:"));
     println!("{} {command}", color::context("Command:"));
     println!(
         "{} {}",
-        color::yellow("Waiting for pipeline to start..."),
+        color::yellow("Waiting for job to start..."),
         color::muted("(Ctrl+C to skip)")
     );
     println!();
 
-    // Poll for pipeline start
+    // Poll for job start
     let poll_interval = Duration::from_millis(500);
     let deadline = Instant::now() + crate::client::run_wait_timeout();
     let mut started = false;
@@ -285,7 +285,7 @@ async fn dispatch_pipeline(
                 if Instant::now() >= deadline {
                     break;
                 }
-                if let Ok(Some(p)) = client.get_pipeline(pipeline_id).await {
+                if let Ok(Some(p)) = client.get_job(job_id).await {
                     if p.step_status != "pending" {
                         started = true;
                         break;
@@ -299,16 +299,16 @@ async fn dispatch_pipeline(
         println!(
             "{} {} {}",
             color::green("Started"),
-            pipeline_name,
-            color::muted(&format!("(pipeline: {short_id})"))
+            job_name,
+            color::muted(&format!("(job: {short_id})"))
         );
     } else {
         println!(
             "{}",
-            color::yellow("Still waiting for the pipeline to start, check:")
+            color::yellow("Still waiting for the job to start, check:")
         );
     }
-    super::pipeline::print_pipeline_commands(short_id);
+    super::job::print_job_commands(short_id);
 
     Ok(())
 }

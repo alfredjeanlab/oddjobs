@@ -26,7 +26,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Duration;
 
-use oj_core::{Clock, Event, PipelineId};
+use oj_core::{Clock, Event, JobId};
 use oj_storage::{Checkpointer, MaterializedState, Wal};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Notify;
@@ -172,14 +172,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("READY");
 
     // Spawn background reconciliation — daemon is already accepting connections
-    if reconcile_ctx.pipeline_count > 0
+    if reconcile_ctx.job_count > 0
         || reconcile_ctx.worker_count > 0
         || reconcile_ctx.cron_count > 0
         || reconcile_ctx.agent_run_count > 0
     {
         info!(
-            "spawning background reconciliation for {} pipelines, {} workers, {} crons, {} agent_runs",
-            reconcile_ctx.pipeline_count, reconcile_ctx.worker_count, reconcile_ctx.cron_count, reconcile_ctx.agent_run_count
+            "spawning background reconciliation for {} jobs, {} workers, {} crons, {} agent_runs",
+            reconcile_ctx.job_count,
+            reconcile_ctx.worker_count,
+            reconcile_ctx.cron_count,
+            reconcile_ctx.agent_run_count
         );
         tokio::spawn(async move {
             lifecycle::reconcile_state(
@@ -216,10 +219,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 event_reader.mark_processed(seq);
                             }
                             event => {
-                                let pipeline_id = event.pipeline_id().map(|p| p.to_string());
+                                let job_id = event.job_id().map(|p| p.to_string());
                                 let is_failure = matches!(
                                     &event,
-                                    Event::PipelineAdvanced { step, .. } if step == "failed"
+                                    Event::JobAdvanced { step, .. } if step == "failed"
                                 );
                                 match daemon.process_event(event).await {
                                     Ok(()) => event_reader.mark_processed(seq),
@@ -230,16 +233,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         error!("Error processing event (seq={}): {}", seq, e);
                                         event_reader.mark_processed(seq);
 
-                                        // Best-effort: fail the associated pipeline so it
+                                        // Best-effort: fail the associated job so it
                                         // doesn't get stuck. Skip if already a failure
                                         // transition to avoid cascading events.
-                                        if let Some(pid) = pipeline_id.filter(|_| !is_failure) {
-                                            let fail_event = Event::PipelineAdvanced {
-                                                id: PipelineId::new(pid),
+                                        if let Some(pid) = job_id.filter(|_| !is_failure) {
+                                            let fail_event = Event::JobAdvanced {
+                                                id: JobId::new(pid),
                                                 step: "failed".to_string(),
                                             };
                                             if let Err(send_err) = daemon.event_bus.send(fail_event) {
-                                                error!("Failed to emit pipeline failure event: {}", send_err);
+                                                error!("Failed to emit job failure event: {}", send_err);
                                             }
                                         }
                                     }

@@ -1,27 +1,27 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Shared path builders for pipeline, agent, and worker log files.
+//! Shared path builders for job, agent, and worker log files.
 //!
 //! Used by both the logger (writer) and daemon (reader) to construct
 //! consistent paths for log files in the directory structure:
-//!   `<logs_dir>/pipeline/<pipeline_id>.log`
+//!   `<logs_dir>/job/<job_id>.log`
 //!   `<logs_dir>/agent/<agent_id>.log`
 //!   `<logs_dir>/worker/<worker_name>.log`
 
 use std::path::{Path, PathBuf};
 
-/// Build the path to a pipeline log file.
+/// Build the path to a job log file.
 ///
-/// Structure: `{logs_dir}/pipeline/{pipeline_id}.log`
+/// Structure: `{logs_dir}/job/{job_id}.log`
 ///
 /// # Arguments
 /// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
-/// * `pipeline_id` - Pipeline identifier
-pub fn pipeline_log_path(logs_dir: &Path, pipeline_id: &str) -> PathBuf {
+/// * `job_id` - Job identifier
+pub fn job_log_path(logs_dir: &Path, job_id: &str) -> PathBuf {
     logs_dir
-        .join("pipeline")
-        .join(format!("{}.log", pipeline_id))
+        .join("job")
+        .join(format!("{}.log", job_id))
 }
 
 /// Build the path to an agent log file.
@@ -78,11 +78,11 @@ pub fn queue_log_path(logs_dir: &Path, queue_name: &str) -> PathBuf {
     logs_dir.join("queue").join(format!("{}.log", queue_name))
 }
 
-/// Build the path to a pipeline breadcrumb file.
+/// Build the path to a job breadcrumb file.
 ///
-/// Structure: `{logs_dir}/{pipeline_id}.crumb.json`
-pub fn breadcrumb_path(logs_dir: &Path, pipeline_id: &str) -> PathBuf {
-    logs_dir.join(format!("{}.crumb.json", pipeline_id))
+/// Structure: `{logs_dir}/{job_id}.crumb.json`
+pub fn breadcrumb_path(logs_dir: &Path, job_id: &str) -> PathBuf {
+    logs_dir.join(format!("{}.crumb.json", job_id))
 }
 
 #[cfg(test)]

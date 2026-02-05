@@ -49,7 +49,7 @@ fn decision_option_minimal_serde() {
 fn decision_serde_roundtrip() {
     let decision = Decision {
         id: DecisionId::new("dec-123"),
-        pipeline_id: "pipe-1".to_string(),
+        job_id: "pipe-1".to_string(),
         agent_id: Some("agent-1".to_string()),
         source: DecisionSource::Gate,
         context: "Gate failed with exit code 1".to_string(),
@@ -74,7 +74,7 @@ fn decision_serde_roundtrip() {
     let json = serde_json::to_string(&decision).unwrap();
     let parsed: Decision = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed.id, DecisionId::new("dec-123"));
-    assert_eq!(parsed.pipeline_id, "pipe-1");
+    assert_eq!(parsed.job_id, "pipe-1");
     assert_eq!(parsed.source, DecisionSource::Gate);
     assert_eq!(parsed.options.len(), 2);
     assert!(!parsed.is_resolved());
@@ -84,7 +84,7 @@ fn decision_serde_roundtrip() {
 fn decision_is_resolved() {
     let mut decision = Decision {
         id: DecisionId::new("dec-1"),
-        pipeline_id: "pipe-1".to_string(),
+        job_id: "pipe-1".to_string(),
         agent_id: None,
         source: DecisionSource::Question,
         context: "What should we do?".to_string(),

@@ -37,9 +37,9 @@ pub enum ValidationError {
         span: Span,
     },
 
-    /// Empty pipeline segment (no command between pipes).
-    #[error("empty pipeline segment")]
-    EmptyPipelineSegment {
+    /// Empty job segment (no command between pipes).
+    #[error("empty job segment")]
+    EmptyJobSegment {
         /// Source location span for the error.
         span: Span,
     },
@@ -102,7 +102,7 @@ impl ValidationError {
             Self::EmptyCommand { span } => *span,
             Self::MissingCommandAfter { span, .. } => *span,
             Self::MissingCommandBefore { span, .. } => *span,
-            Self::EmptyPipelineSegment { span } => *span,
+            Self::EmptyJobSegment { span } => *span,
             Self::EmptySubshell { span } => *span,
             Self::EmptyBraceGroup { span } => *span,
             Self::StandaloneAssignment { span, .. } => *span,

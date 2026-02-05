@@ -115,36 +115,36 @@ macro_rules! simple_cmd_tests {
     };
 }
 
-/// Generate pipeline tests (verifies pipeline command count).
+/// Generate job tests (verifies job command count).
 ///
 /// # Usage
 ///
 /// ```ignore
-/// pipeline_tests! {
-///     name: "input" => pipeline_cmds: N,
+/// job_tests! {
+///     name: "input" => job_cmds: N,
 /// }
 /// ```
 ///
 /// # Example
 ///
 /// ```ignore
-/// pipeline_tests! {
-///     two_pipe: "a | b" => pipeline_cmds: 2,
-///     three_pipe: "a | b | c" => pipeline_cmds: 3,
+/// job_tests! {
+///     two_pipe: "a | b" => job_cmds: 2,
+///     three_pipe: "a | b | c" => job_cmds: 3,
 /// }
 /// ```
-macro_rules! pipeline_tests {
-    ($($name:ident: $input:expr => pipeline_cmds: $count:expr),* $(,)?) => {
+macro_rules! job_tests {
+    ($($name:ident: $input:expr => job_cmds: $count:expr),* $(,)?) => {
         $(
             #[test]
             fn $name() {
                 let result = Parser::parse($input)
                     .expect(concat!("failed to parse: ", $input));
                 assert_eq!(result.commands.len(), 1);
-                let pipeline = super::helpers::get_pipeline(&result.commands[0]);
+                let job = super::helpers::get_job(&result.commands[0]);
                 assert_eq!(
-                    pipeline.commands.len(), $count,
-                    "input: {:?}, expected {} pipeline commands",
+                    job.commands.len(), $count,
+                    "input: {:?}, expected {} job commands",
                     $input, $count
                 );
             }
@@ -185,5 +185,5 @@ macro_rules! parse_span_tests {
 }
 
 pub(crate) use {
-    parse_error_tests, parse_span_tests, parse_tests, pipeline_tests, simple_cmd_tests,
+    parse_error_tests, parse_span_tests, parse_tests, job_tests, simple_cmd_tests,
 };

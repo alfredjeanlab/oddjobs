@@ -102,8 +102,8 @@ fn test_spawn_config(cwd: Option<PathBuf>) -> AgentSpawnConfig {
         workspace_path: PathBuf::from("/tmp"),
         cwd,
         prompt: "Test prompt".to_string(),
-        pipeline_name: "test-pipeline".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test-job".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: std::collections::HashMap::new(),
     }

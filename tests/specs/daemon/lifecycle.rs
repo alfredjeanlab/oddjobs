@@ -9,7 +9,7 @@ use crate::prelude::*;
 // =============================================================================
 
 /// Scenario for a slow agent that sleeps for a while.
-/// The sleep gives us time to kill the daemon mid-pipeline.
+/// The sleep gives us time to kill the daemon mid-job.
 const SLOW_AGENT_SCENARIO: &str = r#"
 name = "slow-agent"
 trusted = true
@@ -37,12 +37,12 @@ fn slow_agent_runbook(scenario_path: &std::path::Path) -> String {
         r#"
 [command.slow]
 args = "<name>"
-run = {{ pipeline = "slow" }}
+run = {{ job = "slow" }}
 
-[pipeline.slow]
+[job.slow]
 vars  = ["name"]
 
-[[pipeline.slow.step]]
+[[job.slow.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -55,14 +55,14 @@ on_dead = "done"
     )
 }
 
-/// Tests daemon recovery mid-pipeline.
+/// Tests daemon recovery mid-job.
 ///
-/// This test verifies that when the daemon crashes while a pipeline is running,
+/// This test verifies that when the daemon crashes while a job is running,
 /// restarting the daemon triggers the background reconcile flow which:
 /// - Detects that the tmux session exists but the agent exited
-/// - Triggers the on_dead action to advance the pipeline
+/// - Triggers the on_dead action to advance the job
 #[test]
-fn daemon_recovers_pipeline_after_crash() {
+fn daemon_recovers_job_after_crash() {
     let temp = Project::empty();
     temp.git_init();
 
@@ -74,16 +74,16 @@ fn daemon_recovers_pipeline_after_crash() {
         &slow_agent_runbook(&scenario_path),
     );
 
-    // Start daemon and run the slow pipeline
+    // Start daemon and run the slow job
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow", "recovery-test"]).passes();
 
-    // Wait for the pipeline to reach the agent step (Running status)
+    // Wait for the job to reach the agent step (Running status)
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         output.contains("work") && output.contains("running")
     });
-    assert!(running, "pipeline should reach the agent step");
+    assert!(running, "job should reach the agent step");
 
     // Kill the daemon with SIGKILL (simulates crash - no graceful shutdown)
     let killed = temp.daemon_kill();
@@ -104,11 +104,11 @@ fn daemon_recovers_pipeline_after_crash() {
     // Restart the daemon - this triggers background reconciliation
     temp.oj().args(&["daemon", "start"]).passes();
 
-    // Wait for the pipeline to complete via recovery.
+    // Wait for the job to complete via recovery.
     // The reconcile flow should detect the dead agent and trigger on_dead = "done"
     let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
@@ -120,12 +120,12 @@ fn daemon_recovers_pipeline_after_crash() {
     }
     assert!(
         done,
-        "pipeline should complete after daemon recovery via on_dead action"
+        "job should complete after daemon recovery via on_dead action"
     );
 
     // Verify final state
     temp.oj()
-        .args(&["pipeline", "list"])
+        .args(&["job", "list"])
         .passes()
         .stdout_has("completed");
 }
@@ -171,13 +171,13 @@ fn daemon_status_shows_uptime() {
 }
 
 #[test]
-fn daemon_status_shows_pipeline_count() {
+fn daemon_status_shows_job_count() {
     let temp = Project::empty();
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj()
         .args(&["daemon", "status"])
         .passes()
-        .stdout_has("Pipelines:");
+        .stdout_has("Jobs:");
 }
 
 #[test]
@@ -408,7 +408,7 @@ fn daemon_stop_kill_terminates_sessions() {
         &slow_agent_runbook(&scenario_path),
     );
 
-    // Start daemon and run pipeline
+    // Start daemon and run job
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow", "kill-test"]).passes();
 
@@ -477,7 +477,7 @@ fn sessions_survive_normal_shutdown() {
         &slow_agent_runbook(&scenario_path),
     );
 
-    // Start daemon and run pipeline
+    // Start daemon and run job
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "slow", "survive-test"]).passes();
 
@@ -545,7 +545,7 @@ fn daemon_start_shows_migration_error_for_too_new_snapshot() {
         "v": 99,
         "seq": 1,
         "state": {
-            "pipelines": {},
+            "jobs": {},
             "sessions": {},
             "workspaces": {},
             "runbooks": {},

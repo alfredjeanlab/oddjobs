@@ -59,7 +59,7 @@ fn workspace_status_display() {
 #[test]
 fn workspace_status_serde() {
     let status = WorkspaceStatus::InUse {
-        by: "test-pipeline".to_string(),
+        by: "test-job".to_string(),
     };
     let json = serde_json::to_string(&status).unwrap();
     let parsed: WorkspaceStatus = serde_json::from_str(&json).unwrap();

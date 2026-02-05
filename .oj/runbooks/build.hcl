@@ -12,14 +12,14 @@
 
 command "build" {
   args = "<name> <instructions> [--base <branch>]"
-  run  = { pipeline = "build" }
+  run  = { job = "build" }
 
   defaults = {
     base = "main"
   }
 }
 
-pipeline "build" {
+job "build" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "base"]
   on_fail   = { step = "reopen" }
@@ -53,7 +53,7 @@ pipeline "build" {
     on_done = { step = "submit" }
   }
 
-  # TODO: hook into merge pipeline to mark issue done instead
+  # TODO: hook into merge job to mark issue done instead
   step "submit" {
     run = <<-SHELL
       git add -A
@@ -66,11 +66,11 @@ pipeline "build" {
   }
 
   step "cancel" {
-    run = "wok close ${local.issue} --reason 'Build pipeline cancelled'"
+    run = "wok close ${local.issue} --reason 'Build job cancelled'"
   }
 
   step "reopen" {
-    run = "wok reopen ${local.issue} --reason 'Build pipeline failed'"
+    run = "wok reopen ${local.issue} --reason 'Build job failed'"
   }
 }
 

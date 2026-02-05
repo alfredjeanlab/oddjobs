@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{scoped_name, Event, IdGen, PipelineId, UuidIdGen};
+use oj_core::{scoped_name, Event, IdGen, JobId, UuidIdGen};
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
@@ -61,18 +61,15 @@ pub(super) fn handle_cron_start(
         }
     };
 
-    // Validate run is a pipeline or agent reference
-    let (pipeline_name, run_target) = match &cron_def.run {
-        oj_runbook::RunDirective::Pipeline { pipeline } => {
-            if runbook.get_pipeline(pipeline).is_none() {
+    // Validate run is a job or agent reference
+    let (job_name, run_target) = match &cron_def.run {
+        oj_runbook::RunDirective::Job { job } => {
+            if runbook.get_job(job).is_none() {
                 return Ok(Response::Error {
-                    message: format!(
-                        "cron '{}' references unknown pipeline '{}'",
-                        cron_name, pipeline
-                    ),
+                    message: format!("cron '{}' references unknown job '{}'", cron_name, job),
                 });
             }
-            (pipeline.clone(), format!("pipeline:{}", pipeline))
+            (job.clone(), format!("job:{}", job))
         }
         oj_runbook::RunDirective::Agent { agent, .. } => {
             if runbook.get_agent(agent).is_none() {
@@ -84,10 +81,7 @@ pub(super) fn handle_cron_start(
         }
         _ => {
             return Ok(Response::Error {
-                message: format!(
-                    "cron '{}' run must reference a pipeline or agent",
-                    cron_name
-                ),
+                message: format!("cron '{}' run must reference a job or agent", cron_name),
             })
         }
     };
@@ -114,7 +108,7 @@ pub(super) fn handle_cron_start(
         project_root: project_root.to_path_buf(),
         runbook_hash,
         interval: cron_def.interval.clone(),
-        pipeline_name,
+        job_name,
         run_target,
         namespace: namespace.to_string(),
     };
@@ -176,7 +170,7 @@ pub(super) fn handle_cron_stop(
     Ok(Response::Ok)
 }
 
-/// Handle a CronOnce request — run the cron's pipeline once immediately.
+/// Handle a CronOnce request — run the cron's job once immediately.
 pub(super) async fn handle_cron_once(
     project_root: &Path,
     namespace: &str,
@@ -215,18 +209,15 @@ pub(super) async fn handle_cron_once(
         }
     };
 
-    // Validate run is a pipeline or agent reference and build event
-    let (pipeline_name, run_target) = match &cron_def.run {
-        oj_runbook::RunDirective::Pipeline { pipeline } => {
-            if runbook.get_pipeline(pipeline).is_none() {
+    // Validate run is a job or agent reference and build event
+    let (job_name, run_target) = match &cron_def.run {
+        oj_runbook::RunDirective::Job { job } => {
+            if runbook.get_job(job).is_none() {
                 return Ok(Response::Error {
-                    message: format!(
-                        "cron '{}' references unknown pipeline '{}'",
-                        cron_name, pipeline
-                    ),
+                    message: format!("cron '{}' references unknown job '{}'", cron_name, job),
                 });
             }
-            (pipeline.clone(), format!("pipeline:{}", pipeline))
+            (job.clone(), format!("job:{}", job))
         }
         oj_runbook::RunDirective::Agent { agent, .. } => {
             if runbook.get_agent(agent).is_none() {
@@ -238,10 +229,7 @@ pub(super) async fn handle_cron_once(
         }
         _ => {
             return Ok(Response::Error {
-                message: format!(
-                    "cron '{}' run must reference a pipeline or agent",
-                    cron_name
-                ),
+                message: format!("cron '{}' run must reference a job or agent", cron_name),
             })
         }
     };
@@ -270,9 +258,9 @@ pub(super) async fn handle_cron_once(
 
         let event = Event::CronOnce {
             cron_name: cron_name.to_string(),
-            pipeline_id: PipelineId::new(""),
-            pipeline_name: String::new(),
-            pipeline_kind: String::new(),
+            job_id: JobId::new(""),
+            job_name: String::new(),
+            job_kind: String::new(),
             agent_run_id: Some(agent_run_id.clone()),
             agent_name: Some(agent_name.clone()),
             project_root: project_root.to_path_buf(),
@@ -286,21 +274,20 @@ pub(super) async fn handle_cron_once(
             .map_err(|_| ConnectionError::WalError)?;
 
         Ok(Response::CommandStarted {
-            pipeline_id: agent_run_id,
-            pipeline_name: format!("agent:{}", agent_name),
+            job_id: agent_run_id,
+            job_name: format!("agent:{}", agent_name),
         })
     } else {
-        // Generate pipeline ID
-        let pipeline_id = PipelineId::new(UuidIdGen.next());
-        let pipeline_display_name =
-            oj_runbook::pipeline_display_name(&pipeline_name, pipeline_id.short(8), namespace);
+        // Generate job ID
+        let job_id = JobId::new(UuidIdGen.next());
+        let job_display_name = oj_runbook::job_display_name(&job_name, job_id.short(8), namespace);
 
-        // Emit CronOnce event to create pipeline via the cron code path
+        // Emit CronOnce event to create job via the cron code path
         let event = Event::CronOnce {
             cron_name: cron_name.to_string(),
-            pipeline_id: pipeline_id.clone(),
-            pipeline_name: pipeline_display_name.clone(),
-            pipeline_kind: pipeline_name.clone(),
+            job_id: job_id.clone(),
+            job_name: job_display_name.clone(),
+            job_kind: job_name.clone(),
             agent_run_id: None,
             agent_name: None,
             project_root: project_root.to_path_buf(),
@@ -314,8 +301,8 @@ pub(super) async fn handle_cron_once(
             .map_err(|_| ConnectionError::WalError)?;
 
         Ok(Response::CommandStarted {
-            pipeline_id: pipeline_id.to_string(),
-            pipeline_name: pipeline_display_name,
+            job_id: job_id.to_string(),
+            job_name: job_display_name,
         })
     }
 }

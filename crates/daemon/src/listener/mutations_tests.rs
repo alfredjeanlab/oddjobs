@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use tempfile::tempdir;
 
 use oj_core::{
-    AgentRun, AgentRunStatus, Event, Pipeline, StepOutcome, StepRecord, StepStatus, WorkspaceStatus,
+    AgentRun, AgentRunStatus, Event, Job, StepOutcome, StepRecord, StepStatus, WorkspaceStatus,
 };
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_storage::{MaterializedState, Wal, Workspace, WorkspaceType};
@@ -18,8 +18,8 @@ use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::{
-    handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_prune,
-    handle_pipeline_resume, handle_session_kill, workspace_prune_inner, PruneFlags,
+    handle_agent_prune, handle_agent_send, handle_job_cancel, handle_job_prune, handle_job_resume,
+    handle_session_kill, workspace_prune_inner, PruneFlags,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -37,10 +37,10 @@ fn empty_orphans() -> Arc<Mutex<Vec<Breadcrumb>>> {
     Arc::new(Mutex::new(Vec::new()))
 }
 
-fn make_pipeline(id: &str, step: &str) -> Pipeline {
-    Pipeline {
+fn make_job(id: &str, step: &str) -> Job {
+    Job {
         id: id.to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "test".to_string(),
         namespace: "proj".to_string(),
         step: step.to_string(),
@@ -72,12 +72,12 @@ fn make_pipeline(id: &str, step: &str) -> Pipeline {
     }
 }
 
-fn make_breadcrumb(pipeline_id: &str) -> Breadcrumb {
+fn make_breadcrumb(job_id: &str) -> Breadcrumb {
     Breadcrumb {
-        pipeline_id: pipeline_id.to_string(),
+        job_id: job_id.to_string(),
         project: "proj".to_string(),
         kind: "test".to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         vars: HashMap::new(),
         current_step: "work".to_string(),
         step_status: "running".to_string(),
@@ -101,20 +101,20 @@ fn load_runbook_into_state(state: &Arc<Mutex<MaterializedState>>, hash: &str) {
 }
 
 #[test]
-fn resume_existing_pipeline_emits_event() {
+fn resume_existing_job_emits_event() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
     let orphans = empty_orphans();
 
-    // Insert a pipeline in state
+    // Insert a job in state
     {
         let mut s = state.lock();
-        s.pipelines
-            .insert("pipe-1".to_string(), make_pipeline("pipe-1", "work"));
+        s.jobs
+            .insert("pipe-1".to_string(), make_job("pipe-1", "work"));
     }
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -127,13 +127,13 @@ fn resume_existing_pipeline_emits_event() {
 }
 
 #[test]
-fn resume_nonexistent_pipeline_returns_error() {
+fn resume_nonexistent_job_returns_error() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
     let orphans = empty_orphans();
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -165,7 +165,7 @@ fn resume_orphan_without_runbook_hash_returns_error() {
     bc.runbook_hash = String::new();
     let orphans = Arc::new(Mutex::new(vec![bc]));
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -195,7 +195,7 @@ fn resume_orphan_without_runbook_in_state_returns_error() {
     // Create an orphan with a runbook_hash, but no matching runbook in state
     let orphans = Arc::new(Mutex::new(vec![make_breadcrumb("orphan-2")]));
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -227,7 +227,7 @@ fn resume_orphan_with_runbook_reconstructs_and_resumes() {
 
     let orphans = Arc::new(Mutex::new(vec![make_breadcrumb("orphan-3")]));
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -255,7 +255,7 @@ fn resume_orphan_by_prefix() {
         "orphan-long-uuid-string-12345",
     )]));
 
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -301,7 +301,7 @@ async fn session_kill_existing_returns_ok() {
             "oj-test-session".to_string(),
             oj_storage::Session {
                 id: "oj-test-session".to_string(),
-                pipeline_id: "pipe-1".to_string(),
+                job_id: "pipe-1".to_string(),
             },
         );
     }
@@ -313,10 +313,10 @@ async fn session_kill_existing_returns_ok() {
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }
 
-fn make_pipeline_with_agent(id: &str, step: &str, agent_id: &str) -> Pipeline {
-    Pipeline {
+fn make_job_with_agent(id: &str, step: &str, agent_id: &str) -> Job {
+    Job {
         id: id.to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "test".to_string(),
         namespace: "proj".to_string(),
         step: step.to_string(),
@@ -349,7 +349,7 @@ fn make_pipeline_with_agent(id: &str, step: &str, agent_id: &str) -> Pipeline {
 }
 
 #[test]
-fn agent_prune_all_removes_terminal_pipelines_from_state() {
+fn agent_prune_all_removes_terminal_jobs_from_state() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
@@ -357,17 +357,17 @@ fn agent_prune_all_removes_terminal_pipelines_from_state() {
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    // Insert a terminal pipeline with an agent
+    // Insert a terminal job with an agent
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-done".to_string(),
-            make_pipeline_with_agent("pipe-done", "done", "agent-1"),
+            make_job_with_agent("pipe-done", "done", "agent-1"),
         );
-        // Insert a non-terminal pipeline (should be skipped)
-        s.pipelines.insert(
+        // Insert a non-terminal job (should be skipped)
+        s.jobs.insert(
             "pipe-running".to_string(),
-            make_pipeline_with_agent("pipe-running", "work", "agent-2"),
+            make_job_with_agent("pipe-running", "work", "agent-2"),
         );
     }
 
@@ -382,28 +382,28 @@ fn agent_prune_all_removes_terminal_pipelines_from_state() {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
             assert_eq!(pruned.len(), 1, "should prune 1 agent");
             assert_eq!(pruned[0].agent_id, "agent-1");
-            assert_eq!(pruned[0].pipeline_id, "pipe-done");
-            assert_eq!(skipped, 1, "should skip 1 non-terminal pipeline");
+            assert_eq!(pruned[0].job_id, "pipe-done");
+            assert_eq!(skipped, 1, "should skip 1 non-terminal job");
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
     }
 
-    // After processing events, the terminal pipeline should be removed from state
+    // After processing events, the terminal job should be removed from state
     {
         let mut s = state.lock();
-        // Apply the PipelineDeleted event that was emitted
-        let event = Event::PipelineDeleted {
-            id: oj_core::PipelineId::new("pipe-done".to_string()),
+        // Apply the JobDeleted event that was emitted
+        let event = Event::JobDeleted {
+            id: oj_core::JobId::new("pipe-done".to_string()),
         };
         s.apply_event(&event);
 
         assert!(
-            !s.pipelines.contains_key("pipe-done"),
-            "terminal pipeline should be removed after prune"
+            !s.jobs.contains_key("pipe-done"),
+            "terminal job should be removed after prune"
         );
         assert!(
-            s.pipelines.contains_key("pipe-running"),
-            "non-terminal pipeline should remain"
+            s.jobs.contains_key("pipe-running"),
+            "non-terminal job should remain"
         );
     }
 }
@@ -419,9 +419,9 @@ fn agent_prune_dry_run_does_not_delete() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-failed".to_string(),
-            make_pipeline_with_agent("pipe-failed", "failed", "agent-3"),
+            make_job_with_agent("pipe-failed", "failed", "agent-3"),
         );
     }
 
@@ -440,16 +440,16 @@ fn agent_prune_dry_run_does_not_delete() {
         other => panic!("expected AgentsPruned, got: {:?}", other),
     }
 
-    // Pipeline should still be in state after dry run
+    // Job should still be in state after dry run
     let s = state.lock();
     assert!(
-        s.pipelines.contains_key("pipe-failed"),
-        "pipeline should remain after dry run"
+        s.jobs.contains_key("pipe-failed"),
+        "job should remain after dry run"
     );
 }
 
 #[test]
-fn agent_prune_skips_non_terminal_pipelines() {
+fn agent_prune_skips_non_terminal_jobs() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
@@ -459,9 +459,9 @@ fn agent_prune_skips_non_terminal_pipelines() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-active".to_string(),
-            make_pipeline_with_agent("pipe-active", "build", "agent-4"),
+            make_job_with_agent("pipe-active", "build", "agent-4"),
         );
     }
 
@@ -475,15 +475,15 @@ fn agent_prune_skips_non_terminal_pipelines() {
     match result {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
             assert_eq!(pruned.len(), 0, "should not prune active agents");
-            assert_eq!(skipped, 1, "should skip the active pipeline");
+            assert_eq!(skipped, 1, "should skip the active job");
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
     }
 
     let s = state.lock();
     assert!(
-        s.pipelines.contains_key("pipe-active"),
-        "active pipeline should remain"
+        s.jobs.contains_key("pipe-active"),
+        "active job should remain"
     );
 }
 
@@ -546,11 +546,11 @@ fn agent_prune_all_removes_terminal_standalone_agent_runs() {
             assert_eq!(pruned.len(), 2, "should prune 2 terminal agent runs");
             assert_eq!(skipped, 1, "should skip 1 running agent run");
 
-            // Verify pruned entries have empty pipeline_id (standalone)
+            // Verify pruned entries have empty job_id (standalone)
             for entry in &pruned {
                 assert!(
-                    entry.pipeline_id.is_empty(),
-                    "standalone agents have empty pipeline_id"
+                    entry.job_id.is_empty(),
+                    "standalone agents have empty job_id"
                 );
             }
         }
@@ -612,8 +612,8 @@ fn agent_prune_dry_run_does_not_delete_standalone_agent_runs() {
             assert_eq!(skipped, 0);
             // Verify it's a standalone agent entry
             assert!(
-                pruned[0].pipeline_id.is_empty(),
-                "standalone agent has empty pipeline_id"
+                pruned[0].job_id.is_empty(),
+                "standalone agent has empty job_id"
             );
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
@@ -628,7 +628,7 @@ fn agent_prune_dry_run_does_not_delete_standalone_agent_runs() {
 }
 
 #[test]
-fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
+fn agent_prune_all_handles_mixed_job_and_standalone_agents() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
@@ -638,10 +638,10 @@ fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
 
     {
         let mut s = state.lock();
-        // Terminal pipeline with agent
-        s.pipelines.insert(
+        // Terminal job with agent
+        s.jobs.insert(
             "pipe-done".to_string(),
-            make_pipeline_with_agent("pipe-done", "done", "agent-from-pipeline"),
+            make_job_with_agent("pipe-done", "done", "agent-from-job"),
         );
         // Terminal standalone agent run
         s.agent_runs.insert(
@@ -662,15 +662,15 @@ fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
             assert_eq!(
                 pruned.len(),
                 2,
-                "should prune both pipeline agent and standalone"
+                "should prune both job agent and standalone"
             );
             assert_eq!(skipped, 0);
 
             // Find the entries
-            let pipeline_agent = pruned.iter().find(|e| !e.pipeline_id.is_empty());
-            let standalone_agent = pruned.iter().find(|e| e.pipeline_id.is_empty());
+            let job_agent = pruned.iter().find(|e| !e.job_id.is_empty());
+            let standalone_agent = pruned.iter().find(|e| e.job_id.is_empty());
 
-            assert!(pipeline_agent.is_some(), "should have pipeline agent");
+            assert!(job_agent.is_some(), "should have job agent");
             assert!(standalone_agent.is_some(), "should have standalone agent");
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
@@ -679,17 +679,14 @@ fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
     // Apply the emitted events and verify state
     {
         let mut s = state.lock();
-        s.apply_event(&Event::PipelineDeleted {
-            id: oj_core::PipelineId::new("pipe-done".to_string()),
+        s.apply_event(&Event::JobDeleted {
+            id: oj_core::JobId::new("pipe-done".to_string()),
         });
         s.apply_event(&Event::AgentRunDeleted {
             id: oj_core::AgentRunId::new("ar-done"),
         });
 
-        assert!(
-            !s.pipelines.contains_key("pipe-done"),
-            "pipeline should be pruned"
-        );
+        assert!(!s.jobs.contains_key("pipe-done"), "job should be pruned");
         assert!(
             !s.agent_runs.contains_key("ar-done"),
             "agent run should be pruned"
@@ -700,13 +697,13 @@ fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
 // --- cleanup helper tests ---
 
 #[test]
-fn cleanup_pipeline_files_removes_log_and_breadcrumb() {
+fn cleanup_job_files_removes_log_and_breadcrumb() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
 
-    // Create pipeline log, breadcrumb, and agent files
-    let log_file = oj_engine::log_paths::pipeline_log_path(&logs_path, "pipe-cleanup");
+    // Create job log, breadcrumb, and agent files
+    let log_file = oj_engine::log_paths::job_log_path(&logs_path, "pipe-cleanup");
     if let Some(parent) = log_file.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
@@ -725,9 +722,9 @@ fn cleanup_pipeline_files_removes_log_and_breadcrumb() {
     std::fs::create_dir_all(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("session.log"), "session").unwrap();
 
-    super::cleanup_pipeline_files(&logs_path, "pipe-cleanup");
+    super::cleanup_job_files(&logs_path, "pipe-cleanup");
 
-    assert!(!log_file.exists(), "pipeline log should be removed");
+    assert!(!log_file.exists(), "job log should be removed");
     assert!(!crumb_file.exists(), "breadcrumb should be removed");
     assert!(!agent_log.exists(), "agent log should be removed");
     assert!(!agent_dir.exists(), "agent dir should be removed");
@@ -751,24 +748,24 @@ fn cleanup_agent_files_removes_log_and_dir() {
     assert!(!agent_dir.exists(), "agent dir should be removed");
 }
 
-// --- handle_pipeline_cancel tests ---
+// --- handle_job_cancel tests ---
 
 #[test]
-fn cancel_single_running_pipeline() {
+fn cancel_single_running_job() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
     {
         let mut s = state.lock();
-        s.pipelines
-            .insert("pipe-1".to_string(), make_pipeline("pipe-1", "work"));
+        s.jobs
+            .insert("pipe-1".to_string(), make_job("pipe-1", "work"));
     }
 
-    let result = handle_pipeline_cancel(&state, &event_bus, vec!["pipe-1".to_string()]);
+    let result = handle_job_cancel(&state, &event_bus, vec!["pipe-1".to_string()]);
 
     match result {
-        Ok(Response::PipelinesCancelled {
+        Ok(Response::JobsCancelled {
             cancelled,
             already_terminal,
             not_found,
@@ -777,20 +774,20 @@ fn cancel_single_running_pipeline() {
             assert!(already_terminal.is_empty());
             assert!(not_found.is_empty());
         }
-        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+        other => panic!("expected JobsCancelled, got: {:?}", other),
     }
 }
 
 #[test]
-fn cancel_nonexistent_pipeline_returns_not_found() {
+fn cancel_nonexistent_job_returns_not_found() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    let result = handle_pipeline_cancel(&state, &event_bus, vec!["no-such-pipe".to_string()]);
+    let result = handle_job_cancel(&state, &event_bus, vec!["no-such-pipe".to_string()]);
 
     match result {
-        Ok(Response::PipelinesCancelled {
+        Ok(Response::JobsCancelled {
             cancelled,
             already_terminal,
             not_found,
@@ -799,31 +796,29 @@ fn cancel_nonexistent_pipeline_returns_not_found() {
             assert!(already_terminal.is_empty());
             assert_eq!(not_found, vec!["no-such-pipe"]);
         }
-        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+        other => panic!("expected JobsCancelled, got: {:?}", other),
     }
 }
 
 #[test]
-fn cancel_already_terminal_pipeline() {
+fn cancel_already_terminal_job() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
     {
         let mut s = state.lock();
-        s.pipelines
-            .insert("pipe-done".to_string(), make_pipeline("pipe-done", "done"));
-        s.pipelines.insert(
-            "pipe-failed".to_string(),
-            make_pipeline("pipe-failed", "failed"),
-        );
-        s.pipelines.insert(
+        s.jobs
+            .insert("pipe-done".to_string(), make_job("pipe-done", "done"));
+        s.jobs
+            .insert("pipe-failed".to_string(), make_job("pipe-failed", "failed"));
+        s.jobs.insert(
             "pipe-cancelled".to_string(),
-            make_pipeline("pipe-cancelled", "cancelled"),
+            make_job("pipe-cancelled", "cancelled"),
         );
     }
 
-    let result = handle_pipeline_cancel(
+    let result = handle_job_cancel(
         &state,
         &event_bus,
         vec![
@@ -834,7 +829,7 @@ fn cancel_already_terminal_pipeline() {
     );
 
     match result {
-        Ok(Response::PipelinesCancelled {
+        Ok(Response::JobsCancelled {
             cancelled,
             already_terminal,
             not_found,
@@ -846,31 +841,31 @@ fn cancel_already_terminal_pipeline() {
             assert!(already_terminal.contains(&"pipe-cancelled".to_string()));
             assert!(not_found.is_empty());
         }
-        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+        other => panic!("expected JobsCancelled, got: {:?}", other),
     }
 }
 
 #[test]
-fn cancel_multiple_pipelines_mixed_results() {
+fn cancel_multiple_jobs_mixed_results() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
     {
         let mut s = state.lock();
-        // Running pipeline — should be cancelled
-        s.pipelines
-            .insert("pipe-a".to_string(), make_pipeline("pipe-a", "build"));
-        // Another running pipeline — should be cancelled
-        s.pipelines
-            .insert("pipe-b".to_string(), make_pipeline("pipe-b", "test"));
-        // Terminal pipeline — already_terminal
-        s.pipelines
-            .insert("pipe-c".to_string(), make_pipeline("pipe-c", "done"));
+        // Running job — should be cancelled
+        s.jobs
+            .insert("pipe-a".to_string(), make_job("pipe-a", "build"));
+        // Another running job — should be cancelled
+        s.jobs
+            .insert("pipe-b".to_string(), make_job("pipe-b", "test"));
+        // Terminal job — already_terminal
+        s.jobs
+            .insert("pipe-c".to_string(), make_job("pipe-c", "done"));
         // "pipe-d" not inserted — not_found
     }
 
-    let result = handle_pipeline_cancel(
+    let result = handle_job_cancel(
         &state,
         &event_bus,
         vec![
@@ -882,7 +877,7 @@ fn cancel_multiple_pipelines_mixed_results() {
     );
 
     match result {
-        Ok(Response::PipelinesCancelled {
+        Ok(Response::JobsCancelled {
             cancelled,
             already_terminal,
             not_found,
@@ -891,7 +886,7 @@ fn cancel_multiple_pipelines_mixed_results() {
             assert_eq!(already_terminal, vec!["pipe-c"]);
             assert_eq!(not_found, vec!["pipe-d"]);
         }
-        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+        other => panic!("expected JobsCancelled, got: {:?}", other),
     }
 }
 
@@ -901,10 +896,10 @@ fn cancel_empty_ids_returns_empty_response() {
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    let result = handle_pipeline_cancel(&state, &event_bus, vec![]);
+    let result = handle_job_cancel(&state, &event_bus, vec![]);
 
     match result {
-        Ok(Response::PipelinesCancelled {
+        Ok(Response::JobsCancelled {
             cancelled,
             already_terminal,
             not_found,
@@ -913,16 +908,16 @@ fn cancel_empty_ids_returns_empty_response() {
             assert!(already_terminal.is_empty());
             assert!(not_found.is_empty());
         }
-        other => panic!("expected PipelinesCancelled, got: {:?}", other),
+        other => panic!("expected JobsCancelled, got: {:?}", other),
     }
 }
 
 /// Helper to create a runbook JSON with an agent step
-fn make_agent_runbook_json(pipeline_kind: &str, step_name: &str) -> serde_json::Value {
+fn make_agent_runbook_json(job_kind: &str, step_name: &str) -> serde_json::Value {
     serde_json::json!({
-        "pipelines": {
-            pipeline_kind: {
-                "kind": pipeline_kind,
+        "jobs": {
+            job_kind: {
+                "kind": job_kind,
                 "steps": [
                     {
                         "name": step_name,
@@ -935,11 +930,11 @@ fn make_agent_runbook_json(pipeline_kind: &str, step_name: &str) -> serde_json::
 }
 
 /// Helper to create a runbook JSON with a shell step
-fn make_shell_runbook_json(pipeline_kind: &str, step_name: &str) -> serde_json::Value {
+fn make_shell_runbook_json(job_kind: &str, step_name: &str) -> serde_json::Value {
     serde_json::json!({
-        "pipelines": {
-            pipeline_kind: {
-                "kind": pipeline_kind,
+        "jobs": {
+            job_kind: {
+                "kind": job_kind,
                 "steps": [
                     {
                         "name": step_name,
@@ -980,16 +975,16 @@ fn resume_agent_step_without_message_returns_error() {
         make_agent_runbook_json("test", "work"),
     );
 
-    // Create a pipeline at the agent step
-    let mut pipeline = make_pipeline("pipe-agent", "work");
-    pipeline.runbook_hash = runbook_hash.to_string();
+    // Create a job at the agent step
+    let mut job = make_job("pipe-agent", "work");
+    job.runbook_hash = runbook_hash.to_string();
     {
         let mut s = state.lock();
-        s.pipelines.insert("pipe-agent".to_string(), pipeline);
+        s.jobs.insert("pipe-agent".to_string(), job);
     }
 
     // Try to resume without a message
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -1025,16 +1020,16 @@ fn resume_agent_step_with_message_succeeds() {
         make_agent_runbook_json("test", "work"),
     );
 
-    // Create a pipeline at the agent step
-    let mut pipeline = make_pipeline("pipe-agent-2", "work");
-    pipeline.runbook_hash = runbook_hash.to_string();
+    // Create a job at the agent step
+    let mut job = make_job("pipe-agent-2", "work");
+    job.runbook_hash = runbook_hash.to_string();
     {
         let mut s = state.lock();
-        s.pipelines.insert("pipe-agent-2".to_string(), pipeline);
+        s.jobs.insert("pipe-agent-2".to_string(), job);
     }
 
     // Resume with a message should succeed
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -1061,16 +1056,16 @@ fn resume_shell_step_without_message_succeeds() {
         make_shell_runbook_json("test", "build"),
     );
 
-    // Create a pipeline at the shell step
-    let mut pipeline = make_pipeline("pipe-shell", "build");
-    pipeline.runbook_hash = runbook_hash.to_string();
+    // Create a job at the shell step
+    let mut job = make_job("pipe-shell", "build");
+    job.runbook_hash = runbook_hash.to_string();
     {
         let mut s = state.lock();
-        s.pipelines.insert("pipe-shell".to_string(), pipeline);
+        s.jobs.insert("pipe-shell".to_string(), job);
     }
 
     // Resume without a message should succeed for shell steps
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -1083,7 +1078,7 @@ fn resume_shell_step_without_message_succeeds() {
 }
 
 #[test]
-fn resume_failed_pipeline_without_message_succeeds() {
+fn resume_failed_job_without_message_succeeds() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
@@ -1097,21 +1092,20 @@ fn resume_failed_pipeline_without_message_succeeds() {
         make_agent_runbook_json("test", "work"),
     );
 
-    // Create a pipeline in "failed" state (terminal failure)
+    // Create a job in "failed" state (terminal failure)
     // Even though the last step was an agent step, resuming from "failed"
     // doesn't require a message at the daemon level - the engine handles
     // resetting to the failed step
-    let mut pipeline = make_pipeline("pipe-failed-agent", "failed");
-    pipeline.runbook_hash = runbook_hash.to_string();
+    let mut job = make_job("pipe-failed-agent", "failed");
+    job.runbook_hash = runbook_hash.to_string();
     {
         let mut s = state.lock();
-        s.pipelines
-            .insert("pipe-failed-agent".to_string(), pipeline);
+        s.jobs.insert("pipe-failed-agent".to_string(), job);
     }
 
     // Resume without message should be allowed for "failed" state
     // (the engine will reset to the actual failed step and validate there)
-    let result = handle_pipeline_resume(
+    let result = handle_job_resume(
         &state,
         &orphans,
         &event_bus,
@@ -1125,17 +1119,17 @@ fn resume_failed_pipeline_without_message_succeeds() {
 
 // --- handle_agent_send tests ---
 
-/// Helper: build a pipeline where the agent step is NOT the last step.
-/// This simulates a pipeline that has advanced past the agent step.
-fn make_pipeline_agent_in_history(
+/// Helper: build a job where the agent step is NOT the last step.
+/// This simulates a job that has advanced past the agent step.
+fn make_job_agent_in_history(
     id: &str,
     current_step: &str,
     agent_step: &str,
     agent_id: &str,
-) -> Pipeline {
-    Pipeline {
+) -> Job {
+    Job {
         id: id.to_string(),
-        name: "test-pipeline".to_string(),
+        name: "test-job".to_string(),
         kind: "test".to_string(),
         namespace: "proj".to_string(),
         step: current_step.to_string(),
@@ -1185,9 +1179,9 @@ async fn agent_send_finds_agent_in_last_step() {
 
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-1".to_string(),
-            make_pipeline_with_agent("pipe-1", "work", "agent-abc"),
+            make_job_with_agent("pipe-1", "work", "agent-abc"),
         );
     }
 
@@ -1207,12 +1201,12 @@ async fn agent_send_finds_agent_in_earlier_step() {
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    // Agent step is NOT the last step — pipeline has advanced to "review"
+    // Agent step is NOT the last step — job has advanced to "review"
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-1".to_string(),
-            make_pipeline_agent_in_history("pipe-1", "review", "work", "agent-xyz"),
+            make_job_agent_in_history("pipe-1", "review", "work", "agent-xyz"),
         );
     }
 
@@ -1227,21 +1221,21 @@ async fn agent_send_finds_agent_in_earlier_step() {
 }
 
 #[tokio::test]
-async fn agent_send_via_pipeline_id_finds_agent_in_earlier_step() {
+async fn agent_send_via_job_id_finds_agent_in_earlier_step() {
     let dir = tempdir().unwrap();
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    // Pipeline has advanced past the agent step
+    // Job has advanced past the agent step
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-abc123".to_string(),
-            make_pipeline_agent_in_history("pipe-abc123", "review", "work", "agent-inner"),
+            make_job_agent_in_history("pipe-abc123", "review", "work", "agent-inner"),
         );
     }
 
-    // Look up by pipeline ID — should search all history and find the agent
+    // Look up by job ID — should search all history and find the agent
     let result = handle_agent_send(
         &state,
         &event_bus,
@@ -1261,14 +1255,9 @@ async fn agent_send_prefix_match_across_all_history() {
     // Agent ID in a non-last step, matched by prefix
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-1".to_string(),
-            make_pipeline_agent_in_history(
-                "pipe-1",
-                "review",
-                "work",
-                "agent-long-uuid-string-12345",
-            ),
+            make_job_agent_in_history("pipe-1", "review", "work", "agent-long-uuid-string-12345"),
         );
     }
 
@@ -1288,7 +1277,7 @@ async fn agent_send_finds_standalone_agent_run() {
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    // Insert a standalone agent run (no pipeline)
+    // Insert a standalone agent run (no job)
     {
         let mut s = state.lock();
         s.agent_runs.insert(
@@ -1356,12 +1345,12 @@ async fn agent_send_prefers_latest_step_history_entry() {
     let event_bus = test_event_bus(dir.path());
     let state = empty_state();
 
-    // Pipeline with two agent steps — should prefer the latest (second) one
-    // when looking up by pipeline ID
+    // Job with two agent steps — should prefer the latest (second) one
+    // when looking up by job ID
     {
         let mut s = state.lock();
-        let mut pipeline = make_pipeline("pipe-multi", "done");
-        pipeline.step_history = vec![
+        let mut job = make_job("pipe-multi", "done");
+        job.step_history = vec![
             StepRecord {
                 name: "work-1".to_string(),
                 started_at_ms: 1000,
@@ -1387,10 +1376,10 @@ async fn agent_send_prefers_latest_step_history_entry() {
                 agent_name: None,
             },
         ];
-        s.pipelines.insert("pipe-multi".to_string(), pipeline);
+        s.jobs.insert("pipe-multi".to_string(), job);
     }
 
-    // Look up by pipeline ID — should resolve to the latest agent (agent-new)
+    // Look up by job ID — should resolve to the latest agent (agent-new)
     let result = handle_agent_send(
         &state,
         &event_bus,
@@ -1401,16 +1390,16 @@ async fn agent_send_prefers_latest_step_history_entry() {
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }
 
-// --- handle_pipeline_prune tests ---
+// --- handle_job_prune tests ---
 
-fn make_pipeline_ns(id: &str, step: &str, namespace: &str) -> Pipeline {
-    let mut p = make_pipeline(id, step);
+fn make_job_ns(id: &str, step: &str, namespace: &str) -> Job {
+    let mut p = make_job(id, step);
     p.namespace = namespace.to_string();
     p
 }
 
 #[test]
-fn pipeline_prune_all_without_namespace_prunes_across_all_projects() {
+fn job_prune_all_without_namespace_prunes_across_all_projects() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(&logs_path).unwrap();
@@ -1419,25 +1408,25 @@ fn pipeline_prune_all_without_namespace_prunes_across_all_projects() {
     let state = empty_state();
     let orphans = empty_orphans();
 
-    // Insert terminal pipelines from different namespaces
+    // Insert terminal jobs from different namespaces
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-a".to_string(),
-            make_pipeline_ns("pipe-a", "done", "proj-alpha"),
+            make_job_ns("pipe-a", "done", "proj-alpha"),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-b".to_string(),
-            make_pipeline_ns("pipe-b", "failed", "proj-beta"),
+            make_job_ns("pipe-b", "failed", "proj-beta"),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-c".to_string(),
-            make_pipeline_ns("pipe-c", "cancelled", "proj-gamma"),
+            make_job_ns("pipe-c", "cancelled", "proj-gamma"),
         );
-        // Non-terminal pipeline should be skipped
-        s.pipelines.insert(
+        // Non-terminal job should be skipped
+        s.jobs.insert(
             "pipe-d".to_string(),
-            make_pipeline_ns("pipe-d", "work", "proj-alpha"),
+            make_job_ns("pipe-d", "work", "proj-alpha"),
         );
     }
 
@@ -1446,29 +1435,29 @@ fn pipeline_prune_all_without_namespace_prunes_across_all_projects() {
         dry_run: false,
         namespace: None, // No namespace filter
     };
-    let result = handle_pipeline_prune(
+    let result = handle_job_prune(
         &state, &event_bus, &logs_path, &orphans, &flags, false, false,
     );
 
     match result {
-        Ok(Response::PipelinesPruned { pruned, skipped }) => {
+        Ok(Response::JobsPruned { pruned, skipped }) => {
             assert_eq!(
                 pruned.len(),
                 3,
-                "should prune all 3 terminal pipelines across namespaces"
+                "should prune all 3 terminal jobs across namespaces"
             );
             let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
             assert!(pruned_ids.contains(&"pipe-a"));
             assert!(pruned_ids.contains(&"pipe-b"));
             assert!(pruned_ids.contains(&"pipe-c"));
-            assert_eq!(skipped, 1, "should skip non-terminal pipeline");
+            assert_eq!(skipped, 1, "should skip non-terminal job");
         }
-        other => panic!("expected PipelinesPruned, got: {:?}", other),
+        other => panic!("expected JobsPruned, got: {:?}", other),
     }
 }
 
 #[test]
-fn pipeline_prune_all_with_namespace_only_prunes_matching_project() {
+fn job_prune_all_with_namespace_only_prunes_matching_project() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(&logs_path).unwrap();
@@ -1477,20 +1466,20 @@ fn pipeline_prune_all_with_namespace_only_prunes_matching_project() {
     let state = empty_state();
     let orphans = empty_orphans();
 
-    // Insert terminal pipelines from different namespaces
+    // Insert terminal jobs from different namespaces
     {
         let mut s = state.lock();
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-a".to_string(),
-            make_pipeline_ns("pipe-a", "done", "proj-alpha"),
+            make_job_ns("pipe-a", "done", "proj-alpha"),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-b".to_string(),
-            make_pipeline_ns("pipe-b", "failed", "proj-beta"),
+            make_job_ns("pipe-b", "failed", "proj-beta"),
         );
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-c".to_string(),
-            make_pipeline_ns("pipe-c", "cancelled", "proj-alpha"),
+            make_job_ns("pipe-c", "cancelled", "proj-alpha"),
         );
     }
 
@@ -1499,26 +1488,26 @@ fn pipeline_prune_all_with_namespace_only_prunes_matching_project() {
         dry_run: false,
         namespace: Some("proj-alpha"), // Only prune proj-alpha
     };
-    let result = handle_pipeline_prune(
+    let result = handle_job_prune(
         &state, &event_bus, &logs_path, &orphans, &flags, false, false,
     );
 
     match result {
-        Ok(Response::PipelinesPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 2, "should prune only proj-alpha pipelines");
+        Ok(Response::JobsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 2, "should prune only proj-alpha jobs");
             let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
             assert!(pruned_ids.contains(&"pipe-a"));
             assert!(pruned_ids.contains(&"pipe-c"));
-            // Namespace-filtered pipelines don't count as "skipped" —
-            // only non-terminal pipelines within the namespace do.
+            // Namespace-filtered jobs don't count as "skipped" —
+            // only non-terminal jobs within the namespace do.
             assert_eq!(skipped, 0);
         }
-        other => panic!("expected PipelinesPruned, got: {:?}", other),
+        other => panic!("expected JobsPruned, got: {:?}", other),
     }
 }
 
 #[test]
-fn pipeline_prune_skips_non_terminal_steps() {
+fn job_prune_skips_non_terminal_steps() {
     let dir = tempdir().unwrap();
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(&logs_path).unwrap();
@@ -1530,12 +1519,12 @@ fn pipeline_prune_skips_non_terminal_steps() {
     {
         let mut s = state.lock();
         // Non-terminal steps should never be pruned
-        s.pipelines.insert(
+        s.jobs.insert(
             "pipe-running".to_string(),
-            make_pipeline("pipe-running", "implement"),
+            make_job("pipe-running", "implement"),
         );
-        s.pipelines
-            .insert("pipe-work".to_string(), make_pipeline("pipe-work", "work"));
+        s.jobs
+            .insert("pipe-work".to_string(), make_job("pipe-work", "work"));
     }
 
     let flags = PruneFlags {
@@ -1543,16 +1532,16 @@ fn pipeline_prune_skips_non_terminal_steps() {
         dry_run: false,
         namespace: None,
     };
-    let result = handle_pipeline_prune(
+    let result = handle_job_prune(
         &state, &event_bus, &logs_path, &orphans, &flags, false, false,
     );
 
     match result {
-        Ok(Response::PipelinesPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 0, "should not prune non-terminal pipelines");
-            assert_eq!(skipped, 2, "should skip both non-terminal pipelines");
+        Ok(Response::JobsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 0, "should not prune non-terminal jobs");
+            assert_eq!(skipped, 2, "should skip both non-terminal jobs");
         }
-        other => panic!("expected PipelinesPruned, got: {:?}", other),
+        other => panic!("expected JobsPruned, got: {:?}", other),
     }
 }
 
@@ -1733,7 +1722,7 @@ async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
     let workspaces_dir = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspaces_dir).unwrap();
 
-    // Workspace with an owner whose pipeline no longer exists in state
+    // Workspace with an owner whose job no longer exists in state
     // (owner is unresolvable → should be included in namespace-filtered prune)
     {
         let mut s = state.lock();
@@ -1742,20 +1731,20 @@ async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
             make_workspace(
                 "ws-orphan-owner",
                 workspaces_dir.join("ws-orphan-owner"),
-                Some("deleted-pipeline-id"),
+                Some("deleted-job-id"),
             ),
         );
-        // Workspace with a matching namespace pipeline
-        s.pipelines.insert(
-            "live-pipeline".to_string(),
-            make_pipeline_ns("live-pipeline", "done", "myproject"),
+        // Workspace with a matching namespace job
+        s.jobs.insert(
+            "live-job".to_string(),
+            make_job_ns("live-job", "done", "myproject"),
         );
         s.workspaces.insert(
             "ws-with-owner".to_string(),
             make_workspace(
                 "ws-with-owner",
                 workspaces_dir.join("ws-with-owner"),
-                Some("live-pipeline"),
+                Some("live-job"),
             ),
         );
     }

@@ -3,7 +3,7 @@
 
 //! Parser tests for environment variable prefix parsing.
 
-use super::helpers::{assert_literal, cmd_name, get_pipeline, get_simple_command};
+use super::helpers::{assert_literal, cmd_name, get_job, get_simple_command};
 use crate::ast::WordPart;
 use crate::parser::Parser;
 use crate::token::Span;
@@ -75,38 +75,38 @@ fn test_path_value_prefix() {
 }
 
 // =============================================================================
-// Prefix with Pipeline
+// Prefix with Job
 // =============================================================================
 
 #[test]
-fn test_env_prefix_in_pipeline() {
+fn test_env_prefix_in_job() {
     let result = Parser::parse("FOO=bar cmd1 | cmd2").unwrap();
-    let pipeline = get_pipeline(&result.commands[0]);
+    let job = get_job(&result.commands[0]);
 
     // Prefix applies to first command only
-    assert_eq!(pipeline.commands.len(), 2);
-    assert_eq!(pipeline.commands[0].env.len(), 1);
-    assert_eq!(pipeline.commands[0].env[0].name, "FOO");
-    assert_eq!(cmd_name(&pipeline.commands[0]), "cmd1");
+    assert_eq!(job.commands.len(), 2);
+    assert_eq!(job.commands[0].env.len(), 1);
+    assert_eq!(job.commands[0].env[0].name, "FOO");
+    assert_eq!(cmd_name(&job.commands[0]), "cmd1");
 
     // Second command has no prefix
-    assert!(pipeline.commands[1].env.is_empty());
-    assert_eq!(cmd_name(&pipeline.commands[1]), "cmd2");
+    assert!(job.commands[1].env.is_empty());
+    assert_eq!(cmd_name(&job.commands[1]), "cmd2");
 }
 
 #[test]
-fn test_env_prefix_second_cmd_pipeline() {
+fn test_env_prefix_second_cmd_job() {
     let result = Parser::parse("cmd1 | FOO=bar cmd2").unwrap();
-    let pipeline = get_pipeline(&result.commands[0]);
+    let job = get_job(&result.commands[0]);
 
     // First command has no prefix
-    assert!(pipeline.commands[0].env.is_empty());
-    assert_eq!(cmd_name(&pipeline.commands[0]), "cmd1");
+    assert!(job.commands[0].env.is_empty());
+    assert_eq!(cmd_name(&job.commands[0]), "cmd1");
 
     // Second command has prefix
-    assert_eq!(pipeline.commands[1].env.len(), 1);
-    assert_eq!(pipeline.commands[1].env[0].name, "FOO");
-    assert_eq!(cmd_name(&pipeline.commands[1]), "cmd2");
+    assert_eq!(job.commands[1].env.len(), 1);
+    assert_eq!(job.commands[1].env[0].name, "FOO");
+    assert_eq!(cmd_name(&job.commands[1]), "cmd2");
 }
 
 // =============================================================================

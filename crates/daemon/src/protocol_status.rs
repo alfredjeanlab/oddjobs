@@ -16,7 +16,7 @@ pub struct CronSummary {
     #[serde(default)]
     pub namespace: String,
     pub interval: String,
-    pub pipeline: String,
+    pub job: String,
     pub status: String,
     /// Human-readable time: "in 12m" for running, "3h ago" for stopped
     #[serde(default)]
@@ -27,12 +27,12 @@ pub struct CronSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NamespaceStatus {
     pub namespace: String,
-    /// Non-terminal pipelines (Running/Pending status)
-    pub active_pipelines: Vec<PipelineStatusEntry>,
-    /// Pipelines in Waiting status (escalated to human)
-    pub escalated_pipelines: Vec<PipelineStatusEntry>,
-    /// Orphaned pipelines detected from breadcrumb files
-    pub orphaned_pipelines: Vec<PipelineStatusEntry>,
+    /// Non-terminal jobs (Running/Pending status)
+    pub active_jobs: Vec<JobStatusEntry>,
+    /// Jobs in Waiting status (escalated to human)
+    pub escalated_jobs: Vec<JobStatusEntry>,
+    /// Orphaned jobs detected from breadcrumb files
+    pub orphaned_jobs: Vec<JobStatusEntry>,
     /// Workers and their status
     pub workers: Vec<WorkerSummary>,
     /// Queue depths: (queue_name, pending_count, active_count, dead_count)
@@ -45,18 +45,18 @@ pub struct NamespaceStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PipelineStatusEntry {
+pub struct JobStatusEntry {
     pub id: String,
     pub name: String,
     pub kind: String,
     pub step: String,
     pub step_status: String,
-    /// Duration since pipeline started (ms)
+    /// Duration since job started (ms)
     pub elapsed_ms: u64,
     /// Epoch ms of the most recent step activity (start or finish)
     #[serde(default)]
     pub last_activity_ms: u64,
-    /// Reason pipeline is waiting (from StepOutcome::Waiting)
+    /// Reason job is waiting (from StepOutcome::Waiting)
     pub waiting_reason: Option<String>,
     /// Escalation source category (e.g., "idle", "error", "gate", "approval")
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -79,10 +79,10 @@ pub struct AgentStatusEntry {
     pub status: String,
 }
 
-/// Summary of an orphaned pipeline detected from a breadcrumb file
+/// Summary of an orphaned job detected from a breadcrumb file
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrphanSummary {
-    pub pipeline_id: String,
+    pub job_id: String,
     pub project: String,
     pub kind: String,
     pub name: String,
@@ -93,7 +93,7 @@ pub struct OrphanSummary {
     pub updated_at: String,
 }
 
-/// Agent info from an orphaned pipeline's breadcrumb
+/// Agent info from an orphaned job's breadcrumb
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrphanAgent {
     pub agent_id: String,
@@ -101,9 +101,9 @@ pub struct OrphanAgent {
     pub log_path: PathBuf,
 }
 
-/// Pipeline entry for prune responses
+/// Job entry for prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PipelineEntry {
+pub struct JobEntry {
     pub id: String,
     pub name: String,
     pub step: String,
@@ -113,7 +113,7 @@ pub struct PipelineEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentEntry {
     pub agent_id: String,
-    pub pipeline_id: String,
+    pub job_id: String,
     pub step_name: String,
 }
 /// Worker entry for prune responses
@@ -143,7 +143,7 @@ pub struct QueueItemEntry {
 pub struct ProjectSummary {
     pub name: String,
     pub root: PathBuf,
-    pub active_pipelines: usize,
+    pub active_jobs: usize,
     pub active_agents: usize,
     pub workers: usize,
     pub crons: usize,

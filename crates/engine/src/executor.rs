@@ -120,7 +120,7 @@ where
             Effect::SpawnAgent {
                 agent_id,
                 agent_name,
-                pipeline_id,
+                job_id,
                 agent_run_id,
                 workspace_path,
                 input,
@@ -138,11 +138,11 @@ where
                     workspace_path: workspace_path.clone(),
                     cwd,
                     prompt: input.get("prompt").cloned().unwrap_or_default(),
-                    pipeline_name: input
+                    job_name: input
                         .get("name")
                         .cloned()
-                        .unwrap_or_else(|| pipeline_id.to_string()),
-                    pipeline_id: pipeline_id.to_string(),
+                        .unwrap_or_else(|| job_id.to_string()),
+                    job_id: job_id.to_string(),
                     project_root: workspace_path,
                     session_config,
                 };
@@ -153,7 +153,7 @@ where
                 // Emit SessionCreated so state tracks the session_id
                 let event = Event::SessionCreated {
                     id: oj_core::SessionId::new(handle.session_id),
-                    pipeline_id,
+                    job_id,
                     agent_run_id,
                 };
                 {
@@ -400,7 +400,7 @@ where
 
             // === Shell effects ===
             Effect::Shell {
-                pipeline_id,
+                job_id,
                 step,
                 command,
                 cwd,
@@ -410,7 +410,7 @@ where
 
                 tokio::spawn(async move {
                     tracing::info!(
-                        %pipeline_id,
+                        %job_id,
                         step,
                         %command,
                         cwd = %cwd.display(),
@@ -433,7 +433,7 @@ where
                             } else {
                                 let s = String::from_utf8_lossy(&output.stdout).into_owned();
                                 tracing::info!(
-                                    %pipeline_id,
+                                    %job_id,
                                     step,
                                     cwd = %cwd.display(),
                                     stdout = %s,
@@ -446,7 +446,7 @@ where
                             } else {
                                 let s = String::from_utf8_lossy(&output.stderr).into_owned();
                                 tracing::warn!(
-                                    %pipeline_id,
+                                    %job_id,
                                     step,
                                     cwd = %cwd.display(),
                                     stderr = %s,
@@ -458,7 +458,7 @@ where
                         }
                         Err(e) => {
                             tracing::error!(
-                                %pipeline_id,
+                                %job_id,
                                 step,
                                 cwd = %cwd.display(),
                                 error = %e,
@@ -469,7 +469,7 @@ where
                     };
 
                     let event = Event::ShellExited {
-                        pipeline_id,
+                        job_id,
                         step,
                         exit_code,
                         stdout,

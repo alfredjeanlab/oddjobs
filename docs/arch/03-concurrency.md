@@ -159,7 +159,7 @@ Handlers fall into three categories by blocking behavior:
 — write to WAL and return. Never contend with the engine.
 
 **State-reading** (blocks on `state.lock()`):
-All `Query::*` variants, `PipelineCancel`, `PipelineResume`, `SessionSend`,
+All `Query::*` variants, `JobCancel`, `JobResume`, `SessionSend`,
 `DecisionResolve` — acquire the shared `Mutex<MaterializedState>`. Blocked
 whenever `process_event()` holds the lock.
 
@@ -179,7 +179,7 @@ Shared State                        Protected By              Held Across .await
 MaterializedState                   Arc<Mutex<..>>            No
 Wal                                 Arc<Mutex<..>>            No
 Scheduler                           Arc<Mutex<..>>            No
-Runtime.agent_pipelines             Mutex<HashMap<..>>        No
+Runtime.agent_jobs             Mutex<HashMap<..>>        No
 Runtime.agent_runs                  Mutex<HashMap<..>>        No
 Runtime.runbook_cache               Mutex<HashMap<..>>        No
 Runtime.worker_states               Mutex<HashMap<..>>        No
@@ -199,7 +199,7 @@ Channel                             Type                  Capacity   Direction
 ─────────────────────────────────── ───────────────────── ────────── ──────────
 Runtime → EventBus                  tokio::sync::mpsc     100        events
 EventBus → EventReader              tokio::sync::mpsc     1          wake signal
-Agent log entries                   tokio::sync::mpsc     256        log pipeline
+Agent log entries                   tokio::sync::mpsc     256        log job
 Watcher shutdown                    tokio::sync::oneshot  —          per-agent
 Daemon shutdown                     tokio::sync::Notify   —          broadcast
 CLI output streaming                tokio::sync::mpsc     16         CLI display
@@ -278,7 +278,7 @@ connection task on external process I/O for seconds, with no timeout.
 A single `CommandRun` produces result events (`WorkspaceReady`,
 `SessionCreated`) that feed back through the WAL. Each result event triggers
 another `process_event()` iteration that may execute more inline effects.
-The full chain for a workspace+agent pipeline:
+The full chain for a workspace+agent job:
 
 ```diagram
 CommandRun ─► CreateWorkspace (5-30s) ─► WorkspaceReady

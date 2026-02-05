@@ -8,7 +8,7 @@ mod assignments;
 mod env_prefix;
 mod errors;
 mod nesting;
-mod pipelines;
+mod jobs;
 mod properties;
 mod sequences;
 mod simple_cmd;

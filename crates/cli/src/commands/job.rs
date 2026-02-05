@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! `oj pipeline` - Pipeline management commands
+//! `oj job` - Job management commands
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -20,14 +20,14 @@ use crate::output::{
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
-pub struct PipelineArgs {
+pub struct JobArgs {
     #[command(subcommand)]
-    pub command: PipelineCommand,
+    pub command: JobCommand,
 }
 
 #[derive(Subcommand)]
-pub enum PipelineCommand {
-    /// List pipelines
+pub enum JobCommand {
+    /// List jobs
     List {
         /// Filter by name substring
         name: Option<String>,
@@ -36,50 +36,50 @@ pub enum PipelineCommand {
         #[arg(long)]
         status: Option<String>,
 
-        /// Maximum number of pipelines to show (default: 20)
+        /// Maximum number of jobs to show (default: 20)
         #[arg(short = 'n', long, default_value = "20")]
         limit: usize,
 
-        /// Show all pipelines (no limit)
+        /// Show all jobs (no limit)
         #[arg(long, conflicts_with = "limit")]
         no_limit: bool,
     },
-    /// Show details of a pipeline
+    /// Show details of a job
     Show {
-        /// Pipeline ID or name
+        /// Job ID or name
         id: String,
 
         /// Show full variable values without truncation
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// Resume monitoring for an escalated pipeline
+    /// Resume monitoring for an escalated job
     Resume {
-        /// Pipeline ID or name
+        /// Job ID or name
         id: String,
 
         /// Message for nudge/recovery (required for agent steps)
         #[arg(short = 'm', long)]
         message: Option<String>,
 
-        /// Pipeline variables to set (can be repeated: --var key=value)
+        /// Job variables to set (can be repeated: --var key=value)
         #[arg(long = "var", value_parser = parse_key_value)]
         var: Vec<(String, String)>,
     },
-    /// Cancel one or more running pipelines
+    /// Cancel one or more running jobs
     Cancel {
-        /// Pipeline IDs or names (prefix match)
+        /// Job IDs or names (prefix match)
         #[arg(required = true)]
         ids: Vec<String>,
     },
-    /// Attach to the agent session for a pipeline
+    /// Attach to the agent session for a job
     Attach {
-        /// Pipeline ID (supports prefix matching)
+        /// Job ID (supports prefix matching)
         id: String,
     },
-    /// View pipeline activity logs
+    /// View job activity logs
     Logs {
-        /// Pipeline ID or name
+        /// Job ID or name
         id: String,
         /// Stream live activity (like tail -f)
         #[arg(long, short)]
@@ -88,33 +88,33 @@ pub enum PipelineCommand {
         #[arg(short = 'n', long, default_value = "50")]
         limit: usize,
     },
-    /// Peek at the active tmux session for a pipeline
+    /// Peek at the active tmux session for a job
     Peek {
-        /// Pipeline ID (supports prefix matching)
+        /// Job ID (supports prefix matching)
         id: String,
     },
-    /// Remove old terminal pipelines (failed/cancelled/done)
+    /// Remove old terminal jobs (failed/cancelled/done)
     Prune {
-        /// Remove all terminal pipelines regardless of age
+        /// Remove all terminal jobs regardless of age
         #[arg(long)]
         all: bool,
-        /// Remove all failed pipelines regardless of age
+        /// Remove all failed jobs regardless of age
         #[arg(long)]
         failed: bool,
-        /// Prune orphaned pipelines (breadcrumb exists but no daemon state)
+        /// Prune orphaned jobs (breadcrumb exists but no daemon state)
         #[arg(long)]
         orphans: bool,
         /// Show what would be pruned without doing it
         #[arg(long)]
         dry_run: bool,
     },
-    /// Block until pipeline(s) reach a terminal state
+    /// Block until job(s) reach a terminal state
     Wait {
-        /// Pipeline IDs or names (prefix match)
+        /// Job IDs or names (prefix match)
         #[arg(required = true)]
         ids: Vec<String>,
 
-        /// Wait for ALL pipelines to complete (default: wait for ANY)
+        /// Wait for ALL jobs to complete (default: wait for ANY)
         #[arg(long)]
         all: bool,
 
@@ -166,17 +166,17 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs(total_secs))
 }
 
-pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon::PipelineSummary]) {
-    if pipelines.is_empty() {
-        let _ = writeln!(out, "No pipelines");
+pub(crate) fn format_job_list(out: &mut impl Write, jobs: &[oj_daemon::JobSummary]) {
+    if jobs.is_empty() {
+        let _ = writeln!(out, "No jobs");
         return;
     }
 
     // Show PROJECT column only when multiple namespaces present
-    let show_project = should_show_project(pipelines.iter().map(|p| p.namespace.as_str()));
+    let show_project = should_show_project(jobs.iter().map(|p| p.namespace.as_str()));
 
-    // Show RETRIES column only when any pipeline has retries
-    let show_retries = pipelines.iter().any(|p| p.retry_count > 0);
+    // Show RETRIES column only when any job has retries
+    let show_retries = jobs.iter().any(|p| p.retry_count > 0);
 
     // Build columns
     let mut cols = vec![Column::muted("ID")];
@@ -196,7 +196,7 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
 
     let mut table = Table::new(cols);
 
-    for p in pipelines {
+    for p in jobs {
         let id = p.id.short(8).to_string();
         let updated = format_time_ago(p.updated_at_ms);
 
@@ -216,54 +216,54 @@ pub(crate) fn format_pipeline_list(out: &mut impl Write, pipelines: &[oj_daemon:
 }
 
 pub async fn handle(
-    command: PipelineCommand,
+    command: JobCommand,
     client: &DaemonClient,
     project: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        PipelineCommand::List {
+        JobCommand::List {
             name,
             status,
             limit,
             no_limit,
         } => {
-            let mut pipelines = client.list_pipelines().await?;
+            let mut jobs = client.list_jobs().await?;
 
             // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
             if let Some(proj) = project {
-                pipelines.retain(|p| p.namespace == proj);
+                jobs.retain(|p| p.namespace == proj);
             }
 
             // Filter by name substring
             if let Some(ref pat) = name {
                 let pat_lower = pat.to_lowercase();
-                pipelines.retain(|p| p.name.to_lowercase().contains(&pat_lower));
+                jobs.retain(|p| p.name.to_lowercase().contains(&pat_lower));
             }
 
             // Filter by status
             if let Some(ref st) = status {
                 let st_lower = st.to_lowercase();
-                pipelines.retain(|p| {
+                jobs.retain(|p| {
                     p.step_status.to_lowercase() == st_lower || p.step.to_lowercase() == st_lower
                 });
             }
 
             // Sort by most recently updated first
-            pipelines.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+            jobs.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
 
             // Limit
-            let total = pipelines.len();
+            let total = jobs.len();
             let effective_limit = if no_limit { total } else { limit };
             let truncated = total > effective_limit;
             if truncated {
-                pipelines.truncate(effective_limit);
+                jobs.truncate(effective_limit);
             }
 
             match format {
                 OutputFormat::Text => {
                     let mut out = std::io::stdout();
-                    format_pipeline_list(&mut out, &pipelines);
+                    format_job_list(&mut out, &jobs);
 
                     if truncated {
                         let remaining = total - effective_limit;
@@ -274,17 +274,17 @@ pub async fn handle(
                     }
                 }
                 OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&pipelines)?);
+                    println!("{}", serde_json::to_string_pretty(&jobs)?);
                 }
             }
         }
-        PipelineCommand::Show { id, verbose } => {
-            let pipeline = client.get_pipeline(&id).await?;
+        JobCommand::Show { id, verbose } => {
+            let job = client.get_job(&id).await?;
 
             match format {
                 OutputFormat::Text => {
-                    if let Some(p) = pipeline {
-                        println!("{} {}", color::header("Pipeline:"), p.id);
+                    if let Some(p) = job {
+                        println!("{} {}", color::header("Job:"), p.id);
                         println!("  {} {}", color::context("Name:"), p.name);
                         if !p.namespace.is_empty() {
                             println!("  {} {}", color::context("Project:"), p.namespace);
@@ -310,7 +310,7 @@ pub async fn handle(
                             println!();
                             println!("  {}", color::header("Steps:"));
                             for step in &p.steps {
-                                let duration = super::pipeline_wait::format_duration(
+                                let duration = super::job_wait::format_duration(
                                     step.started_at_ms,
                                     step.finished_at_ms,
                                 );
@@ -393,25 +393,25 @@ pub async fn handle(
                             }
                         }
                     } else {
-                        println!("Pipeline not found: {}", id);
+                        println!("Job not found: {}", id);
                     }
                 }
                 OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&pipeline)?);
+                    println!("{}", serde_json::to_string_pretty(&job)?);
                 }
             }
         }
-        PipelineCommand::Resume { id, message, var } => {
+        JobCommand::Resume { id, message, var } => {
             let var_map: HashMap<String, String> = var.into_iter().collect();
             match client
-                .pipeline_resume(&id, message.as_deref(), &var_map)
+                .job_resume(&id, message.as_deref(), &var_map)
                 .await
             {
                 Ok(()) => {
                     if !var_map.is_empty() {
-                        println!("Updated vars and resumed pipeline {}", id);
+                        println!("Updated vars and resumed job {}", id);
                     } else {
-                        println!("Resumed pipeline {}", id);
+                        println!("Resumed job {}", id);
                     }
                 }
                 Err(crate::client::ClientError::Rejected(msg))
@@ -423,43 +423,43 @@ pub async fn handle(
                 Err(e) => return Err(e.into()),
             }
         }
-        PipelineCommand::Cancel { ids } => {
-            let result = client.pipeline_cancel(&ids).await?;
+        JobCommand::Cancel { ids } => {
+            let result = client.job_cancel(&ids).await?;
 
             for id in &result.cancelled {
-                println!("Cancelled pipeline {}", id);
+                println!("Cancelled job {}", id);
             }
             for id in &result.already_terminal {
-                println!("Pipeline {} was already terminal", id);
+                println!("Job {} was already terminal", id);
             }
             for id in &result.not_found {
-                eprintln!("Pipeline not found: {}", id);
+                eprintln!("Job not found: {}", id);
             }
 
-            // Exit with error if any pipelines were not found
+            // Exit with error if any jobs were not found
             if !result.not_found.is_empty() {
                 std::process::exit(1);
             }
         }
-        PipelineCommand::Attach { id } => {
-            let pipeline = client
-                .get_pipeline(&id)
+        JobCommand::Attach { id } => {
+            let job = client
+                .get_job(&id)
                 .await?
-                .ok_or_else(|| anyhow::anyhow!("pipeline not found: {}", id))?;
-            let session_id = pipeline
+                .ok_or_else(|| anyhow::anyhow!("job not found: {}", id))?;
+            let session_id = job
                 .session_id
-                .ok_or_else(|| anyhow::anyhow!("pipeline has no active session"))?;
+                .ok_or_else(|| anyhow::anyhow!("job has no active session"))?;
             super::session::attach(&session_id)?;
         }
-        PipelineCommand::Peek { id } => {
-            let pipeline = client
-                .get_pipeline(&id)
+        JobCommand::Peek { id } => {
+            let job = client
+                .get_job(&id)
                 .await?
-                .ok_or_else(|| anyhow::anyhow!("Pipeline not found: {}", id))?;
+                .ok_or_else(|| anyhow::anyhow!("Job not found: {}", id))?;
 
-            // Try main pipeline session first, then fall back to running agent session
-            let session_id = pipeline.session_id.clone().or_else(|| {
-                pipeline
+            // Try main job session first, then fall back to running agent session
+            let session_id = job.session_id.clone().or_else(|| {
+                job
                     .agents
                     .iter()
                     .find(|a| a.status == "running")
@@ -492,45 +492,45 @@ pub async fn handle(
                     println!("╰────── {} ──────", color::header("end peek"));
                 }
                 None => {
-                    let short_id = pipeline.id.short(8);
-                    let is_terminal = pipeline.step == "done"
-                        || pipeline.step == "failed"
-                        || pipeline.step == "cancelled";
+                    let short_id = job.id.short(8);
+                    let is_terminal = job.step == "done"
+                        || job.step == "failed"
+                        || job.step == "cancelled";
 
                     if is_terminal {
                         println!(
-                            "Pipeline {} is {}. No active session.",
-                            short_id, pipeline.step
+                            "Job {} is {}. No active session.",
+                            short_id, job.step
                         );
                     } else {
                         println!(
-                            "No active session for pipeline {} (step: {}, status: {})",
-                            short_id, pipeline.step, pipeline.step_status
+                            "No active session for job {} (step: {}, status: {})",
+                            short_id, job.step, job.step_status
                         );
                     }
                     println!();
                     println!("Try:");
-                    println!("    oj pipeline logs {}", short_id);
-                    println!("    oj pipeline show {}", short_id);
+                    println!("    oj job logs {}", short_id);
+                    println!("    oj job show {}", short_id);
                 }
             }
         }
-        PipelineCommand::Logs { id, follow, limit } => {
-            let (log_path, content) = client.get_pipeline_logs(&id, limit).await?;
-            display_log(&log_path, &content, follow, format, "pipeline", &id).await?;
+        JobCommand::Logs { id, follow, limit } => {
+            let (log_path, content) = client.get_job_logs(&id, limit).await?;
+            display_log(&log_path, &content, follow, format, "job", &id).await?;
         }
-        PipelineCommand::Prune {
+        JobCommand::Prune {
             all,
             failed,
             orphans,
             dry_run,
         } => {
             // Only scope by namespace when explicitly requested via --project.
-            // Without this, prune matches `pipeline list` behavior and operates
+            // Without this, prune matches `job list` behavior and operates
             // across all namespaces — fixing the bug where auto-resolved namespace
-            // silently skipped pipelines from other projects.
+            // silently skipped jobs from other projects.
             let (pruned, skipped) = client
-                .pipeline_prune(all, failed, orphans, dry_run, project)
+                .job_prune(all, failed, orphans, dry_run, project)
                 .await?;
 
             print_prune_results(
@@ -538,7 +538,7 @@ pub async fn handle(
                 skipped,
                 dry_run,
                 format,
-                "pipeline",
+                "job",
                 "skipped",
                 |entry| {
                     let short_id = entry.id.short(8);
@@ -546,31 +546,31 @@ pub async fn handle(
                 },
             )?;
         }
-        PipelineCommand::Wait { ids, all, timeout } => {
-            super::pipeline_wait::handle(ids, all, timeout, client).await?;
+        JobCommand::Wait { ids, all, timeout } => {
+            super::job_wait::handle(ids, all, timeout, client).await?;
         }
     }
 
     Ok(())
 }
 
-/// Print follow-up commands for a pipeline.
-pub(crate) fn print_pipeline_commands(short_id: &str) {
-    println!("    oj pipeline show {short_id}");
+/// Print follow-up commands for a job.
+pub(crate) fn print_job_commands(short_id: &str) {
+    println!("    oj job show {short_id}");
     println!(
-        "    oj pipeline wait {short_id}      {}",
-        color::muted("# Wait until pipeline ends")
+        "    oj job wait {short_id}      {}",
+        color::muted("# Wait until job ends")
     );
     println!(
-        "    oj pipeline logs {short_id} -f   {}",
+        "    oj job logs {short_id} -f   {}",
         color::muted("# Follow logs")
     );
     println!(
-        "    oj pipeline peek {short_id}      {}",
+        "    oj job peek {short_id}      {}",
         color::muted("# Capture tmux pane")
     );
     println!(
-        "    oj pipeline attach {short_id}    {}",
+        "    oj job attach {short_id}    {}",
         color::muted("# Attach to tmux")
     );
 }
@@ -628,5 +628,5 @@ fn is_var_truncated(value: &str, max_len: usize) -> bool {
 }
 
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
+#[path = "job_tests.rs"]
 mod tests;

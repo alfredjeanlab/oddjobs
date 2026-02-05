@@ -13,7 +13,7 @@
 #   - Non-blocking delegation: conflicts don't stop the queue
 #   - Strict post-merge: push → notify witness → close MR → cleanup
 
-pipeline "refinery-patrol" {
+job "refinery-patrol" {
   name      = "refinery-${var.mr.id}"
   vars      = ["mr"]
   workspace = "ephemeral"

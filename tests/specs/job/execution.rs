@@ -1,31 +1,31 @@
-//! Pipeline execution specs
+//! Job execution specs
 //!
-//! Verify pipelines execute steps correctly.
+//! Verify jobs execute steps correctly.
 
 use crate::prelude::*;
 
 // =============================================================================
-// Shell Constructs in Pipeline Steps
+// Shell Constructs in Job Steps
 // =============================================================================
 //
-// These tests verify that shell constructs (conditionals, pipelines, variables,
+// These tests verify that shell constructs (conditionals, jobs, variables,
 // subshells) work correctly in runbook step commands.
 
 /// Runbook testing shell conditionals (&&, ||)
 const CONDITIONAL_RUNBOOK: &str = r#"
 [command.conditional]
 args = "<name>"
-run = { pipeline = "conditional" }
+run = { job = "conditional" }
 
-[pipeline.conditional]
+[job.conditional]
 vars  = ["name"]
 
-[[pipeline.conditional.step]]
+[[job.conditional.step]]
 name = "execute"
 run = "true && echo 'and_success:${name}' >> ${workspace}/output.log"
 on_done = "done"
 
-[[pipeline.conditional.step]]
+[[job.conditional.step]]
 name = "done"
 run = "false || echo 'or_fallback:${name}' >> ${workspace}/output.log"
 "#;
@@ -39,15 +39,15 @@ fn shell_conditional_and_succeeds() {
 
     temp.oj().args(&["run", "conditional", "test"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 
     // Verify file was written by the && construct
     let output_path = temp.path().join("output.log");
@@ -62,33 +62,33 @@ fn shell_conditional_and_succeeds() {
     }
 }
 
-/// Runbook testing shell pipelines (|)
-const PIPELINE_SHELL_RUNBOOK: &str = r#"
-[command.pipeline_test]
+/// Runbook testing shell jobs (|)
+const JOB_SHELL_RUNBOOK: &str = r#"
+[command.job_test]
 args = "<name>"
-run = { pipeline = "pipeline_test" }
+run = { job = "job_test" }
 
-[pipeline.pipeline_test]
+[job.job_test]
 vars  = ["name"]
 
-[[pipeline.pipeline_test.step]]
+[[job.job_test.step]]
 name = "execute"
 run = "echo 'alpha beta gamma:${name}' | wc -w > ${workspace}/wordcount.txt"
 "#;
 
 #[test]
-fn shell_pipeline_executes() {
+fn shell_job_executes() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/pipe.toml", PIPELINE_SHELL_RUNBOOK);
+    temp.file(".oj/runbooks/pipe.toml", JOB_SHELL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj().args(&["run", "pipeline_test", "test"]).passes();
+    temp.oj().args(&["run", "job_test", "test"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
@@ -96,26 +96,26 @@ fn shell_pipeline_executes() {
     if !done {
         let output = temp
             .oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .to_string();
-        eprintln!("=== PIPELINE LIST ===\n{output}\n=== END ===");
+        eprintln!("=== JOB LIST ===\n{output}\n=== END ===");
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 }
 
 /// Runbook testing variable expansion
 const VARIABLE_RUNBOOK: &str = r#"
 [command.vartest]
 args = "<name>"
-run = { pipeline = "vartest" }
+run = { job = "vartest" }
 
-[pipeline.vartest]
+[job.vartest]
 vars  = ["name"]
 
-[[pipeline.vartest.step]]
+[[job.vartest.step]]
 name = "execute"
 run = "NAME=${name}; echo \"var_expanded:$NAME\" >> ${workspace}/output.log"
 "#;
@@ -129,27 +129,27 @@ fn shell_variable_expansion() {
 
     temp.oj().args(&["run", "vartest", "myvalue"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 }
 
 /// Runbook testing subshell execution
 const SUBSHELL_RUNBOOK: &str = r#"
 [command.subshell]
 args = "<name>"
-run = { pipeline = "subshell" }
+run = { job = "subshell" }
 
-[pipeline.subshell]
+[job.subshell]
 vars  = ["name"]
 
-[[pipeline.subshell.step]]
+[[job.subshell.step]]
 name = "execute"
 run = "(echo 'subshell_output:${name}') >> ${workspace}/output.log"
 "#;
@@ -163,27 +163,27 @@ fn shell_subshell_executes() {
 
     temp.oj().args(&["run", "subshell", "test"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 }
 
 /// Runbook testing exit code propagation
 const EXIT_CODE_RUNBOOK: &str = r#"
 [command.exitcode]
 args = "<name>"
-run = { pipeline = "exitcode" }
+run = { job = "exitcode" }
 
-[pipeline.exitcode]
+[job.exitcode]
 vars  = ["name"]
 
-[[pipeline.exitcode.step]]
+[[job.exitcode.step]]
 name = "execute"
 run = "exit 1"
 "#;
@@ -197,23 +197,23 @@ fn shell_exit_code_failure() {
 
     temp.oj().args(&["run", "exitcode", "test"]).passes();
 
-    // Wait for pipeline to show failed state
+    // Wait for job to show failed state
     let mut last_output = String::new();
     let failed = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         last_output = output.to_string();
-        // Pipeline should either fail or show error state
+        // Job should either fail or show error state
         output.contains("failed") || output.contains("execute")
     });
     assert!(
         failed,
-        "pipeline should fail on exit 1, got output:\n{}",
+        "job should fail on exit 1, got output:\n{}",
         last_output
     );
 }
 
 // =============================================================================
-// Quoting Safety in Pipeline Steps
+// Quoting Safety in Job Steps
 // =============================================================================
 //
 // Verify that user-provided arguments containing shell-special characters
@@ -223,12 +223,12 @@ fn shell_exit_code_failure() {
 const QUOTES_RUNBOOK: &str = r#"
 [command.greet]
 args = "<name>"
-run = { pipeline = "greet" }
+run = { job = "greet" }
 
-[pipeline.greet]
+[job.greet]
 vars  = ["name"]
 
-[[pipeline.greet.step]]
+[[job.greet.step]]
 name = "execute"
 run = "echo \"hello:${var.name}\" >> ${workspace}/output.log"
 "#;
@@ -243,23 +243,23 @@ fn shell_step_with_single_quote_in_arg() {
     // Pass an argument containing a single quote
     temp.oj().args(&["run", "greet", "it's"]).passes();
 
-    // Wait for pipeline to complete or fail
+    // Wait for job to complete or fail
     let mut last_output = String::new();
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         last_output = output.to_string();
         output.contains("completed") || output.contains("failed")
     });
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(done, "pipeline should finish, got:\n{}", last_output);
+    assert!(done, "job should finish, got:\n{}", last_output);
     if !last_output.contains("completed") {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
     assert!(
         last_output.contains("completed"),
-        "pipeline should complete successfully, got:\n{}",
+        "job should complete successfully, got:\n{}",
         last_output
     );
 
@@ -285,23 +285,23 @@ fn shell_step_with_double_quote_in_arg() {
     // Pass an argument containing double quotes
     temp.oj().args(&["run", "greet", r#"say "hello""#]).passes();
 
-    // Wait for pipeline to complete or fail
+    // Wait for job to complete or fail
     let mut last_output = String::new();
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
         last_output = output.to_string();
         output.contains("completed") || output.contains("failed")
     });
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(done, "pipeline should finish, got:\n{}", last_output);
+    assert!(done, "job should finish, got:\n{}", last_output);
     if !last_output.contains("completed") {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
     assert!(
         last_output.contains("completed"),
-        "pipeline should complete successfully, got:\n{}",
+        "job should complete successfully, got:\n{}",
         last_output
     );
 
@@ -325,33 +325,33 @@ fn shell_step_with_double_quote_in_arg() {
 const SHELL_RUNBOOK: &str = r#"
 [command.test]
 args = "<name>"
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 vars  = ["name"]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "init"
 run = "echo 'init:${name}' >> ${workspace}/output.log"
 on_done = "plan"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "plan"
 run = "echo 'plan:${name}' >> ${workspace}/output.log"
 on_done = "execute"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "execute"
 run = "echo 'execute:${name}' >> ${workspace}/output.log"
 on_done = "merge"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "merge"
 run = "echo 'merge:${name}' >> ${workspace}/output.log"
 "#;
 
 #[test]
-fn pipeline_starts_and_runs_init_step() {
+fn job_starts_and_runs_init_step() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/test.toml", SHELL_RUNBOOK);
@@ -362,10 +362,10 @@ fn pipeline_starts_and_runs_init_step() {
         .passes()
         .stdout_has("Command: test");
 
-    // Wait for pipeline to appear (event processing is async)
+    // Wait for job to appear (event processing is async)
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("hello")
@@ -375,11 +375,11 @@ fn pipeline_starts_and_runs_init_step() {
         // Debug: print daemon log to understand failure
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(found, "pipeline should be visible in list");
+    assert!(found, "job should be visible in list");
 }
 
 #[test]
-fn pipeline_completes_all_steps() {
+fn job_completes_all_steps() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/test.toml", SHELL_RUNBOOK);
@@ -387,26 +387,26 @@ fn pipeline_completes_all_steps() {
 
     temp.oj().args(&["run", "test", "complete"]).passes();
 
-    // Wait for pipeline to reach done step
+    // Wait for job to reach done step
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("done")
     });
-    assert!(done, "pipeline should reach done step");
+    assert!(done, "job should reach done step");
 
     // Verify final state
     temp.oj()
-        .args(&["pipeline", "list"])
+        .args(&["job", "list"])
         .passes()
         .stdout_has("done")
         .stdout_has("completed");
 }
 
 #[test]
-fn pipeline_runs_custom_step_names() {
+fn job_runs_custom_step_names() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(
@@ -414,17 +414,17 @@ fn pipeline_runs_custom_step_names() {
         r#"
 [command.custom]
 args = "<name>"
-run = { pipeline = "custom" }
+run = { job = "custom" }
 
-[pipeline.custom]
+[job.custom]
 vars  = ["name"]
 
-[[pipeline.custom.step]]
+[[job.custom.step]]
 name = "step1"
 run = "echo 'step1'"
 on_done = "step2"
 
-[[pipeline.custom.step]]
+[[job.custom.step]]
 name = "step2"
 run = "echo 'step2'"
 "#,
@@ -433,22 +433,22 @@ run = "echo 'step2'"
 
     temp.oj().args(&["run", "custom", "test"]).passes();
 
-    // Wait for pipeline to show custom step name (step1 or step2) OR complete
-    // The pipeline executes very quickly, so we may see:
+    // Wait for job to show custom step name (step1 or step2) OR complete
+    // The job executes very quickly, so we may see:
     // - "step1" or "step2" if we catch it mid-execution
     // - "done" with "Completed" if it finished
     let mut last_output = String::new();
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        let result = temp.oj().args(&["pipeline", "list"]).passes();
+        let result = temp.oj().args(&["job", "list"]).passes();
         last_output = result.stdout().to_string();
-        // Accept either seeing custom step names OR pipeline completed
+        // Accept either seeing custom step names OR job completed
         last_output.contains("step1")
             || last_output.contains("step2")
             || (last_output.contains("done") && last_output.contains("completed"))
     });
     assert!(
         found,
-        "pipeline should show custom step name or complete successfully, got: {}",
+        "job should show custom step name or complete successfully, got: {}",
         last_output
     );
 }

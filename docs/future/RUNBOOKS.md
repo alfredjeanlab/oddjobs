@@ -10,14 +10,14 @@ Cron is now implemented. See [Runbook Concepts — Cron](../concepts/RUNBOOKS.md
 
 Dead letter semantics with configurable retry are now implemented. See [Runbook Concepts — Queue](../concepts/RUNBOOKS.md#retry-and-dead-letter) and [CLI — oj queue](../interface/CLI.md#oj-queue).
 
-## Nested Pipeline Vars
+## Nested Job Vars
 
-Pass variables when invoking a nested pipeline from a step:
+Pass variables when invoking a nested job from a step:
 
 ```hcl
 step "deploy" {
-  run = { pipeline = "deploy", vars = { ... } }
+  run = { job = "deploy", vars = { ... } }
 }
 ```
 
-Currently, nested pipeline directives are rejected at runtime. The `RunDirective::Pipeline` variant only accepts a `pipeline` name.
+Currently, nested job directives are rejected at runtime. The `RunDirective::Job` variant only accepts a `job` name.

@@ -4,7 +4,7 @@
 //! Standalone agent run entity.
 //!
 //! An `AgentRun` represents a standalone agent invocation triggered by a
-//! `command { run = { agent = "..." } }` block. Unlike pipeline-embedded agents,
+//! `command { run = { agent = "..." } }` block. Unlike job-embedded agents,
 //! standalone agents are top-level WAL entities with self-resolving lifecycle.
 
 use crate::action_tracker::ActionTracker;

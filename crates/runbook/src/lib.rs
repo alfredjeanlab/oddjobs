@@ -14,7 +14,7 @@ mod cron;
 mod find;
 mod help;
 mod parser;
-mod pipeline;
+mod job;
 mod queue;
 mod slug;
 mod template;
@@ -38,11 +38,11 @@ pub use find::{
     runbook_parse_warnings, validate_runbook_dir, FileComment, FindError,
 };
 pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
-pub use pipeline::{
-    GitWorkspaceMode, NotifyConfig, PipelineDef, StepDef, StepTransition, WorkspaceBlock,
+pub use job::{
+    GitWorkspaceMode, NotifyConfig, JobDef, StepDef, StepTransition, WorkspaceBlock,
     WorkspaceConfig, WorkspaceType,
 };
 pub use queue::{QueueDef, QueueType};
-pub use slug::{pipeline_display_name, slugify};
+pub use slug::{job_display_name, slugify};
 pub use template::{escape_for_shell, interpolate, interpolate_shell};
 pub use worker::{WorkerDef, WorkerHandler, WorkerSource};

@@ -10,7 +10,7 @@ beads (bd)                       oj runbooks
 ─────────────                    ───────────
 State layer                      Execution layer
 
-issues, bugs, tasks              pipelines, steps
+issues, bugs, tasks              jobs, steps
 agent beads (identity)           agents (Claude sessions)
 molecules (step tracking)        step transitions
 merge-request beads              merge queue + worker
@@ -20,7 +20,7 @@ advice beads                     prime context injection
 
 **Principle: beads is truth, oj is motion.** Every piece of state — work items,
 agent identity, mail, merge requests, escalations — lives in beads (`bd`).
-Oj provides the pipelines, agents, queues, and workers that execute against
+Oj provides the jobs, agents, queues, and workers that execute against
 that state.
 
 ## Agent Taxonomy
@@ -84,7 +84,7 @@ gastown/
 
 ### File Inventory
 
-| File | Commands | Pipelines | Agents | Queues | Workers |
+| File | Commands | Jobs | Agents | Queues | Workers |
 |------|----------|-----------|--------|--------|---------|
 | infra.hcl | — | — | — | 5 | 2 |
 | start.hcl | gt-start, gt-status, gt-stop | — | — | — | — |
@@ -206,7 +206,7 @@ Human: oj run gt-sling auth-fix "Fix the auth bug"
   │
   ├─ 1. Create task bead (or use existing bead ID)
   ├─ 2. Create molecule steps as child beads
-  ├─ 3. Spawn polecat pipeline in ephemeral worktree
+  ├─ 3. Spawn polecat job in ephemeral worktree
   ├─ 4. Polecat discovers steps via bd ready, executes each
   ├─ 5. Polecat commits, pushes branch, creates MR bead, sends POLECAT_DONE
   │
@@ -242,7 +242,7 @@ Daemon heartbeat (periodic):
      │
      ├─ Observe: oj status, workers, queues, escalations
      ├─ Act: restart stopped workers, retry dead queue items,
-     │       resume/cancel escalated pipelines
+     │       resume/cancel escalated jobs
      └─ Exit (ephemeral — zero accumulated context)
 
 Deacon patrol (periodic):
@@ -256,7 +256,7 @@ Deacon patrol (periodic):
 Witness patrol (periodic, per-rig):
   │
   ├─ Process inbox (POLECAT_DONE, MERGED)
-  ├─ Health scan: nudge stalled agents, resume escalated pipelines
+  ├─ Health scan: nudge stalled agents, resume escalated jobs
   ├─ Restart stopped workers
   └─ Report findings
 ```
@@ -294,6 +294,6 @@ matching Gas Town's design where dogs are lightweight goroutines.
 - **No parallel steps** — Gas Town's code review runs 10 legs in parallel;
   oj runs all 10 sequentially. Could use workers with `concurrency > 1` but
   adds orchestration complexity (queue + worker + polling for completion).
-- **Commands can't run agents directly** — only pipelines can reference agents
+- **Commands can't run agents directly** — only jobs can reference agents
   via `run = { agent = "..." }`. Commands that need an agent require a
-  single-step pipeline wrapper (e.g. `convoy-dispatch`).
+  single-step job wrapper (e.g. `convoy-dispatch`).

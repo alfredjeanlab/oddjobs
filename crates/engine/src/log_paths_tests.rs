@@ -4,11 +4,11 @@
 use super::*;
 
 #[test]
-fn pipeline_log_path_builds_expected_path() {
-    let result = pipeline_log_path(Path::new("/state/logs"), "pipeline-001");
+fn job_log_path_builds_expected_path() {
+    let result = job_log_path(Path::new("/state/logs"), "job-001");
     assert_eq!(
         result,
-        PathBuf::from("/state/logs/pipeline/pipeline-001.log")
+        PathBuf::from("/state/logs/job/job-001.log")
     );
 }
 
@@ -71,6 +71,6 @@ fn queue_log_path_with_namespace() {
 
 #[test]
 fn breadcrumb_path_builds_expected_path() {
-    let result = breadcrumb_path(Path::new("/state/logs"), "pipeline-001");
-    assert_eq!(result, PathBuf::from("/state/logs/pipeline-001.crumb.json"));
+    let result = breadcrumb_path(Path::new("/state/logs"), "job-001");
+    assert_eq!(result, PathBuf::from("/state/logs/job-001.crumb.json"));
 }

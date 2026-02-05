@@ -45,12 +45,12 @@ pub fn poll_interval() -> Duration {
     crate::env::connect_poll_ms().unwrap_or(Duration::from_millis(50))
 }
 
-/// Polling interval for `oj pipeline wait` / `oj agent wait`
+/// Polling interval for `oj job wait` / `oj agent wait`
 pub fn wait_poll_interval() -> Duration {
     crate::env::wait_poll_ms().unwrap_or(Duration::from_secs(1))
 }
 
-/// How long `oj run` waits for a pipeline to start before returning
+/// How long `oj run` waits for a job to start before returning
 pub fn run_wait_timeout() -> Duration {
     crate::env::run_wait_ms().unwrap_or(Duration::from_secs(10))
 }

@@ -26,14 +26,14 @@
 
 command "gt-review" {
   args = "<branch> [--base <base>]"
-  run  = { pipeline = "code-review" }
+  run  = { job = "code-review" }
 
   defaults = {
     base = "main"
   }
 }
 
-pipeline "code-review" {
+job "code-review" {
   name      = "review-${var.branch}"
   vars      = ["branch", "base"]
   workspace = "ephemeral"

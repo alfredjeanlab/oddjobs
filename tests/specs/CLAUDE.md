@@ -64,9 +64,9 @@ temp.oj().args(&["daemon", "status"]).passes().stdout_has("running");
 
 // Polling for async conditions (NO SLEEPS)
 let ready = wait_for(SPEC_WAIT_MAX_MS, || {
-    temp.oj().args(&["pipeline", "list"]).passes().stdout().contains("Done")
+    temp.oj().args(&["job", "list"]).passes().stdout().contains("Done")
 });
-assert!(ready, "pipeline should complete");
+assert!(ready, "job should complete");
 ```
 
 ## Constants
@@ -114,10 +114,10 @@ cargo test --test specs cli_help     # Just help tests
 | **Print** | `-p 'prompt'` | Responds once and **exits** | `on_dead` |
 | **Interactive** | `'prompt'` (no `-p`) | Responds and **stays alive**, waiting for input | `on_idle` |
 
-- **`-p` tests**: Agent exits immediately after one response. The watcher detects session death and fires `on_dead`. Use `on_dead = "done"` to advance the pipeline.
-- **Interactive tests**: Agent stays alive and idles. The watcher detects idleness agent and fires `on_idle`. Use `on_idle = "done"` to advance the pipeline.
+- **`-p` tests**: Agent exits immediately after one response. The watcher detects session death and fires `on_dead`. Use `on_dead = "done"` to advance the job.
+- **Interactive tests**: Agent stays alive and idles. The watcher detects idleness agent and fires `on_idle`. Use `on_idle = "done"` to advance the job.
 
-**Common mistake:** Using `on_idle = "done"` with `-p` mode. The agent exits before idling, so `on_idle` never fires. The pipeline gets stuck because `on_dead` defaults to `"escalate"`.
+**Common mistake:** Using `on_idle = "done"` with `-p` mode. The agent exits before idling, so `on_idle` never fires. The job gets stuck because `on_dead` defaults to `"escalate"`.
 
 ## Debugging
 
@@ -145,7 +145,7 @@ Or check the test's temp directory (printed by cargo test on failure).
 
 When the CLI runs without `OJ_STATE_DIR` set, it falls back to `~/.local/state/oj` (the user's real daemon). This means:
 - Spawned agents will talk to the **wrong daemon** if `OJ_STATE_DIR` isn't passed through
-- The pipeline appears stuck even though the agent "completed"
+- The job appears stuck even though the agent "completed"
 
 Check `~/.local/state/oj/cli.log` (not the test's cli.log) for evidence - it logs `OJ_STATE_DIR=(not set)` and the socket path used.
 
@@ -156,8 +156,8 @@ The fix: `spawn.rs` passes `OJ_STATE_DIR` to spawned sessions via the env list.
 1. **Agent spawn issues** - Check `daemon.log` for spawn effects and session events
 2. **Agent not completing** - Check `daemon.log` for on_dead/on_idle action handling
 3. **Daemon not starting** - Check `daemon.log` for startup errors after the marker line
-4. **Pipeline stuck** - Check `daemon.log` for the request log: `received request`
-5. **Agent completes but pipeline stuck** - Check if `OJ_STATE_DIR` was passed to the session
+4. **Job stuck** - Check `daemon.log` for the request log: `received request`
+5. **Agent completes but job stuck** - Check if `OJ_STATE_DIR` was passed to the session
 
 **Tmux sessions (agent tests):**
 

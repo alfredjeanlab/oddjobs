@@ -105,7 +105,7 @@ SpawnAgent {
 
 Use `serde_json::Value` at the effect level so the core crate stays generic. The runbook crate serializes `TmuxSessionConfig` to JSON, and the adapter deserializes it. This keeps `oj_core` free of adapter-specific types.
 
-2. Update `build_spawn_effects()` in `crates/engine/src/spawn.rs` to serialize the session config from `AgentDef` and include it in the `SpawnAgent` effect. Also inject defaults for `status.left` and `status.right` here, since this is where all the context variables (namespace, pipeline name, agent name, agent_id) are available:
+2. Update `build_spawn_effects()` in `crates/engine/src/spawn.rs` to serialize the session config from `AgentDef` and include it in the `SpawnAgent` effect. Also inject defaults for `status.left` and `status.right` here, since this is where all the context variables (namespace, job name, agent name, agent_id) are available:
 
 ```rust
 // Build session config with defaults
@@ -267,7 +267,7 @@ Add unit tests across all layers.
 2. **Spawn effects tests** (`crates/engine/src/spawn_tests.rs`):
    - Verify `build_spawn_effects()` includes default status left/right when no session block
    - Verify explicit session config overrides defaults
-   - Verify namespace/pipeline/step appear in default status-left
+   - Verify namespace/job/step appear in default status-left
 
 3. **Tmux adapter tests** (`crates/adapters/src/session/tmux_tests.rs`):
    - Test `configure` with full config (color + title + status) — unit test with mock (or integration test with real tmux)
@@ -287,13 +287,13 @@ Add unit tests across all layers.
 
 1. **Generic at core, typed at edges**: `Effect::SpawnAgent` carries `serde_json::Value` so `oj_core` doesn't depend on adapter-specific types. The runbook crate defines the typed `TmuxSessionConfig`; the adapter deserializes from `Value`.
 
-2. **Defaults injected in spawn.rs**: The engine's `build_spawn_effects()` is the natural place to assemble defaults because it has access to all context variables (namespace, pipeline name, step name, agent ID). The adapter just applies whatever config it receives.
+2. **Defaults injected in spawn.rs**: The engine's `build_spawn_effects()` is the natural place to assemble defaults because it has access to all context variables (namespace, job name, step name, agent ID). The adapter just applies whatever config it receives.
 
 3. **Non-fatal styling**: Session configuration errors are logged as warnings, never fail the spawn. An agent with broken styling is better than no agent.
 
 4. **Provider-keyed map**: `session` is `HashMap<String, TmuxSessionConfig>` at the runbook level. This matches HCL labeled block syntax (`session "tmux" { ... }`) and allows future providers without schema changes. Unknown providers are silently ignored.
 
-5. **Status bar defaults**: Every agent gets default status bars showing `<namespace> <pipeline>/<step>` on the left and the short agent ID (first 8 hex chars) on the right. Explicit values in the session block override these defaults.
+5. **Status bar defaults**: Every agent gets default status bars showing `<namespace> <job>/<step>` on the left and the short agent ID (first 8 hex chars) on the right. Explicit values in the session block override these defaults.
 
 ### Color Validation
 

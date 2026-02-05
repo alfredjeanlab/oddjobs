@@ -4,40 +4,40 @@
 //! Cron event handling
 
 use super::super::Runtime;
-use super::CreatePipelineParams;
+use super::CreateJobParams;
 use crate::error::RuntimeError;
 use crate::log_paths::cron_log_path;
 use crate::runtime::agent_run::SpawnAgentParams;
 use crate::time_fmt::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, ShortId, TimerId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, IdGen, JobId, ShortId, TimerId, UuidIdGen};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// What a cron targets when it fires.
 #[derive(Debug, Clone)]
 pub(crate) enum CronRunTarget {
-    Pipeline(String),
+    Job(String),
     Agent(String),
 }
 
 impl CronRunTarget {
-    /// Parse a "pipeline:name" or "agent:name" string.
+    /// Parse a "job:name" or "agent:name" string.
     pub(crate) fn from_run_target_str(s: &str) -> Self {
         if let Some(name) = s.strip_prefix("agent:") {
             CronRunTarget::Agent(name.to_string())
-        } else if let Some(name) = s.strip_prefix("pipeline:") {
-            CronRunTarget::Pipeline(name.to_string())
+        } else if let Some(name) = s.strip_prefix("job:") {
+            CronRunTarget::Job(name.to_string())
         } else {
-            // Backward compat: bare name = pipeline
-            CronRunTarget::Pipeline(s.to_string())
+            // Backward compat: bare name = job
+            CronRunTarget::Job(s.to_string())
         }
     }
 
     /// Get the display name for logging.
     pub(crate) fn display_name(&self) -> String {
         match self {
-            CronRunTarget::Pipeline(name) => format!("pipeline={}", name),
+            CronRunTarget::Job(name) => format!("job={}", name),
             CronRunTarget::Agent(name) => format!("agent={}", name),
         }
     }
@@ -51,7 +51,7 @@ pub(crate) struct CronState {
     pub run_target: CronRunTarget,
     pub status: CronStatus,
     pub namespace: String,
-    /// Maximum concurrent pipelines this cron can have running. Default 1.
+    /// Maximum concurrent jobs this cron can have running. Default 1.
     pub concurrency: u32,
 }
 
@@ -88,7 +88,7 @@ pub(crate) struct CronStartedParams<'a> {
     pub project_root: &'a Path,
     pub runbook_hash: &'a str,
     pub interval: &'a str,
-    pub pipeline_name: &'a str,
+    pub job_name: &'a str,
     pub run_target_str: &'a str,
     pub namespace: &'a str,
 }
@@ -96,9 +96,9 @@ pub(crate) struct CronStartedParams<'a> {
 /// Parameters for handling a one-shot cron execution.
 pub(crate) struct CronOnceParams<'a> {
     pub cron_name: &'a str,
-    pub pipeline_id: &'a PipelineId,
-    pub pipeline_name: &'a str,
-    pub pipeline_kind: &'a str,
+    pub job_id: &'a JobId,
+    pub job_name: &'a str,
+    pub job_kind: &'a str,
     pub agent_run_id: &'a Option<String>,
     pub agent_name: &'a Option<String>,
     pub runbook_hash: &'a str,
@@ -123,7 +123,7 @@ where
             project_root,
             runbook_hash,
             interval,
-            pipeline_name,
+            job_name,
             run_target_str,
             namespace,
         } = params;
@@ -131,9 +131,9 @@ where
             RuntimeError::InvalidFormat(format!("invalid cron interval '{}': {}", interval, e))
         })?;
 
-        // Resolve run target from run_target string, falling back to pipeline_name
+        // Resolve run target from run_target string, falling back to job_name
         let run_target = if run_target_str.is_empty() {
-            CronRunTarget::Pipeline(pipeline_name.to_string())
+            CronRunTarget::Job(job_name.to_string())
         } else {
             CronRunTarget::from_run_target_str(run_target_str)
         };
@@ -207,16 +207,16 @@ where
         Ok(vec![])
     }
 
-    /// Handle a one-shot cron execution: create and start the pipeline/agent immediately.
+    /// Handle a one-shot cron execution: create and start the job/agent immediately.
     pub(crate) async fn handle_cron_once(
         &self,
         params: CronOnceParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
         let CronOnceParams {
             cron_name,
-            pipeline_id,
-            pipeline_name,
-            pipeline_kind,
+            job_id,
+            job_name,
+            job_kind,
             agent_run_id,
             agent_name,
             runbook_hash,
@@ -227,7 +227,7 @@ where
         let runbook = self.cached_runbook(runbook_hash)?;
         let mut result_events = Vec::new();
 
-        // Determine target: prefer run_target, fall back to pipeline fields
+        // Determine target: prefer run_target, fall back to job fields
         let is_agent = if !run_target.is_empty() {
             run_target.starts_with("agent:")
         } else {
@@ -280,7 +280,7 @@ where
                     .execute_all(vec![Effect::Emit {
                         event: Event::CronFired {
                             cron_name: cron_name.to_string(),
-                            pipeline_id: PipelineId::new(""),
+                            job_id: JobId::new(""),
                             agent_run_id: Some(ar_id.as_str().to_string()),
                             namespace: namespace.to_string(),
                         },
@@ -292,12 +292,12 @@ where
             let mut vars = HashMap::new();
             vars.insert("invoke.dir".to_string(), project_root.display().to_string());
 
-            // Pipeline target (original behavior)
+            // Job target (original behavior)
             result_events.extend(
-                self.create_and_start_pipeline(CreatePipelineParams {
-                    pipeline_id: pipeline_id.clone(),
-                    pipeline_name: pipeline_name.to_string(),
-                    pipeline_kind: pipeline_kind.to_string(),
+                self.create_and_start_job(CreateJobParams {
+                    job_id: job_id.clone(),
+                    job_name: job_name.to_string(),
+                    job_kind: job_kind.to_string(),
                     vars,
                     runbook_hash: runbook_hash.to_string(),
                     runbook_json: None,
@@ -314,7 +314,7 @@ where
                     .execute_all(vec![Effect::Emit {
                         event: Event::CronFired {
                             cron_name: cron_name.to_string(),
-                            pipeline_id: pipeline_id.clone(),
+                            job_id: job_id.clone(),
                             agent_run_id: None,
                             namespace: namespace.to_string(),
                         },
@@ -326,7 +326,7 @@ where
         Ok(result_events)
     }
 
-    /// Handle a cron timer firing: spawn pipeline/agent and reschedule timer.
+    /// Handle a cron timer firing: spawn job/agent and reschedule timer.
     pub(crate) async fn handle_cron_timer_fired(
         &self,
         rest: &str,
@@ -385,17 +385,17 @@ where
         let mut result_events = Vec::new();
 
         match &run_target {
-            CronRunTarget::Pipeline(pipeline_name) => {
+            CronRunTarget::Job(job_name) => {
                 // Check concurrency before spawning
-                let active = self.count_active_cron_pipelines(cron_name, &namespace);
+                let active = self.count_active_cron_jobs(cron_name, &namespace);
                 if active >= concurrency as usize {
                     append_cron_log(
                         self.logger.log_dir(),
                         cron_name,
                         &namespace,
                         &format!(
-                            "skip: pipeline '{}' at max concurrency ({}/{})",
-                            pipeline_name, active, concurrency
+                            "skip: job '{}' at max concurrency ({}/{})",
+                            job_name, active, concurrency
                         ),
                     );
                     // Reschedule timer but don't spawn
@@ -415,11 +415,11 @@ where
                     return Ok(result_events);
                 }
 
-                // Generate pipeline ID
-                let pipeline_id = PipelineId::new(UuidIdGen.next());
-                let display_name = oj_runbook::pipeline_display_name(
-                    pipeline_name,
-                    pipeline_id.short(8),
+                // Generate job ID
+                let job_id = JobId::new(UuidIdGen.next());
+                let display_name = oj_runbook::job_display_name(
+                    job_name,
+                    job_id.short(8),
                     &namespace,
                 );
 
@@ -427,12 +427,12 @@ where
                 let mut vars = HashMap::new();
                 vars.insert("invoke.dir".to_string(), project_root.display().to_string());
 
-                // Create and start pipeline
+                // Create and start job
                 result_events.extend(
-                    self.create_and_start_pipeline(CreatePipelineParams {
-                        pipeline_id: pipeline_id.clone(),
-                        pipeline_name: display_name,
-                        pipeline_kind: pipeline_name.clone(),
+                    self.create_and_start_job(CreateJobParams {
+                        job_id: job_id.clone(),
+                        job_name: display_name,
+                        job_kind: job_name.clone(),
                         vars,
                         runbook_hash: runbook_hash.clone(),
                         runbook_json: None,
@@ -448,9 +448,9 @@ where
                     cron_name,
                     &namespace,
                     &format!(
-                        "tick: triggered pipeline {} ({})",
-                        pipeline_name,
-                        pipeline_id.short(8)
+                        "tick: triggered job {} ({})",
+                        job_name,
+                        job_id.short(8)
                     ),
                 );
 
@@ -460,7 +460,7 @@ where
                         .execute_all(vec![Effect::Emit {
                             event: Event::CronFired {
                                 cron_name: cron_name.to_string(),
-                                pipeline_id,
+                                job_id,
                                 agent_run_id: None,
                                 namespace: namespace.clone(),
                             },
@@ -553,7 +553,7 @@ where
                         .execute_all(vec![Effect::Emit {
                             event: Event::CronFired {
                                 cron_name: cron_name.to_string(),
-                                pipeline_id: PipelineId::new(""),
+                                job_id: JobId::new(""),
                                 agent_run_id: Some(agent_run_id.as_str().to_string()),
                                 namespace: namespace.clone(),
                             },

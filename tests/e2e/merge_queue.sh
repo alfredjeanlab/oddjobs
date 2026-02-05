@@ -31,11 +31,11 @@ queue "merges" {
 
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { pipeline = "merge" }
+  handler     = { job = "merge" }
   concurrency = 1
 }
 
-pipeline "merge" {
+job "merge" {
   vars = ["mr"]
 
   step "init" {
@@ -77,7 +77,7 @@ oj worker start merge
 TIMEOUT=30
 ELAPSED=0
 while [ $ELAPSED -lt $TIMEOUT ]; do
-  if oj pipeline list 2>/dev/null | grep -q "completed"; then
+  if oj job list 2>/dev/null | grep -q "completed"; then
     break
   fi
   sleep 1  # polling interval, not synchronization
@@ -85,8 +85,8 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
 done
 
 if [ $ELAPSED -ge $TIMEOUT ]; then
-  echo "FAIL: merge pipeline did not complete within ${TIMEOUT}s"
-  oj pipeline list
+  echo "FAIL: merge job did not complete within ${TIMEOUT}s"
+  oj job list
   oj daemon stop
   exit 1
 fi

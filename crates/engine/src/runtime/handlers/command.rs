@@ -4,11 +4,11 @@
 //! Command run event handling
 
 use super::super::Runtime;
-use super::CreatePipelineParams;
+use super::CreateJobParams;
 use crate::error::RuntimeError;
 use crate::runtime::agent_run::SpawnAgentParams;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentRunId, Clock, Effect, Event, PipelineId};
+use oj_core::{AgentRunId, Clock, Effect, Event, JobId};
 use oj_runbook::RunDirective;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -16,8 +16,8 @@ use std::path::Path;
 
 /// Parameters for handling a command run event.
 pub(crate) struct HandleCommandParams<'a> {
-    pub pipeline_id: &'a PipelineId,
-    pub pipeline_name: &'a str,
+    pub job_id: &'a JobId,
+    pub job_name: &'a str,
     pub project_root: &'a Path,
     pub invoke_dir: &'a Path,
     pub namespace: &'a str,
@@ -37,8 +37,8 @@ where
         params: HandleCommandParams<'_>,
     ) -> Result<Vec<Event>, RuntimeError> {
         let HandleCommandParams {
-            pipeline_id,
-            pipeline_name,
+            job_id,
+            job_name,
             project_root,
             invoke_dir,
             namespace,
@@ -71,16 +71,16 @@ where
             .ok_or_else(|| RuntimeError::CommandNotFound(command.to_string()))?;
 
         match &cmd_def.run {
-            RunDirective::Pipeline { .. } => {
-                // Validate pipeline def exists
+            RunDirective::Job { .. } => {
+                // Validate job def exists
                 let _ = runbook
-                    .get_pipeline(pipeline_name)
-                    .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline_name.to_string()))?;
+                    .get_job(job_name)
+                    .ok_or_else(|| RuntimeError::JobDefNotFound(job_name.to_string()))?;
 
                 let name = args
                     .get("name")
                     .cloned()
-                    .unwrap_or_else(|| pipeline_id.to_string());
+                    .unwrap_or_else(|| job_id.to_string());
 
                 // Only pass runbook_json if not already cached
                 let already_cached = self.runbook_cache.lock().contains_key(&runbook_hash);
@@ -90,10 +90,10 @@ where
                     Some(runbook_json)
                 };
 
-                self.create_and_start_pipeline(CreatePipelineParams {
-                    pipeline_id: pipeline_id.clone(),
-                    pipeline_name: name,
-                    pipeline_kind: pipeline_name.to_string(),
+                self.create_and_start_job(CreateJobParams {
+                    job_id: job_id.clone(),
+                    job_name: name,
+                    job_kind: job_name.to_string(),
                     vars: args.clone(),
                     runbook_hash,
                     runbook_json: runbook_json_param,
@@ -108,11 +108,11 @@ where
                 let name = args
                     .get("name")
                     .cloned()
-                    .unwrap_or_else(|| pipeline_id.to_string());
+                    .unwrap_or_else(|| job_id.to_string());
                 let step_name = "run";
                 let execution_path = project_root.to_path_buf();
 
-                // Phase 1: Persist pipeline record
+                // Phase 1: Persist job record
                 let mut creation_effects = Vec::new();
                 let already_cached = self.runbook_cache.lock().contains_key(&runbook_hash);
                 if !already_cached {
@@ -126,8 +126,8 @@ where
                 }
 
                 creation_effects.push(Effect::Emit {
-                    event: Event::PipelineCreated {
-                        id: pipeline_id.clone(),
+                    event: Event::JobCreated {
+                        id: job_id.clone(),
                         kind: command.to_string(),
                         name: name.clone(),
                         runbook_hash: runbook_hash.clone(),
@@ -150,7 +150,7 @@ where
 
                 let mut result_events = self.executor.execute_all(creation_effects).await?;
                 self.logger
-                    .append(pipeline_id.as_str(), step_name, "shell command created");
+                    .append(job_id.as_str(), step_name, "shell command created");
 
                 // Phase 2: Interpolate and execute shell command
                 // Values are escaped by interpolate_shell() during substitution
@@ -158,7 +158,7 @@ where
                     .iter()
                     .map(|(k, v)| (format!("args.{}", k), v.clone()))
                     .collect();
-                vars.insert("pipeline_id".to_string(), pipeline_id.to_string());
+                vars.insert("job_id".to_string(), job_id.to_string());
                 vars.insert("name".to_string(), name.clone());
                 vars.insert(
                     "workspace".to_string(),
@@ -167,7 +167,7 @@ where
 
                 let interpolated = oj_runbook::interpolate_shell(&cmd, &vars);
                 self.logger.append(
-                    pipeline_id.as_str(),
+                    job_id.as_str(),
                     step_name,
                     &format!(
                         "shell (cwd: {}): {}",
@@ -179,14 +179,14 @@ where
                 let shell_effects = vec![
                     Effect::Emit {
                         event: Event::StepStarted {
-                            pipeline_id: pipeline_id.clone(),
+                            job_id: job_id.clone(),
                             step: step_name.to_string(),
                             agent_id: None,
                             agent_name: None,
                         },
                     },
                     Effect::Shell {
-                        pipeline_id: pipeline_id.clone(),
+                        job_id: job_id.clone(),
                         step: step_name.to_string(),
                         command: interpolated,
                         cwd: execution_path,
@@ -219,8 +219,8 @@ where
                     }
                 }
 
-                // Use the pipeline_id as the agent_run_id (daemon generated it)
-                let agent_run_id = AgentRunId::new(pipeline_id.to_string());
+                // Use the job_id as the agent_run_id (daemon generated it)
+                let agent_run_id = AgentRunId::new(job_id.to_string());
 
                 // Only pass runbook_json if not already cached
                 let already_cached = self.runbook_cache.lock().contains_key(&runbook_hash);

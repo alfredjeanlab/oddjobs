@@ -42,10 +42,10 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { pipeline = "handle" }
+  handler = { job = "handle" }
 }
 
-pipeline "handle" {
+job "handle" {
   step "run" {
     run = "echo task"
   }
@@ -69,7 +69,7 @@ queue "tasks" {
   vars = ["task"]
 }
 
-pipeline "handle" {
+job "handle" {
   step "run" {
     run = "echo task"
   }
@@ -147,7 +147,7 @@ fn push_wakes_running_worker() {
             project_root: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: String::new(),
@@ -308,10 +308,10 @@ queue "issues" {
 
 worker "triager" {
   source  = { queue = "issues" }
-  handler = { pipeline = "triage" }
+  handler = { job = "triage" }
 }
 
-pipeline "triage" {
+job "triage" {
   step "run" {
     run = "echo triaging"
   }
@@ -337,7 +337,7 @@ fn push_external_queue_wakes_workers() {
             project_root: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "issues".to_string(),
             concurrency: 1,
             namespace: String::new(),
@@ -1030,7 +1030,7 @@ fn push_with_wrong_project_root_falls_back_to_namespace() {
             project_root: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: "my-project".to_string(),
@@ -1074,8 +1074,8 @@ fn drop_with_wrong_project_root_falls_back_to_namespace() {
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            pipeline_name: "handle".to_string(),
-            run_target: "pipeline:handle".to_string(),
+            job_name: "handle".to_string(),
+            run_target: "job:handle".to_string(),
             started_at_ms: 1_000,
             last_fired_at_ms: None,
         },
@@ -1128,7 +1128,7 @@ fn retry_with_wrong_project_root_falls_back_to_namespace() {
             project_root: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "stopped".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: "my-project".to_string(),
@@ -1197,8 +1197,8 @@ fn drain_with_wrong_project_root_falls_back_to_namespace() {
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            pipeline_name: "handle".to_string(),
-            run_target: "pipeline:handle".to_string(),
+            job_name: "handle".to_string(),
+            run_target: "job:handle".to_string(),
             started_at_ms: 1_000,
             last_fired_at_ms: None,
         },

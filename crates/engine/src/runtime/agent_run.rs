@@ -10,7 +10,7 @@ use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, AgentReconnectConfig, NotifyAdapter, SessionAdapter};
 use oj_core::{
     AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event,
-    PipelineId, QuestionData, SessionId, TimerId,
+    JobId, QuestionData, SessionId, TimerId,
 };
 use oj_runbook::AgentDef;
 use std::collections::HashMap;
@@ -53,9 +53,9 @@ where
         } = params;
 
         // Build a SpawnContext for standalone agent
-        let sentinel_pipeline_id = PipelineId::new("");
+        let sentinel_job_id = JobId::new("");
         let ctx = crate::spawn::SpawnContext {
-            pipeline_id: &sentinel_pipeline_id,
+            job_id: &sentinel_job_id,
             agent_run_id: Some(agent_run_id),
             name: agent_name,
             namespace,
@@ -429,7 +429,7 @@ where
                 ];
                 let result = self.executor.execute_all(events).await?;
 
-                // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                // Kill the tmux session (mirrors job advance_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
 
                 Ok(result)
@@ -460,7 +460,7 @@ where
                 ];
                 let result = self.executor.execute_all(events).await?;
 
-                // Kill the tmux session (mirrors pipeline fail_pipeline behavior)
+                // Kill the tmux session (mirrors job fail_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
 
                 Ok(result)
@@ -540,7 +540,7 @@ where
                         ];
                         let result = self.executor.execute_all(events).await?;
 
-                        // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                        // Kill the tmux session (mirrors job advance_job behavior)
                         self.cleanup_standalone_agent_session(agent_run).await?;
 
                         Ok(result)
@@ -581,13 +581,13 @@ where
                     }
                 }
             }
-            // Pipeline-specific effects should not be routed here
-            ActionEffects::AdvancePipeline
-            | ActionEffects::FailPipeline { .. }
+            // Job-specific effects should not be routed here
+            ActionEffects::AdvanceJob
+            | ActionEffects::FailJob { .. }
             | ActionEffects::Escalate { .. } => {
                 tracing::error!(
                     agent_run_id = %agent_run.id,
-                    "pipeline action effect routed to standalone agent handler"
+                    "job action effect routed to standalone agent handler"
                 );
                 Ok(vec![])
             }
@@ -635,7 +635,7 @@ where
 
     /// Kill the standalone agent's tmux session and clean up mappings.
     ///
-    /// Mirrors what `advance_pipeline` / `fail_pipeline` do for pipeline agents:
+    /// Mirrors what `advance_job` / `fail_job` do for job agents:
     /// deregister the agent mapping, kill the session, and emit `SessionDeleted`.
     async fn cleanup_standalone_agent_session(
         &self,
@@ -727,7 +727,7 @@ where
                 ];
                 let result = self.executor.execute_all(events).await?;
 
-                // Kill the tmux session (mirrors pipeline advance_pipeline behavior)
+                // Kill the tmux session (mirrors job advance_job behavior)
                 self.cleanup_standalone_agent_session(agent_run).await?;
 
                 Ok(result)

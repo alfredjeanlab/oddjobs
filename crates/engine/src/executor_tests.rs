@@ -4,7 +4,7 @@
 use super::*;
 use crate::RuntimeDeps;
 use oj_adapters::{FakeAgentAdapter, FakeNotifyAdapter, FakeSessionAdapter};
-use oj_core::{FakeClock, PipelineId, SessionId, TimerId, WorkspaceId};
+use oj_core::{FakeClock, JobId, SessionId, TimerId, WorkspaceId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -47,8 +47,8 @@ async fn executor_emit_event_effect() {
     let result = harness
         .executor
         .execute(Effect::Emit {
-            event: Event::PipelineCreated {
-                id: PipelineId::new("pipe-1"),
+            event: Event::JobCreated {
+                id: JobId::new("pipe-1"),
                 kind: "build".to_string(),
                 name: "test".to_string(),
                 runbook_hash: "testhash".to_string(),
@@ -65,12 +65,12 @@ async fn executor_emit_event_effect() {
 
     // Verify it returns the typed event
     assert!(result.is_some());
-    assert!(matches!(result, Some(Event::PipelineCreated { .. })));
+    assert!(matches!(result, Some(Event::JobCreated { .. })));
 
     // Verify state was applied
     let state = harness.executor.state();
     let state = state.lock();
-    assert!(state.pipelines.contains_key("pipe-1"));
+    assert!(state.jobs.contains_key("pipe-1"));
 }
 
 #[tokio::test]
@@ -99,7 +99,7 @@ async fn shell_effect_runs_command() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            pipeline_id: PipelineId::new("test"),
+            job_id: JobId::new("test"),
             step: "init".to_string(),
             command: "echo hello".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -122,7 +122,7 @@ async fn shell_failure_returns_nonzero() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            pipeline_id: PipelineId::new("test"),
+            job_id: JobId::new("test"),
             step: "init".to_string(),
             command: "exit 1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -212,14 +212,14 @@ async fn execute_all_shell_effects_are_async() {
 
     let effects = vec![
         Effect::Shell {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "init".to_string(),
             command: "echo first".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
         },
         Effect::Shell {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "build".to_string(),
             command: "echo second".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -297,7 +297,7 @@ async fn shell_intermediate_failure_propagates() {
     let event = harness
         .executor
         .execute(Effect::Shell {
-            pipeline_id: PipelineId::new("test"),
+            job_id: JobId::new("test"),
             step: "init".to_string(),
             command: "false\ntrue".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -322,12 +322,12 @@ async fn shell_intermediate_failure_propagates() {
 async fn shell_pipefail_propagates() {
     let mut harness = setup().await;
 
-    // Pipeline where the first command fails but the second succeeds.
+    // Job where the first command fails but the second succeeds.
     // Without pipefail, `exit 1 | cat` would return 0.
     let event = harness
         .executor
         .execute(Effect::Shell {
-            pipeline_id: PipelineId::new("test"),
+            job_id: JobId::new("test"),
             step: "init".to_string(),
             command: "exit 1 | cat".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),

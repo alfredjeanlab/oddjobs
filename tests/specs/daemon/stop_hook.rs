@@ -1,11 +1,11 @@
 //! Agent stop hook resilience specs
 //!
 //! Verify that agent steps handle cancellation and stop scenarios correctly:
-//! - Pipeline cancel kills agent session and transitions pipeline
+//! - Job cancel kills agent session and transitions job
 //! - `on_cancel` cleanup steps run after agent is killed
-//! - Queue items transition properly when agent pipelines are cancelled
+//! - Queue items transition properly when agent jobs are cancelled
 //! - Re-cancellation during cleanup is a no-op
-//! - Daemon stop with --kill terminates agent sessions mid-pipeline
+//! - Daemon stop with --kill terminates agent sessions mid-job
 
 use crate::prelude::*;
 
@@ -13,7 +13,7 @@ use crate::prelude::*;
 // Scenarios
 // =============================================================================
 
-/// A slow agent that sleeps, keeping the pipeline on the agent step long enough
+/// A slow agent that sleeps, keeping the job on the agent step long enough
 /// to cancel it mid-execution. Uses -p mode so on_dead fires if not cancelled.
 const SLOW_AGENT_SCENARIO: &str = r#"
 name = "slow-agent"
@@ -47,12 +47,12 @@ fn runbook_agent_no_on_cancel(scenario_path: &std::path::Path) -> String {
         r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
@@ -65,24 +65,24 @@ on_dead = "done"
     )
 }
 
-/// Runbook with a slow agent step and a pipeline-level on_cancel that routes
+/// Runbook with a slow agent step and a job-level on_cancel that routes
 /// to a cleanup step. The cleanup step writes a marker file to prove it ran.
 fn runbook_agent_with_on_cancel(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 on_cancel = {{ step = "cleanup" }}
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "cleanup"
 run = "echo cleaned"
 
@@ -102,17 +102,17 @@ fn runbook_agent_step_on_cancel(scenario_path: &std::path::Path) -> String {
         r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 on_cancel = {{ step = "cleanup" }}
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "cleanup"
 run = "echo step-cleanup-ran"
 
@@ -132,12 +132,12 @@ fn runbook_agent_recover_then_cancel(scenario_path: &std::path::Path) -> String 
         r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
@@ -161,13 +161,13 @@ vars = ["name"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ pipeline = "work" }}
+handler = {{ job = "work" }}
 concurrency = 1
 
-[pipeline.work]
+[job.work]
 vars = ["name"]
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
@@ -180,16 +180,16 @@ on_dead = "done"
     )
 }
 
-/// Extract the first pipeline ID from `oj pipeline list` output
+/// Extract the first job ID from `oj job list` output
 /// by matching a line containing `name_filter`.
-fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
-    let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+fn extract_job_id(temp: &Project, name_filter: &str) -> String {
+    let output = temp.oj().args(&["job", "list"]).passes().stdout();
     output
         .lines()
         .find(|l| l.contains(name_filter))
         .unwrap_or_else(|| {
             panic!(
-                "no pipeline matching '{}' in output:\n{}",
+                "no job matching '{}' in output:\n{}",
                 name_filter, output
             )
         })
@@ -200,13 +200,13 @@ fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
 }
 
 // =============================================================================
-// Test 1: Cancel pipeline during agent step transitions to cancelled
+// Test 1: Cancel job during agent step transitions to cancelled
 // =============================================================================
 
-/// When a pipeline is cancelled while an agent step is running, the agent
-/// session is killed and the pipeline transitions to "cancelled" status.
+/// When a job is cancelled while an agent step is running, the agent
+/// session is killed and the job transitions to "cancelled" status.
 #[test]
-fn cancel_agent_step_transitions_pipeline_to_cancelled() {
+fn cancel_agent_step_transitions_job_to_cancelled() {
     let temp = Project::empty();
     temp.git_init();
 
@@ -220,26 +220,26 @@ fn cancel_agent_step_transitions_pipeline_to_cancelled() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "cancel-basic"]).passes();
 
-    // Wait for pipeline to reach agent step (running status)
+    // Wait for job to reach agent step (running status)
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
-    // Cancel the pipeline
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should reach cancelled status
+    // Job should reach cancelled status
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("cancelled")
     });
 
@@ -248,16 +248,16 @@ fn cancel_agent_step_transitions_pipeline_to_cancelled() {
     }
     assert!(
         cancelled,
-        "pipeline should transition to cancelled after cancel during agent step"
+        "job should transition to cancelled after cancel during agent step"
     );
 }
 
 // =============================================================================
-// Test 2: Pipeline-level on_cancel cleanup step runs after agent is killed
+// Test 2: Job-level on_cancel cleanup step runs after agent is killed
 // =============================================================================
 
-/// When a pipeline with `on_cancel` is cancelled during an agent step, the
-/// agent is killed first, then the cleanup step runs, and the pipeline
+/// When a job with `on_cancel` is cancelled during an agent step, the
+/// agent is killed first, then the cleanup step runs, and the job
 /// completes (not stuck in cancelling).
 #[test]
 fn on_cancel_cleanup_step_runs_after_agent_kill() {
@@ -274,27 +274,27 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "cancel-cleanup"]).passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
-    // Cancel the pipeline
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // The cleanup step should run and the pipeline should reach a terminal state.
-    // With on_cancel routing, the pipeline goes through "cleanup" step before terminal.
+    // The cleanup step should run and the job should reach a terminal state.
+    // With on_cancel routing, the job goes through "cleanup" step before terminal.
     let terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("completed") || out.contains("cancelled")
     });
 
@@ -303,7 +303,7 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
     }
     assert!(
         terminal,
-        "pipeline should reach terminal state after on_cancel cleanup step runs"
+        "job should reach terminal state after on_cancel cleanup step runs"
     );
 }
 
@@ -312,7 +312,7 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
 // =============================================================================
 
 /// When a step has its own on_cancel, the step-level on_cancel takes priority
-/// over the pipeline-level on_cancel.
+/// over the job-level on_cancel.
 #[test]
 fn step_level_on_cancel_routes_to_cleanup() {
     let temp = Project::empty();
@@ -328,26 +328,26 @@ fn step_level_on_cancel_routes_to_cleanup() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "step-cancel"]).passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
-    // Cancel the pipeline
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should route to cleanup step and reach terminal
+    // Job should route to cleanup step and reach terminal
     let terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("completed") || out.contains("cancelled")
     });
 
@@ -356,7 +356,7 @@ fn step_level_on_cancel_routes_to_cleanup() {
     }
     assert!(
         terminal,
-        "pipeline should reach terminal state after step-level on_cancel cleanup runs"
+        "job should reach terminal state after step-level on_cancel cleanup runs"
     );
 }
 
@@ -365,8 +365,8 @@ fn step_level_on_cancel_routes_to_cleanup() {
 // =============================================================================
 
 /// When the agent is configured with on_dead = recover (with attempts), but
-/// the pipeline is cancelled, the cancel should take effect immediately.
-/// The pipeline should NOT attempt to recover the agent.
+/// the job is cancelled, the cancel should take effect immediately.
+/// The job should NOT attempt to recover the agent.
 #[test]
 fn cancel_overrides_on_dead_recover() {
     let temp = Project::empty();
@@ -384,26 +384,26 @@ fn cancel_overrides_on_dead_recover() {
         .args(&["run", "work", "cancel-vs-recover"])
         .passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
-    // Cancel the pipeline while agent is running
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job while agent is running
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should be cancelled, NOT recovering
+    // Job should be cancelled, NOT recovering
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("cancelled")
     });
 
@@ -420,7 +420,7 @@ fn cancel_overrides_on_dead_recover() {
 // Test 5: Re-cancel during cleanup step is a no-op
 // =============================================================================
 
-/// When a pipeline is already running its on_cancel cleanup step, issuing
+/// When a job is already running its on_cancel cleanup step, issuing
 /// another cancel should be a no-op (the cleanup runs to completion).
 #[test]
 fn re_cancel_during_cleanup_is_noop() {
@@ -436,17 +436,17 @@ fn re_cancel_during_cleanup_is_noop() {
             r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 on_cancel = {{ step = "cleanup" }}
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "cleanup"
 run = "echo cleanup-done"
 
@@ -462,31 +462,31 @@ on_dead = "done"
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "re-cancel-test"]).passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
     // First cancel
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
     // Immediately re-cancel (should be a no-op due to cancelling guard)
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should still reach terminal state (cleanup completes, not disrupted)
+    // Job should still reach terminal state (cleanup completes, not disrupted)
     let terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("completed") || out.contains("cancelled")
     });
 
@@ -495,18 +495,18 @@ on_dead = "done"
     }
     assert!(
         terminal,
-        "pipeline should reach terminal state despite re-cancel during cleanup"
+        "job should reach terminal state despite re-cancel during cleanup"
     );
 }
 
 // =============================================================================
-// Test 6: Cancel agent pipeline frees queue slot
+// Test 6: Cancel agent job frees queue slot
 // =============================================================================
 
-/// When a queue-spawned pipeline with an agent step is cancelled, the queue
+/// When a queue-spawned job with an agent step is cancelled, the queue
 /// item transitions from active and the concurrency slot is freed.
 #[test]
-fn cancel_agent_pipeline_frees_queue_slot() {
+fn cancel_agent_job_frees_queue_slot() {
     let temp = Project::empty();
     temp.git_init();
 
@@ -525,14 +525,14 @@ fn cancel_agent_pipeline_frees_queue_slot() {
         .args(&["queue", "push", "tasks", r#"{"name": "test-item"}"#])
         .passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
@@ -544,10 +544,10 @@ fn cancel_agent_pipeline_frees_queue_slot() {
         .stdout();
     assert!(active.contains("active"), "queue item should be active");
 
-    // Cancel the pipeline
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
     // Queue item should leave active status
@@ -565,7 +565,7 @@ fn cancel_agent_pipeline_frees_queue_slot() {
     }
     assert!(
         transitioned,
-        "queue item must not stay active after agent pipeline cancel"
+        "queue item must not stay active after agent job cancel"
     );
 
     // Verify the slot is freed by pushing another item and watching it activate
@@ -593,13 +593,13 @@ fn cancel_agent_pipeline_frees_queue_slot() {
 }
 
 // =============================================================================
-// Test 7: Cancel already-terminal pipeline is a no-op
+// Test 7: Cancel already-terminal job is a no-op
 // =============================================================================
 
-/// Cancelling a pipeline that has already completed should be a no-op
+/// Cancelling a job that has already completed should be a no-op
 /// (no crash, no state corruption).
 #[test]
-fn cancel_completed_pipeline_is_noop() {
+fn cancel_completed_job_is_noop() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(
@@ -607,12 +607,12 @@ fn cancel_completed_pipeline_is_noop() {
         r#"
 [command.fast]
 args = "<name>"
-run = { pipeline = "fast" }
+run = { job = "fast" }
 
-[pipeline.fast]
+[job.fast]
 vars  = ["name"]
 
-[[pipeline.fast.step]]
+[[job.fast.step]]
 name = "work"
 run = "echo done"
 "#,
@@ -621,25 +621,25 @@ run = "echo done"
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "fast", "noop-cancel"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(completed, "pipeline should complete");
+    assert!(completed, "job should complete");
 
-    // Cancel the already-completed pipeline (should be a no-op)
-    let pipeline_id = extract_pipeline_id(&temp, "fast");
+    // Cancel the already-completed job (should be a no-op)
+    let job_id = extract_job_id(&temp, "fast");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should still show completed (not cancelled)
+    // Job should still show completed (not cancelled)
     temp.oj()
-        .args(&["pipeline", "list"])
+        .args(&["job", "list"])
         .passes()
         .stdout_has("completed");
 }
@@ -648,7 +648,7 @@ run = "echo done"
 // Test 8: Cancel cleans up workspace directory
 // =============================================================================
 
-/// When a pipeline with a workspace is cancelled, the workspace directory
+/// When a job with a workspace is cancelled, the workspace directory
 /// should be cleaned up (same as on successful completion).
 #[test]
 fn cancel_cleans_up_workspace() {
@@ -663,13 +663,13 @@ fn cancel_cleans_up_workspace() {
             r#"
 [command.work]
 args = "<name>"
-run = {{ pipeline = "work" }}
+run = {{ job = "work" }}
 
-[pipeline.work]
+[job.work]
 vars  = ["name"]
 workspace = "folder"
 
-[[pipeline.work.step]]
+[[job.work.step]]
 name = "agent"
 run = {{ agent = "worker" }}
 
@@ -685,14 +685,14 @@ on_dead = "done"
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "ws-cancel"]).passes();
 
-    // Wait for pipeline to reach agent step
+    // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
     assert!(
         running,
-        "pipeline should reach the agent step\ndaemon log:\n{}",
+        "job should reach the agent step\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
@@ -707,15 +707,15 @@ on_dead = "done"
         "workspace directory should exist before cancel"
     );
 
-    // Cancel the pipeline
-    let pipeline_id = extract_pipeline_id(&temp, "work");
+    // Cancel the job
+    let job_id = extract_job_id(&temp, "work");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
-    // Pipeline should reach cancelled status
+    // Job should reach cancelled status
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("cancelled")
     });
 
@@ -724,7 +724,7 @@ on_dead = "done"
     }
     assert!(
         cancelled,
-        "pipeline should transition to cancelled after cancel"
+        "job should transition to cancelled after cancel"
     );
 
     // Workspace directory should be cleaned up

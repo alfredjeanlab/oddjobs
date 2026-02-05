@@ -4,10 +4,10 @@
 //! Timer lifecycle cleanup tests.
 //!
 //! Verifies that liveness, exit-deferred, and cooldown timers are properly
-//! cleaned up when pipelines advance, complete, fail, or are cancelled.
+//! cleaned up when jobs advance, complete, fail, or are cancelled.
 
 use super::*;
-use oj_core::{PipelineId, TimerId};
+use oj_core::{JobId, TimerId};
 
 /// Collect all pending timer IDs from the scheduler by advancing time far
 /// into the future and draining fired timers.
@@ -25,7 +25,7 @@ fn pending_timer_ids(ctx: &TestContext) -> Vec<String> {
         .collect()
 }
 
-/// Helper: check that no pipeline-scoped timer with the given prefix exists.
+/// Helper: check that no job-scoped timer with the given prefix exists.
 fn assert_no_timer_with_prefix(timer_ids: &[String], prefix: &str) {
     let matching: Vec<&String> = timer_ids
         .iter()
@@ -47,17 +47,17 @@ fn assert_no_timer_with_prefix(timer_ids: &[String], prefix: &str) {
 const RUNBOOK_CLEANUP: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "finish"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "finish"
 run = "echo done"
 
@@ -71,17 +71,17 @@ on_dead = "done"
 const RUNBOOK_COOLDOWN: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "finish"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "finish"
 run = "echo done"
 
@@ -96,7 +96,7 @@ on_dead = "done"
 // =============================================================================
 
 #[tokio::test]
-async fn liveness_timer_cancelled_when_pipeline_advances_past_agent_step() {
+async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -112,17 +112,17 @@ async fn liveness_timer_cancelled_when_pipeline_advances_past_agent_step() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
     // Liveness timer should be pending from spawn
     let scheduler = ctx.runtime.executor.scheduler();
     assert!(scheduler.lock().has_timers());
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent goes idle → on_idle = done → pipeline advances to "finish"
+    // Agent goes idle → on_idle = done → job advances to "finish"
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -132,16 +132,16 @@ async fn liveness_timer_cancelled_when_pipeline_advances_past_agent_step() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "finish");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "finish");
 
     // Liveness timer should be cancelled (not pending)
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
 }
 
 #[tokio::test]
-async fn liveness_timer_cancelled_on_pipeline_failure() {
+async fn liveness_timer_cancelled_on_job_failure() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -157,14 +157,14 @@ async fn liveness_timer_cancelled_on_pipeline_failure() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
     // Simulate agent exiting with failure → ShellExited exit_code=1 on agent step
-    // triggers fail_pipeline which cancels timers
+    // triggers fail_job which cancels timers
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "work".to_string(),
             exit_code: 1,
             stdout: None,
@@ -173,16 +173,16 @@ async fn liveness_timer_cancelled_on_pipeline_failure() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
     // No liveness timers should remain
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
 }
 
 #[tokio::test]
-async fn liveness_timer_cancelled_on_pipeline_cancellation() {
+async fn liveness_timer_cancelled_on_job_cancellation() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -198,23 +198,23 @@ async fn liveness_timer_cancelled_on_pipeline_cancellation() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
-    // Cancel the pipeline
+    // Cancel the job
     ctx.runtime
-        .handle_event(Event::PipelineCancel {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobCancel {
+            id: JobId::new(job_id.clone()),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
     // No liveness timers should remain
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
 }
 
 // =============================================================================
@@ -222,7 +222,7 @@ async fn liveness_timer_cancelled_on_pipeline_cancellation() {
 // =============================================================================
 
 #[tokio::test]
-async fn exit_deferred_timer_cancelled_when_pipeline_advances() {
+async fn exit_deferred_timer_cancelled_when_job_advances() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -238,13 +238,13 @@ async fn exit_deferred_timer_cancelled_when_pipeline_advances() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    assert_eq!(ctx.runtime.get_pipeline(&pipeline_id).unwrap().step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
     // Session not registered → liveness detects death → schedules exit-deferred
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -255,9 +255,9 @@ async fn exit_deferred_timer_cancelled_when_pipeline_advances() {
         assert!(scheduler.lock().has_timers());
     }
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent goes idle → on_idle = done → pipeline advances (before exit-deferred fires)
+    // Agent goes idle → on_idle = done → job advances (before exit-deferred fires)
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -267,16 +267,16 @@ async fn exit_deferred_timer_cancelled_when_pipeline_advances() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "finish");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "finish");
 
     // Exit-deferred timer should have been cancelled during advance
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
 }
 
 #[tokio::test]
-async fn exit_deferred_timer_cancelled_on_pipeline_failure() {
+async fn exit_deferred_timer_cancelled_on_job_failure() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -292,20 +292,20 @@ async fn exit_deferred_timer_cancelled_on_pipeline_failure() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
     // Session dead → liveness schedules exit-deferred
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // Fail the pipeline before exit-deferred fires
+    // Fail the job before exit-deferred fires
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "work".to_string(),
             exit_code: 1,
             stdout: None,
@@ -314,16 +314,16 @@ async fn exit_deferred_timer_cancelled_on_pipeline_failure() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
     // Exit-deferred should be cancelled
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
 }
 
 #[tokio::test]
-async fn exit_deferred_timer_cancelled_on_pipeline_cancellation() {
+async fn exit_deferred_timer_cancelled_on_job_cancellation() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -339,29 +339,29 @@ async fn exit_deferred_timer_cancelled_on_pipeline_cancellation() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
     // Session dead → liveness schedules exit-deferred
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
     // Cancel before exit-deferred fires
     ctx.runtime
-        .handle_event(Event::PipelineCancel {
-            id: PipelineId::new(pipeline_id.clone()),
+        .handle_event(Event::JobCancel {
+            id: JobId::new(job_id.clone()),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
 }
 
 // =============================================================================
@@ -369,7 +369,7 @@ async fn exit_deferred_timer_cancelled_on_pipeline_cancellation() {
 // =============================================================================
 
 #[tokio::test]
-async fn cooldown_timer_noop_when_pipeline_becomes_terminal() {
+async fn cooldown_timer_noop_when_job_becomes_terminal() {
     let ctx = setup_with_runbook(RUNBOOK_COOLDOWN).await;
 
     ctx.runtime
@@ -385,15 +385,15 @@ async fn cooldown_timer_noop_when_pipeline_becomes_terminal() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
     // Register session as alive so nudge (SendToSession) doesn't fail
-    let session_id = pipeline.session_id.clone().unwrap();
+    let session_id = job.session_id.clone().unwrap();
     ctx.sessions.add_session(&session_id, true);
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // First idle → on_idle nudge (attempt 1, no cooldown yet)
     ctx.agents
@@ -420,10 +420,10 @@ async fn cooldown_timer_noop_when_pipeline_becomes_terminal() {
         assert!(sched.has_timers(), "cooldown timer should be pending");
     }
 
-    // Fail the pipeline while cooldown is pending
+    // Fail the job while cooldown is pending
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "work".to_string(),
             exit_code: 1,
             stdout: None,
@@ -432,33 +432,33 @@ async fn cooldown_timer_noop_when_pipeline_becomes_terminal() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
-    // Fire the cooldown timer — should be a no-op since pipeline is terminal
+    // Fire the cooldown timer — should be a no-op since job is terminal
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::cooldown(&PipelineId::new(pipeline_id.clone()), "idle", 0),
+            id: TimerId::cooldown(&JobId::new(job_id.clone()), "idle", 0),
         })
         .await
         .unwrap();
 
     assert!(
         result.is_empty(),
-        "cooldown on terminal pipeline should be a no-op"
+        "cooldown on terminal job should be a no-op"
     );
 }
 
 #[tokio::test]
-async fn cooldown_timer_noop_when_pipeline_missing() {
+async fn cooldown_timer_noop_when_job_missing() {
     let ctx = setup_with_runbook(RUNBOOK_COOLDOWN).await;
 
-    // Fire cooldown timer for a pipeline that doesn't exist
+    // Fire cooldown timer for a job that doesn't exist
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::cooldown(&PipelineId::new("nonexistent"), "idle", 0),
+            id: TimerId::cooldown(&JobId::new("nonexistent"), "idle", 0),
         })
         .await
         .unwrap();
@@ -471,7 +471,7 @@ async fn cooldown_timer_noop_when_pipeline_missing() {
 // =============================================================================
 
 #[tokio::test]
-async fn all_pipeline_timers_cancelled_after_on_dead_done_completes() {
+async fn all_job_timers_cancelled_after_on_dead_done_completes() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -487,14 +487,14 @@ async fn all_pipeline_timers_cancelled_after_on_dead_done_completes() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Full lifecycle: liveness detects dead session → exit-deferred → on_dead=done
     // Step 1: Liveness fires, session dead → exit-deferred scheduled
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -505,25 +505,25 @@ async fn all_pipeline_timers_cancelled_after_on_dead_done_completes() {
         oj_core::AgentState::Exited { exit_code: Some(0) },
     );
 
-    // Step 3: Exit-deferred fires → on_dead=done → pipeline advances to "finish"
+    // Step 3: Exit-deferred fires → on_dead=done → job advances to "finish"
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "finish");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "finish");
 
-    // No liveness or exit-deferred timers should remain for this pipeline
+    // No liveness or exit-deferred timers should remain for this job
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", pipeline_id));
-    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
 }
 
 #[tokio::test]
-async fn all_pipeline_timers_cancelled_after_on_idle_done_completes() {
+async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     let ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
     ctx.runtime
@@ -539,18 +539,18 @@ async fn all_pipeline_timers_cancelled_after_on_idle_done_completes() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Session dead → liveness → exit-deferred (both timers now exist)
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // Agent goes idle → on_idle=done → pipeline advances to "finish"
+    // Agent goes idle → on_idle=done → job advances to "finish"
     // This should cancel BOTH liveness and exit-deferred timers
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
@@ -561,11 +561,11 @@ async fn all_pipeline_timers_cancelled_after_on_idle_done_completes() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "finish");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "finish");
 
     // Both timers should be gone
     let timer_ids = pending_timer_ids(&ctx);
-    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", pipeline_id));
-    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", pipeline_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
+    assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
 }

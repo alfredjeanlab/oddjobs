@@ -7,15 +7,13 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{AgentId, AgentRunId, Event, PipelineId, SessionId, ShortId, WorkspaceId};
+use oj_core::{AgentId, AgentRunId, Event, JobId, SessionId, ShortId, WorkspaceId};
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
-use crate::protocol::{
-    AgentEntry, CronEntry, PipelineEntry, Response, WorkerEntry, WorkspaceEntry,
-};
+use crate::protocol::{AgentEntry, CronEntry, JobEntry, Response, WorkerEntry, WorkspaceEntry};
 
 use super::ConnectionError;
 
@@ -26,13 +24,13 @@ pub(super) struct PruneFlags<'a> {
     pub namespace: Option<&'a str>,
 }
 
-/// Best-effort cleanup of pipeline log, breadcrumb, and associated agent files.
-fn cleanup_pipeline_files(logs_path: &std::path::Path, pipeline_id: &str) {
-    let log_file = oj_engine::log_paths::pipeline_log_path(logs_path, pipeline_id);
+/// Best-effort cleanup of job log, breadcrumb, and associated agent files.
+fn cleanup_job_files(logs_path: &std::path::Path, job_id: &str) {
+    let log_file = oj_engine::log_paths::job_log_path(logs_path, job_id);
     let _ = std::fs::remove_file(&log_file);
-    let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, pipeline_id);
+    let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, job_id);
     let _ = std::fs::remove_file(&crumb_file);
-    cleanup_agent_files(logs_path, pipeline_id);
+    cleanup_agent_files(logs_path, job_id);
 }
 
 /// Best-effort cleanup of agent log file and directory.
@@ -50,13 +48,9 @@ pub(super) fn handle_status(
     start_time: std::time::Instant,
 ) -> Response {
     let uptime_secs = start_time.elapsed().as_secs();
-    let (pipelines_active, sessions_active) = {
+    let (jobs_active, sessions_active) = {
         let state = state.lock();
-        let active = state
-            .pipelines
-            .values()
-            .filter(|p| !p.is_terminal())
-            .count();
+        let active = state.jobs.values().filter(|p| !p.is_terminal()).count();
         let sessions = state.sessions.len();
         (active, sessions)
     };
@@ -64,7 +58,7 @@ pub(super) fn handle_status(
 
     Response::Status {
         uptime_secs,
-        pipelines_active,
+        jobs_active,
         sessions_active,
         orphan_count,
     }
@@ -82,10 +76,7 @@ pub(super) fn handle_session_send(
         if state_guard.sessions.contains_key(&id) {
             Some(id.clone())
         } else {
-            state_guard
-                .pipelines
-                .get(&id)
-                .and_then(|p| p.session_id.clone())
+            state_guard.jobs.get(&id).and_then(|p| p.session_id.clone())
         }
     };
 
@@ -147,12 +138,12 @@ pub(super) async fn handle_session_kill(
     }
 }
 
-/// Handle a pipeline resume request.
+/// Handle a job resume request.
 ///
-/// Validates that the pipeline exists in state or the orphan registry before
-/// emitting the resume event. For orphaned pipelines, emits synthetic events
-/// to reconstruct the pipeline in state, then resumes.
-pub(super) fn handle_pipeline_resume(
+/// Validates that the job exists in state or the orphan registry before
+/// emitting the resume event. For orphaned jobs, emits synthetic events
+/// to reconstruct the job in state, then resumes.
+pub(super) fn handle_job_resume(
     state: &Arc<Mutex<MaterializedState>>,
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
     event_bus: &EventBus,
@@ -160,10 +151,10 @@ pub(super) fn handle_pipeline_resume(
     message: Option<String>,
     vars: std::collections::HashMap<String, String>,
 ) -> Result<Response, ConnectionError> {
-    // Check if pipeline exists in state and get relevant info for validation
-    let pipeline_info = {
+    // Check if job exists in state and get relevant info for validation
+    let job_info = {
         let state_guard = state.lock();
-        state_guard.get_pipeline(&id).map(|p| {
+        state_guard.get_job(&id).map(|p| {
             (
                 p.id.clone(),
                 p.kind.clone(),
@@ -173,22 +164,18 @@ pub(super) fn handle_pipeline_resume(
         })
     };
 
-    if let Some((pipeline_id, pipeline_kind, current_step, runbook_hash)) = pipeline_info {
+    if let Some((job_id, job_kind, current_step, runbook_hash)) = job_info {
         // Validate agent steps require --message before emitting event
         if message.is_none() && current_step != "failed" {
-            if let Err(err_msg) = validate_resume_message(
-                state,
-                &pipeline_id,
-                &pipeline_kind,
-                &current_step,
-                &runbook_hash,
-            ) {
+            if let Err(err_msg) =
+                validate_resume_message(state, &job_id, &job_kind, &current_step, &runbook_hash)
+            {
                 return Ok(Response::Error { message: err_msg });
             }
         }
 
-        let event = Event::PipelineResume {
-            id: PipelineId::new(pipeline_id),
+        let event = Event::JobResume {
+            id: JobId::new(job_id),
             message,
             vars,
         };
@@ -203,13 +190,13 @@ pub(super) fn handle_pipeline_resume(
         let orphans_guard = orphans.lock();
         orphans_guard
             .iter()
-            .find(|bc| bc.pipeline_id == id || bc.pipeline_id.starts_with(&id))
+            .find(|bc| bc.job_id == id || bc.job_id.starts_with(&id))
             .cloned()
     };
 
     let Some(orphan) = orphan else {
         return Ok(Response::Error {
-            message: format!("pipeline not found: {}", id),
+            message: format!("job not found: {}", id),
         });
     };
 
@@ -217,10 +204,10 @@ pub(super) fn handle_pipeline_resume(
     if orphan.runbook_hash.is_empty() {
         return Ok(Response::Error {
             message: format!(
-                "pipeline {} is orphaned (state lost during daemon restart) and cannot be \
+                "job {} is orphaned (state lost during daemon restart) and cannot be \
                  resumed: breadcrumb missing runbook hash (written by older daemon version). \
-                 Dismiss with `oj pipeline prune --orphans` and re-run the pipeline.",
-                orphan.pipeline_id
+                 Dismiss with `oj job prune --orphans` and re-run the job.",
+                orphan.job_id
             ),
         });
     }
@@ -234,25 +221,25 @@ pub(super) fn handle_pipeline_resume(
     if !runbook_available {
         return Ok(Response::Error {
             message: format!(
-                "pipeline {} is orphaned (state lost during daemon restart) and cannot be \
+                "job {} is orphaned (state lost during daemon restart) and cannot be \
                  resumed: runbook is no longer available. Dismiss with \
-                 `oj pipeline prune --orphans` and re-run the pipeline.",
-                orphan.pipeline_id
+                 `oj job prune --orphans` and re-run the job.",
+                orphan.job_id
             ),
         });
     }
 
-    // Reconstruct the pipeline by emitting synthetic events:
-    // 1. PipelineCreated (at current_step as initial_step)
-    // 2. PipelineAdvanced to "failed" (so resume resets to the right step)
-    // 3. PipelineResume (the actual resume request)
-    let orphan_id = orphan.pipeline_id.clone();
-    let pipeline_id = PipelineId::new(&orphan_id);
+    // Reconstruct the job by emitting synthetic events:
+    // 1. JobCreated (at current_step as initial_step)
+    // 2. JobAdvanced to "failed" (so resume resets to the right step)
+    // 3. JobResume (the actual resume request)
+    let orphan_id = orphan.job_id.clone();
+    let job_id = JobId::new(&orphan_id);
     let cwd = orphan.cwd.or(orphan.workspace_root).unwrap_or_default();
 
     event_bus
-        .send(Event::PipelineCreated {
-            id: pipeline_id.clone(),
+        .send(Event::JobCreated {
+            id: job_id.clone(),
             kind: orphan.kind,
             name: orphan.name,
             runbook_hash: orphan.runbook_hash,
@@ -266,15 +253,15 @@ pub(super) fn handle_pipeline_resume(
         .map_err(|_| ConnectionError::WalError)?;
 
     event_bus
-        .send(Event::PipelineAdvanced {
-            id: pipeline_id.clone(),
+        .send(Event::JobAdvanced {
+            id: job_id.clone(),
             step: "failed".to_string(),
         })
         .map_err(|_| ConnectionError::WalError)?;
 
     event_bus
-        .send(Event::PipelineResume {
-            id: pipeline_id,
+        .send(Event::JobResume {
+            id: job_id,
             message,
             vars,
         })
@@ -283,10 +270,7 @@ pub(super) fn handle_pipeline_resume(
     // Remove from orphan registry
     {
         let mut orphans_guard = orphans.lock();
-        if let Some(idx) = orphans_guard
-            .iter()
-            .position(|bc| bc.pipeline_id == orphan_id)
-        {
+        if let Some(idx) = orphans_guard.iter().position(|bc| bc.job_id == orphan_id) {
             orphans_guard.remove(idx);
         }
     }
@@ -294,8 +278,8 @@ pub(super) fn handle_pipeline_resume(
     Ok(Response::Ok)
 }
 
-/// Handle a pipeline cancel request.
-pub(super) fn handle_pipeline_cancel(
+/// Handle a job cancel request.
+pub(super) fn handle_job_cancel(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     ids: Vec<String>,
@@ -307,13 +291,13 @@ pub(super) fn handle_pipeline_cancel(
     for id in ids {
         let is_valid = {
             let state_guard = state.lock();
-            state_guard.get_pipeline(&id).map(|p| !p.is_terminal())
+            state_guard.get_job(&id).map(|p| !p.is_terminal())
         };
 
         match is_valid {
             Some(true) => {
-                let event = Event::PipelineCancel {
-                    id: PipelineId::new(id.clone()),
+                let event = Event::JobCancel {
+                    id: JobId::new(id.clone()),
                 };
                 event_bus
                     .send(event)
@@ -329,7 +313,7 @@ pub(super) fn handle_pipeline_cancel(
         }
     }
 
-    Ok(Response::PipelinesCancelled {
+    Ok(Response::JobsCancelled {
         cancelled,
         already_terminal,
         not_found,
@@ -416,7 +400,7 @@ pub(super) async fn handle_workspace_drop(
 ///
 /// Resolves agent_id via (in order, first match wins):
 /// 1. Exact agent_id match across ALL step_history entries (prefer latest)
-/// 2. Pipeline ID lookup → latest agent from ALL step_history entries
+/// 2. Job ID lookup → latest agent from ALL step_history entries
 /// 3. Prefix match on agent_id across ALL step_history entries (prefer latest)
 /// 4. Standalone agent_runs match
 /// 5. Session liveness check (tmux has-session) before returning 'not found'
@@ -431,8 +415,8 @@ pub(super) async fn handle_agent_send(
 
         // (1) Exact agent_id match across ALL step history, prefer latest
         let mut found: Option<String> = None;
-        for pipeline in state_guard.pipelines.values() {
-            for record in pipeline.step_history.iter().rev() {
+        for job in state_guard.jobs.values() {
+            for record in job.step_history.iter().rev() {
                 if let Some(aid) = &record.agent_id {
                     if aid == &agent_id {
                         found = Some(aid.clone());
@@ -445,10 +429,10 @@ pub(super) async fn handle_agent_send(
             }
         }
 
-        // (2) Pipeline ID lookup → latest agent from ALL step history
+        // (2) Job ID lookup → latest agent from ALL step history
         if found.is_none() {
-            if let Some(pipeline) = state_guard.get_pipeline(&agent_id) {
-                for record in pipeline.step_history.iter().rev() {
+            if let Some(job) = state_guard.get_job(&agent_id) {
+                for record in job.step_history.iter().rev() {
                     if let Some(aid) = &record.agent_id {
                         found = Some(aid.clone());
                         break;
@@ -459,8 +443,8 @@ pub(super) async fn handle_agent_send(
 
         // (3) Prefix match across ALL step history entries, prefer latest
         if found.is_none() {
-            for pipeline in state_guard.pipelines.values() {
-                for record in pipeline.step_history.iter().rev() {
+            for job in state_guard.jobs.values() {
+                for record in job.step_history.iter().rev() {
                     if let Some(aid) = &record.agent_id {
                         if aid.starts_with(&agent_id) {
                             found = Some(aid.clone());
@@ -528,12 +512,12 @@ pub(super) async fn handle_agent_send(
     })
 }
 
-/// Handle pipeline prune requests.
+/// Handle job prune requests.
 ///
-/// Removes terminal pipelines (failed/cancelled/done) from state and
-/// cleans up their log files. By default only prunes pipelines older
-/// than 12 hours; use `--all` to prune all terminal pipelines.
-pub(super) fn handle_pipeline_prune(
+/// Removes terminal jobs (failed/cancelled/done) from state and
+/// cleans up their log files. By default only prunes jobs older
+/// than 12 hours; use `--all` to prune all terminal jobs.
+pub(super) fn handle_job_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
     logs_path: &std::path::Path,
@@ -551,40 +535,40 @@ pub(super) fn handle_pipeline_prune(
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
 
-    // When --orphans is used alone, skip the normal terminal-pipeline loop.
+    // When --orphans is used alone, skip the normal terminal-job loop.
     // When combined with --all or --failed, run both.
     let prune_terminal = flags.all || failed || !orphans;
 
     if prune_terminal {
         let state_guard = state.lock();
-        for pipeline in state_guard.pipelines.values() {
+        for job in state_guard.jobs.values() {
             // Filter by namespace when --project is specified
             if let Some(ns) = flags.namespace {
-                if pipeline.namespace != ns {
+                if job.namespace != ns {
                     continue;
                 }
             }
 
-            if !pipeline.is_terminal() {
+            if !job.is_terminal() {
                 skipped += 1;
                 continue;
             }
 
-            // --failed flag: only prune failed pipelines (skip done/cancelled)
-            if failed && pipeline.step != "failed" {
+            // --failed flag: only prune failed jobs (skip done/cancelled)
+            if failed && job.step != "failed" {
                 skipped += 1;
                 continue;
             }
 
-            // Determine if this pipeline skips the age check:
+            // Determine if this job skips the age check:
             // - --all: everything skips age check
-            // - --failed: failed pipelines skip age check
-            // - cancelled pipelines always skip age check (default behavior)
+            // - --failed: failed jobs skip age check
+            // - cancelled jobs always skip age check (default behavior)
             let skip_age_check =
-                flags.all || (failed && pipeline.step == "failed") || pipeline.step == "cancelled";
+                flags.all || (failed && job.step == "failed") || job.step == "cancelled";
 
             if !skip_age_check {
-                let created_at_ms = pipeline
+                let created_at_ms = job
                     .step_history
                     .first()
                     .map(|r| r.started_at_ms)
@@ -595,45 +579,45 @@ pub(super) fn handle_pipeline_prune(
                 }
             }
 
-            to_prune.push(PipelineEntry {
-                id: pipeline.id.clone(),
-                name: pipeline.name.clone(),
-                step: pipeline.step.clone(),
+            to_prune.push(JobEntry {
+                id: job.id.clone(),
+                name: job.name.clone(),
+                step: job.step.clone(),
             });
         }
     }
 
     if !flags.dry_run {
         for entry in &to_prune {
-            let event = Event::PipelineDeleted {
-                id: PipelineId::new(entry.id.clone()),
+            let event = Event::JobDeleted {
+                id: JobId::new(entry.id.clone()),
             };
             event_bus
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
-            cleanup_pipeline_files(logs_path, &entry.id);
+            cleanup_job_files(logs_path, &entry.id);
         }
     }
 
-    // When --orphans flag is set, collect orphaned pipelines
+    // When --orphans flag is set, collect orphaned jobs
     if orphans {
         let mut orphan_guard = orphans_registry.lock();
         let drain_indices: Vec<usize> = (0..orphan_guard.len()).collect();
         for &i in drain_indices.iter().rev() {
             let bc = &orphan_guard[i];
-            to_prune.push(PipelineEntry {
-                id: bc.pipeline_id.clone(),
+            to_prune.push(JobEntry {
+                id: bc.job_id.clone(),
                 name: bc.name.clone(),
                 step: "orphaned".to_string(),
             });
             if !flags.dry_run {
                 let removed = orphan_guard.remove(i);
-                cleanup_pipeline_files(logs_path, &removed.pipeline_id);
+                cleanup_job_files(logs_path, &removed.job_id);
             }
         }
     }
 
-    Ok(Response::PipelinesPruned {
+    Ok(Response::JobsPruned {
         pruned: to_prune,
         skipped,
     })
@@ -641,7 +625,7 @@ pub(super) fn handle_pipeline_prune(
 
 /// Handle agent prune requests.
 ///
-/// Removes agent log files for agents belonging to terminal pipelines
+/// Removes agent log files for agents belonging to terminal jobs
 /// (failed/cancelled/done) and standalone agent runs in terminal state.
 /// By default only prunes agents older than 24 hours; use `--all` to prune all.
 pub(super) fn handle_agent_prune(
@@ -657,23 +641,23 @@ pub(super) fn handle_agent_prune(
     let age_threshold_ms = 24 * 60 * 60 * 1000; // 24 hours in ms
 
     let mut to_prune = Vec::new();
-    let mut pipeline_ids_to_delete = Vec::new();
+    let mut job_ids_to_delete = Vec::new();
     let mut agent_run_ids_to_delete = Vec::new();
     let mut skipped = 0usize;
 
     {
         let state_guard = state.lock();
 
-        // (1) Collect agents from terminal pipelines
-        for pipeline in state_guard.pipelines.values() {
-            if !pipeline.is_terminal() {
+        // (1) Collect agents from terminal jobs
+        for job in state_guard.jobs.values() {
+            if !job.is_terminal() {
                 skipped += 1;
                 continue;
             }
 
             // Check age via step history
             if !flags.all {
-                let created_at_ms = pipeline
+                let created_at_ms = job
                     .step_history
                     .first()
                     .map(|r| r.started_at_ms)
@@ -685,17 +669,17 @@ pub(super) fn handle_agent_prune(
             }
 
             // Collect agents from step history
-            for record in &pipeline.step_history {
+            for record in &job.step_history {
                 if let Some(agent_id) = &record.agent_id {
                     to_prune.push(AgentEntry {
                         agent_id: agent_id.clone(),
-                        pipeline_id: pipeline.id.clone(),
+                        job_id: job.id.clone(),
                         step_name: record.name.clone(),
                     });
                 }
             }
 
-            pipeline_ids_to_delete.push(pipeline.id.clone());
+            job_ids_to_delete.push(job.id.clone());
         }
 
         // (2) Collect standalone agent runs in terminal state
@@ -722,7 +706,7 @@ pub(super) fn handle_agent_prune(
 
             to_prune.push(AgentEntry {
                 agent_id,
-                pipeline_id: String::new(), // Empty for standalone agents
+                job_id: String::new(), // Empty for standalone agents
                 step_name: agent_run.agent_name.clone(),
             });
 
@@ -731,15 +715,15 @@ pub(super) fn handle_agent_prune(
     }
 
     if !flags.dry_run {
-        // Delete the terminal pipelines from state so agents no longer appear in `agent list`
-        for pipeline_id in &pipeline_ids_to_delete {
-            let event = Event::PipelineDeleted {
-                id: PipelineId::new(pipeline_id.clone()),
+        // Delete the terminal jobs from state so agents no longer appear in `agent list`
+        for job_id in &job_ids_to_delete {
+            let event = Event::JobDeleted {
+                id: JobId::new(job_id.clone()),
             };
             event_bus
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
-            cleanup_pipeline_files(logs_path, pipeline_id);
+            cleanup_job_files(logs_path, job_id);
         }
 
         // Delete standalone agent runs from state
@@ -792,7 +776,7 @@ async fn workspace_prune_inner(
     workspaces_dir: &std::path::Path,
 ) -> Result<Response, ConnectionError> {
     // When filtering by namespace, build a set of workspace IDs that match.
-    // Namespace is derived from the workspace's owner (pipeline or worker).
+    // Namespace is derived from the workspace's owner (job or worker).
     // Workspaces with no determinable namespace (no owner, or owner not in state)
     // are included when the owner is missing (truly orphaned).
     let namespace_filter: Option<std::collections::HashSet<String>> = flags.namespace.map(|ns| {
@@ -803,7 +787,7 @@ async fn workspace_prune_inner(
             .filter(|(_, w)| {
                 let workspace_ns = w.owner.as_deref().and_then(|owner| {
                     state_guard
-                        .pipelines
+                        .jobs
                         .get(owner)
                         .map(|p| p.namespace.as_str())
                         .or_else(|| {
@@ -1052,7 +1036,7 @@ pub(super) fn handle_cron_prune(
 /// Handle an agent resume request.
 ///
 /// Finds the agent by ID/prefix (or all dead agents when `all` is true),
-/// optionally kills the tmux session, then emits PipelineResume to trigger
+/// optionally kills the tmux session, then emits JobResume to trigger
 /// the engine's resume flow (which uses `--resume` to preserve conversation).
 pub(super) async fn handle_agent_resume(
     state: &Arc<Mutex<MaterializedState>>,
@@ -1061,7 +1045,7 @@ pub(super) async fn handle_agent_resume(
     kill: bool,
     all: bool,
 ) -> Result<Response, ConnectionError> {
-    // Collect (pipeline_id, agent_id, session_id) tuples to resume
+    // Collect (job_id, agent_id, session_id) tuples to resume
     // Use a scoped block to ensure lock is released before any await points
     let (targets, skipped) = {
         let state_guard = state.lock();
@@ -1069,65 +1053,50 @@ pub(super) async fn handle_agent_resume(
         let mut skipped: Vec<(String, String)> = Vec::new();
 
         if all {
-            // Iterate all non-terminal pipelines, find ones with agents
-            for pipeline in state_guard.pipelines.values() {
-                if pipeline.is_terminal() {
+            // Iterate all non-terminal jobs, find ones with agents
+            for job in state_guard.jobs.values() {
+                if job.is_terminal() {
                     continue;
                 }
                 // Get the current step's agent
-                if let Some(record) = pipeline
-                    .step_history
-                    .iter()
-                    .rfind(|r| r.name == pipeline.step)
-                {
+                if let Some(record) = job.step_history.iter().rfind(|r| r.name == job.step) {
                     if let Some(ref aid) = record.agent_id {
                         if !kill {
                             // Without --kill, only resume agents that are
                             // escalated/waiting (dead session scenario)
-                            if !pipeline.step_status.is_waiting()
+                            if !job.step_status.is_waiting()
                                 && !matches!(
-                                    pipeline.step_status,
+                                    job.step_status,
                                     oj_core::StepStatus::Failed | oj_core::StepStatus::Pending
                                 )
                             {
                                 skipped.push((
                                     aid.clone(),
-                                    format!(
-                                        "agent is {:?} (use --kill to force)",
-                                        pipeline.step_status
-                                    ),
+                                    format!("agent is {:?} (use --kill to force)", job.step_status),
                                 ));
                                 continue;
                             }
                         }
-                        targets.push((
-                            pipeline.id.clone(),
-                            aid.clone(),
-                            pipeline.session_id.clone(),
-                        ));
+                        targets.push((job.id.clone(), aid.clone(), job.session_id.clone()));
                     }
                 }
             }
         } else {
             // Find specific agent by ID or prefix
             let mut found = false;
-            for pipeline in state_guard.pipelines.values() {
-                for record in &pipeline.step_history {
+            for job in state_guard.jobs.values() {
+                for record in &job.step_history {
                     if let Some(ref aid) = record.agent_id {
                         if aid == &agent_id || aid.starts_with(&agent_id) {
-                            if pipeline.is_terminal() {
+                            if job.is_terminal() {
                                 return Ok(Response::Error {
                                     message: format!(
-                                        "pipeline {} is already {} — cannot resume agent",
-                                        pipeline.id, pipeline.step
+                                        "job {} is already {} — cannot resume agent",
+                                        job.id, job.step
                                     ),
                                 });
                             }
-                            targets.push((
-                                pipeline.id.clone(),
-                                aid.clone(),
-                                pipeline.session_id.clone(),
-                            ));
+                            targets.push((job.id.clone(), aid.clone(), job.session_id.clone()));
                             found = true;
                             break;
                         }
@@ -1169,9 +1138,9 @@ pub(super) async fn handle_agent_resume(
 
     let mut resumed = Vec::new();
 
-    for (pipeline_id, aid, _) in targets {
-        let event = Event::PipelineResume {
-            id: PipelineId::new(&pipeline_id),
+    for (job_id, aid, _) in targets {
+        let event = Event::JobResume {
+            id: JobId::new(&job_id),
             message: None,
             vars: std::collections::HashMap::new(),
         };
@@ -1190,8 +1159,8 @@ pub(super) async fn handle_agent_resume(
 /// if the step is an agent step and no message was provided.
 fn validate_resume_message(
     state: &Arc<Mutex<MaterializedState>>,
-    pipeline_id: &str,
-    pipeline_kind: &str,
+    job_id: &str,
+    job_kind: &str,
     current_step: &str,
     runbook_hash: &str,
 ) -> Result<(), String> {
@@ -1215,20 +1184,20 @@ fn validate_resume_message(
         }
     };
 
-    // Get the pipeline and step definitions
-    let Some(pipeline_def) = runbook.get_pipeline(pipeline_kind) else {
+    // Get the job and step definitions
+    let Some(job_def) = runbook.get_job(job_kind) else {
         return Ok(());
     };
-    let Some(step_def) = pipeline_def.get_step(current_step) else {
+    let Some(step_def) = job_def.get_step(current_step) else {
         return Ok(());
     };
 
     // Check if it's an agent step
     if step_def.is_agent() {
-        let short_id = pipeline_id.short(12);
+        let short_id = job_id.short(12);
         return Err(format!(
             "agent steps require --message for resume. Example:\n  \
-             oj pipeline resume {} -m \"I fixed the import, try again\"",
+             oj job resume {} -m \"I fixed the import, try again\"",
             short_id
         ));
     }

@@ -5,7 +5,7 @@ Proposed changes to the concurrency model described in
 
 ## Problem
 
-The event loop blocks for 3-40+ seconds during pipeline creation because
+The event loop blocks for 3-40+ seconds during job creation because
 workspace creation, agent spawning, and shell evaluation are awaited inline
 within `process_event()`. During these windows:
 
@@ -83,10 +83,10 @@ Notify        fire-and-forget thread   Shell             (already deferred)
 
 ### Sequential dependencies via events
 
-Today, `create_and_start_pipeline()` runs three phases in one async function:
+Today, `create_and_start_job()` runs three phases in one async function:
 
 ```
-Phase 1: Emit PipelineCreated
+Phase 1: Emit JobCreated
 Phase 2: execute(CreateWorkspace).await     ← blocks event loop
 Phase 3: start_step() → execute(SpawnAgent).await  ← blocks again
 ```
@@ -95,7 +95,7 @@ With deferred effects, each phase becomes an event-driven step:
 
 ```
 CommandRun event
-  → handler emits PipelineCreated + dispatches CreateWorkspace (deferred)
+  → handler emits JobCreated + dispatches CreateWorkspace (deferred)
   → event loop returns immediately
 
 WorkspaceReady event (emitted by background task)
@@ -107,27 +107,27 @@ SessionCreated event (emitted by background task)
   → event loop returns immediately
 ```
 
-This is the natural event-driven model. The pipeline state machine already
+This is the natural event-driven model. The job state machine already
 tracks which step it's on; workspace readiness and agent creation are just
 additional state transitions.
 
-**Key change**: `create_and_start_pipeline()` no longer calls
+**Key change**: `create_and_start_job()` no longer calls
 `executor.execute_all(workspace_effects).await` followed by
 `start_step().await`. Instead it emits effects and returns. The
 `WorkspaceReady` event handler (which already exists for handling workspace
 status) triggers `start_step()`. The `WorkspaceFailed` event handler
-triggers `fail_pipeline()`.
+triggers `fail_job()`.
 
 ### Handling pre-creation shell evaluation
 
-The current `create_and_start_pipeline()` also evaluates `workspace.ref` and
+The current `create_and_start_job()` also evaluates `workspace.ref` and
 `locals` by running shell subprocesses inline. These block the event loop for
 50-500ms each.
 
 **Option A: Evaluate in the deferred task.** Move `workspace.ref` and `locals`
 evaluation into the `CreateWorkspace` background task, passing the unevaluated
 templates as part of the effect. The task evaluates them, then creates the
-workspace. Result events carry the resolved values back to update pipeline
+workspace. Result events carry the resolved values back to update job
 vars.
 
 **Option B: Add a PrepareWorkspace effect.** Create a new deferred effect that
@@ -152,7 +152,7 @@ deferred effects, failures are asynchronous:
 
 - Background task catches the error
 - Emits a failure event (e.g., `WorkspaceFailed`, `AgentSpawnFailed`)
-- The event loop processes the failure event and fails the pipeline
+- The event loop processes the failure event and fails the job
 
 This pattern already exists for `Shell` effects: the background task catches
 errors and emits `ShellExited` with a non-zero exit code. Workspace and agent
@@ -166,7 +166,7 @@ inherently timing-dependent and cannot be made event-driven.
 
 Options:
 - Move to deferred execution. The send doesn't produce a result event that
-  the pipeline depends on — the agent watcher detects when the agent starts
+  the job depends on — the agent watcher detects when the agent starts
   working. Fire-and-forget semantics are safe here.
 - Reduce settle time. The 2s cap is conservative; measure whether shorter
   times cause issues in practice.
@@ -180,11 +180,11 @@ Options:
 3. Move `CreateWorkspace` execution into a `tokio::spawn` task in the executor,
    following the `Shell` effect pattern
 4. Move `SpawnAgent` execution into a `tokio::spawn` task
-5. Refactor `create_and_start_pipeline()` to return after emitting effects
+5. Refactor `create_and_start_job()` to return after emitting effects
    instead of awaiting them
 6. Add `WorkspaceReady` → `start_step()` handler to the runtime
-7. Add `WorkspaceFailed` → `fail_pipeline()` handler
-8. Add `AgentSpawnFailed` → `fail_pipeline()` handler
+7. Add `WorkspaceFailed` → `fail_job()` handler
+8. Add `AgentSpawnFailed` → `fail_job()` handler
 
 ### Phase 2: Deferred remaining I/O effects
 

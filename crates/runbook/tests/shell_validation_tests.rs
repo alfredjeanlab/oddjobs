@@ -11,7 +11,7 @@ fn valid_shell_commands_parse_successfully() {
         [command.build]
         run = "cargo build --release"
 
-        [[pipeline.deploy.step]]
+        [[job.deploy.step]]
         name = "push"
         run = "git push origin main"
     "#;
@@ -33,16 +33,16 @@ fn invalid_shell_in_command_returns_error() {
 }
 
 #[test]
-fn invalid_shell_in_pipeline_step_returns_error() {
+fn invalid_shell_in_job_step_returns_error() {
     let content = r#"
-        [[pipeline.build.step]]
+        [[job.build.step]]
         name = "init"
         run = "echo $(incomplete"
     "#;
     let err = parse_runbook(content).unwrap_err();
     assert!(
-        matches!(err, ParseError::ShellError { ref location, .. } if location.contains("pipeline.build")),
-        "Expected ShellError with location containing 'pipeline.build', got: {:?}",
+        matches!(err, ParseError::ShellError { ref location, .. } if location.contains("job.build")),
+        "Expected ShellError with location containing 'job.build', got: {:?}",
         err
     );
 }
@@ -88,12 +88,12 @@ fn shell_with_command_substitution() {
 }
 
 #[test]
-fn pipeline_directive_not_validated_as_shell() {
+fn job_directive_not_validated_as_shell() {
     let content = r#"
         [command.delegate]
-        run = { pipeline = "build" }
+        run = { job = "build" }
 
-        [[pipeline.build.step]]
+        [[job.build.step]]
         name = "compile"
         run = "cargo build"
     "#;
@@ -115,11 +115,11 @@ fn agent_directive_not_validated_as_shell() {
 #[test]
 fn error_context_includes_step_index() {
     let content = r#"
-        [[pipeline.deploy.step]]
+        [[job.deploy.step]]
         name = "valid"
         run = "echo ok"
 
-        [[pipeline.deploy.step]]
+        [[job.deploy.step]]
         name = "invalid"
         run = "echo 'broken"
     "#;
@@ -178,9 +178,9 @@ fn shell_with_template_variables() {
 }
 
 #[test]
-fn shell_with_template_variables_in_pipeline() {
+fn shell_with_template_variables_in_job() {
     let content = r#"
-        [[pipeline.build.step]]
+        [[job.build.step]]
         name = "init"
         run = "echo ${message} | tee ${output_file}"
     "#;

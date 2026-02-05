@@ -20,8 +20,8 @@ fn format_help_full_args() {
         ]
         .into_iter()
         .collect(),
-        run: RunDirective::Pipeline {
-            pipeline: "build".to_string(),
+        run: RunDirective::Job {
+            job: "build".to_string(),
         },
     };
 

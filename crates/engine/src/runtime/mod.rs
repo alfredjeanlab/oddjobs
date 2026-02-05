@@ -6,10 +6,10 @@
 pub(crate) mod agent_run;
 mod handlers;
 mod monitor;
-mod pipeline;
+mod job;
 
 use crate::{
-    breadcrumb::BreadcrumbWriter, error::RuntimeError, pipeline_logger::PipelineLogger,
+    breadcrumb::BreadcrumbWriter, error::RuntimeError, job_logger::JobLogger,
     queue_logger::QueueLogger, worker_logger::WorkerLogger, Executor, Scheduler,
 };
 use handlers::cron::CronState;
@@ -17,7 +17,7 @@ use handlers::worker::WorkerState;
 #[cfg(test)]
 use handlers::worker::WorkerStatus;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentRunId, Clock, Pipeline, ShortId};
+use oj_core::{AgentId, AgentRunId, Clock, Job, ShortId};
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 use std::collections::HashMap;
@@ -35,7 +35,7 @@ pub use oj_core::{Event, StepStatus};
 pub struct RuntimeConfig {
     /// Root state directory (e.g. ~/.local/state/oj)
     pub state_dir: PathBuf,
-    /// Directory for per-pipeline log files
+    /// Directory for per-job log files
     pub log_dir: PathBuf,
 }
 
@@ -51,11 +51,11 @@ pub struct RuntimeDeps<S, A, N> {
 pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) executor: Executor<S, A, N, C>,
     pub(crate) state_dir: PathBuf,
-    pub(crate) logger: PipelineLogger,
+    pub(crate) logger: JobLogger,
     pub(crate) worker_logger: WorkerLogger,
     pub(crate) queue_logger: QueueLogger,
     pub(crate) breadcrumb: BreadcrumbWriter,
-    pub(crate) agent_pipelines: Mutex<HashMap<AgentId, String>>,
+    pub(crate) agent_jobs: Mutex<HashMap<AgentId, String>>,
     pub(crate) agent_runs: Mutex<HashMap<AgentId, AgentRunId>>,
     pub(crate) runbook_cache: Mutex<HashMap<String, Runbook>>,
     pub(crate) worker_states: Mutex<HashMap<String, WorkerState>>,
@@ -84,11 +84,11 @@ where
                 event_tx,
             ),
             state_dir: config.state_dir,
-            logger: PipelineLogger::new(config.log_dir.clone()),
+            logger: JobLogger::new(config.log_dir.clone()),
             worker_logger: WorkerLogger::new(config.log_dir.clone()),
             queue_logger: QueueLogger::new(config.log_dir.clone()),
             breadcrumb: BreadcrumbWriter::new(config.log_dir),
-            agent_pipelines: Mutex::new(HashMap::new()),
+            agent_jobs: Mutex::new(HashMap::new()),
             agent_runs: Mutex::new(HashMap::new()),
             runbook_cache: Mutex::new(HashMap::new()),
             worker_states: Mutex::new(HashMap::new()),
@@ -106,14 +106,14 @@ where
         self.executor.scheduler()
     }
 
-    /// Get current pipelines
-    pub fn pipelines(&self) -> HashMap<String, Pipeline> {
-        self.lock_state(|state| state.pipelines.clone())
+    /// Get current jobs
+    pub fn jobs(&self) -> HashMap<String, Job> {
+        self.lock_state(|state| state.jobs.clone())
     }
 
-    /// Get a specific pipeline by ID or unique prefix
-    pub fn get_pipeline(&self, id: &str) -> Option<Pipeline> {
-        self.lock_state(|state| state.get_pipeline(id).cloned())
+    /// Get a specific job by ID or unique prefix
+    pub fn get_job(&self, id: &str) -> Option<Job> {
+        self.lock_state(|state| state.get_job(id).cloned())
     }
 
     /// Helper to lock state and handle poisoned mutex
@@ -130,11 +130,11 @@ where
         f(&mut guard)
     }
 
-    /// Count currently active (non-terminal) pipelines spawned by a given cron.
-    pub(crate) fn count_active_cron_pipelines(&self, cron_name: &str, namespace: &str) -> usize {
+    /// Count currently active (non-terminal) jobs spawned by a given cron.
+    pub(crate) fn count_active_cron_jobs(&self, cron_name: &str, namespace: &str) -> usize {
         self.lock_state(|state| {
             state
-                .pipelines
+                .jobs
                 .values()
                 .filter(|p| {
                     p.cron_name.as_deref() == Some(cron_name)
@@ -168,17 +168,17 @@ where
         }
     }
 
-    pub(crate) fn require_pipeline(&self, id: &str) -> Result<Pipeline, RuntimeError> {
-        self.get_pipeline(id)
-            .ok_or_else(|| RuntimeError::PipelineNotFound(id.to_string()))
+    pub(crate) fn require_job(&self, id: &str) -> Result<Job, RuntimeError> {
+        self.get_job(id)
+            .ok_or_else(|| RuntimeError::JobNotFound(id.to_string()))
     }
 
-    pub(crate) fn execution_dir(&self, pipeline: &Pipeline) -> PathBuf {
+    pub(crate) fn execution_dir(&self, job: &Job) -> PathBuf {
         // Use workspace_path if in workspace mode, otherwise use cwd
-        pipeline
+        job
             .workspace_path
             .clone()
-            .unwrap_or_else(|| pipeline.cwd.clone())
+            .unwrap_or_else(|| job.cwd.clone())
     }
 
     /// Load a runbook containing the given command name.

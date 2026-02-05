@@ -53,7 +53,7 @@ fn make_question_options() -> Vec<DecisionOption> {
         },
         DecisionOption {
             label: "Cancel".to_string(),
-            description: Some("Cancel the pipeline".to_string()),
+            description: Some("Cancel the job".to_string()),
             recommended: false,
         },
     ]
@@ -74,8 +74,8 @@ fn question_cancel_is_last_option() {
         &options,
     );
     match result {
-        Some(Event::PipelineCancel { .. }) => {}
-        other => panic!("expected PipelineCancel, got {:?}", other),
+        Some(Event::JobCancel { .. }) => {}
+        other => panic!("expected JobCancel, got {:?}", other),
     }
 }
 
@@ -93,7 +93,7 @@ fn question_non_cancel_choice_resumes_with_label() {
         &options,
     );
     match result {
-        Some(Event::PipelineResume { message, .. }) => {
+        Some(Event::JobResume { message, .. }) => {
             let msg = message.unwrap();
             assert!(msg.contains("Option A"), "expected label, got: {}", msg);
             assert!(
@@ -102,7 +102,7 @@ fn question_non_cancel_choice_resumes_with_label() {
                 msg
             );
         }
-        other => panic!("expected PipelineResume, got {:?}", other),
+        other => panic!("expected JobResume, got {:?}", other),
     }
 }
 
@@ -120,7 +120,7 @@ fn question_freeform_message_only() {
         &options,
     );
     match result {
-        Some(Event::PipelineResume { message, .. }) => {
+        Some(Event::JobResume { message, .. }) => {
             let msg = message.unwrap();
             assert!(
                 msg.contains("custom answer"),
@@ -128,7 +128,7 @@ fn question_freeform_message_only() {
                 msg
             );
         }
-        other => panic!("expected PipelineResume, got {:?}", other),
+        other => panic!("expected JobResume, got {:?}", other),
     }
 }
 

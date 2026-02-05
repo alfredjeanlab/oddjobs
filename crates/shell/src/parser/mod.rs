@@ -86,7 +86,7 @@ impl Parser {
     /// let ast = Parser::parse("echo hello")?;
     /// assert_eq!(ast.count_simple_commands(), 1);
     ///
-    /// // Pipeline
+    /// // Job
     /// let ast = Parser::parse("cat file | grep pattern | wc -l")?;
     /// assert_eq!(ast.count_simple_commands(), 3);
     ///
@@ -290,11 +290,11 @@ impl Parser {
         })
     }
 
-    /// Parse a command with optional background: pipeline '&'?
+    /// Parse a command with optional background: job '&'?
     ///
-    /// Background applies only to the immediately preceding pipeline.
+    /// Background applies only to the immediately preceding job.
     fn parse_command_item(&mut self) -> Result<CommandItem, ParseError> {
-        let command = self.parse_pipeline()?;
+        let command = self.parse_job()?;
         let start_span = command.span();
 
         let (background, end_span) = match self.peek_kind() {
@@ -313,11 +313,11 @@ impl Parser {
         })
     }
 
-    /// Parse a pipeline: compound_command ('|' simple_command)*
+    /// Parse a job: compound_command ('|' simple_command)*
     ///
     /// Pipe binds tighter than && and ||.
-    /// Note: First element can be a compound command, but pipeline elements must be simple.
-    fn parse_pipeline(&mut self) -> Result<Command, ParseError> {
+    /// Note: First element can be a compound command, but job elements must be simple.
+    fn parse_job(&mut self) -> Result<Command, ParseError> {
         // Check for compound commands first (subshell, brace group)
         match self.peek_kind() {
             Some(TokenKind::LParen) => return self.parse_subshell(),
@@ -341,7 +341,7 @@ impl Parser {
             end_span = cmd.span;
             commands.push(cmd);
         }
-        Ok(Command::Pipeline(Pipeline {
+        Ok(Command::Job(Job {
             commands,
             span: start_span.merge(end_span),
         }))

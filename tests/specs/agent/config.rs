@@ -31,12 +31,12 @@ fn runbook_with_full_config(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -83,18 +83,18 @@ fn runbook_with_agent_config_loads() {
     // Daemon should start without errors (config parses correctly)
     temp.oj().args(&["daemon", "start"]).passes();
 
-    // Pipeline should run to verify agent config doesn't break runtime
+    // Job should run to verify agent config doesn't break runtime
     temp.oj().args(&["run", "build", "test"]).passes();
 
     // claudeless -p exits immediately. Detection requires liveness poll + deferred timer.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 }
 
 /// Verify that on_idle = "done" works in interactive mode (no -p) with full config.
@@ -112,12 +112,12 @@ fn runbook_with_agent_config_idle_completes() {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -152,10 +152,10 @@ action = "escalate"
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete via on_idle = done");
+    assert!(done, "job should complete via on_idle = done");
 }

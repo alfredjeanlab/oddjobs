@@ -12,8 +12,7 @@ use parking_lot::Mutex;
 use oj_engine::breadcrumb::Breadcrumb;
 
 use crate::protocol::{
-    AgentSummary, OrphanAgent, OrphanSummary, PipelineDetail, PipelineStatusEntry, PipelineSummary,
-    Response,
+    AgentSummary, JobDetail, JobStatusEntry, JobSummary, OrphanAgent, OrphanSummary, Response,
 };
 
 /// Handle ListOrphans query by converting breadcrumbs to OrphanSummary.
@@ -22,7 +21,7 @@ pub(super) fn handle_list_orphans(orphans: &Arc<Mutex<Vec<Breadcrumb>>>) -> Resp
     let summaries = orphans
         .iter()
         .map(|bc| OrphanSummary {
-            pipeline_id: bc.pipeline_id.clone(),
+            job_id: bc.job_id.clone(),
             project: bc.project.clone(),
             kind: bc.kind.clone(),
             name: bc.name.clone(),
@@ -55,15 +54,15 @@ pub(super) fn handle_dismiss_orphan(
     // Find by exact match or prefix
     let idx = orphans
         .iter()
-        .position(|bc| bc.pipeline_id == id || bc.pipeline_id.starts_with(id));
+        .position(|bc| bc.job_id == id || bc.job_id.starts_with(id));
 
     match idx {
         Some(i) => {
             let removed = orphans.remove(i);
-            // Clean up all associated files (breadcrumb, pipeline log, agent files)
-            let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.pipeline_id);
+            // Clean up all associated files (breadcrumb, job log, agent files)
+            let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.job_id);
             let _ = std::fs::remove_file(&crumb);
-            let log = oj_engine::log_paths::pipeline_log_path(logs_path, &removed.pipeline_id);
+            let log = oj_engine::log_paths::job_log_path(logs_path, &removed.job_id);
             let _ = std::fs::remove_file(&log);
             for agent in &removed.agents {
                 let agent_log = oj_engine::log_paths::agent_log_path(logs_path, &agent.agent_id);
@@ -80,16 +79,16 @@ pub(super) fn handle_dismiss_orphan(
     }
 }
 
-/// Append orphaned pipelines as `PipelineSummary` entries to a pipeline list.
+/// Append orphaned jobs as `JobSummary` entries to a job list.
 pub(super) fn append_orphan_summaries(
-    pipelines: &mut Vec<PipelineSummary>,
+    jobs: &mut Vec<JobSummary>,
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
 ) {
     let orphans = orphans.lock();
     for bc in orphans.iter() {
         let updated_at_ms = parse_rfc3339_to_epoch_ms(&bc.updated_at);
-        pipelines.push(PipelineSummary {
-            id: bc.pipeline_id.clone(),
+        jobs.push(JobSummary {
+            id: bc.job_id.clone(),
             name: bc.name.clone(),
             kind: bc.kind.clone(),
             step: bc.current_step.clone(),
@@ -102,18 +101,18 @@ pub(super) fn append_orphan_summaries(
     }
 }
 
-/// Look up an orphan by exact ID or prefix, returning a `PipelineDetail`.
+/// Look up an orphan by exact ID or prefix, returning a `JobDetail`.
 pub(super) fn find_orphan_detail(
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
     id: &str,
-) -> Option<Box<PipelineDetail>> {
+) -> Option<Box<JobDetail>> {
     let orphans = orphans.lock();
     orphans
         .iter()
-        .find(|bc| bc.pipeline_id == id || bc.pipeline_id.starts_with(id))
+        .find(|bc| bc.job_id == id || bc.job_id.starts_with(id))
         .map(|bc| {
-            Box::new(PipelineDetail {
-                id: bc.pipeline_id.clone(),
+            Box::new(JobDetail {
+                id: bc.job_id.clone(),
                 name: bc.name.clone(),
                 kind: bc.kind.clone(),
                 step: bc.current_step.clone(),
@@ -121,13 +120,13 @@ pub(super) fn find_orphan_detail(
                 vars: bc.vars.clone(),
                 workspace_path: bc.workspace_root.clone(),
                 session_id: bc.agents.iter().find_map(|a| a.session_name.clone()),
-                error: Some("Pipeline was not recovered from WAL/snapshot".to_string()),
+                error: Some("Job was not recovered from WAL/snapshot".to_string()),
                 steps: Vec::new(),
                 agents: bc
                     .agents
                     .iter()
                     .map(|a| AgentSummary {
-                        pipeline_id: bc.pipeline_id.clone(),
+                        job_id: bc.job_id.clone(),
                         step_name: bc.current_step.clone(),
                         agent_id: a.agent_id.clone(),
                         agent_name: None,
@@ -145,21 +144,21 @@ pub(super) fn find_orphan_detail(
         })
 }
 
-/// Resolve an orphan pipeline ID by exact match or prefix, returning the full ID.
+/// Resolve an orphan job ID by exact match or prefix, returning the full ID.
 pub(super) fn find_orphan_id(orphans: &Arc<Mutex<Vec<Breadcrumb>>>, id: &str) -> Option<String> {
     let orphans = orphans.lock();
     orphans
         .iter()
-        .find(|bc| bc.pipeline_id == id || bc.pipeline_id.starts_with(id))
-        .map(|bc| bc.pipeline_id.clone())
+        .find(|bc| bc.job_id == id || bc.job_id.starts_with(id))
+        .map(|bc| bc.job_id.clone())
 }
 
-/// Collect orphaned pipelines grouped by namespace for status overview.
+/// Collect orphaned jobs grouped by namespace for status overview.
 pub(super) fn collect_orphan_status_entries(
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
     now_ms: u64,
-) -> BTreeMap<String, Vec<PipelineStatusEntry>> {
-    let mut ns_orphaned: BTreeMap<String, Vec<PipelineStatusEntry>> = BTreeMap::new();
+) -> BTreeMap<String, Vec<JobStatusEntry>> {
+    let mut ns_orphaned: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
     let orphans = orphans.lock();
     for bc in orphans.iter() {
         let updated_at_ms = parse_rfc3339_to_epoch_ms(&bc.updated_at);
@@ -167,8 +166,8 @@ pub(super) fn collect_orphan_status_entries(
         ns_orphaned
             .entry(bc.project.clone())
             .or_default()
-            .push(PipelineStatusEntry {
-                id: bc.pipeline_id.clone(),
+            .push(JobStatusEntry {
+                id: bc.job_id.clone(),
                 name: bc.name.clone(),
                 kind: bc.kind.clone(),
                 step: bc.current_step.clone(),

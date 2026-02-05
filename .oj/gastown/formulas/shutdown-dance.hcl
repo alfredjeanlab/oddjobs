@@ -23,10 +23,10 @@
 
 command "gt-shutdown-dance" {
   args = "<target> <reason>"
-  run  = { pipeline = "shutdown-dance" }
+  run  = { job = "shutdown-dance" }
 }
 
-pipeline "shutdown-dance" {
+job "shutdown-dance" {
   name = "shutdown-${var.target}"
   vars = ["target", "reason"]
 

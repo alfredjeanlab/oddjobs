@@ -22,11 +22,11 @@ queue "bugs" {
 
 worker "bug" {
   source      = { queue = "bugs" }
-  handler     = { pipeline = "bug" }
+  handler     = { job = "bug" }
   concurrency = 3
 }
 
-pipeline "bug" {
+job "bug" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
   on_fail   = { step = "reopen" }
@@ -53,7 +53,7 @@ pipeline "bug" {
     on_done = { step = "submit" }
   }
 
-  # TODO: hook into merge pipeline to mark issue done instead
+  # TODO: hook into merge job to mark issue done instead
   step "submit" {
     run = <<-SHELL
       git add -A
@@ -72,11 +72,11 @@ pipeline "bug" {
   }
 
   step "reopen" {
-    run = "wok reopen ${var.bug.id} --reason 'Fix pipeline failed'"
+    run = "wok reopen ${var.bug.id} --reason 'Fix job failed'"
   }
 
   step "cancel" {
-    run = "wok close ${var.bug.id} --reason 'Fix pipeline cancelled'"
+    run = "wok close ${var.bug.id} --reason 'Fix job cancelled'"
   }
 }
 

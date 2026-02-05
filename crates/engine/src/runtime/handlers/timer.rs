@@ -9,7 +9,7 @@ use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
     split_scoped_name, AgentId, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event,
-    PipelineId, TimerId,
+    JobId, TimerId,
 };
 use std::time::Duration;
 
@@ -23,7 +23,7 @@ where
     /// Route timer events to the appropriate handler
     pub(crate) async fn handle_timer(&self, id: &TimerId) -> Result<Vec<Event>, RuntimeError> {
         let id_str = id.as_str();
-        // Agent-run timers (check before pipeline timers since they share prefixes)
+        // Agent-run timers (check before job timers since they share prefixes)
         if let Some(ar_id) = id_str.strip_prefix("idle-grace:ar:") {
             return self.handle_agent_run_idle_grace_timer(ar_id).await;
         }
@@ -36,15 +36,15 @@ where
         if let Some(rest) = id_str.strip_prefix("cooldown:ar:") {
             return self.handle_agent_run_cooldown_timer(rest).await;
         }
-        // Pipeline timers
-        if let Some(pipeline_id) = id_str.strip_prefix("idle-grace:") {
-            return self.handle_idle_grace_timer(pipeline_id).await;
+        // Job timers
+        if let Some(job_id) = id_str.strip_prefix("idle-grace:") {
+            return self.handle_idle_grace_timer(job_id).await;
         }
-        if let Some(pipeline_id) = id_str.strip_prefix("liveness:") {
-            return self.handle_liveness_timer(pipeline_id).await;
+        if let Some(job_id) = id_str.strip_prefix("liveness:") {
+            return self.handle_liveness_timer(job_id).await;
         }
-        if let Some(pipeline_id) = id_str.strip_prefix("exit-deferred:") {
-            return self.handle_exit_deferred_timer(pipeline_id).await;
+        if let Some(job_id) = id_str.strip_prefix("exit-deferred:") {
+            return self.handle_exit_deferred_timer(job_id).await;
         }
         if let Some(rest) = id_str.strip_prefix("cooldown:") {
             return self.handle_cooldown_timer(rest).await;
@@ -65,33 +65,33 @@ where
 
     /// Handle cooldown timer expiry - re-trigger the action
     async fn handle_cooldown_timer(&self, rest: &str) -> Result<Vec<Event>, RuntimeError> {
-        // Parse timer ID: "pipeline_id:trigger:chain_pos"
+        // Parse timer ID: "job_id:trigger:chain_pos"
         let parts: Vec<&str> = rest.splitn(3, ':').collect();
         if parts.len() != 3 {
             tracing::warn!(timer_rest = rest, "malformed cooldown timer ID");
             return Ok(vec![]);
         }
-        let pipeline_id = parts[0];
+        let job_id = parts[0];
         let trigger = parts[1];
         let chain_pos: usize = parts[2].parse().unwrap_or(0);
 
-        let pipeline = match self.get_pipeline(pipeline_id) {
+        let job = match self.get_job(job_id) {
             Some(p) => p,
             None => {
-                tracing::debug!(pipeline_id, "cooldown timer for missing pipeline");
+                tracing::debug!(job_id, "cooldown timer for missing job");
                 return Ok(vec![]);
             }
         };
 
-        if pipeline.is_terminal() {
+        if job.is_terminal() {
             return Ok(vec![]);
         }
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let agent_def = match monitor::get_agent_def(&runbook, &pipeline) {
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let agent_def = match monitor::get_agent_def(&runbook, &job) {
             Ok(def) => def.clone(),
             Err(_) => {
-                // Pipeline already advanced past the agent step
+                // Job already advanced past the agent step
                 return Ok(vec![]);
             }
         };
@@ -108,14 +108,14 @@ where
         };
 
         tracing::info!(
-            pipeline_id = %pipeline.id,
+            job_id = %job.id,
             trigger,
             chain_pos,
             "cooldown expired, executing action"
         );
 
         self.execute_action_with_attempts(
-            &pipeline,
+            &job,
             &agent_def,
             &action_config,
             trigger,
@@ -196,17 +196,17 @@ where
     }
 
     /// Periodic liveness check (30s). Checks if tmux session + agent process are alive.
-    async fn handle_liveness_timer(&self, pipeline_id: &str) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = match self.get_pipeline(pipeline_id) {
+    async fn handle_liveness_timer(&self, job_id: &str) -> Result<Vec<Event>, RuntimeError> {
+        let job = match self.get_job(job_id) {
             Some(p) => p,
             None => return Ok(vec![]),
         };
 
-        if pipeline.is_terminal() {
+        if job.is_terminal() {
             return Ok(vec![]); // No need to reschedule
         }
 
-        let session_id = match &pipeline.session_id {
+        let session_id = match &job.session_id {
             Some(id) => id.clone(),
             None => return Ok(vec![]),
         };
@@ -215,10 +215,10 @@ where
         // child process, so session-only checks miss dead agents.
         let is_running = self.executor.check_session_alive(&session_id).await && {
             let process_name = self
-                .cached_runbook(&pipeline.runbook_hash)
+                .cached_runbook(&job.runbook_hash)
                 .ok()
                 .and_then(|rb| {
-                    crate::monitor::get_agent_def(&rb, &pipeline)
+                    crate::monitor::get_agent_def(&rb, &job)
                         .ok()
                         .map(|def| oj_adapters::extract_process_name(&def.run))
                 })
@@ -228,7 +228,7 @@ where
                 .await
         };
 
-        let pid = PipelineId::new(pipeline_id);
+        let pid = JobId::new(job_id);
         if is_running {
             // Reschedule liveness timer
             self.executor
@@ -239,7 +239,7 @@ where
                 .await?;
         } else {
             // Dead — schedule deferred exit (5s grace period)
-            tracing::info!(pipeline_id, "agent process dead, scheduling deferred exit");
+            tracing::info!(job_id, "agent process dead, scheduling deferred exit");
             self.executor
                 .execute(Effect::SetTimer {
                     id: TimerId::exit_deferred(&pid),
@@ -254,24 +254,24 @@ where
     /// Reads final session log to determine exit reason.
     async fn handle_exit_deferred_timer(
         &self,
-        pipeline_id: &str,
+        job_id: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = match self.get_pipeline(pipeline_id) {
+        let job = match self.get_job(job_id) {
             Some(p) => p,
             None => return Ok(vec![]),
         };
 
-        // If pipeline already terminal, agent state event won the race — no-op
-        if pipeline.is_terminal() {
+        // If job already terminal, agent state event won the race — no-op
+        if job.is_terminal() {
             return Ok(vec![]);
         }
 
         // Read final agent state from session log
         // Get agent_id from step history (it's a UUID stored when the agent was spawned)
-        let agent_id = pipeline
+        let agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.clone())
             .map(AgentId::new);
 
@@ -280,19 +280,19 @@ where
             None => {
                 // No agent_id means we can't check state, treat as unexpected death
                 tracing::warn!(
-                    pipeline_id = %pipeline.id,
-                    step = %pipeline.step,
+                    job_id = %job.id,
+                    step = %job.step,
                     "no agent_id in step history for exit deferred timer"
                 );
                 None
             }
         };
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let agent_def = match monitor::get_agent_def(&runbook, &pipeline) {
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let agent_def = match monitor::get_agent_def(&runbook, &job) {
             Ok(def) => def.clone(),
             Err(_) => {
-                // Pipeline already advanced past the agent step
+                // Job already advanced past the agent step
                 return Ok(vec![]);
             }
         };
@@ -306,7 +306,7 @@ where
             _ => MonitorState::Exited, // on_dead (unexpected death)
         };
 
-        self.handle_monitor_state(&pipeline, &agent_def, monitor_state)
+        self.handle_monitor_state(&job, &agent_def, monitor_state)
             .await
     }
 
@@ -404,21 +404,21 @@ where
             .await
     }
 
-    /// Handle idle grace timer expiry for a pipeline.
+    /// Handle idle grace timer expiry for a job.
     ///
     /// Dual check: log file growth AND agent state. Both must indicate idle
     /// for us to proceed with the on_idle action.
-    async fn handle_idle_grace_timer(&self, pipeline_id: &str) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = match self.get_pipeline(pipeline_id) {
+    async fn handle_idle_grace_timer(&self, job_id: &str) -> Result<Vec<Event>, RuntimeError> {
+        let job = match self.get_job(job_id) {
             Some(p) => p,
             None => return Ok(vec![]),
         };
 
-        if pipeline.is_terminal() || pipeline.step_status.is_waiting() {
+        if job.is_terminal() || job.step_status.is_waiting() {
             // Clear the grace log size
-            let pid = PipelineId::new(pipeline_id);
+            let pid = JobId::new(job_id);
             self.lock_state_mut(|state| {
-                if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+                if let Some(p) = state.jobs.get_mut(pid.as_str()) {
                     p.idle_grace_log_size = None;
                 }
             });
@@ -426,27 +426,27 @@ where
         }
 
         // Get the agent_id for the current step
-        let agent_id = pipeline
+        let agent_id = job
             .step_history
             .iter()
-            .rfind(|r| r.name == pipeline.step)
+            .rfind(|r| r.name == job.step)
             .and_then(|r| r.agent_id.clone())
             .map(AgentId::new);
 
         // Check 1: Has the session log grown?
-        let recorded_size = pipeline.idle_grace_log_size.unwrap_or(0);
+        let recorded_size = job.idle_grace_log_size.unwrap_or(0);
         if let Some(ref aid) = agent_id {
             let current_size = self.executor.get_session_log_size(aid).await.unwrap_or(0);
             if current_size > recorded_size {
                 tracing::info!(
-                    pipeline_id,
+                    job_id,
                     recorded_size,
                     current_size,
                     "agent active during grace period (log grew), cancelling idle"
                 );
-                let pid = PipelineId::new(pipeline_id);
+                let pid = JobId::new(job_id);
                 self.lock_state_mut(|state| {
-                    if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+                    if let Some(p) = state.jobs.get_mut(pid.as_str()) {
                         p.idle_grace_log_size = None;
                     }
                 });
@@ -459,12 +459,12 @@ where
         if let Some(ref aid) = agent_id {
             if let Ok(AgentState::Working) = self.executor.get_agent_state(aid).await {
                 tracing::info!(
-                    pipeline_id,
+                    job_id,
                     "agent working at grace timer expiry, cancelling idle"
                 );
-                let pid = PipelineId::new(pipeline_id);
+                let pid = JobId::new(job_id);
                 self.lock_state_mut(|state| {
-                    if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+                    if let Some(p) = state.jobs.get_mut(pid.as_str()) {
                         p.idle_grace_log_size = None;
                     }
                 });
@@ -473,30 +473,30 @@ where
         }
 
         // Clear grace state and proceed with on_idle
-        let pid = PipelineId::new(pipeline_id);
+        let pid = JobId::new(job_id);
         self.lock_state_mut(|state| {
-            if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+            if let Some(p) = state.jobs.get_mut(pid.as_str()) {
                 p.idle_grace_log_size = None;
             }
         });
 
-        // Re-fetch pipeline after state mutation
-        let pipeline = match self.get_pipeline(pipeline_id) {
+        // Re-fetch job after state mutation
+        let job = match self.get_job(job_id) {
             Some(p) => p,
             None => return Ok(vec![]),
         };
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let agent_def = match monitor::get_agent_def(&runbook, &pipeline) {
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let agent_def = match monitor::get_agent_def(&runbook, &job) {
             Ok(def) => def.clone(),
             Err(_) => return Ok(vec![]),
         };
 
         tracing::info!(
-            pipeline_id,
+            job_id,
             "idle grace timer expired — agent genuinely idle, proceeding with on_idle"
         );
-        self.handle_monitor_state(&pipeline, &agent_def, MonitorState::WaitingForInput)
+        self.handle_monitor_state(&job, &agent_def, MonitorState::WaitingForInput)
             .await
     }
 

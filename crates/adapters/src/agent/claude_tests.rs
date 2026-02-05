@@ -26,8 +26,8 @@ async fn spawn_rejects_nonexistent_cwd() {
         workspace_path: workspace_dir.path().to_path_buf(),
         cwd: Some(PathBuf::from("/nonexistent/path")),
         prompt: "Test prompt".to_string(),
-        pipeline_name: "test-pipeline".to_string(),
-        pipeline_id: "pipe-1".to_string(),
+        job_name: "test-job".to_string(),
+        job_id: "pipe-1".to_string(),
         project_root: project_dir.path().to_path_buf(),
         session_config: HashMap::new(),
     };
@@ -228,15 +228,12 @@ fn sanitize_removes_invalid_chars() {
 
 #[test]
 fn sanitize_preserves_valid_chars() {
-    assert_eq!(sanitize_for_tmux("my-pipeline_123", 20), "my-pipeline_123");
+    assert_eq!(sanitize_for_tmux("my-job_123", 20), "my-job_123");
 }
 
 #[test]
 fn sanitize_replaces_spaces() {
-    assert_eq!(
-        sanitize_for_tmux("Pipeline With Spaces", 25),
-        "Pipeline-With-Spaces"
-    );
+    assert_eq!(sanitize_for_tmux("Job With Spaces", 25), "Job-With-Spaces");
 }
 
 #[test]
@@ -263,14 +260,14 @@ fn sanitize_trims_trailing_hyphen_on_truncate() {
 
 #[test]
 fn session_name_has_expected_format() {
-    let name = generate_session_name("my-pipeline", "claude");
+    let name = generate_session_name("my-job", "claude");
     assert!(
-        name.starts_with("my-pipeline-claude-"),
-        "Expected name to start with 'my-pipeline-claude-', got: {}",
+        name.starts_with("my-job-claude-"),
+        "Expected name to start with 'my-job-claude-', got: {}",
         name
     );
     // Should have 4 hex chars at the end
-    let suffix = &name["my-pipeline-claude-".len()..];
+    let suffix = &name["my-job-claude-".len()..];
     assert_eq!(suffix.len(), 4, "Expected 4-char suffix, got: {}", suffix);
     assert!(
         suffix.chars().all(|c| c.is_ascii_hexdigit()),
@@ -280,19 +277,19 @@ fn session_name_has_expected_format() {
 }
 
 #[test]
-fn session_name_sanitizes_pipeline_name() {
+fn session_name_sanitizes_job_name() {
     let name = generate_session_name("my.dotted.name", "agent-1");
     assert!(
         name.starts_with("my-dotted-name-agent-1-"),
-        "Expected sanitized pipeline name, got: {}",
+        "Expected sanitized job name, got: {}",
         name
     );
 }
 
 #[test]
 fn session_name_truncates_long_names() {
-    let name = generate_session_name("very-long-pipeline-name-here", "implementation-step");
-    // Pipeline truncated to 20, step to 15, plus 4 random + 2 hyphens
+    let name = generate_session_name("very-long-job-name-here", "implementation-step");
+    // Job truncated to 20, step to 15, plus 4 random + 2 hyphens
     // Should be reasonable length
     assert!(name.len() <= 45, "Name too long: {} ({})", name, name.len());
 }

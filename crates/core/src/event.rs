@@ -7,7 +7,7 @@ use crate::agent::{AgentError, AgentId, AgentState};
 use crate::agent_run::{AgentRunId, AgentRunStatus};
 use crate::decision::{DecisionOption, DecisionSource};
 use crate::id::ShortId;
-use crate::pipeline::PipelineId;
+use crate::job::JobId;
 use crate::session::SessionId;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
@@ -19,9 +19,9 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentSignalKind {
-    /// Advance the pipeline to the next step
+    /// Advance the job to the next step
     Complete,
-    /// Pause the pipeline and notify for human intervention
+    /// Pause the job and notify for human intervention
     Escalate,
     /// No-op acknowledgement — agent is still working
     Continue,
@@ -106,7 +106,7 @@ pub enum Event {
     #[serde(rename = "agent:signal")]
     AgentSignal {
         agent_id: AgentId,
-        /// Kind of signal: "complete" advances pipeline, "escalate" pauses for human
+        /// Kind of signal: "complete" advances job, "escalate" pauses for human
         kind: AgentSignalKind,
         /// Optional message explaining the signal
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,8 +135,8 @@ pub enum Event {
     // -- command --
     #[serde(rename = "command:run")]
     CommandRun {
-        pipeline_id: PipelineId,
-        pipeline_name: String,
+        job_id: JobId,
+        job_name: String,
         project_root: PathBuf,
         /// Directory where the CLI was invoked (cwd), exposed as {invoke.dir}
         #[serde(default)]
@@ -148,10 +148,10 @@ pub enum Event {
         args: HashMap<String, String>,
     },
 
-    // -- pipeline --
-    #[serde(rename = "pipeline:created")]
-    PipelineCreated {
-        id: PipelineId,
+    // -- job --
+    #[serde(rename = "job:created")]
+    JobCreated {
+        id: JobId,
         kind: String,
         name: String,
         runbook_hash: String,
@@ -167,33 +167,33 @@ pub enum Event {
         cron_name: Option<String>,
     },
 
-    #[serde(rename = "pipeline:advanced")]
-    PipelineAdvanced { id: PipelineId, step: String },
+    #[serde(rename = "job:advanced")]
+    JobAdvanced { id: JobId, step: String },
 
-    #[serde(rename = "pipeline:updated")]
-    PipelineUpdated {
-        id: PipelineId,
+    #[serde(rename = "job:updated")]
+    JobUpdated {
+        id: JobId,
         #[serde(alias = "input")]
         vars: HashMap<String, String>,
     },
 
-    #[serde(rename = "pipeline:resume")]
-    PipelineResume {
-        id: PipelineId,
+    #[serde(rename = "job:resume")]
+    JobResume {
+        id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(default, skip_serializing_if = "is_empty_map", alias = "input")]
         vars: HashMap<String, String>,
     },
 
-    #[serde(rename = "pipeline:cancelling")]
-    PipelineCancelling { id: PipelineId },
+    #[serde(rename = "job:cancelling")]
+    JobCancelling { id: JobId },
 
-    #[serde(rename = "pipeline:cancel")]
-    PipelineCancel { id: PipelineId },
+    #[serde(rename = "job:cancel")]
+    JobCancel { id: JobId },
 
-    #[serde(rename = "pipeline:deleted")]
-    PipelineDeleted { id: PipelineId },
+    #[serde(rename = "job:deleted")]
+    JobDeleted { id: JobId },
 
     // -- runbook --
     #[serde(rename = "runbook:loaded")]
@@ -207,7 +207,7 @@ pub enum Event {
     #[serde(rename = "session:created")]
     SessionCreated {
         id: SessionId,
-        pipeline_id: PipelineId,
+        job_id: JobId,
         /// For standalone agents, the AgentRunId that owns this session
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_run_id: Option<AgentRunId>,
@@ -222,7 +222,7 @@ pub enum Event {
     // -- shell --
     #[serde(rename = "shell:exited")]
     ShellExited {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
         exit_code: i32,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -235,7 +235,7 @@ pub enum Event {
     /// Step has started running
     #[serde(rename = "step:started")]
     StepStarted {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
         /// Agent ID if this is an agent step (for recovery)
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -248,7 +248,7 @@ pub enum Event {
     /// Step is waiting for human intervention
     #[serde(rename = "step:waiting")]
     StepWaiting {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
         /// Reason for waiting (e.g., gate failure message)
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -261,14 +261,14 @@ pub enum Event {
     /// Step completed successfully
     #[serde(rename = "step:completed")]
     StepCompleted {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
     },
 
     /// Step failed
     #[serde(rename = "step:failed")]
     StepFailed {
-        pipeline_id: PipelineId,
+        job_id: JobId,
         step: String,
         error: String,
     },
@@ -314,8 +314,8 @@ pub enum Event {
         interval: String,
         /// Deprecated: use run_target. Kept for WAL backward compat.
         #[serde(default)]
-        pipeline_name: String,
-        /// What this cron runs: "pipeline:name" or "agent:name"
+        job_name: String,
+        /// What this cron runs: "job:name" or "agent:name"
         #[serde(default)]
         run_target: String,
         #[serde(default)]
@@ -332,13 +332,13 @@ pub enum Event {
     #[serde(rename = "cron:once")]
     CronOnce {
         cron_name: String,
-        /// Set for pipeline targets
+        /// Set for job targets
         #[serde(default)]
-        pipeline_id: PipelineId,
+        job_id: JobId,
         #[serde(default)]
-        pipeline_name: String,
+        job_name: String,
         #[serde(default)]
-        pipeline_kind: String,
+        job_kind: String,
         /// Set for agent targets
         #[serde(default)]
         agent_run_id: Option<String>,
@@ -346,7 +346,7 @@ pub enum Event {
         agent_name: Option<String>,
         project_root: PathBuf,
         runbook_hash: String,
-        /// What this cron runs: "pipeline:name" or "agent:name"
+        /// What this cron runs: "job:name" or "agent:name"
         #[serde(default)]
         run_target: String,
         #[serde(default)]
@@ -357,7 +357,7 @@ pub enum Event {
     CronFired {
         cron_name: String,
         #[serde(default)]
-        pipeline_id: PipelineId,
+        job_id: JobId,
         #[serde(default)]
         agent_run_id: Option<String>,
         #[serde(default)]
@@ -412,7 +412,7 @@ pub enum Event {
     WorkerItemDispatched {
         worker_name: String,
         item_id: String,
-        pipeline_id: PipelineId,
+        job_id: JobId,
         #[serde(default)]
         namespace: String,
     },
@@ -496,7 +496,7 @@ pub enum Event {
     #[serde(rename = "decision:created")]
     DecisionCreated {
         id: String,
-        pipeline_id: PipelineId,
+        job_id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
         source: DecisionSource,
@@ -607,13 +607,13 @@ impl Event {
             Event::AgentStop { .. } => "agent:stop",
             Event::AgentPrompt { .. } => "agent:prompt",
             Event::CommandRun { .. } => "command:run",
-            Event::PipelineCreated { .. } => "pipeline:created",
-            Event::PipelineAdvanced { .. } => "pipeline:advanced",
-            Event::PipelineUpdated { .. } => "pipeline:updated",
-            Event::PipelineResume { .. } => "pipeline:resume",
-            Event::PipelineCancelling { .. } => "pipeline:cancelling",
-            Event::PipelineCancel { .. } => "pipeline:cancel",
-            Event::PipelineDeleted { .. } => "pipeline:deleted",
+            Event::JobCreated { .. } => "job:created",
+            Event::JobAdvanced { .. } => "job:advanced",
+            Event::JobUpdated { .. } => "job:updated",
+            Event::JobResume { .. } => "job:resume",
+            Event::JobCancelling { .. } => "job:cancelling",
+            Event::JobCancel { .. } => "job:cancel",
+            Event::JobDeleted { .. } => "job:deleted",
             Event::RunbookLoaded { .. } => "runbook:loaded",
             Event::SessionCreated { .. } => "session:created",
             Event::SessionInput { .. } => "session:input",
@@ -679,18 +679,18 @@ impl Event {
                 ..
             } => format!("{t} agent={agent_id} prompt_type={prompt_type:?}"),
             Event::CommandRun {
-                pipeline_id,
+                job_id,
                 command,
                 namespace,
                 ..
             } => {
                 if namespace.is_empty() {
-                    format!("{t} id={pipeline_id} cmd={command}")
+                    format!("{t} id={job_id} cmd={command}")
                 } else {
-                    format!("{t} id={pipeline_id} ns={namespace} cmd={command}")
+                    format!("{t} id={job_id} ns={namespace} cmd={command}")
                 }
             }
-            Event::PipelineCreated {
+            Event::JobCreated {
                 id,
                 kind,
                 name,
@@ -703,12 +703,12 @@ impl Event {
                     format!("{t} id={id} ns={namespace} kind={kind} name={name}")
                 }
             }
-            Event::PipelineAdvanced { id, step } => format!("{t} id={id} step={step}"),
-            Event::PipelineUpdated { id, .. } => format!("{t} id={id}"),
-            Event::PipelineResume { id, .. } => format!("{t} id={id}"),
-            Event::PipelineCancelling { id } => format!("{t} id={id}"),
-            Event::PipelineCancel { id } => format!("{t} id={id}"),
-            Event::PipelineDeleted { id } => format!("{t} id={id}"),
+            Event::JobAdvanced { id, step } => format!("{t} id={id} step={step}"),
+            Event::JobUpdated { id, .. } => format!("{t} id={id}"),
+            Event::JobResume { id, .. } => format!("{t} id={id}"),
+            Event::JobCancelling { id } => format!("{t} id={id}"),
+            Event::JobCancel { id } => format!("{t} id={id}"),
+            Event::JobDeleted { id } => format!("{t} id={id}"),
             Event::RunbookLoaded {
                 hash,
                 version,
@@ -719,47 +719,47 @@ impl Event {
                     .and_then(|v| v.as_object())
                     .map(|o| o.len())
                     .unwrap_or(0);
-                let pipelines = runbook
-                    .get("pipelines")
+                let jobs = runbook
+                    .get("jobs")
                     .and_then(|v| v.as_object())
                     .map(|o| o.len())
                     .unwrap_or(0);
                 format!(
-                    "{t} hash={} v={version} agents={agents} pipelines={pipelines}",
+                    "{t} hash={} v={version} agents={agents} jobs={jobs}",
                     hash.short(12)
                 )
             }
             Event::SessionCreated {
                 id,
-                pipeline_id,
+                job_id,
                 agent_run_id,
             } => {
                 if let Some(ref ar_id) = agent_run_id {
                     format!("{t} id={id} agent_run={ar_id}")
                 } else {
-                    format!("{t} id={id} pipeline={pipeline_id}")
+                    format!("{t} id={id} job={job_id}")
                 }
             }
             Event::SessionInput { id, .. } => format!("{t} id={id}"),
             Event::SessionDeleted { id } => format!("{t} id={id}"),
             Event::ShellExited {
-                pipeline_id,
+                job_id,
                 step,
                 exit_code,
                 ..
-            } => format!("{t} pipeline={pipeline_id} step={step} exit={exit_code}"),
+            } => format!("{t} job={job_id} step={step} exit={exit_code}"),
             Event::StepStarted {
-                pipeline_id, step, ..
-            } => format!("{t} pipeline={pipeline_id} step={step}"),
+                job_id, step, ..
+            } => format!("{t} job={job_id} step={step}"),
             Event::StepWaiting {
-                pipeline_id, step, ..
-            } => format!("{t} pipeline={pipeline_id} step={step}"),
-            Event::StepCompleted { pipeline_id, step } => {
-                format!("{t} pipeline={pipeline_id} step={step}")
+                job_id, step, ..
+            } => format!("{t} job={job_id} step={step}"),
+            Event::StepCompleted { job_id, step } => {
+                format!("{t} job={job_id} step={step}")
             }
             Event::StepFailed {
-                pipeline_id, step, ..
-            } => format!("{t} pipeline={pipeline_id} step={step}"),
+                job_id, step, ..
+            } => format!("{t} job={job_id} step={step}"),
             Event::Shutdown | Event::Custom => t.to_string(),
             Event::TimerStart { id } => format!("{t} id={id}"),
             Event::WorkspaceCreated { id, .. } => format!("{t} id={id}"),
@@ -771,26 +771,26 @@ impl Event {
             Event::CronStopped { cron_name, .. } => format!("{t} cron={cron_name}"),
             Event::CronOnce {
                 cron_name,
-                pipeline_id,
+                job_id,
                 agent_name,
                 ..
             } => {
                 if let Some(agent) = agent_name {
                     format!("{t} cron={cron_name} agent={agent}")
                 } else {
-                    format!("{t} cron={cron_name} pipeline={pipeline_id}")
+                    format!("{t} cron={cron_name} job={job_id}")
                 }
             }
             Event::CronFired {
                 cron_name,
-                pipeline_id,
+                job_id,
                 agent_run_id,
                 ..
             } => {
                 if let Some(ar_id) = agent_run_id {
                     format!("{t} cron={cron_name} agent_run={ar_id}")
                 } else {
-                    format!("{t} cron={cron_name} pipeline={pipeline_id}")
+                    format!("{t} cron={cron_name} job={job_id}")
                 }
             }
             Event::CronDeleted {
@@ -819,9 +819,9 @@ impl Event {
             Event::WorkerItemDispatched {
                 worker_name,
                 item_id,
-                pipeline_id,
+                job_id,
                 ..
-            } => format!("{t} worker={worker_name} item={item_id} pipeline={pipeline_id}"),
+            } => format!("{t} worker={worker_name} item={item_id} job={job_id}"),
             Event::WorkerStopped { worker_name, .. } => format!("{t} worker={worker_name}"),
             Event::WorkerDeleted {
                 worker_name,
@@ -870,10 +870,10 @@ impl Event {
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::DecisionCreated {
                 id,
-                pipeline_id,
+                job_id,
                 source,
                 ..
-            } => format!("{t} id={id} pipeline={pipeline_id} source={source:?}"),
+            } => format!("{t} id={id} job={job_id} source={source:?}"),
             Event::DecisionResolved { id, chosen, .. } => {
                 if let Some(c) = chosen {
                     format!("{t} id={id} chosen={c}")
@@ -907,46 +907,46 @@ impl Event {
         }
     }
 
-    pub fn pipeline_id(&self) -> Option<&PipelineId> {
+    pub fn job_id(&self) -> Option<&JobId> {
         match self {
-            Event::CommandRun { pipeline_id, .. }
-            | Event::SessionCreated { pipeline_id, .. }
-            | Event::ShellExited { pipeline_id, .. }
-            | Event::StepStarted { pipeline_id, .. }
-            | Event::StepWaiting { pipeline_id, .. }
-            | Event::StepCompleted { pipeline_id, .. }
-            | Event::StepFailed { pipeline_id, .. } => Some(pipeline_id),
-            Event::PipelineCreated { id, .. }
-            | Event::PipelineAdvanced { id, .. }
-            | Event::PipelineUpdated { id, .. }
-            | Event::PipelineResume { id, .. }
-            | Event::PipelineCancelling { id, .. }
-            | Event::PipelineCancel { id, .. }
-            | Event::PipelineDeleted { id, .. } => Some(id),
-            Event::WorkerItemDispatched { pipeline_id, .. } => Some(pipeline_id),
+            Event::CommandRun { job_id, .. }
+            | Event::SessionCreated { job_id, .. }
+            | Event::ShellExited { job_id, .. }
+            | Event::StepStarted { job_id, .. }
+            | Event::StepWaiting { job_id, .. }
+            | Event::StepCompleted { job_id, .. }
+            | Event::StepFailed { job_id, .. } => Some(job_id),
+            Event::JobCreated { id, .. }
+            | Event::JobAdvanced { id, .. }
+            | Event::JobUpdated { id, .. }
+            | Event::JobResume { id, .. }
+            | Event::JobCancelling { id, .. }
+            | Event::JobCancel { id, .. }
+            | Event::JobDeleted { id, .. } => Some(id),
+            Event::WorkerItemDispatched { job_id, .. } => Some(job_id),
             Event::CronOnce {
-                pipeline_id,
+                job_id,
                 agent_name,
                 ..
             } => {
                 if agent_name.is_some() {
                     None
                 } else {
-                    Some(pipeline_id)
+                    Some(job_id)
                 }
             }
             Event::CronFired {
-                pipeline_id,
+                job_id,
                 agent_run_id,
                 ..
             } => {
                 if agent_run_id.is_some() {
                     None
                 } else {
-                    Some(pipeline_id)
+                    Some(job_id)
                 }
             }
-            Event::DecisionCreated { pipeline_id, .. } => Some(pipeline_id),
+            Event::DecisionCreated { job_id, .. } => Some(job_id),
             _ => None,
         }
     }

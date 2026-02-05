@@ -27,7 +27,7 @@ use oj_engine::breadcrumb::Breadcrumb;
 
 use crate::protocol::{
     AgentDetail, AgentStatusEntry, AgentSummary, CronSummary, DecisionDetail, DecisionOptionDetail,
-    DecisionSummary, NamespaceStatus, PipelineDetail, PipelineStatusEntry, PipelineSummary, Query,
+    DecisionSummary, JobDetail, JobStatusEntry, JobSummary, NamespaceStatus, Query,
     QueueItemSummary, QueueStatus, Response, SessionSummary, StepRecordDetail, WorkerSummary,
     WorkspaceDetail, WorkspaceSummary,
 };
@@ -52,9 +52,9 @@ pub(super) fn handle_query(
     let state = state.lock();
 
     match query {
-        Query::ListPipelines => {
-            let mut pipelines: Vec<PipelineSummary> = state
-                .pipelines
+        Query::ListJobs => {
+            let mut jobs: Vec<JobSummary> = state
+                .jobs
                 .values()
                 .map(|p| {
                     // updated_at_ms is the most recent activity timestamp from step history
@@ -63,7 +63,7 @@ pub(super) fn handle_query(
                         .last()
                         .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
                         .unwrap_or(0);
-                    PipelineSummary {
+                    JobSummary {
                         id: p.id.clone(),
                         name: p.name.clone(),
                         kind: p.kind.clone(),
@@ -77,13 +77,13 @@ pub(super) fn handle_query(
                 })
                 .collect();
 
-            query_orphans::append_orphan_summaries(&mut pipelines, orphans);
+            query_orphans::append_orphan_summaries(&mut jobs, orphans);
 
-            Response::Pipelines { pipelines }
+            Response::Jobs { jobs }
         }
 
-        Query::GetPipeline { id } => {
-            let pipeline = state.get_pipeline(&id).map(|p| {
+        Query::GetJob { id } => {
+            let job = state.get_job(&id).map(|p| {
                 let steps: Vec<StepRecordDetail> =
                     p.step_history.iter().map(StepRecordDetail::from).collect();
 
@@ -95,7 +95,7 @@ pub(super) fn handle_query(
                 };
                 let agents = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 
-                Box::new(PipelineDetail {
+                Box::new(JobDetail {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     kind: p.kind.clone(),
@@ -112,14 +112,14 @@ pub(super) fn handle_query(
             });
 
             // If not found in state, check orphans
-            let pipeline = pipeline.or_else(|| query_orphans::find_orphan_detail(orphans, &id));
+            let job = job.or_else(|| query_orphans::find_orphan_detail(orphans, &id));
 
-            Response::Pipeline { pipeline }
+            Response::Job { job }
         }
 
         Query::GetAgent { agent_id } => {
-            // Search all pipelines for a matching agent by ID or prefix
-            let agent = state.pipelines.values().find_map(|p| {
+            // Search all jobs for a matching agent by ID or prefix
+            let agent = state.jobs.values().find_map(|p| {
                 let steps: Vec<StepRecordDetail> =
                     p.step_history.iter().map(StepRecordDetail::from).collect();
 
@@ -154,8 +154,8 @@ pub(super) fn handle_query(
                 Some(Box::new(AgentDetail {
                     agent_id: summary.agent_id.clone(),
                     agent_name: summary.agent_name.clone(),
-                    pipeline_id: p.id.clone(),
-                    pipeline_name: p.name.clone(),
+                    job_id: p.id.clone(),
+                    job_name: p.name.clone(),
                     step_name: summary.step_name.clone(),
                     namespace: namespace.map(|s| s.to_string()),
                     status: summary.status.clone(),
@@ -172,7 +172,7 @@ pub(super) fn handle_query(
                 }))
             });
 
-            // If not found in pipelines, check standalone agent runs
+            // If not found in jobs, check standalone agent runs
             let agent = agent.or_else(|| {
                 state.agent_runs.values().find_map(|ar| {
                     let ar_agent_id = ar.agent_id.as_deref().unwrap_or(&ar.id);
@@ -191,8 +191,8 @@ pub(super) fn handle_query(
                     Some(Box::new(AgentDetail {
                         agent_id: ar_agent_id.to_string(),
                         agent_name: Some(ar.agent_name.clone()),
-                        pipeline_id: String::new(),
-                        pipeline_name: ar.command_name.clone(),
+                        job_id: String::new(),
+                        job_name: ar.command_name.clone(),
                         step_name: String::new(),
                         namespace,
                         status: format!("{}", ar.status),
@@ -232,32 +232,31 @@ pub(super) fn handle_query(
         }
 
         Query::ListWorkspaces => {
-            let workspaces = state
-                .workspaces
-                .values()
-                .map(|w| {
-                    let namespace = w
-                        .owner
-                        .as_deref()
-                        .and_then(|owner| {
-                            // Try pipeline first, then worker
-                            state
-                                .pipelines
-                                .get(owner)
-                                .map(|p| p.namespace.clone())
-                                .or_else(|| state.workers.get(owner).map(|wr| wr.namespace.clone()))
-                        })
-                        .unwrap_or_default();
-                    WorkspaceSummary {
-                        id: w.id.clone(),
-                        path: w.path.clone(),
-                        branch: w.branch.clone(),
-                        status: w.status.to_string(),
-                        created_at_ms: w.created_at_ms,
-                        namespace,
-                    }
-                })
-                .collect();
+            let workspaces =
+                state
+                    .workspaces
+                    .values()
+                    .map(|w| {
+                        let namespace =
+                            w.owner
+                                .as_deref()
+                                .and_then(|owner| {
+                                    // Try job first, then worker
+                                    state.jobs.get(owner).map(|p| p.namespace.clone()).or_else(
+                                        || state.workers.get(owner).map(|wr| wr.namespace.clone()),
+                                    )
+                                })
+                                .unwrap_or_default();
+                        WorkspaceSummary {
+                            id: w.id.clone(),
+                            path: w.path.clone(),
+                            branch: w.branch.clone(),
+                            status: w.status.to_string(),
+                            created_at_ms: w.created_at_ms,
+                            namespace,
+                        }
+                    })
+                    .collect();
             Response::Workspaces { workspaces }
         }
 
@@ -278,12 +277,12 @@ pub(super) fn handle_query(
         Query::GetAgentLogs { id, step, lines } => {
             use oj_engine::log_paths::agent_log_path;
 
-            // Look up pipeline to find agent_ids from step history
-            let pipeline = state.get_pipeline(&id);
+            // Look up job to find agent_ids from step history
+            let job = state.get_job(&id);
 
             let (content, steps, log_path) = if let Some(step_name) = step {
                 // Single step: find agent_id for that step
-                let agent_id = pipeline.and_then(|p| {
+                let agent_id = job.and_then(|p| {
                     p.step_history
                         .iter()
                         .find(|r| r.name == step_name)
@@ -303,7 +302,7 @@ pub(super) fn handle_query(
                 let mut step_names = Vec::new();
                 let mut last_path = logs_path.join("agent");
 
-                if let Some(p) = pipeline {
+                if let Some(p) = job {
                     for record in &p.step_history {
                         if let Some(ref aid) = record.agent_id {
                             step_names.push(record.name.clone());
@@ -337,17 +336,17 @@ pub(super) fn handle_query(
             }
         }
 
-        Query::GetPipelineLogs { id, lines } => {
-            use oj_engine::log_paths::pipeline_log_path;
+        Query::GetJobLogs { id, lines } => {
+            use oj_engine::log_paths::job_log_path;
 
-            // Resolve pipeline ID (supports prefix matching), falling back to orphans
+            // Resolve job ID (supports prefix matching), falling back to orphans
             let full_id = state
-                .get_pipeline(&id)
+                .get_job(&id)
                 .map(|p| p.id.clone())
                 .or_else(|| query_orphans::find_orphan_id(orphans, &id))
                 .unwrap_or(id);
 
-            let log_path = pipeline_log_path(logs_path, &full_id);
+            let log_path = job_log_path(logs_path, &full_id);
             let content = match std::fs::read_to_string(&log_path) {
                 Ok(text) => {
                     if lines > 0 {
@@ -360,7 +359,7 @@ pub(super) fn handle_query(
                 }
                 Err(_) => String::new(),
             };
-            Response::PipelineLogs { log_path, content }
+            Response::JobLogs { log_path, content }
         }
 
         Query::ListQueues {
@@ -470,8 +469,8 @@ pub(super) fn handle_query(
                 };
             }
 
-            // Find pipeline by agent_id in current step and return its signal
-            let pipeline_signal = state.pipelines.values().find_map(|p| {
+            // Find job by agent_id in current step and return its signal
+            let job_signal = state.jobs.values().find_map(|p| {
                 let matches = p
                     .step_history
                     .iter()
@@ -485,7 +484,7 @@ pub(super) fn handle_query(
                 }
             });
 
-            match pipeline_signal {
+            match job_signal {
                 Some(Some(s)) => Response::AgentSignal {
                     signaled: true,
                     kind: Some(s.kind.clone()),
@@ -497,7 +496,7 @@ pub(super) fn handle_query(
                     message: None,
                 },
                 None => {
-                    // No pipeline or agent_run owns this agent — orphaned or pipeline advanced.
+                    // No job or agent_run owns this agent — orphaned or job advanced.
                     // Allow exit to prevent the agent from getting stuck.
                     Response::AgentSignal {
                         signaled: true,
@@ -508,14 +507,11 @@ pub(super) fn handle_query(
             }
         }
 
-        Query::ListAgents {
-            pipeline_id,
-            status,
-        } => {
+        Query::ListAgents { job_id, status } => {
             let mut agents: Vec<AgentSummary> = Vec::new();
 
-            for p in state.pipelines.values() {
-                if let Some(ref prefix) = pipeline_id {
+            for p in state.jobs.values() {
+                if let Some(ref prefix) = job_id {
                     if !p.id.starts_with(prefix.as_str()) {
                         continue;
                     }
@@ -553,7 +549,7 @@ pub(super) fn handle_query(
                     Some(ar.namespace.clone())
                 };
                 agents.push(AgentSummary {
-                    pipeline_id: String::new(),
+                    job_id: String::new(),
                     step_name: String::new(),
                     agent_id: ar.agent_id.clone().unwrap_or_else(|| ar.id.clone()),
                     agent_name: Some(ar.agent_name.clone()),
@@ -653,11 +649,11 @@ pub(super) fn handle_query(
                 .workers
                 .values()
                 .map(|w| {
-                    // Derive updated_at_ms from the most recently updated active pipeline
+                    // Derive updated_at_ms from the most recently updated active job
                     let updated_at_ms = w
-                        .active_pipeline_ids
+                        .active_job_ids
                         .iter()
-                        .filter_map(|pid| state.pipelines.get(pid))
+                        .filter_map(|pid| state.jobs.get(pid))
                         .filter_map(|p| {
                             p.step_history
                                 .last()
@@ -670,7 +666,7 @@ pub(super) fn handle_query(
                         namespace: w.namespace.clone(),
                         queue: w.queue_name.clone(),
                         status: w.status.clone(),
-                        active: w.active_pipeline_ids.len(),
+                        active: w.active_job_ids.len(),
                         concurrency: w.concurrency,
                         updated_at_ms,
                     }
@@ -757,17 +753,17 @@ pub(super) fn handle_query(
                 .values()
                 .map(|c| {
                     let time = query_crons::cron_time_display(c, now_ms);
-                    // Use run_target if available, fall back to pipeline_name
+                    // Use run_target if available, fall back to job_name
                     let target = if !c.run_target.is_empty() {
                         c.run_target.clone()
                     } else {
-                        c.pipeline_name.clone()
+                        c.job_name.clone()
                     };
                     CronSummary {
                         name: c.name.clone(),
                         namespace: c.namespace.clone(),
                         interval: c.interval.clone(),
-                        pipeline: target,
+                        job: target,
                         status: c.status.clone(),
                         time,
                     }
@@ -784,11 +780,11 @@ pub(super) fn handle_query(
                 .as_millis() as u64;
 
             // Collect all namespaces seen across entities
-            let mut ns_active: BTreeMap<String, Vec<PipelineStatusEntry>> = BTreeMap::new();
-            let mut ns_escalated: BTreeMap<String, Vec<PipelineStatusEntry>> = BTreeMap::new();
+            let mut ns_active: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
+            let mut ns_escalated: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
             let mut ns_agents: BTreeMap<String, Vec<AgentStatusEntry>> = BTreeMap::new();
 
-            for p in state.pipelines.values() {
+            for p in state.jobs.values() {
                 if p.is_terminal() {
                     continue;
                 }
@@ -814,7 +810,7 @@ pub(super) fn handle_query(
                     _ => None,
                 };
 
-                let entry = PipelineStatusEntry {
+                let entry = JobStatusEntry {
                     id: p.id.clone(),
                     name: p.name.clone(),
                     kind: p.kind.clone(),
@@ -862,12 +858,12 @@ pub(super) fn handle_query(
                         namespace: w.namespace.clone(),
                         queue: w.queue_name.clone(),
                         status: w.status.clone(),
-                        active: w.active_pipeline_ids.len(),
+                        active: w.active_job_ids.len(),
                         concurrency: w.concurrency,
                         updated_at_ms: w
-                            .active_pipeline_ids
+                            .active_job_ids
                             .iter()
-                            .filter_map(|pid| state.pipelines.get(pid))
+                            .filter_map(|pid| state.jobs.get(pid))
                             .filter_map(|p| {
                                 p.step_history
                                     .last()
@@ -915,7 +911,7 @@ pub(super) fn handle_query(
                 }
             }
 
-            // Collect orphaned pipelines grouped by namespace
+            // Collect orphaned jobs grouped by namespace
             let mut ns_orphaned = query_orphans::collect_orphan_status_entries(orphans, now_ms);
 
             // Build combined namespace set
@@ -945,9 +941,9 @@ pub(super) fn handle_query(
             let mut namespaces: Vec<NamespaceStatus> = all_namespaces
                 .into_iter()
                 .map(|ns| NamespaceStatus {
-                    active_pipelines: ns_active.remove(&ns).unwrap_or_default(),
-                    escalated_pipelines: ns_escalated.remove(&ns).unwrap_or_default(),
-                    orphaned_pipelines: ns_orphaned.remove(&ns).unwrap_or_default(),
+                    active_jobs: ns_active.remove(&ns).unwrap_or_default(),
+                    escalated_jobs: ns_escalated.remove(&ns).unwrap_or_default(),
+                    orphaned_jobs: ns_orphaned.remove(&ns).unwrap_or_default(),
                     workers: ns_workers.remove(&ns).unwrap_or_default(),
                     queues: ns_queues.remove(&ns).unwrap_or_default(),
                     active_agents: ns_agents.remove(&ns).unwrap_or_default(),
@@ -985,9 +981,9 @@ pub(super) fn handle_query(
                 .values()
                 .filter(|d| !d.is_resolved())
                 .map(|d| {
-                    let pipeline_name = state
-                        .pipelines
-                        .get(&d.pipeline_id)
+                    let job_name = state
+                        .jobs
+                        .get(&d.job_id)
                         .map(|p| p.name.clone())
                         .unwrap_or_default();
                     let summary = if d.context.len() > 80 {
@@ -997,8 +993,8 @@ pub(super) fn handle_query(
                     };
                     DecisionSummary {
                         id: d.id.to_string(),
-                        pipeline_id: d.pipeline_id.clone(),
-                        pipeline_name,
+                        job_id: d.job_id.clone(),
+                        job_name,
                         source: format!("{:?}", d.source).to_lowercase(),
                         summary,
                         created_at_ms: d.created_at_ms,
@@ -1012,9 +1008,9 @@ pub(super) fn handle_query(
 
         Query::GetDecision { id } => {
             let decision = state.get_decision(&id).map(|d| {
-                let pipeline_name = state
-                    .pipelines
-                    .get(&d.pipeline_id)
+                let job_name = state
+                    .jobs
+                    .get(&d.job_id)
                     .map(|p| p.name.clone())
                     .unwrap_or_default();
                 let options = d
@@ -1030,8 +1026,8 @@ pub(super) fn handle_query(
                     .collect();
                 Box::new(DecisionDetail {
                     id: d.id.to_string(),
-                    pipeline_id: d.pipeline_id.clone(),
-                    pipeline_name,
+                    job_id: d.job_id.clone(),
+                    job_name,
                     agent_id: d.agent_id.clone(),
                     source: format!("{:?}", d.source).to_lowercase(),
                     context: d.context.clone(),
@@ -1051,11 +1047,11 @@ pub(super) fn handle_query(
     }
 }
 
-/// Build a `SessionSummary` from a stored session, deriving fields from its pipeline.
+/// Build a `SessionSummary` from a stored session, deriving fields from its job.
 fn session_summary(s: &oj_storage::Session, state: &MaterializedState) -> SessionSummary {
     let updated_at_ms = state
-        .pipelines
-        .get(&s.pipeline_id)
+        .jobs
+        .get(&s.job_id)
         .and_then(|p| {
             p.step_history
                 .last()
@@ -1063,21 +1059,21 @@ fn session_summary(s: &oj_storage::Session, state: &MaterializedState) -> Sessio
         })
         .unwrap_or(0);
     let namespace = state
-        .pipelines
-        .get(&s.pipeline_id)
+        .jobs
+        .get(&s.job_id)
         .map(|p| p.namespace.clone())
         .unwrap_or_default();
     SessionSummary {
         id: s.id.clone(),
         namespace,
-        pipeline_id: Some(s.pipeline_id.clone()),
+        job_id: Some(s.job_id.clone()),
         updated_at_ms,
     }
 }
 
 /// Compute agent summaries from step records by scanning agent log files.
 fn compute_agent_summaries(
-    pipeline_id: &str,
+    job_id: &str,
     steps: &[StepRecordDetail],
     logs_path: &Path,
     namespace: Option<&str>,
@@ -1136,7 +1132,7 @@ fn compute_agent_summaries(
             let updated_at_ms = step.finished_at_ms.unwrap_or(step.started_at_ms);
 
             Some(AgentSummary {
-                pipeline_id: pipeline_id.to_string(),
+                job_id: job_id.to_string(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
                 agent_name: step.agent_name.clone(),

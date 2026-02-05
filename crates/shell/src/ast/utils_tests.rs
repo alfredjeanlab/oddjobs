@@ -16,7 +16,7 @@ fn count_simple_commands_multiple() {
 }
 
 #[test]
-fn count_simple_commands_pipeline() {
+fn count_simple_commands_job() {
     let result = Parser::parse("a | b | c").unwrap();
     assert_eq!(result.count_simple_commands(), 3);
 }

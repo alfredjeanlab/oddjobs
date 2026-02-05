@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::super::pipeline_wait::{print_step_progress, StepTracker};
-use super::{format_pipeline_list, format_var_value, is_var_truncated, parse_duration};
-use oj_daemon::{PipelineDetail, PipelineSummary, StepRecordDetail};
+use super::super::job_wait::{print_step_progress, StepTracker};
+use super::{format_job_list, format_var_value, is_var_truncated, parse_duration};
+use oj_daemon::{JobDetail, JobSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -39,10 +39,10 @@ fn parse_duration_zero_fails() {
 
 #[test]
 fn sort_order_most_recently_updated_first() {
-    let mut pipelines = vec![
-        PipelineSummary {
+    let mut jobs = vec![
+        JobSummary {
             id: "done-1".into(),
-            name: "done-pipeline".into(),
+            name: "done-job".into(),
             kind: "build".into(),
             step: "done".into(),
             step_status: "completed".into(),
@@ -51,9 +51,9 @@ fn sort_order_most_recently_updated_first() {
             namespace: String::new(),
             retry_count: 0,
         },
-        PipelineSummary {
+        JobSummary {
             id: "failed-1".into(),
-            name: "failed-pipeline".into(),
+            name: "failed-job".into(),
             kind: "build".into(),
             step: "failed".into(),
             step_status: "failed".into(),
@@ -62,9 +62,9 @@ fn sort_order_most_recently_updated_first() {
             namespace: String::new(),
             retry_count: 0,
         },
-        PipelineSummary {
+        JobSummary {
             id: "active-1".into(),
-            name: "active-pipeline".into(),
+            name: "active-job".into(),
             kind: "build".into(),
             step: "build".into(),
             step_status: "running".into(),
@@ -75,19 +75,19 @@ fn sort_order_most_recently_updated_first() {
         },
     ];
 
-    pipelines.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+    jobs.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
 
-    assert_eq!(pipelines[0].id, "done-1"); // updated_at 5000
-    assert_eq!(pipelines[1].id, "active-1"); // updated_at 3000
-    assert_eq!(pipelines[2].id, "failed-1"); // updated_at 2000
+    assert_eq!(jobs[0].id, "done-1"); // updated_at 5000
+    assert_eq!(jobs[1].id, "active-1"); // updated_at 3000
+    assert_eq!(jobs[2].id, "failed-1"); // updated_at 2000
 }
 
 #[test]
 fn sort_order_most_recent_updated_first_within_same_status() {
-    let mut pipelines = vec![
-        PipelineSummary {
+    let mut jobs = vec![
+        JobSummary {
             id: "old".into(),
-            name: "old-pipeline".into(),
+            name: "old-job".into(),
             kind: "build".into(),
             step: "build".into(),
             step_status: "running".into(),
@@ -96,9 +96,9 @@ fn sort_order_most_recent_updated_first_within_same_status() {
             namespace: String::new(),
             retry_count: 0,
         },
-        PipelineSummary {
+        JobSummary {
             id: "new".into(),
-            name: "new-pipeline".into(),
+            name: "new-job".into(),
             kind: "build".into(),
             step: "execute".into(),
             step_status: "running".into(),
@@ -109,17 +109,17 @@ fn sort_order_most_recent_updated_first_within_same_status() {
         },
     ];
 
-    pipelines.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+    jobs.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
 
-    assert_eq!(pipelines[0].id, "new");
-    assert_eq!(pipelines[1].id, "old");
+    assert_eq!(jobs[0].id, "new");
+    assert_eq!(jobs[1].id, "old");
 }
 
-fn make_detail(name: &str, steps: Vec<StepRecordDetail>) -> PipelineDetail {
-    PipelineDetail {
+fn make_detail(name: &str, steps: Vec<StepRecordDetail>) -> JobDetail {
+    JobDetail {
         id: "abc12345".into(),
         name: name.into(),
-        kind: "pipeline".into(),
+        kind: "job".into(),
         step: "build".into(),
         step_status: "running".into(),
         vars: HashMap::new(),
@@ -248,7 +248,7 @@ fn step_progress_failed_with_detail() {
 }
 
 #[test]
-fn step_progress_multi_pipeline_prefix() {
+fn step_progress_multi_job_prefix() {
     let detail = make_detail(
         "auto-start-worker",
         vec![make_step("init", "completed", 1000, Some(1000))],
@@ -373,8 +373,8 @@ fn make_summary_ns(
     step: &str,
     status: &str,
     namespace: &str,
-) -> PipelineSummary {
-    PipelineSummary {
+) -> JobSummary {
+    JobSummary {
         id: id.into(),
         name: name.into(),
         kind: kind.into(),
@@ -387,8 +387,8 @@ fn make_summary_ns(
     }
 }
 
-fn make_summary(id: &str, name: &str, kind: &str, step: &str, status: &str) -> PipelineSummary {
-    PipelineSummary {
+fn make_summary(id: &str, name: &str, kind: &str, step: &str, status: &str) -> JobSummary {
+    JobSummary {
         id: id.into(),
         name: name.into(),
         kind: kind.into(),
@@ -404,18 +404,18 @@ fn make_summary(id: &str, name: &str, kind: &str, step: &str, status: &str) -> P
 #[test]
 fn list_empty() {
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &[]);
-    assert_eq!(output_string(&buf), "No pipelines\n");
+    format_job_list(&mut buf, &[]);
+    assert_eq!(output_string(&buf), "No jobs\n");
 }
 
 #[test]
 fn list_columns_fit_data() {
-    let pipelines = vec![
+    let jobs = vec![
         make_summary("abcdef123456", "my-build", "build", "plan", "running"),
         make_summary("999999999999", "x", "fix", "implement", "running"),
     ];
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     let lines: Vec<&str> = out.lines().collect();
 
@@ -442,10 +442,10 @@ fn list_with_project_column() {
     p1.namespace = "myproject".into();
     let mut p2 = make_summary("999999999999", "worker", "fix", "done", "completed");
     p2.namespace = "other".into();
-    let pipelines = vec![p1, p2];
+    let jobs = vec![p1, p2];
 
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     let lines: Vec<&str> = out.lines().collect();
 
@@ -463,10 +463,10 @@ fn list_mixed_namespace_shows_no_project_for_empty() {
     p1.namespace = "myproject".into();
     let p2 = make_summary("999999999999", "worker", "fix", "done", "completed");
     // p2 has empty namespace
-    let pipelines = vec![p1, p2];
+    let jobs = vec![p1, p2];
 
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     let lines: Vec<&str> = out.lines().collect();
 
@@ -478,7 +478,7 @@ fn list_mixed_namespace_shows_no_project_for_empty() {
 
 #[test]
 fn list_no_project_when_all_empty_namespace() {
-    let pipelines = vec![make_summary(
+    let jobs = vec![make_summary(
         "abcdef123456",
         "build-a",
         "build",
@@ -486,14 +486,14 @@ fn list_no_project_when_all_empty_namespace() {
         "running",
     )];
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     assert!(!out.contains("PROJECT"));
 }
 
 #[test]
 fn list_no_retries_column_when_all_zero() {
-    let pipelines = vec![make_summary(
+    let jobs = vec![make_summary(
         "abcdef123456",
         "build-a",
         "build",
@@ -501,7 +501,7 @@ fn list_no_retries_column_when_all_zero() {
         "running",
     )];
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     assert!(!out.contains("RETRIES"));
 }
@@ -511,9 +511,9 @@ fn list_retries_column_shown_when_nonzero() {
     let mut p1 = make_summary("abcdef123456", "build-a", "build", "plan", "running");
     p1.retry_count = 3;
     let p2 = make_summary("999999999999", "build-b", "build", "test", "running");
-    let pipelines = vec![p1, p2];
+    let jobs = vec![p1, p2];
     let mut buf = Vec::new();
-    format_pipeline_list(&mut buf, &pipelines);
+    format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
     let lines: Vec<&str> = out.lines().collect();
 
@@ -527,7 +527,7 @@ fn list_retries_column_shown_when_nonzero() {
 
 #[test]
 fn project_filter_retains_matching_namespace() {
-    let mut pipelines = vec![
+    let mut jobs = vec![
         make_summary_ns("aaa", "build-wok", "build", "plan", "running", "wok"),
         make_summary_ns("bbb", "build-bar", "build", "test", "running", "bar"),
         make_summary_ns("ccc", "build-wok2", "build", "done", "completed", "wok"),
@@ -536,17 +536,17 @@ fn project_filter_retains_matching_namespace() {
     // Simulate: --project wok
     let project_filter: Option<&str> = Some("wok");
     if let Some(proj) = project_filter {
-        pipelines.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.namespace == proj);
     }
 
-    assert_eq!(pipelines.len(), 2);
-    assert_eq!(pipelines[0].id, "aaa");
-    assert_eq!(pipelines[1].id, "ccc");
+    assert_eq!(jobs.len(), 2);
+    assert_eq!(jobs[0].id, "aaa");
+    assert_eq!(jobs[1].id, "ccc");
 }
 
 #[test]
 fn project_filter_none_retains_all() {
-    let mut pipelines = vec![
+    let mut jobs = vec![
         make_summary_ns("aaa", "build-wok", "build", "plan", "running", "wok"),
         make_summary_ns("bbb", "build-bar", "build", "test", "running", "bar"),
         make_summary_ns("ccc", "build-wok2", "build", "done", "completed", "wok"),
@@ -555,27 +555,27 @@ fn project_filter_none_retains_all() {
     // Simulate: no --project flag (OJ_NAMESPACE should NOT filter)
     let project_filter: Option<&str> = None;
     if let Some(proj) = project_filter {
-        pipelines.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.namespace == proj);
     }
 
     assert_eq!(
-        pipelines.len(),
+        jobs.len(),
         3,
-        "all pipelines should be retained when no --project flag"
+        "all jobs should be retained when no --project flag"
     );
 }
 
 #[test]
 fn project_filter_no_match_returns_empty() {
-    let mut pipelines = vec![
+    let mut jobs = vec![
         make_summary_ns("aaa", "build-wok", "build", "plan", "running", "wok"),
         make_summary_ns("bbb", "build-bar", "build", "test", "running", "bar"),
     ];
 
     let project_filter: Option<&str> = Some("nonexistent");
     if let Some(proj) = project_filter {
-        pipelines.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.namespace == proj);
     }
 
-    assert!(pipelines.is_empty());
+    assert!(jobs.is_empty());
 }

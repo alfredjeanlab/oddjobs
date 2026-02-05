@@ -33,7 +33,7 @@
 │  ┌─────────┬───────────┘                                │
 │  │         │                                            │
 │  ▼         ▼                                            │
-│ Pipeline  Worker                                        │
+│ Job  Worker                                        │
 │ (pure)    (pure)                                        │
 │                                                         │
 │  Each module: State + Event → (NewState, Effects)       │
@@ -95,7 +95,7 @@ enum Effect {
     Emit { event: Event },
     CreateWorkspace { workspace_id: WorkspaceId, path: PathBuf, ... },
     SetTimer { id: TimerId, duration: Duration },
-    Shell { pipeline_id: PipelineId, command: String, ... },
+    Shell { job_id: JobId, command: String, ... },
     Notify { title: String, message: String },
     // ... see 02-effects.md for full list
 }
@@ -122,7 +122,7 @@ Components communicate via events rather than direct calls, enabling loose coupl
 
 Each primitive has a pure transition function: `(state, event) → (new_state, effects)`
 
-Pipeline and Worker are implemented.
+Job and Worker are implemented.
 
 ### 5. Injectable Dependencies
 

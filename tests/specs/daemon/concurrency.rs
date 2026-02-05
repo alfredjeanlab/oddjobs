@@ -1,4 +1,4 @@
-//! Multi-pipeline concurrency specs
+//! Multi-job concurrency specs
 //!
 //! Verify that workers enforce concurrency limits, free slots correctly,
 //! and operate independently across separate worker pools.
@@ -13,18 +13,18 @@ vars = ["cmd"]
 
 [worker.runner]
 source = { queue = "tasks" }
-handler = { pipeline = "process" }
+handler = { job = "process" }
 concurrency = 2
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
 
-/// Runbook with two independent queue/worker/pipeline sets.
+/// Runbook with two independent queue/worker/job sets.
 const TWO_WORKERS_RUNBOOK: &str = r#"
 [queue.alpha]
 type = "persisted"
@@ -36,25 +36,25 @@ vars = ["cmd"]
 
 [worker.alpha_runner]
 source = { queue = "alpha" }
-handler = { pipeline = "alpha_job" }
+handler = { job = "alpha_job" }
 concurrency = 1
 
 [worker.beta_runner]
 source = { queue = "beta" }
-handler = { pipeline = "beta_job" }
+handler = { job = "beta_job" }
 concurrency = 1
 
-[pipeline.alpha_job]
+[job.alpha_job]
 vars = ["cmd"]
 
-[[pipeline.alpha_job.step]]
+[[job.alpha_job.step]]
 name = "work"
 run = "${var.cmd}"
 
-[pipeline.beta_job]
+[job.beta_job]
 vars = ["cmd"]
 
-[[pipeline.beta_job.step]]
+[[job.beta_job.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
@@ -64,7 +64,7 @@ run = "${var.cmd}"
 // =============================================================================
 
 #[test]
-fn concurrency_limit_caps_active_pipelines() {
+fn concurrency_limit_caps_active_jobs() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/queue.toml", CONCURRENCY_2_RUNBOOK);
@@ -72,7 +72,7 @@ fn concurrency_limit_caps_active_pipelines() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push 4 items with blocking commands so pipelines stay running.
+    // Push 4 items with blocking commands so jobs stay running.
     // Each item needs unique data to avoid deduplication.
     for i in 0..4 {
         temp.oj()
@@ -85,18 +85,18 @@ fn concurrency_limit_caps_active_pipelines() {
             .passes();
     }
 
-    // Wait until we observe both running pipelines AND pending queue items.
+    // Wait until we observe both running jobs AND pending queue items.
     // The engine processes events asynchronously after the CLI returns, so
     // we must wait for all 4 queue pushes to be applied AND for the worker
     // to have dispatched as many items as the concurrency limit allows.
     let cap_observed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let pipelines = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
         let items = temp
             .oj()
             .args(&["queue", "show", "tasks"])
             .passes()
             .stdout();
-        pipelines.contains("running") && items.contains("pending")
+        jobs.contains("running") && items.contains("pending")
     });
 
     if !cap_observed {
@@ -104,18 +104,18 @@ fn concurrency_limit_caps_active_pipelines() {
     }
     assert!(
         cap_observed,
-        "with concurrency=2 and blocking commands, should see running pipelines \
+        "with concurrency=2 and blocking commands, should see running jobs \
          alongside pending queue items"
     );
 
-    // The concurrency cap should limit running pipelines to at most 2
-    let pipeline_output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
-    let running_count = pipeline_output.matches("running").count();
+    // The concurrency cap should limit running jobs to at most 2
+    let job_output = temp.oj().args(&["job", "list"]).passes().stdout();
+    let running_count = job_output.matches("running").count();
     assert!(
         running_count <= 2,
-        "concurrency=2 should cap running pipelines at 2, got {}:\n{}",
+        "concurrency=2 should cap running jobs at 2, got {}:\n{}",
         running_count,
-        pipeline_output
+        job_output
     );
 }
 
@@ -165,7 +165,7 @@ fn pending_items_drain_through_limited_slots() {
 }
 
 // =============================================================================
-// Test 3: Failed pipeline frees slot for next pending item
+// Test 3: Failed job frees slot for next pending item
 // =============================================================================
 
 /// Runbook with concurrency=1 for serial dispatch testing.
@@ -176,20 +176,20 @@ vars = ["cmd"]
 
 [worker.runner]
 source = { queue = "tasks" }
-handler = { pipeline = "process" }
+handler = { job = "process" }
 concurrency = 1
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
 
 #[test]
 #[serial_test::serial]
-fn failed_pipeline_frees_slot_for_next_pending_item() {
+fn failed_job_frees_slot_for_next_pending_item() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/queue.toml", CONCURRENCY_1_RUNBOOK);
@@ -207,7 +207,7 @@ fn failed_pipeline_frees_slot_for_next_pending_item() {
         .args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#])
         .passes();
 
-    // Wait for the second item to complete, proving the failed pipeline
+    // Wait for the second item to complete, proving the failed job
     // freed the concurrency slot. Allow generous time for the engine to
     // process all events under parallel test load.
     let second_completed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
@@ -224,7 +224,7 @@ fn failed_pipeline_frees_slot_for_next_pending_item() {
     }
     assert!(
         second_completed,
-        "second item should complete, proving the failed pipeline freed the slot"
+        "second item should complete, proving the failed job freed the slot"
     );
 
     // Verify: 1 dead (the failed one), 1 completed
@@ -246,11 +246,11 @@ fn failed_pipeline_frees_slot_for_next_pending_item() {
 }
 
 // =============================================================================
-// Test 4: Worker list reflects active pipeline count
+// Test 4: Worker list reflects active job count
 // =============================================================================
 
 #[test]
-fn worker_list_reflects_active_pipeline_count() {
+fn worker_list_reflects_active_job_count() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/queue.toml", CONCURRENCY_2_RUNBOOK);
@@ -277,22 +277,22 @@ fn worker_list_reflects_active_pipeline_count() {
         ])
         .passes();
 
-    // Wait for 2 pipelines to be running
+    // Wait for 2 jobs to be running
     let two_running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.matches("running").count() >= 2
     });
 
     if !two_running {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(two_running, "should have 2 pipelines running");
+    assert!(two_running, "should have 2 jobs running");
 
     // Verify `oj worker list` shows active=2 for the runner worker
     let worker_output = temp.oj().args(&["worker", "list"]).passes().stdout();
     assert!(
         worker_output.contains("2"),
-        "worker list should show 2 active pipelines, got:\n{}",
+        "worker list should show 2 active jobs, got:\n{}",
         worker_output
     );
 }
@@ -333,11 +333,11 @@ fn independent_workers_have_separate_concurrency_pools() {
         ])
         .passes();
 
-    // Wait for both pipelines to be running simultaneously.
+    // Wait for both jobs to be running simultaneously.
     // Each worker has concurrency=1, but since they are independent,
-    // both should have 1 active pipeline at the same time (total 2 running).
+    // both should have 1 active job at the same time (total 2 running).
     let both_running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.matches("running").count() >= 2
     });
 
@@ -346,20 +346,20 @@ fn independent_workers_have_separate_concurrency_pools() {
     }
     assert!(
         both_running,
-        "both workers should have 1 running pipeline each (2 total), \
+        "both workers should have 1 running job each (2 total), \
          proving independent concurrency pools"
     );
 
-    // Verify we see both pipeline types in the list
-    let pipeline_output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+    // Verify we see both job types in the list
+    let job_output = temp.oj().args(&["job", "list"]).passes().stdout();
     assert!(
-        pipeline_output.contains("alpha_job"),
-        "should see alpha_job pipeline:\n{}",
-        pipeline_output
+        job_output.contains("alpha_job"),
+        "should see alpha_job job:\n{}",
+        job_output
     );
     assert!(
-        pipeline_output.contains("beta_job"),
-        "should see beta_job pipeline:\n{}",
-        pipeline_output
+        job_output.contains("beta_job"),
+        "should see beta_job job:\n{}",
+        job_output
     );
 }

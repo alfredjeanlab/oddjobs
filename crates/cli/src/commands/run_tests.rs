@@ -196,10 +196,10 @@ fn shell_inline_leaves_unknown_vars_uninterpolated() {
     let dir = tempfile::tempdir().unwrap();
     let output_file = dir.path().join("unknown.txt");
 
-    // ${pipeline_id} and ${name} should be left as-is
+    // ${job_id} and ${name} should be left as-is
     let cmd_def = make_shell_command(
         "check-unknown",
-        &format!("echo '${{pipeline_id}}' > {}", output_file.display()),
+        &format!("echo '${{job_id}}' > {}", output_file.display()),
     );
 
     let result = execute_shell_inline(
@@ -213,7 +213,7 @@ fn shell_inline_leaves_unknown_vars_uninterpolated() {
 
     assert!(result.is_ok());
     let content = std::fs::read_to_string(&output_file).unwrap();
-    assert_eq!(content.trim(), "${pipeline_id}");
+    assert_eq!(content.trim(), "${job_id}");
 }
 
 #[test]
@@ -251,17 +251,17 @@ fn shell_inline_with_named_args() {
 fn directive_is_shell_for_shell_commands() {
     let directive = RunDirective::Shell("echo hi".to_string());
     assert!(directive.is_shell());
-    assert!(!directive.is_pipeline());
+    assert!(!directive.is_job());
     assert!(!directive.is_agent());
 }
 
 #[test]
-fn directive_is_pipeline_for_pipeline_commands() {
-    let directive = RunDirective::Pipeline {
-        pipeline: "build".to_string(),
+fn directive_is_job_for_job_commands() {
+    let directive = RunDirective::Job {
+        job: "build".to_string(),
     };
     assert!(!directive.is_shell());
-    assert!(directive.is_pipeline());
+    assert!(directive.is_job());
 }
 
 #[test]

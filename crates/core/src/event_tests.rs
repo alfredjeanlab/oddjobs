@@ -8,8 +8,8 @@ use crate::agent::AgentError;
 fn event_serialization_roundtrip() {
     let events = vec![
         Event::CommandRun {
-            pipeline_id: PipelineId::new("pipe-1"),
-            pipeline_name: "build".to_string(),
+            job_id: JobId::new("pipe-1"),
+            job_name: "build".to_string(),
             project_root: std::path::PathBuf::from("/test/project"),
             invoke_dir: std::path::PathBuf::from("/test/project"),
             command: "build".to_string(),
@@ -26,7 +26,7 @@ fn event_serialization_roundtrip() {
             error: AgentError::RateLimited,
         },
         Event::ShellExited {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -127,9 +127,9 @@ fn event_agent_gone_roundtrip() {
 }
 
 #[test]
-fn event_pipeline_created_roundtrip() {
-    let event = Event::PipelineCreated {
-        id: PipelineId::new("pipe-1"),
+fn event_job_created_roundtrip() {
+    let event = Event::JobCreated {
+        id: JobId::new("pipe-1"),
         kind: "build".to_string(),
         name: "test".to_string(),
         runbook_hash: "abc123".to_string(),
@@ -143,7 +143,7 @@ fn event_pipeline_created_roundtrip() {
         cron_name: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
-    assert_eq!(json["type"], "pipeline:created");
+    assert_eq!(json["type"], "job:created");
     assert_eq!(json["id"], "pipe-1");
     assert_eq!(json["kind"], "build");
     assert_eq!(json["initial_step"], "init");
@@ -157,14 +157,14 @@ fn event_pipeline_created_roundtrip() {
 #[test]
 fn event_step_started_roundtrip() {
     let event = Event::StepStarted {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "build".to_string(),
         agent_id: None,
         agent_name: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "step:started");
-    assert_eq!(json["pipeline_id"], "pipe-1");
+    assert_eq!(json["job_id"], "pipe-1");
     assert_eq!(json["step"], "build");
     assert!(json.get("agent_id").is_none());
 
@@ -176,14 +176,14 @@ fn event_step_started_roundtrip() {
 #[test]
 fn event_step_waiting_roundtrip() {
     let event = Event::StepWaiting {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "review".to_string(),
         reason: Some("gate failed".to_string()),
         decision_id: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "step:waiting");
-    assert_eq!(json["pipeline_id"], "pipe-1");
+    assert_eq!(json["job_id"], "pipe-1");
     assert_eq!(json["step"], "review");
     assert_eq!(json["reason"], "gate failed");
 
@@ -195,12 +195,12 @@ fn event_step_waiting_roundtrip() {
 #[test]
 fn event_step_completed_roundtrip() {
     let event = Event::StepCompleted {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "deploy".to_string(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "step:completed");
-    assert_eq!(json["pipeline_id"], "pipe-1");
+    assert_eq!(json["job_id"], "pipe-1");
     assert_eq!(json["step"], "deploy");
 
     let json_str = serde_json::to_string(&event).unwrap();
@@ -211,13 +211,13 @@ fn event_step_completed_roundtrip() {
 #[test]
 fn event_step_failed_roundtrip() {
     let event = Event::StepFailed {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "test".to_string(),
         error: "something went wrong".to_string(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "step:failed");
-    assert_eq!(json["pipeline_id"], "pipe-1");
+    assert_eq!(json["job_id"], "pipe-1");
     assert_eq!(json["step"], "test");
     assert_eq!(json["error"], "something went wrong");
 
@@ -227,16 +227,16 @@ fn event_step_failed_roundtrip() {
 }
 
 #[test]
-fn event_pipeline_resume_roundtrip() {
-    let event = Event::PipelineResume {
-        id: PipelineId::new("pipe-1"),
+fn event_job_resume_roundtrip() {
+    let event = Event::JobResume {
+        id: JobId::new("pipe-1"),
         message: Some("try again".to_string()),
         vars: [("key".to_string(), "value".to_string())]
             .into_iter()
             .collect(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
-    assert_eq!(json["type"], "pipeline:resume");
+    assert_eq!(json["type"], "job:resume");
     assert_eq!(json["id"], "pipe-1");
     assert_eq!(json["message"], "try again");
 
@@ -246,14 +246,14 @@ fn event_pipeline_resume_roundtrip() {
 }
 
 #[test]
-fn event_pipeline_resume_no_message_roundtrip() {
-    let event = Event::PipelineResume {
-        id: PipelineId::new("pipe-1"),
+fn event_job_resume_no_message_roundtrip() {
+    let event = Event::JobResume {
+        id: JobId::new("pipe-1"),
         message: None,
         vars: HashMap::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
-    assert_eq!(json["type"], "pipeline:resume");
+    assert_eq!(json["type"], "job:resume");
     assert!(json.get("message").is_none());
 
     let json_str = serde_json::to_string(&event).unwrap();
@@ -306,23 +306,23 @@ fn event_workspace_failed_roundtrip() {
 }
 
 #[test]
-fn event_pipeline_id_returns_id_for_pipeline_events() {
-    let cases: Vec<(Event, PipelineId)> = vec![
+fn event_job_id_returns_id_for_job_events() {
+    let cases: Vec<(Event, JobId)> = vec![
         (
             Event::CommandRun {
-                pipeline_id: PipelineId::new("p1"),
-                pipeline_name: "b".to_string(),
+                job_id: JobId::new("p1"),
+                job_name: "b".to_string(),
                 project_root: PathBuf::from("/"),
                 invoke_dir: PathBuf::from("/"),
                 command: "build".to_string(),
                 args: HashMap::new(),
                 namespace: String::new(),
             },
-            PipelineId::new("p1"),
+            JobId::new("p1"),
         ),
         (
-            Event::PipelineCreated {
-                id: PipelineId::new("p6"),
+            Event::JobCreated {
+                id: JobId::new("p6"),
                 kind: "build".to_string(),
                 name: "test".to_string(),
                 runbook_hash: "abc".to_string(),
@@ -333,22 +333,22 @@ fn event_pipeline_id_returns_id_for_pipeline_events() {
                 namespace: String::new(),
                 cron_name: None,
             },
-            PipelineId::new("p6"),
+            JobId::new("p6"),
         ),
     ];
 
     for (event, expected_id) in cases {
         assert_eq!(
-            event.pipeline_id(),
+            event.job_id(),
             Some(&expected_id),
-            "wrong pipeline_id for {:?}",
+            "wrong job_id for {:?}",
             event
         );
     }
 }
 
 #[test]
-fn event_pipeline_id_returns_none_for_non_pipeline_events() {
+fn event_job_id_returns_none_for_non_job_events() {
     let events = vec![
         Event::TimerStart {
             id: TimerId::new("t"),
@@ -361,7 +361,7 @@ fn event_pipeline_id_returns_none_for_non_pipeline_events() {
     ];
 
     for event in events {
-        assert_eq!(event.pipeline_id(), None, "expected None for {:?}", event);
+        assert_eq!(event.job_id(), None, "expected None for {:?}", event);
     }
 }
 
@@ -456,12 +456,12 @@ fn event_queue_failed_roundtrip() {
     let event = Event::QueueFailed {
         queue_name: "bugs".to_string(),
         item_id: "item-1".to_string(),
-        error: "pipeline failed".to_string(),
+        error: "job failed".to_string(),
         namespace: String::new(),
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "queue:failed");
-    assert_eq!(json["error"], "pipeline failed");
+    assert_eq!(json["error"], "job failed");
 
     let json_str = serde_json::to_string(&event).unwrap();
     let parsed: Event = serde_json::from_str(&json_str).unwrap();
@@ -721,7 +721,7 @@ fn event_decision_created_roundtrip() {
 
     let event = Event::DecisionCreated {
         id: "dec-abc123".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         agent_id: Some("agent-1".to_string()),
         source: DecisionSource::Gate,
         context: "Gate check failed".to_string(),
@@ -733,7 +733,7 @@ fn event_decision_created_roundtrip() {
             },
             DecisionOption {
                 label: "Reject".to_string(),
-                description: Some("Stop pipeline".to_string()),
+                description: Some("Stop job".to_string()),
                 recommended: false,
             },
         ],
@@ -743,7 +743,7 @@ fn event_decision_created_roundtrip() {
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "decision:created");
     assert_eq!(json["id"], "dec-abc123");
-    assert_eq!(json["pipeline_id"], "pipe-1");
+    assert_eq!(json["job_id"], "pipe-1");
     assert_eq!(json["agent_id"], "agent-1");
     assert_eq!(json["source"], "gate");
     assert_eq!(json["options"].as_array().unwrap().len(), 2);
@@ -795,7 +795,7 @@ fn event_decision_name() {
     assert_eq!(
         Event::DecisionCreated {
             id: "d".to_string(),
-            pipeline_id: PipelineId::new("p"),
+            job_id: JobId::new("p"),
             agent_id: None,
             source: DecisionSource::Question,
             context: "ctx".to_string(),

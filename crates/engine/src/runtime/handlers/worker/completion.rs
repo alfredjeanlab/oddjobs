@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline completion → queue item status updates
+//! Job completion → queue item status updates
 
 use super::WorkerStatus;
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, PipelineId, TimerId};
+use oj_core::{scoped_name, Clock, Effect, Event, JobId, TimerId};
 use oj_runbook::QueueType;
 use std::time::Duration;
 
@@ -18,20 +18,20 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    /// Check if a completed pipeline belongs to a worker and trigger re-poll if so.
+    /// Check if a completed job belongs to a worker and trigger re-poll if so.
     /// For persisted queues, also emits queue:completed or queue:failed events.
-    pub(crate) async fn check_worker_pipeline_complete(
+    pub(crate) async fn check_worker_job_complete(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         terminal_step: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Find which worker (if any) owns this pipeline
+        // Find which worker (if any) owns this job
         let worker_info = {
             let mut workers = self.worker_states.lock();
             let mut found = None;
             for (name, state) in workers.iter_mut() {
-                if state.active_pipelines.remove(pipeline_id) {
-                    let item_id = state.item_pipeline_map.remove(pipeline_id);
+                if state.active_jobs.remove(job_id) {
+                    let item_id = state.item_job_map.remove(job_id);
                     // Remove from inflight set so the item can be re-queued
                     if let Some(ref id) = item_id {
                         state.inflight_items.remove(id);
@@ -63,12 +63,12 @@ where
             worker_namespace,
         )) = worker_info
         {
-            // Log pipeline completion
+            // Log job completion
             {
                 let workers = self.worker_states.lock();
                 let active = workers
                     .get(&worker_name)
-                    .map(|s| s.active_pipelines.len())
+                    .map(|s| s.active_jobs.len())
                     .unwrap_or(0);
                 let concurrency = workers
                     .get(&worker_name)
@@ -78,8 +78,8 @@ where
                 self.worker_logger.append(
                     &scoped,
                     &format!(
-                        "pipeline {} completed (step={}), active={}/{}",
-                        pipeline_id.as_str(),
+                        "job {} completed (step={}), active={}/{}",
+                        job_id.as_str(),
                         terminal_step,
                         active,
                         concurrency,
@@ -112,7 +112,7 @@ where
                         Event::QueueFailed {
                             queue_name: queue_name.clone(),
                             item_id: item_id.clone(),
-                            error: format!("pipeline reached '{}'", terminal_step),
+                            error: format!("job reached '{}'", terminal_step),
                             namespace: worker_namespace.clone(),
                         }
                     };
@@ -186,7 +186,7 @@ where
                     .get(&worker_name)
                     .map(|s| {
                         s.status == WorkerStatus::Running
-                            && (s.active_pipelines.len() as u32) < s.concurrency
+                            && (s.active_jobs.len() as u32) < s.concurrency
                     })
                     .unwrap_or(false)
             };

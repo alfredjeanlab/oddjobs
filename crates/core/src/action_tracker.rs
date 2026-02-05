@@ -3,7 +3,7 @@
 
 //! Shared action attempt tracking and agent signal state.
 //!
-//! Used by both `Pipeline` and `AgentRun` to manage retry logic for
+//! Used by both `Job` and `AgentRun` to manage retry logic for
 //! lifecycle actions (on_idle, on_dead, etc.).
 
 use crate::event::AgentSignalKind;
@@ -19,7 +19,7 @@ pub struct AgentSignal {
 
 /// Tracks action attempt counts and agent signal state.
 ///
-/// Embedded in both `Pipeline` and `AgentRun` via `#[serde(flatten)]`
+/// Embedded in both `Job` and `AgentRun` via `#[serde(flatten)]`
 /// for backward-compatible serialization.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ActionTracker {

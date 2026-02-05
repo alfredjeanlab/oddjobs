@@ -78,7 +78,7 @@ pub enum AgentState {
 }
 ```
 
-`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, `workspace_path`, `cwd`, `prompt`, `pipeline_name`, `pipeline_id`, `project_root`.
+`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, `workspace_path`, `cwd`, `prompt`, `job_name`, `job_id`, `project_root`.
 
 `AgentReconnectConfig` bundles reconnect parameters: `agent_id`, `session_id`, `workspace_path`, `process_name`.
 

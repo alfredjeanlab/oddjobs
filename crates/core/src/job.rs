@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline identifier and state machine.
+//! Job identifier and state machine.
 
 use crate::action_tracker::ActionTracker;
 use crate::clock::Clock;
@@ -15,12 +15,12 @@ use std::time::Instant;
 pub use crate::action_tracker::AgentSignal;
 
 crate::define_id! {
-    /// Unique identifier for a pipeline instance.
+    /// Unique identifier for a job instance.
     ///
-    /// Each pipeline run gets a unique ID that can be used to track its state,
+    /// Each job run gets a unique ID that can be used to track its state,
     /// query its status, and reference it in logs and events.
     #[derive(Default)]
-    pub struct PipelineId;
+    pub struct JobId;
 }
 
 /// Status of the current step.
@@ -154,9 +154,9 @@ pub struct StepRecord {
     pub agent_name: Option<String>,
 }
 
-/// Configuration for creating a new pipeline
+/// Configuration for creating a new job
 #[derive(Debug, Clone)]
-pub struct PipelineConfig {
+pub struct JobConfig {
     pub id: String,
     pub name: String,
     pub kind: String,
@@ -165,22 +165,22 @@ pub struct PipelineConfig {
     pub cwd: PathBuf,
     pub initial_step: String,
     pub namespace: String,
-    /// Name of the cron that spawned this pipeline, if any.
+    /// Name of the cron that spawned this job, if any.
     pub cron_name: Option<String>,
 }
 
-/// Maximum number of times any single step can be entered before the pipeline
+/// Maximum number of times any single step can be entered before the job
 /// is failed with a circuit-breaker error. Prevents runaway retry cycles
 /// (e.g., merge → resolve → push → reinit → merge looping indefinitely).
 pub const MAX_STEP_VISITS: u32 = 5;
 
-/// A pipeline instance
+/// A job instance
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Pipeline {
+pub struct Job {
     pub id: String,
     pub name: String,
     pub kind: String,
-    /// Project namespace this pipeline belongs to
+    /// Project namespace this job belongs to
     #[serde(default)]
     pub namespace: String,
     /// Current step name (from runbook definition)
@@ -196,7 +196,7 @@ pub struct Pipeline {
     pub runbook_hash: String,
     /// Current working directory where commands execute
     pub cwd: PathBuf,
-    /// Reference to the workspace this pipeline is using (for managed git worktrees)
+    /// Reference to the workspace this job is using (for managed git worktrees)
     pub workspace_id: Option<WorkspaceId>,
     /// Path to the workspace (derived from workspace_id lookup)
     pub workspace_path: Option<PathBuf>,
@@ -218,7 +218,7 @@ pub struct Pipeline {
     /// Used as a circuit breaker to prevent runaway retry cycles.
     #[serde(default)]
     pub step_visits: HashMap<String, u32>,
-    /// Name of the cron that spawned this pipeline, if any.
+    /// Name of the cron that spawned this job, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cron_name: Option<String>,
     /// Session log file size when idle grace timer was set.
@@ -231,14 +231,14 @@ pub struct Pipeline {
     pub last_nudge_at: Option<u64>,
 }
 
-impl Pipeline {
-    /// Create a new pipeline with the given initial step
-    pub fn new(config: PipelineConfig, clock: &impl Clock) -> Self {
+impl Job {
+    /// Create a new job with the given initial step
+    pub fn new(config: JobConfig, clock: &impl Clock) -> Self {
         Self::new_with_epoch_ms(config, clock.epoch_ms())
     }
 
-    /// Create a new pipeline with explicit epoch_ms (for WAL replay)
-    pub fn new_with_epoch_ms(config: PipelineConfig, epoch_ms: u64) -> Self {
+    /// Create a new job with explicit epoch_ms (for WAL replay)
+    pub fn new_with_epoch_ms(config: JobConfig, epoch_ms: u64) -> Self {
         Self {
             id: config.id,
             name: config.name,
@@ -322,7 +322,7 @@ impl Pipeline {
         }
     }
 
-    /// Check if the pipeline is in a terminal state
+    /// Check if the job is in a terminal state
     pub fn is_terminal(&self) -> bool {
         self.step == "done" || self.step == "failed" || self.step == "cancelled"
     }
@@ -382,5 +382,5 @@ impl Pipeline {
 }
 
 #[cfg(test)]
-#[path = "pipeline_tests.rs"]
+#[path = "job_tests.rs"]
 mod tests;

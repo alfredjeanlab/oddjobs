@@ -7,11 +7,11 @@ mod agent;
 mod command;
 pub(crate) mod cron;
 mod lifecycle;
-mod pipeline_create;
+mod job_create;
 mod timer;
 pub(crate) mod worker;
 
-pub(crate) use pipeline_create::CreatePipelineParams;
+pub(crate) use job_create::CreateJobParams;
 
 use self::command::HandleCommandParams;
 use self::cron::{CronOnceParams, CronStartedParams};
@@ -33,8 +33,8 @@ where
 
         match &event {
             Event::CommandRun {
-                pipeline_id,
-                pipeline_name,
+                job_id,
+                job_name,
                 project_root,
                 invoke_dir,
                 namespace,
@@ -43,8 +43,8 @@ where
             } => {
                 result_events.extend(
                     self.handle_command(HandleCommandParams {
-                        pipeline_id,
-                        pipeline_name,
+                        job_id,
+                        job_name,
                         project_root,
                         invoke_dir,
                         namespace,
@@ -80,7 +80,7 @@ where
                 message,
             } => {
                 // Signal is now persisted via WAL in MaterializedState
-                // Just handle pipeline advance
+                // Just handle job advance
                 result_events.extend(
                     self.handle_agent_done(agent_id, kind.clone(), message.clone())
                         .await?,
@@ -107,7 +107,7 @@ where
             }
 
             Event::ShellExited {
-                pipeline_id,
+                job_id,
                 step,
                 exit_code,
                 stdout,
@@ -115,7 +115,7 @@ where
             } => {
                 result_events.extend(
                     self.handle_shell_exited(
-                        pipeline_id,
+                        job_id,
                         step,
                         *exit_code,
                         stdout.as_deref(),
@@ -138,15 +138,15 @@ where
                     .await?;
             }
 
-            Event::PipelineResume { id, message, vars } => {
+            Event::JobResume { id, message, vars } => {
                 result_events.extend(
-                    self.handle_pipeline_resume(id, message.as_deref(), vars)
+                    self.handle_job_resume(id, message.as_deref(), vars)
                         .await?,
                 );
             }
 
-            Event::PipelineCancel { id } => {
-                result_events.extend(self.handle_pipeline_cancel(id).await?);
+            Event::JobCancel { id } => {
+                result_events.extend(self.handle_job_cancel(id).await?);
             }
 
             Event::WorkspaceDrop { id } => {
@@ -159,7 +159,7 @@ where
                 project_root,
                 runbook_hash,
                 interval,
-                pipeline_name,
+                job_name,
                 run_target,
                 namespace,
             } => {
@@ -169,7 +169,7 @@ where
                         project_root,
                         runbook_hash,
                         interval,
-                        pipeline_name,
+                        job_name,
                         run_target_str: run_target,
                         namespace,
                     })
@@ -186,9 +186,9 @@ where
 
             Event::CronOnce {
                 cron_name,
-                pipeline_id,
-                pipeline_name,
-                pipeline_kind,
+                job_id,
+                job_name,
+                job_kind,
                 agent_run_id,
                 agent_name,
                 project_root,
@@ -199,9 +199,9 @@ where
                 result_events.extend(
                     self.handle_cron_once(CronOnceParams {
                         cron_name,
-                        pipeline_id,
-                        pipeline_name,
-                        pipeline_kind,
+                        job_id,
+                        job_name,
+                        job_kind,
                         agent_run_id,
                         agent_name,
                         runbook_hash,
@@ -260,14 +260,14 @@ where
                 result_events.extend(self.handle_worker_stopped(worker_name).await?);
             }
 
-            // Pipeline terminal state -> check worker re-poll
-            // NOTE: check_worker_pipeline_complete is also called directly from
-            // fail_pipeline/cancel_pipeline/complete_pipeline for immediate queue
+            // Job terminal state -> check worker re-poll
+            // NOTE: check_worker_job_complete is also called directly from
+            // fail_job/cancel_job/complete_job for immediate queue
             // item updates. This handler is a no-op safety net (idempotent).
-            Event::PipelineAdvanced { id, step }
+            Event::JobAdvanced { id, step }
                 if step == "done" || step == "failed" || step == "cancelled" =>
             {
-                result_events.extend(self.check_worker_pipeline_complete(id, step).await?);
+                result_events.extend(self.check_worker_job_complete(id, step).await?);
             }
 
             // Queue pushed -> wake workers watching this queue
@@ -382,13 +382,13 @@ where
             // No-op: signals and state mutations handled elsewhere
             Event::Shutdown
             | Event::Custom
-            | Event::PipelineCreated { .. }
-            | Event::PipelineAdvanced { .. }
+            | Event::JobCreated { .. }
+            | Event::JobAdvanced { .. }
             | Event::StepStarted { .. }
             | Event::StepWaiting { .. }
             | Event::StepCompleted { .. }
             | Event::StepFailed { .. }
-            | Event::PipelineDeleted { .. }
+            | Event::JobDeleted { .. }
             | Event::SessionCreated { .. }
             | Event::SessionDeleted { .. }
             | Event::WorkspaceCreated { .. }
@@ -396,8 +396,8 @@ where
             | Event::WorkspaceFailed { .. }
             | Event::WorkspaceDeleted { .. }
             | Event::WorkerDeleted { .. }
-            | Event::PipelineCancelling { .. }
-            | Event::PipelineUpdated { .. }
+            | Event::JobCancelling { .. }
+            | Event::JobUpdated { .. }
             | Event::WorkerItemDispatched { .. }
             | Event::CronFired { .. }
             | Event::CronDeleted { .. }

@@ -7,14 +7,14 @@ use super::*;
 fn effect_serialization_roundtrip() {
     let effects = vec![
         Effect::Emit {
-            event: Event::PipelineDeleted {
-                id: PipelineId::new("pipe-1"),
+            event: Event::JobDeleted {
+                id: JobId::new("pipe-1"),
             },
         },
         Effect::SpawnAgent {
             agent_id: AgentId::new("agent-1"),
             agent_name: "claude".to_string(),
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             agent_run_id: None,
             workspace_path: PathBuf::from("/work"),
             input: HashMap::new(),
@@ -57,7 +57,7 @@ fn effect_serialization_roundtrip() {
             id: TimerId::new("timer-1"),
         },
         Effect::Shell {
-            pipeline_id: PipelineId::new("pipe-1"),
+            job_id: JobId::new("pipe-1"),
             step: "init".to_string(),
             command: "echo hello".to_string(),
             cwd: PathBuf::from("/tmp"),
@@ -103,7 +103,7 @@ fn traced_effect_names() {
             Effect::SpawnAgent {
                 agent_id: AgentId::new("a"),
                 agent_name: "claude".to_string(),
-                pipeline_id: PipelineId::new("p"),
+                job_id: JobId::new("p"),
                 agent_run_id: None,
                 workspace_path: PathBuf::from("/w"),
                 input: HashMap::new(),
@@ -173,7 +173,7 @@ fn traced_effect_names() {
         ),
         (
             Effect::Shell {
-                pipeline_id: PipelineId::new("p"),
+                job_id: JobId::new("p"),
                 step: "init".to_string(),
                 command: "cmd".to_string(),
                 cwd: PathBuf::from("/"),
@@ -217,8 +217,8 @@ fn traced_effect_names() {
 fn traced_effect_fields() {
     // Test Emit fields
     let effect = Effect::Emit {
-        event: Event::PipelineDeleted {
-            id: PipelineId::new("pipe-1"),
+        event: Event::JobDeleted {
+            id: JobId::new("pipe-1"),
         },
     };
     let fields = effect.fields();
@@ -229,7 +229,7 @@ fn traced_effect_fields() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         agent_run_id: None,
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
@@ -242,7 +242,7 @@ fn traced_effect_fields() {
     assert_eq!(fields.len(), 6);
     assert_eq!(fields[0], ("agent_id", "agent-1".to_string()));
     assert_eq!(fields[1], ("agent_name", "claude".to_string()));
-    assert_eq!(fields[2], ("pipeline_id", "pipe-1".to_string()));
+    assert_eq!(fields[2], ("job_id", "pipe-1".to_string()));
     assert_eq!(fields[3], ("workspace_path", "/work".to_string()));
     assert_eq!(fields[4], ("command", "claude".to_string()));
     assert_eq!(fields[5], ("cwd", "/work".to_string()));
@@ -326,7 +326,7 @@ fn traced_effect_fields() {
 
     // Test Shell fields
     let effect = Effect::Shell {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "build".to_string(),
         command: "make".to_string(),
         cwd: PathBuf::from("/src"),
@@ -336,7 +336,7 @@ fn traced_effect_fields() {
     assert_eq!(
         fields,
         vec![
-            ("pipeline_id", "pipe-1".to_string()),
+            ("job_id", "pipe-1".to_string()),
             ("step", "build".to_string()),
             ("cwd", "/src".to_string())
         ]
@@ -402,7 +402,7 @@ fn spawn_agent_session_config_roundtrip() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         agent_run_id: None,
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
@@ -434,7 +434,7 @@ fn spawn_agent_empty_session_config_skipped_in_serialization() {
     let effect = Effect::SpawnAgent {
         agent_id: AgentId::new("agent-1"),
         agent_name: "claude".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         agent_run_id: None,
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),

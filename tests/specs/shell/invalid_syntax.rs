@@ -13,11 +13,11 @@ fn rejects_unterminated_single_quote() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo 'unterminated"
 "#,
@@ -38,11 +38,11 @@ fn rejects_unterminated_double_quote() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo \"unterminated"
 "#,
@@ -63,11 +63,11 @@ fn rejects_unterminated_subshell() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "(echo hello"
 "#,
@@ -88,11 +88,11 @@ fn rejects_unterminated_brace_group() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "{ echo hello"
 "#,
@@ -113,11 +113,11 @@ fn rejects_dangling_pipe() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo hello |"
 "#,
@@ -138,11 +138,11 @@ fn rejects_dangling_and_operator() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo hello &&"
 "#,
@@ -163,11 +163,11 @@ fn rejects_dangling_or_operator() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo hello ||"
 "#,
@@ -188,11 +188,11 @@ fn rejects_redirection_without_target() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo hello >"
 "#,
@@ -213,11 +213,11 @@ fn rejects_unterminated_command_substitution() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo $(date"
 "#,
@@ -238,11 +238,11 @@ fn rejects_empty_subshell() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "( )"
 "#,
@@ -260,11 +260,11 @@ fn rejects_empty_brace_group() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "{ }"
 "#,
@@ -282,11 +282,11 @@ fn error_includes_step_context() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "my_broken_step"
 run = "echo 'unterminated"
 "#,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Decision types for human-in-the-loop pipeline control.
+//! Decision types for human-in-the-loop job control.
 
 use serde::{Deserialize, Serialize};
 
@@ -35,7 +35,7 @@ pub struct DecisionOption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Decision {
     pub id: DecisionId,
-    pub pipeline_id: String,
+    pub job_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
     pub source: DecisionSource,

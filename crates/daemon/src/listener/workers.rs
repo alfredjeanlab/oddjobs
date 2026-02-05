@@ -70,12 +70,12 @@ pub(super) fn handle_worker_start(
         });
     }
 
-    // Validate referenced pipeline exists
-    if runbook.get_pipeline(&worker_def.handler.pipeline).is_none() {
+    // Validate referenced job exists
+    if runbook.get_job(&worker_def.handler.job).is_none() {
         return Ok(Response::Error {
             message: format!(
-                "worker '{}' references unknown pipeline '{}'",
-                worker_name, worker_def.handler.pipeline
+                "worker '{}' references unknown job '{}'",
+                worker_name, worker_def.handler.job
             ),
         });
     }

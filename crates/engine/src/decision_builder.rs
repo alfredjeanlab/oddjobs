@@ -6,7 +6,7 @@
 //! Creates DecisionCreated events with system-generated options
 //! when escalation paths are triggered.
 
-use oj_core::{DecisionOption, DecisionSource, Event, PipelineId, QuestionData};
+use oj_core::{DecisionOption, DecisionSource, Event, JobId, QuestionData};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
@@ -46,8 +46,8 @@ impl EscalationTrigger {
 
 /// Build a DecisionCreated event for an escalation.
 pub struct EscalationDecisionBuilder {
-    pipeline_id: PipelineId,
-    pipeline_name: String,
+    job_id: JobId,
+    job_name: String,
     agent_id: Option<String>,
     trigger: EscalationTrigger,
     agent_log_tail: Option<String>,
@@ -55,10 +55,10 @@ pub struct EscalationDecisionBuilder {
 }
 
 impl EscalationDecisionBuilder {
-    pub fn new(pipeline_id: PipelineId, pipeline_name: String, trigger: EscalationTrigger) -> Self {
+    pub fn new(job_id: JobId, job_name: String, trigger: EscalationTrigger) -> Self {
         Self {
-            pipeline_id,
-            pipeline_name,
+            job_id,
+            job_name,
             agent_id: None,
             trigger,
             agent_log_tail: None,
@@ -93,7 +93,7 @@ impl EscalationDecisionBuilder {
 
         let event = Event::DecisionCreated {
             id: decision_id.clone(),
-            pipeline_id: self.pipeline_id,
+            job_id: self.job_id,
             agent_id: self.agent_id,
             source: self.trigger.to_source(),
             context,
@@ -112,8 +112,8 @@ impl EscalationDecisionBuilder {
         match &self.trigger {
             EscalationTrigger::Idle => {
                 parts.push(format!(
-                    "Agent in pipeline \"{}\" is idle and waiting for input.",
-                    self.pipeline_name
+                    "Agent in job \"{}\" is idle and waiting for input.",
+                    self.job_name
                 ));
             }
             EscalationTrigger::Dead { exit_code } => {
@@ -121,8 +121,8 @@ impl EscalationDecisionBuilder {
                     .map(|c| format!(" (exit code {})", c))
                     .unwrap_or_default();
                 parts.push(format!(
-                    "Agent in pipeline \"{}\" exited unexpectedly{}.",
-                    self.pipeline_name, code_str
+                    "Agent in job \"{}\" exited unexpectedly{}.",
+                    self.job_name, code_str
                 ));
             }
             EscalationTrigger::Error {
@@ -130,8 +130,8 @@ impl EscalationDecisionBuilder {
                 message,
             } => {
                 parts.push(format!(
-                    "Agent in pipeline \"{}\" encountered an error: {} - {}",
-                    self.pipeline_name, error_type, message
+                    "Agent in job \"{}\" encountered an error: {} - {}",
+                    self.job_name, error_type, message
                 ));
             }
             EscalationTrigger::GateFailed {
@@ -140,8 +140,8 @@ impl EscalationDecisionBuilder {
                 stderr,
             } => {
                 parts.push(format!(
-                    "Gate command failed in pipeline \"{}\".",
-                    self.pipeline_name
+                    "Gate command failed in job \"{}\".",
+                    self.job_name
                 ));
                 parts.push(format!("Command: {}", command));
                 parts.push(format!("Exit code: {}", exit_code));
@@ -151,8 +151,8 @@ impl EscalationDecisionBuilder {
             }
             EscalationTrigger::Prompt { prompt_type } => {
                 parts.push(format!(
-                    "Agent in pipeline \"{}\" is showing a {} prompt.",
-                    self.pipeline_name, prompt_type
+                    "Agent in job \"{}\" is showing a {} prompt.",
+                    self.job_name, prompt_type
                 ));
             }
             EscalationTrigger::Question { ref question_data } => {
@@ -160,8 +160,8 @@ impl EscalationDecisionBuilder {
                     if let Some(entry) = qd.questions.first() {
                         let header = entry.header.as_deref().unwrap_or("Question");
                         parts.push(format!(
-                            "Agent in pipeline \"{}\" is asking a question.",
-                            self.pipeline_name
+                            "Agent in job \"{}\" is asking a question.",
+                            self.job_name
                         ));
                         parts.push(String::new());
                         parts.push(format!("[{}] {}", header, entry.question));
@@ -172,14 +172,14 @@ impl EscalationDecisionBuilder {
                         }
                     } else {
                         parts.push(format!(
-                            "Agent in pipeline \"{}\" is asking a question.",
-                            self.pipeline_name
+                            "Agent in job \"{}\" is asking a question.",
+                            self.job_name
                         ));
                     }
                 } else {
                     parts.push(format!(
-                        "Agent in pipeline \"{}\" is asking a question (no details available).",
-                        self.pipeline_name
+                        "Agent in job \"{}\" is asking a question (no details available).",
+                        self.job_name
                     ));
                 }
             }
@@ -205,12 +205,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Done".to_string(),
-                    description: Some("Mark as complete and advance the pipeline".to_string()),
+                    description: Some("Mark as complete and advance the job".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the pipeline".to_string()),
+                    description: Some("Cancel the job".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
@@ -229,12 +229,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Skip".to_string(),
-                    description: Some("Skip this step and advance the pipeline".to_string()),
+                    description: Some("Skip this step and advance the job".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the pipeline".to_string()),
+                    description: Some("Cancel the job".to_string()),
                     recommended: false,
                 },
             ],
@@ -246,12 +246,12 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Skip".to_string(),
-                    description: Some("Skip the gate and advance the pipeline".to_string()),
+                    description: Some("Skip the gate and advance the job".to_string()),
                     recommended: false,
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the pipeline".to_string()),
+                    description: Some("Cancel the job".to_string()),
                     recommended: false,
                 },
             ],
@@ -268,7 +268,7 @@ impl EscalationDecisionBuilder {
                 },
                 DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the pipeline".to_string()),
+                    description: Some("Cancel the job".to_string()),
                     recommended: false,
                 },
             ],
@@ -290,7 +290,7 @@ impl EscalationDecisionBuilder {
                 // Always add Cancel as the last option
                 options.push(DecisionOption {
                     label: "Cancel".to_string(),
-                    description: Some("Cancel the pipeline".to_string()),
+                    description: Some("Cancel the job".to_string()),
                     recommended: false,
                 });
 

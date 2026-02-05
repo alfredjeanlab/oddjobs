@@ -9,7 +9,7 @@
 
 command "draft" {
   args = "<name> <instructions> [--base <branch>]"
-  run  = { pipeline = "draft" }
+  run  = { job = "draft" }
 
   defaults = {
     base = "main"
@@ -23,7 +23,7 @@ command "draft" {
 #   oj run draft-rebase inline-commands --base develop
 command "draft-rebase" {
   args = "<name> [--base <branch>]"
-  run  = { pipeline = "draft-rebase" }
+  run  = { job = "draft-rebase" }
 
   defaults = {
     base = "main"
@@ -37,7 +37,7 @@ command "draft-rebase" {
 #   oj run draft-refine new-parser "Add error recovery for malformed input"
 command "draft-refine" {
   args = "<name> <instructions>"
-  run  = { pipeline = "draft-refine" }
+  run  = { job = "draft-refine" }
 }
 
 
@@ -75,7 +75,7 @@ command "drafts" {
   }
 }
 
-pipeline "draft" {
+job "draft" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "base"]
 
@@ -118,7 +118,7 @@ pipeline "draft" {
   }
 }
 
-pipeline "draft-rebase" {
+job "draft-rebase" {
   name      = "rebase-${var.name}"
   vars      = ["name", "base"]
   workspace = "folder"
@@ -171,7 +171,7 @@ pipeline "draft-rebase" {
   }
 }
 
-pipeline "draft-refine" {
+job "draft-refine" {
   name      = "refine-${var.name}"
   vars      = ["name", "instructions"]
   workspace = "folder"

@@ -1,7 +1,7 @@
 //! Agent on_stop lifecycle handler specs.
 //!
 //! Verify that the on_stop config is written at spawn time and that
-//! the correct default is applied based on context (pipeline vs standalone).
+//! the correct default is applied based on context (job vs standalone).
 
 use crate::prelude::*;
 
@@ -31,12 +31,12 @@ fn runbook_default_on_stop(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -54,12 +54,12 @@ fn runbook_explicit_on_stop_idle(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -78,12 +78,12 @@ fn runbook_explicit_on_stop_escalate(scenario_path: &std::path::Path) -> String 
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -117,9 +117,9 @@ fn read_agent_config(temp: &Project) -> Option<String> {
 // Tests: config.json written at spawn time
 // =============================================================================
 
-/// Pipeline agent with no explicit on_stop should default to "signal".
+/// Job agent with no explicit on_stop should default to "signal".
 #[test]
-fn pipeline_agent_default_on_stop_is_signal() {
+fn job_agent_default_on_stop_is_signal() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
@@ -133,14 +133,14 @@ fn pipeline_agent_default_on_stop_is_signal() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    // Wait for agent to be spawned (pipeline reaches running status)
+    // Wait for agent to be spawned (job reaches running status)
     let running = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("running") || out.contains("completed")
     });
     assert!(
         running,
-        "pipeline should reach running or completed\ndaemon log:\n{}",
+        "job should reach running or completed\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
@@ -151,14 +151,14 @@ fn pipeline_agent_default_on_stop_is_signal() {
     let config = read_agent_config(&temp).unwrap();
     assert!(
         config.contains("\"on_stop\":\"signal\""),
-        "pipeline agent should default to on_stop=signal, got: {}",
+        "job agent should default to on_stop=signal, got: {}",
         config
     );
 }
 
-/// Pipeline agent with explicit on_stop = "idle" should write idle to config.
+/// Job agent with explicit on_stop = "idle" should write idle to config.
 #[test]
-fn pipeline_agent_explicit_on_stop_idle() {
+fn job_agent_explicit_on_stop_idle() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
@@ -173,12 +173,12 @@ fn pipeline_agent_explicit_on_stop_idle() {
     temp.oj().args(&["run", "build", "test"]).passes();
 
     let running = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("running") || out.contains("completed")
     });
     assert!(
         running,
-        "pipeline should reach running or completed\ndaemon log:\n{}",
+        "job should reach running or completed\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
@@ -193,9 +193,9 @@ fn pipeline_agent_explicit_on_stop_idle() {
     );
 }
 
-/// Pipeline agent with explicit on_stop = "escalate" should write escalate to config.
+/// Job agent with explicit on_stop = "escalate" should write escalate to config.
 #[test]
-fn pipeline_agent_explicit_on_stop_escalate() {
+fn job_agent_explicit_on_stop_escalate() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
@@ -210,12 +210,12 @@ fn pipeline_agent_explicit_on_stop_escalate() {
     temp.oj().args(&["run", "build", "test"]).passes();
 
     let running = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("running") || out.contains("completed")
     });
     assert!(
         running,
-        "pipeline should reach running or completed\ndaemon log:\n{}",
+        "job should reach running or completed\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
@@ -230,7 +230,7 @@ fn pipeline_agent_explicit_on_stop_escalate() {
     );
 }
 
-/// on_stop = idle with on_idle = done should still allow the pipeline to
+/// on_stop = idle with on_idle = done should still allow the job to
 /// complete via normal idle detection (the on_stop config only affects the
 /// Claude Code Stop hook, which doesn't fire in claudeless).
 #[test]
@@ -250,15 +250,15 @@ fn on_stop_idle_does_not_interfere_with_on_idle() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete via on_idle=done (on_stop=idle should not interfere)\npipeline list:\n{}\ndaemon log:\n{}",
-        temp.oj().args(&["pipeline", "list"]).passes().stdout(),
+        "job should complete via on_idle=done (on_stop=idle should not interfere)\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
 }

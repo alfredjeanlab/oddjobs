@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{IdGen, PipelineId, UuidIdGen};
+use oj_core::{IdGen, JobId, UuidIdGen};
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
@@ -101,19 +101,19 @@ pub(super) async fn handle_run_command(
             None
         };
 
-    // Get pipeline name from command definition (shell commands use the command name)
-    let pipeline_name = cmd_def.run.pipeline_name().unwrap_or(command).to_string();
+    // Get job name from command definition (shell commands use the command name)
+    let job_name = cmd_def.run.job_name().unwrap_or(command).to_string();
 
-    // Generate pipeline ID
-    let pipeline_id = PipelineId::new(UuidIdGen.next());
+    // Generate job ID
+    let job_id = JobId::new(UuidIdGen.next());
 
     // Parse arguments
     let parsed_args = cmd_def.parse_args(args, &named);
 
     // Send event to engine
     let event = oj_core::Event::CommandRun {
-        pipeline_id: pipeline_id.clone(),
-        pipeline_name: pipeline_name.clone(),
+        job_id: job_id.clone(),
+        job_name: job_name.clone(),
         project_root: project_root.to_path_buf(),
         invoke_dir: invoke_dir.to_path_buf(),
         namespace: namespace.to_string(),
@@ -128,16 +128,16 @@ pub(super) async fn handle_run_command(
     if is_agent {
         // For standalone agent commands, return AgentRunStarted
         // The engine generates the actual agent_run_id, but the daemon needs to
-        // return a response immediately. We use the pipeline_id as a correlation
+        // return a response immediately. We use the job_id as a correlation
         // key — the engine's command handler will create the agent_run.
         Ok(Response::AgentRunStarted {
-            agent_run_id: pipeline_id.to_string(),
+            agent_run_id: job_id.to_string(),
             agent_name: agent_name_if_standalone.unwrap_or_default(),
         })
     } else {
         Ok(Response::CommandStarted {
-            pipeline_id: pipeline_id.to_string(),
-            pipeline_name,
+            job_id: job_id.to_string(),
+            job_name,
         })
     }
 }

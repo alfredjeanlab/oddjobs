@@ -8,7 +8,7 @@
 
 use crate::agent_run::AgentRunId;
 use crate::namespace::scoped_name;
-use crate::pipeline::PipelineId;
+use crate::job::JobId;
 
 crate::define_id! {
     /// Unique identifier for a timer instance.
@@ -19,21 +19,21 @@ crate::define_id! {
 }
 
 impl TimerId {
-    /// Timer ID for liveness monitoring of a pipeline.
-    pub fn liveness(pipeline_id: &PipelineId) -> Self {
-        Self::new(format!("liveness:{}", pipeline_id))
+    /// Timer ID for liveness monitoring of a job.
+    pub fn liveness(job_id: &JobId) -> Self {
+        Self::new(format!("liveness:{}", job_id))
     }
 
-    /// Timer ID for deferred exit handling of a pipeline.
-    pub fn exit_deferred(pipeline_id: &PipelineId) -> Self {
-        Self::new(format!("exit-deferred:{}", pipeline_id))
+    /// Timer ID for deferred exit handling of a job.
+    pub fn exit_deferred(job_id: &JobId) -> Self {
+        Self::new(format!("exit-deferred:{}", job_id))
     }
 
     /// Timer ID for cooldown between action attempts.
-    pub fn cooldown(pipeline_id: &PipelineId, trigger: &str, chain_pos: usize) -> Self {
+    pub fn cooldown(job_id: &JobId, trigger: &str, chain_pos: usize) -> Self {
         Self::new(format!(
             "cooldown:{}:{}:{}",
-            pipeline_id, trigger, chain_pos
+            job_id, trigger, chain_pos
         ))
     }
 
@@ -103,9 +103,9 @@ impl TimerId {
         ))
     }
 
-    /// Timer ID for idle grace period before triggering on_idle for a pipeline.
-    pub fn idle_grace(pipeline_id: &PipelineId) -> Self {
-        Self::new(format!("idle-grace:{}", pipeline_id))
+    /// Timer ID for idle grace period before triggering on_idle for a job.
+    pub fn idle_grace(job_id: &JobId) -> Self {
+        Self::new(format!("idle-grace:{}", job_id))
     }
 
     /// Timer ID for idle grace period before triggering on_idle for a standalone agent run.
@@ -139,17 +139,17 @@ impl TimerId {
         self.agent_run_id_str().is_some()
     }
 
-    /// Extracts the pipeline ID portion if this is a pipeline-related timer.
+    /// Extracts the job ID portion if this is a job-related timer.
     ///
     /// Returns `Some(&str)` for liveness, exit-deferred, cooldown, and idle-grace timers.
-    /// For cooldown timers, extracts the pipeline_id from "cooldown:pipeline_id:trigger:pos".
-    pub fn pipeline_id_str(&self) -> Option<&str> {
+    /// For cooldown timers, extracts the job_id from "cooldown:job_id:trigger:pos".
+    pub fn job_id_str(&self) -> Option<&str> {
         if let Some(rest) = self.0.strip_prefix("liveness:") {
             Some(rest)
         } else if let Some(rest) = self.0.strip_prefix("exit-deferred:") {
             Some(rest)
         } else if let Some(rest) = self.0.strip_prefix("cooldown:") {
-            // Format: "cooldown:pipeline_id:trigger:chain_pos"
+            // Format: "cooldown:job_id:trigger:chain_pos"
             rest.split(':').next()
         } else if let Some(rest) = self.0.strip_prefix("idle-grace:") {
             Some(rest)

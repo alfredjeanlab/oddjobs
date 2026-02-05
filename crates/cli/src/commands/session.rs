@@ -101,8 +101,8 @@ pub async fn handle(
                 OutputFormat::Text => {
                     if let Some(s) = session {
                         println!("{} {}", color::header("Session:"), s.id);
-                        if let Some(ref pid) = s.pipeline_id {
-                            println!("  {} {}", color::context("Pipeline:"), pid);
+                        if let Some(ref pid) = s.job_id {
+                            println!("  {} {}", color::context("Job:"), pid);
                         }
                         println!(
                             "  {} {}",
@@ -155,17 +155,17 @@ fn format_session_list(w: &mut impl Write, sessions: &[SessionSummary]) {
     if show_project {
         cols.push(Column::left("PROJECT"));
     }
-    cols.extend([Column::left("PIPELINE"), Column::left("UPDATED")]);
+    cols.extend([Column::left("JOB"), Column::left("UPDATED")]);
     let mut table = Table::new(cols);
 
     for s in sessions {
-        let pipeline = s.pipeline_id.as_deref().unwrap_or("-").to_string();
+        let job = s.job_id.as_deref().unwrap_or("-").to_string();
         let updated = format_time_ago(s.updated_at_ms);
         let mut cells = vec![s.id.clone()];
         if show_project {
             cells.push(project_cell(&s.namespace));
         }
-        cells.extend([pipeline, updated]);
+        cells.extend([job, updated]);
         table.row(cells);
     }
 

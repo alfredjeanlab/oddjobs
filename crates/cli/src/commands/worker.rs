@@ -25,7 +25,7 @@ pub enum WorkerCommand {
         /// Worker name from runbook
         name: String,
     },
-    /// Stop a worker (active pipelines continue, no new items dispatched)
+    /// Stop a worker (active jobs continue, no new items dispatched)
     Stop {
         /// Worker name from runbook
         name: String,

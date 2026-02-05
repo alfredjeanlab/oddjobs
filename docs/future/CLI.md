@@ -19,5 +19,5 @@ See [CLI — oj queue](../interface/CLI.md#oj-queue). The implemented command is
 ## oj session prune
 
 ```bash
-oj session prune                 # Kill orphan tmux sessions (no active pipeline)
+oj session prune                 # Kill orphan tmux sessions (no active job)
 ```

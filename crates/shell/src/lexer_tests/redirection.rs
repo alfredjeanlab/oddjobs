@@ -284,7 +284,7 @@ lex_tests! {
         TokenKind::Word("tee".into()),
         TokenKind::Word("output.log".into()),
     ],
-    // heredoc_in_pipeline moved to heredoc.rs (requires newline and body)
+    // heredoc_in_job moved to heredoc.rs (requires newline and body)
     fd_swap: "exec 3>&1 1>&2 2>&3" => [
         TokenKind::Word("exec".into()),
         TokenKind::DuplicateFd {
@@ -303,7 +303,7 @@ lex_tests! {
             output: true,
         },
     ],
-    complex_pipeline: "cat < in | sort | uniq > out 2>&1" => [
+    complex_job: "cat < in | sort | uniq > out 2>&1" => [
         TokenKind::Word("cat".into()),
         TokenKind::RedirectIn { fd: None },
         TokenKind::Word("in".into()),

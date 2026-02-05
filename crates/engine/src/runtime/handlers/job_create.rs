@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Shared pipeline creation logic used by both command and worker handlers.
+//! Shared job creation logic used by both command and worker handlers.
 
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, PipelineId, WorkspaceId};
+use oj_core::{Clock, Effect, Event, JobId, WorkspaceId};
 use oj_runbook::{NotifyConfig, Runbook};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Parameters for creating and starting a pipeline
-pub(crate) struct CreatePipelineParams {
-    pub pipeline_id: PipelineId,
-    pub pipeline_name: String,
-    pub pipeline_kind: String,
+/// Parameters for creating and starting a job
+pub(crate) struct CreateJobParams {
+    pub job_id: JobId,
+    pub job_name: String,
+    pub job_kind: String,
     pub vars: HashMap<String, String>,
     pub runbook_hash: String,
     pub runbook_json: Option<serde_json::Value>,
@@ -31,14 +31,14 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    pub(crate) async fn create_and_start_pipeline(
+    pub(crate) async fn create_and_start_job(
         &self,
-        params: CreatePipelineParams,
+        params: CreateJobParams,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let CreatePipelineParams {
-            pipeline_id,
-            pipeline_name,
-            pipeline_kind,
+        let CreateJobParams {
+            job_id,
+            job_name,
+            job_kind,
             mut vars,
             runbook_hash,
             runbook_json,
@@ -47,31 +47,31 @@ where
             cron_name,
         } = params;
 
-        // Look up pipeline definition
-        let pipeline_def = runbook
-            .get_pipeline(&pipeline_kind)
-            .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline_kind.clone()))?;
+        // Look up job definition
+        let job_def = runbook
+            .get_job(&job_kind)
+            .ok_or_else(|| RuntimeError::JobDefNotFound(job_kind.clone()))?;
 
-        // Resolve pipeline display name from template (if set)
-        let pipeline_name = if let Some(name_template) = &pipeline_def.name {
-            let nonce = pipeline_id.short(8);
+        // Resolve job display name from template (if set)
+        let job_name = if let Some(name_template) = &job_def.name {
+            let nonce = job_id.short(8);
             let lookup: HashMap<String, String> = vars
                 .iter()
                 .flat_map(|(k, v)| vec![(k.clone(), v.clone()), (format!("var.{}", k), v.clone())])
                 .collect();
             let raw = oj_runbook::interpolate(name_template, &lookup);
-            oj_runbook::pipeline_display_name(&raw, nonce, &namespace)
+            oj_runbook::job_display_name(&raw, nonce, &namespace)
         } else {
-            pipeline_name
+            job_name
         };
 
         // Capture notify config before runbook is moved into cache
-        let notify_config = pipeline_def.notify.clone();
+        let notify_config = job_def.notify.clone();
 
         // Determine execution path and workspace metadata (path, id, type)
         let is_worktree;
         let workspace_id_str;
-        let (execution_path, has_workspace) = match (&pipeline_def.cwd, &pipeline_def.workspace) {
+        let (execution_path, has_workspace) = match (&job_def.cwd, &job_def.workspace) {
             (Some(cwd), None) => {
                 // cwd set, workspace omitted: run directly in cwd (interpolated)
                 is_worktree = false;
@@ -80,8 +80,8 @@ where
             }
             (Some(_), Some(_)) | (None, Some(_)) => {
                 // Create workspace directory
-                let nonce = pipeline_id.short(8);
-                let ws_name = pipeline_name.strip_prefix("oj-").unwrap_or(&pipeline_name);
+                let nonce = job_id.short(8);
+                let ws_name = job_name.strip_prefix("oj-").unwrap_or(&job_name);
                 let ws_id = if ws_name.ends_with(nonce) {
                     format!("ws-{}", ws_name)
                 } else {
@@ -92,7 +92,7 @@ where
                 let workspaces_dir = self.state_dir.join("workspaces");
                 let workspace_path = workspaces_dir.join(&ws_id);
 
-                is_worktree = pipeline_def
+                is_worktree = job_def
                     .workspace
                     .as_ref()
                     .map(|w| w.is_git_worktree())
@@ -123,13 +123,13 @@ where
 
         // Interpolate workspace.branch and workspace.ref from workspace config
         // (before locals, so locals can reference ${workspace.branch} if needed)
-        let workspace_block = match &pipeline_def.workspace {
+        let workspace_block = match &job_def.workspace {
             Some(oj_runbook::WorkspaceConfig::Block(block)) => Some(block.clone()),
             _ => None,
         };
 
         if is_worktree {
-            let nonce = pipeline_id.short(8);
+            let nonce = job_id.short(8);
 
             // Build lookup for interpolation (same pattern as locals)
             let lookup: HashMap<String, String> = vars
@@ -191,7 +191,7 @@ where
         // Build a lookup map that includes var.*-prefixed keys so templates like
         // ${var.name} resolve (the vars map stores raw keys like "name").
         // Shell expressions $(...) are eagerly evaluated so locals become plain data.
-        if !pipeline_def.locals.is_empty() {
+        if !job_def.locals.is_empty() {
             let mut lookup: HashMap<String, String> = vars
                 .iter()
                 .flat_map(|(k, v)| {
@@ -199,7 +199,7 @@ where
                     vec![(k.clone(), v.clone()), (prefixed, v.clone())]
                 })
                 .collect();
-            for (key, template) in &pipeline_def.locals {
+            for (key, template) in &job_def.locals {
                 let has_shell = template.contains("$(");
                 let value = if has_shell {
                     oj_runbook::interpolate_shell(template, &lookup)
@@ -290,7 +290,7 @@ where
                 let branch_name = vars
                     .get("workspace.branch")
                     .cloned()
-                    .unwrap_or_else(|| format!("ws-{}", pipeline_id.short(8)));
+                    .unwrap_or_else(|| format!("ws-{}", job_id.short(8)));
                 let start_point = vars
                     .get("workspace.ref")
                     .cloned()
@@ -310,7 +310,7 @@ where
             vec![Effect::CreateWorkspace {
                 workspace_id: WorkspaceId::new(workspace_id_str),
                 path: execution_path.clone(),
-                owner: Some(pipeline_id.to_string()),
+                owner: Some(job_id.to_string()),
                 workspace_type: workspace_type_str,
                 repo_root,
                 branch,
@@ -321,15 +321,15 @@ where
         };
 
         // Compute initial step
-        let initial_step = pipeline_def
+        let initial_step = job_def
             .first_step()
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "init".to_string());
 
         // Extract first step info before releasing borrow on runbook
-        let first_step_name = pipeline_def.first_step().map(|p| p.name.clone());
+        let first_step_name = job_def.first_step().map(|p| p.name.clone());
 
-        // Phase 1: Persist pipeline record before workspace setup
+        // Phase 1: Persist job record before workspace setup
         let mut creation_effects = Vec::new();
         if let Some(json) = runbook_json {
             creation_effects.push(Effect::Emit {
@@ -342,10 +342,10 @@ where
         }
 
         creation_effects.push(Effect::Emit {
-            event: Event::PipelineCreated {
-                id: pipeline_id.clone(),
-                kind: pipeline_kind,
-                name: pipeline_name.clone(),
+            event: Event::JobCreated {
+                id: job_id.clone(),
+                kind: job_kind,
+                name: job_name.clone(),
                 runbook_hash: runbook_hash.clone(),
                 cwd: execution_path.clone(),
                 vars: vars.clone(),
@@ -366,11 +366,11 @@ where
 
         let mut result_events = self.executor.execute_all(creation_effects).await?;
         self.logger
-            .append(pipeline_id.as_str(), "init", "pipeline created");
+            .append(job_id.as_str(), "init", "job created");
 
-        // Write initial breadcrumb after pipeline is persisted
-        if let Some(pipeline) = self.get_pipeline(pipeline_id.as_str()) {
-            self.breadcrumb.write(&pipeline);
+        // Write initial breadcrumb after job is persisted
+        if let Some(job) = self.get_job(job_id.as_str()) {
+            self.breadcrumb.write(&job);
         }
 
         // Emit on_start notification if configured
@@ -379,14 +379,14 @@ where
                 .iter()
                 .map(|(k, v)| (format!("var.{}", k), v.clone()))
                 .collect();
-            notify_vars.insert("pipeline_id".to_string(), pipeline_id.to_string());
-            notify_vars.insert("name".to_string(), pipeline_name.clone());
+            notify_vars.insert("job_id".to_string(), job_id.to_string());
+            notify_vars.insert("name".to_string(), job_name.clone());
 
             let message = NotifyConfig::render(template, &notify_vars);
             if let Some(event) = self
                 .executor
                 .execute(Effect::Notify {
-                    title: pipeline_name.clone(),
+                    title: job_name.clone(),
                     message,
                 })
                 .await?
@@ -395,13 +395,13 @@ where
             }
         }
 
-        // Phase 2: Attempt workspace setup (fails → pipeline marked Failed)
+        // Phase 2: Attempt workspace setup (fails → job marked Failed)
         if !workspace_effects.is_empty() {
             match self.executor.execute_all(workspace_effects).await {
                 Ok(ws_events) => result_events.extend(ws_events),
                 Err(e) => {
-                    let pipeline = self.require_pipeline(pipeline_id.as_str())?;
-                    result_events.extend(self.fail_pipeline(&pipeline, &e.to_string()).await?);
+                    let job = self.require_job(job_id.as_str())?;
+                    result_events.extend(self.fail_job(&job, &e.to_string()).await?);
                     return Ok(result_events);
                 }
             }
@@ -410,7 +410,7 @@ where
         // Start the first step
         if let Some(step_name) = first_step_name {
             result_events.extend(
-                self.start_step(&pipeline_id, &step_name, &vars, &execution_path)
+                self.start_step(&job_id, &step_name, &vars, &execution_path)
                     .await?,
             );
         }

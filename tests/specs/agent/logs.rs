@@ -1,7 +1,7 @@
 //! Integration tests for agent logs directory structure.
 //!
 //! Tests verify:
-//! - Logs are written to `logs/agent/{pipeline_id}/{step}.log`
+//! - Logs are written to `logs/agent/{job_id}/{step}.log`
 //! - `oj agent logs <id>` retrieves all step logs
 //! - `oj agent logs <id> --step <step>` retrieves a single step's log
 //!
@@ -41,17 +41,17 @@ fn multi_step_agent_runbook(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan"
 run = {{ agent = "planner" }}
 on_done = "implement"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "implement"
 run = {{ agent = "implementer" }}
 
@@ -73,16 +73,16 @@ env = {{ OJ_STEP = "implement" }}
 }
 
 /// Tests that agent logs are written to the correct directory structure:
-/// `logs/agent/{pipeline_id}/{step}.log`
+/// `logs/agent/{job_id}/{step}.log`
 ///
 /// Lifecycle:
-/// 1. Pipeline with two agent steps (plan, implement) starts
+/// 1. Job with two agent steps (plan, implement) starts
 /// 2. Each agent makes a Bash tool call (generating log entries)
-/// 3. Pipeline completes
+/// 3. Job completes
 /// 4. Verify log files exist at expected paths
 #[test]
 #[ignore = "BLOCKED BY: claudeless JSONL missing fields for log extraction (less-4afbd0cc)"]
-fn agent_logs_written_to_pipeline_step_structure() {
+fn agent_logs_written_to_job_step_structure() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_with_tool_calls());
@@ -94,27 +94,27 @@ fn agent_logs_written_to_pipeline_step_structure() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    // Wait for pipeline to complete
+    // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete");
+    assert!(done, "job should complete");
 
-    // Get the pipeline ID from pipeline list
-    let list_output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
-    // Extract pipeline ID (first 8 chars of UUID in the list)
-    let pipeline_id = list_output
+    // Get the job ID from job list
+    let list_output = temp.oj().args(&["job", "list"]).passes().stdout();
+    // Extract job ID (first 8 chars of UUID in the list)
+    let job_id = list_output
         .lines()
         .find(|l| l.contains("completed"))
         .and_then(|l| l.split_whitespace().next())
-        .expect("should find pipeline ID");
+        .expect("should find job ID");
 
     // Verify log directory structure exists
-    let logs_dir = temp.state_path().join("logs/agent").join(pipeline_id);
+    let logs_dir = temp.state_path().join("logs/agent").join(job_id);
     assert!(
         logs_dir.exists(),
         "agent logs directory should exist at {:?}",
@@ -143,12 +143,12 @@ fn agent_logs_written_to_pipeline_step_structure() {
     );
 }
 
-/// Tests `oj agent logs <id>` command succeeds for a completed pipeline.
+/// Tests `oj agent logs <id>` command succeeds for a completed job.
 ///
 /// Note: With claudeless -p, no log entries are extracted (session JSONL not written),
 /// so this test verifies the command works but may return empty content.
 #[test]
-fn agent_logs_command_succeeds_after_pipeline_completes() {
+fn agent_logs_command_succeeds_after_job_completes() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_with_tool_calls());
@@ -160,29 +160,29 @@ fn agent_logs_command_succeeds_after_pipeline_completes() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    let pipeline_id = std::cell::RefCell::new(String::new());
+    let job_id = std::cell::RefCell::new(String::new());
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
         let out = temp
             .oj()
-            .args(&["pipeline", "list", "--output", "json"])
+            .args(&["job", "list", "--output", "json"])
             .passes()
             .stdout();
         if let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&out) {
             if let Some(p) = list.iter().find(|p| p["step"] == "done") {
-                *pipeline_id.borrow_mut() = p["id"].as_str().unwrap().to_string();
+                *job_id.borrow_mut() = p["id"].as_str().unwrap().to_string();
                 return true;
             }
         }
         false
     });
-    assert!(done, "pipeline should complete");
-    let pipeline_id = pipeline_id.into_inner();
+    assert!(done, "job should complete");
+    let job_id = job_id.into_inner();
 
     // Test `oj agent logs <id>` succeeds (doesn't error)
-    temp.oj().args(&["agent", "logs", &pipeline_id]).passes();
+    temp.oj().args(&["agent", "logs", &job_id]).passes();
 }
 
-/// Tests `oj agent logs <id> --step <step>` command succeeds for a completed pipeline.
+/// Tests `oj agent logs <id> --step <step>` command succeeds for a completed job.
 ///
 /// Note: With claudeless -p, no log entries are extracted (session JSONL not written),
 /// so this test verifies the command works but may return empty content.
@@ -199,36 +199,36 @@ fn agent_logs_command_with_step_filter_succeeds() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    let pipeline_id = std::cell::RefCell::new(String::new());
+    let job_id = std::cell::RefCell::new(String::new());
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
         let out = temp
             .oj()
-            .args(&["pipeline", "list", "--output", "json"])
+            .args(&["job", "list", "--output", "json"])
             .passes()
             .stdout();
         if let Ok(list) = serde_json::from_str::<Vec<serde_json::Value>>(&out) {
             if let Some(p) = list.iter().find(|p| p["step"] == "done") {
-                *pipeline_id.borrow_mut() = p["id"].as_str().unwrap().to_string();
+                *job_id.borrow_mut() = p["id"].as_str().unwrap().to_string();
                 return true;
             }
         }
         false
     });
-    assert!(done, "pipeline should complete");
-    let pipeline_id = pipeline_id.into_inner();
+    assert!(done, "job should complete");
+    let job_id = job_id.into_inner();
 
     // Test `oj agent logs <id> --step plan` succeeds (doesn't error)
     temp.oj()
-        .args(&["agent", "logs", &pipeline_id, "--step", "plan"])
+        .args(&["agent", "logs", &job_id, "--step", "plan"])
         .passes();
 
     // Test `oj agent logs <id> --step implement` succeeds (doesn't error)
     temp.oj()
-        .args(&["agent", "logs", &pipeline_id, "--step", "implement"])
+        .args(&["agent", "logs", &job_id, "--step", "implement"])
         .passes();
 }
 
-/// Tests that `oj agent logs` with an invalid pipeline ID returns an appropriate message.
+/// Tests that `oj agent logs` with an invalid job ID returns an appropriate message.
 #[test]
 fn agent_logs_command_with_invalid_id() {
     let temp = Project::empty();

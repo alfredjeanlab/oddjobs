@@ -2,7 +2,7 @@
 #
 # Gas Town equivalent: mol-polecat-work.formula.toml
 #
-# This is THE formula that polecats execute. Every polecat runs this pipeline.
+# This is THE formula that polecats execute. Every polecat runs this job.
 # Steps: init → work → submit
 #
 # Key Gas Town principles:
@@ -12,7 +12,7 @@
 #   - Session cycling is normal (prime re-injects context)
 #   - Rebase-as-work: conflicts spawn fresh polecats, never "sent back"
 
-pipeline "polecat-work" {
+job "polecat-work" {
   name      = "${var.bug.id}"
   vars      = ["bug"]
   workspace = "ephemeral"
@@ -80,12 +80,12 @@ pipeline "polecat-work" {
   }
 
   step "cancel" {
-    run     = "bd close \"${var.bug.id}\" --reason 'Pipeline cancelled' 2>/dev/null || true"
+    run     = "bd close \"${var.bug.id}\" --reason 'Job cancelled' 2>/dev/null || true"
     on_done = { step = "cleanup" }
   }
 
   step "reopen" {
-    run     = "bd reopen \"${var.bug.id}\" --reason 'Pipeline failed' 2>/dev/null || true"
+    run     = "bd reopen \"${var.bug.id}\" --reason 'Job failed' 2>/dev/null || true"
     on_done = { step = "cleanup" }
   }
 

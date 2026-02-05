@@ -86,11 +86,11 @@ fn parse_resolve_with_choice_and_message() {
     }
 }
 
-fn make_decision(id: &str, namespace: &str, pipeline: &str) -> DecisionSummary {
+fn make_decision(id: &str, namespace: &str, job: &str) -> DecisionSummary {
     DecisionSummary {
         id: id.to_string(),
-        pipeline_id: "pipe-1234567890".to_string(),
-        pipeline_name: pipeline.to_string(),
+        job_id: "pipe-1234567890".to_string(),
+        job_name: job.to_string(),
         source: "agent".to_string(),
         summary: "Should we proceed?".to_string(),
         created_at_ms: 0,
@@ -101,8 +101,8 @@ fn make_decision(id: &str, namespace: &str, pipeline: &str) -> DecisionSummary {
 fn make_detail(resolved: bool) -> DecisionDetail {
     DecisionDetail {
         id: "abcdef1234567890".to_string(),
-        pipeline_id: "pipe-1234567890".to_string(),
-        pipeline_name: "build".to_string(),
+        job_id: "pipe-1234567890".to_string(),
+        job_name: "build".to_string(),
         agent_id: Some("agent-abc12345".to_string()),
         source: "agent".to_string(),
         context: "Should we deploy?".to_string(),
@@ -149,7 +149,7 @@ fn list_uses_table_with_dynamic_widths() {
 
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("ID"));
-    assert!(lines[0].contains("PIPELINE"));
+    assert!(lines[0].contains("JOB"));
     assert!(lines[0].contains("SOURCE"));
     assert!(!lines[0].contains("PROJECT"));
     // ID should be truncated to 8 chars
@@ -184,7 +184,7 @@ fn format_decision_detail_with_hint() {
 
     assert!(out.contains("Decision:"));
     assert!(out.contains("abcdef12"));
-    assert!(out.contains("Pipeline:"));
+    assert!(out.contains("Job:"));
     assert!(out.contains("build"));
     assert!(out.contains("Source:"));
     assert!(out.contains("agent"));

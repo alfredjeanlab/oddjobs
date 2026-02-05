@@ -5,10 +5,10 @@
 
 cron "specs" {
   interval = "20m"
-  run      = { pipeline = "specs" }
+  run      = { job = "specs" }
 }
 
-pipeline "specs" {
+job "specs" {
   name      = "specs-${workspace.nonce}"
 
   workspace {
@@ -53,10 +53,10 @@ pipeline "specs" {
 
 cron "deflake" {
   interval = "4h"
-  run      = { pipeline = "deflake" }
+  run      = { job = "deflake" }
 }
 
-pipeline "deflake" {
+job "deflake" {
   name      = "deflake-${workspace.nonce}"
 
   workspace {

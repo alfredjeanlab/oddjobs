@@ -78,12 +78,12 @@ fn runbook_idle_done(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -101,12 +101,12 @@ fn runbook_idle_nudge(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -124,12 +124,12 @@ fn runbook_dead_done(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -147,12 +147,12 @@ fn runbook_dead_escalate(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -170,12 +170,12 @@ fn runbook_error_recover(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -201,12 +201,12 @@ fn runbook_idle_gate_pass(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -224,12 +224,12 @@ fn runbook_idle_gate_fail(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = {{ agent = "worker" }}
 
@@ -246,9 +246,9 @@ on_idle = {{ action = "gate", run = "false" }}
 // on_idle tests
 // =============================================================================
 
-/// Tests that on_idle = done completes the pipeline when agent finishes naturally
+/// Tests that on_idle = done completes the job when agent finishes naturally
 #[test]
-fn on_idle_done_completes_pipeline() {
+fn on_idle_done_completes_job() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
@@ -262,15 +262,15 @@ fn on_idle_done_completes_pipeline() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete via on_idle = done\npipeline list:\n{}\ndaemon log:\n{}",
-        temp.oj().args(&["pipeline", "list"]).passes().stdout(),
+        "job should complete via on_idle = done\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
 }
@@ -297,24 +297,24 @@ fn on_idle_nudge_sends_continue_message() {
     // With Attempts::Finite(1), the nudge is exhausted and escalates to Waiting.
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("waiting")
     });
     assert!(
         waiting,
-        "pipeline should escalate to Waiting after nudge exhaustion\npipeline list:\n{}\ndaemon log:\n{}",
-        temp.oj().args(&["pipeline", "list"]).passes().stdout(),
+        "job should escalate to Waiting after nudge exhaustion\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
 }
 
-/// Tests on_idle gate with passing command advances the pipeline.
+/// Tests on_idle gate with passing command advances the job.
 ///
 /// Lifecycle: agent spawns → becomes idle (stop_reason: null) →
 /// liveness timer fires → on_idle action triggers → gate command runs →
-/// gate exits 0 → pipeline advances to Completed.
+/// gate exits 0 → job advances to Completed.
 #[test]
 fn on_idle_gate_advances_when_command_passes() {
     let temp = Project::empty();
@@ -330,19 +330,19 @@ fn on_idle_gate_advances_when_command_passes() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete via on_idle gate (exit 0)");
+    assert!(done, "job should complete via on_idle gate (exit 0)");
 }
 
-/// Tests on_idle gate with failing command escalates the pipeline.
+/// Tests on_idle gate with failing command escalates the job.
 ///
 /// Lifecycle: agent spawns → becomes idle (stop_reason: null) →
 /// liveness timer fires → on_idle action triggers → gate command runs →
-/// gate exits non-zero → pipeline escalates to Waiting.
+/// gate exits non-zero → job escalates to Waiting.
 #[test]
 fn on_idle_gate_escalates_when_command_fails() {
     let temp = Project::empty();
@@ -358,14 +358,14 @@ fn on_idle_gate_escalates_when_command_fails() {
 
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 3, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("waiting")
     });
     assert!(
         waiting,
-        "pipeline should be in Waiting status after on_idle gate fails"
+        "job should be in Waiting status after on_idle gate fails"
     );
 }
 
@@ -373,7 +373,7 @@ fn on_idle_gate_escalates_when_command_fails() {
 // on_dead tests
 // =============================================================================
 
-/// Tests that on_dead = done completes the pipeline when agent exits.
+/// Tests that on_dead = done completes the job when agent exits.
 ///
 /// Uses claudeless -p (print mode) which exits immediately after one response.
 /// The watcher detects the session death and triggers on_dead=done.
@@ -394,20 +394,20 @@ fn on_dead_done_treats_exit_as_success() {
     // session. The watcher detects this via liveness check and fires on_dead=done.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete via on_dead=done after agent exit\npipeline list:\n{}\ndaemon log:\n{}",
-        temp.oj().args(&["pipeline", "list"]).passes().stdout(),
+        "job should complete via on_dead=done after agent exit\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
 }
 
-/// Tests that on_dead = escalate sets the pipeline to Waiting status.
+/// Tests that on_dead = escalate sets the job to Waiting status.
 ///
 /// Uses claudeless -p (print mode) which exits immediately after one response.
 /// The watcher detects the session death and triggers on_dead=escalate.
@@ -428,14 +428,14 @@ fn on_dead_escalate_sets_waiting_status() {
     // The watcher detects this and fires on_dead=escalate → Waiting.
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("waiting")
     });
     assert!(
         waiting,
-        "pipeline should be in Waiting status after on_dead=escalate"
+        "job should be in Waiting status after on_dead=escalate"
     );
 }
 
@@ -459,12 +459,12 @@ fn on_error_recover_retries_after_rate_limit() {
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
-    assert!(done, "pipeline should complete after rate limit recovery");
+    assert!(done, "job should complete after rate limit recovery");
 }
 
 #[test]
@@ -482,10 +482,10 @@ fn on_error_escalate_on_network_failure() {
 
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("waiting")
     });
-    assert!(waiting, "pipeline should escalate after network errors");
+    assert!(waiting, "job should escalate after network errors");
 }

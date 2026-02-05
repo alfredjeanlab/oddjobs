@@ -10,13 +10,13 @@ use crate::{parse_runbook, parse_runbook_with_format, Format, ParseError};
 #[test]
 fn error_step_on_done_references_unknown_step() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "build"
 run = "echo build"
 on_done = "nonexistent"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "deploy"
 run = "echo deploy"
 "#;
@@ -36,8 +36,8 @@ run = "echo deploy"
 #[test]
 fn error_step_on_fail_references_unknown_step() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "build"
 run = "echo build"
 on_fail = "nonexistent"
@@ -55,8 +55,8 @@ on_fail = "nonexistent"
 #[test]
 fn error_step_on_cancel_references_unknown_step() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "build"
 run = "echo build"
 on_cancel = "nonexistent"
@@ -72,9 +72,9 @@ on_cancel = "nonexistent"
 }
 
 #[test]
-fn error_pipeline_on_done_references_unknown_step() {
+fn error_job_on_done_references_unknown_step() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
   on_done = "nonexistent"
 
   step "build" {
@@ -90,15 +90,15 @@ pipeline "test" {
         "got: {msg}"
     );
     assert!(
-        msg.contains("pipeline.test.on_done"),
-        "expected pipeline-level location, got: {msg}"
+        msg.contains("job.test.on_done"),
+        "expected job-level location, got: {msg}"
     );
 }
 
 #[test]
-fn error_pipeline_on_fail_references_unknown_step() {
+fn error_job_on_fail_references_unknown_step() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
   on_fail = "nonexistent"
 
   step "build" {
@@ -113,13 +113,13 @@ pipeline "test" {
         msg.contains("references unknown step 'nonexistent'"),
         "got: {msg}"
     );
-    assert!(msg.contains("pipeline.test.on_fail"), "got: {msg}");
+    assert!(msg.contains("job.test.on_fail"), "got: {msg}");
 }
 
 #[test]
-fn error_pipeline_on_cancel_references_unknown_step() {
+fn error_job_on_cancel_references_unknown_step() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
   on_cancel = "nonexistent"
 
   step "build" {
@@ -134,13 +134,13 @@ pipeline "test" {
         msg.contains("references unknown step 'nonexistent'"),
         "got: {msg}"
     );
-    assert!(msg.contains("pipeline.test.on_cancel"), "got: {msg}");
+    assert!(msg.contains("job.test.on_cancel"), "got: {msg}");
 }
 
 #[test]
 fn valid_step_references_succeed() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
   on_fail = "cleanup"
 
   step "build" {
@@ -164,17 +164,17 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    assert_eq!(runbook.pipelines["deploy"].steps.len(), 4);
+    assert_eq!(runbook.jobs["deploy"].steps.len(), 4);
 }
 
 // ============================================================================
-// Phase 2: Agent and Pipeline Reference Validation
+// Phase 2: Agent and Job Reference Validation
 // ============================================================================
 
 #[test]
 fn error_step_references_unknown_agent() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
   step "work" {
     run = { agent = "ghost" }
   }
@@ -191,11 +191,11 @@ pipeline "test" {
 }
 
 #[test]
-fn error_step_references_unknown_pipeline() {
+fn error_step_references_unknown_job() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
   step "work" {
-    run = { pipeline = "nonexistent" }
+    run = { job = "nonexistent" }
   }
 }
 "#;
@@ -203,7 +203,7 @@ pipeline "test" {
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("references unknown pipeline 'nonexistent'"),
+        msg.contains("references unknown job 'nonexistent'"),
         "got: {msg}"
     );
 }
@@ -225,16 +225,16 @@ run = { agent = "ghost" }
 }
 
 #[test]
-fn error_command_references_unknown_pipeline() {
+fn error_command_references_unknown_job() {
     let toml = r#"
 [command.test]
-run = { pipeline = "ghost" }
+run = { job = "ghost" }
 "#;
     let err = parse_runbook(toml).unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
     assert!(
-        msg.contains("references unknown pipeline 'ghost'"),
+        msg.contains("references unknown job 'ghost'"),
         "got: {msg}"
     );
     assert!(msg.contains("command.test.run"), "got: {msg}");
@@ -247,7 +247,7 @@ agent "planner" {
   run = "claude"
 }
 
-pipeline "test" {
+job "test" {
   step "work" {
     run = { agent = "planner" }
   }
@@ -256,25 +256,25 @@ pipeline "test" {
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     assert!(runbook.agents.contains_key("planner"));
     assert_eq!(
-        runbook.pipelines["test"].steps[0].agent_name(),
+        runbook.jobs["test"].steps[0].agent_name(),
         Some("planner")
     );
 }
 
 #[test]
-fn valid_pipeline_reference_in_command_succeeds() {
+fn valid_job_reference_in_command_succeeds() {
     let toml = r#"
 [command.build]
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
-[[pipeline.build.step]]
+[job.build]
+[[job.build.step]]
 name = "run"
 run = "echo build"
 "#;
     let runbook = parse_runbook(toml).unwrap();
     assert!(runbook.commands.contains_key("build"));
-    assert!(runbook.pipelines.contains_key("build"));
+    assert!(runbook.jobs.contains_key("build"));
 }
 
 // ============================================================================
@@ -282,14 +282,14 @@ run = "echo build"
 // ============================================================================
 
 #[test]
-fn error_duplicate_step_names_in_pipeline() {
+fn error_duplicate_step_names_in_job() {
     let toml = r#"
-[pipeline.test]
-[[pipeline.test.step]]
+[job.test]
+[[job.test.step]]
 name = "deploy"
 run = "echo first"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "deploy"
 run = "echo second"
 "#;
@@ -305,7 +305,7 @@ fn error_duplicate_step_names_hcl() {
     // validation runs. This verifies that duplicate step names in HCL
     // are still rejected (just at the serde/HCL layer).
     let hcl = r#"
-pipeline "test" {
+job "test" {
   step "build" {
     run = "echo first"
   }
@@ -323,22 +323,22 @@ pipeline "test" {
 }
 
 #[test]
-fn same_step_name_in_different_pipelines_is_ok() {
+fn same_step_name_in_different_jobs_is_ok() {
     let hcl = r#"
-pipeline "a" {
+job "a" {
   step "build" {
     run = "echo a"
   }
 }
 
-pipeline "b" {
+job "b" {
   step "build" {
     run = "echo b"
   }
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    assert_eq!(runbook.pipelines.len(), 2);
+    assert_eq!(runbook.jobs.len(), 2);
 }
 
 // ============================================================================
@@ -349,7 +349,7 @@ pipeline "b" {
 fn unreachable_step_is_rejected() {
     // The second step "orphan" is not referenced by any transition
     let hcl = r#"
-pipeline "test" {
+job "test" {
   step "start" {
     run = "echo start"
     on_done = "finish"
@@ -380,7 +380,7 @@ pipeline "test" {
 fn reachable_steps_parse_ok() {
     // All steps are referenced — should parse successfully
     let hcl = r#"
-pipeline "test" {
+job "test" {
   step "start" {
     run = "echo start"
     on_done = "middle"

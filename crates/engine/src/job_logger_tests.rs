@@ -8,24 +8,24 @@ use tempfile::tempdir;
 fn append_creates_directory_and_file() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
-    logger.append("pipe-1", "init", "pipeline created");
+    logger.append("pipe-1", "init", "job created");
 
-    let content = std::fs::read_to_string(log_dir.join("pipeline/pipe-1.log")).unwrap();
-    assert!(content.contains("[init] pipeline created"));
+    let content = std::fs::read_to_string(log_dir.join("job/pipe-1.log")).unwrap();
+    assert!(content.contains("[init] job created"));
 }
 
 #[test]
 fn multiple_appends_produce_ordered_lines() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append("pipe-1", "init", "step started");
     logger.append("pipe-1", "init", "shell: echo hello");
     logger.append("pipe-1", "init", "shell completed (exit 0)");
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("[init] step started"));
@@ -36,11 +36,11 @@ fn multiple_appends_produce_ordered_lines() {
 #[test]
 fn lines_match_expected_format() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append("pipe-1", "plan", "agent spawned: planner");
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let line = content.trim();
 
     // Format: YYYY-MM-DDTHH:MM:SSZ [step] message
@@ -64,18 +64,18 @@ fn lines_match_expected_format() {
 }
 
 #[test]
-fn separate_pipelines_get_separate_files() {
+fn separate_jobs_get_separate_files() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
-    logger.append("pipe-1", "init", "first pipeline");
-    logger.append("pipe-2", "init", "second pipeline");
+    logger.append("pipe-1", "init", "first job");
+    logger.append("pipe-2", "init", "second job");
 
-    let content1 = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
-    let content2 = std::fs::read_to_string(dir.path().join("pipeline/pipe-2.log")).unwrap();
-    assert!(content1.contains("first pipeline"));
-    assert!(content2.contains("second pipeline"));
-    assert!(!content1.contains("second pipeline"));
+    let content1 = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
+    let content2 = std::fs::read_to_string(dir.path().join("job/pipe-2.log")).unwrap();
+    assert!(content1.contains("first job"));
+    assert!(content2.contains("second job"));
+    assert!(!content1.contains("second job"));
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn bad_path_does_not_panic() {
     let file_path = dir.path().join("blocker");
     std::fs::write(&file_path, "not a dir").unwrap();
 
-    let logger = PipelineLogger::new(file_path.join("nested"));
+    let logger = JobLogger::new(file_path.join("nested"));
 
     // Should not panic, just log a warning
     logger.append("pipe-1", "init", "should not panic");
@@ -95,12 +95,12 @@ fn bad_path_does_not_panic() {
 fn agent_pointer_uses_absolute_path() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
     let agent_id = "8cf5e1df-a434-4029-a369-c95af9c374c9";
     logger.append_agent_pointer("pipe-1", "plan", agent_id);
 
-    let content = std::fs::read_to_string(log_dir.join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(log_dir.join("job/pipe-1.log")).unwrap();
     // Should contain the full absolute path with agent_id
     let expected_path = log_dir.join("agent").join(format!("{}.log", agent_id));
     assert!(
@@ -114,7 +114,7 @@ fn agent_pointer_uses_absolute_path() {
 fn copy_session_log_creates_directory_and_copies_file() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
     // Create a source session.jsonl file
     let source_dir = dir.path().join("source");
@@ -137,7 +137,7 @@ fn copy_session_log_creates_directory_and_copies_file() {
 fn append_agent_error_writes_to_agent_log() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
     let agent_id = "8cf5e1df-a434-4029-a369-c95af9c374c9";
     logger.append_agent_error(agent_id, "rate limit exceeded");
@@ -157,7 +157,7 @@ fn append_agent_error_writes_to_agent_log() {
 fn append_agent_error_appends_multiple() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
     let agent_id = "test-agent-1";
     logger.append_agent_error(agent_id, "first error");
@@ -175,7 +175,7 @@ fn append_agent_error_appends_multiple() {
 fn copy_session_log_handles_missing_source() {
     let dir = tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let logger = PipelineLogger::new(log_dir.clone());
+    let logger = JobLogger::new(log_dir.clone());
 
     // Source file does not exist
     let source = dir.path().join("nonexistent.jsonl");
@@ -192,11 +192,11 @@ fn copy_session_log_handles_missing_source() {
 #[test]
 fn append_fenced_writes_correctly_formatted_block() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append_fenced("pipe-1", "init", "stdout", "hello world\n");
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("[init] ```stdout"));
@@ -209,11 +209,11 @@ fn append_fenced_writes_correctly_formatted_block() {
 #[test]
 fn append_fenced_adds_trailing_newline_when_missing() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append_fenced("pipe-1", "build", "stderr", "warning: unused variable");
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("[build] ```stderr"));
@@ -224,7 +224,7 @@ fn append_fenced_adds_trailing_newline_when_missing() {
 #[test]
 fn append_fenced_multiline_content() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append_fenced(
         "pipe-1",
@@ -233,7 +233,7 @@ fn append_fenced_multiline_content() {
         "Compiling oj v0.1.0\n    Finished dev target(s) in 12.34s\n",
     );
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 4);
     assert!(lines[0].contains("[build] ```stdout"));
@@ -245,12 +245,12 @@ fn append_fenced_multiline_content() {
 #[test]
 fn append_fenced_integrates_with_append() {
     let dir = tempdir().unwrap();
-    let logger = PipelineLogger::new(dir.path().to_path_buf());
+    let logger = JobLogger::new(dir.path().to_path_buf());
 
     logger.append_fenced("pipe-1", "init", "stdout", "hello world\n");
     logger.append("pipe-1", "init", "shell completed (exit 0)");
 
-    let content = std::fs::read_to_string(dir.path().join("pipeline/pipe-1.log")).unwrap();
+    let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 4);
     assert!(lines[0].contains("[init] ```stdout"));

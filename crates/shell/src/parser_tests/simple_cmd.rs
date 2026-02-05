@@ -234,7 +234,7 @@ fn test_escaped_semicolon_is_argument() {
 
 #[test]
 fn test_escaped_pipe_is_argument() {
-    // echo \| should parse as single command (not a pipeline)
+    // echo \| should parse as single command (not a job)
     let result = Parser::parse("echo \\|").unwrap();
     assert_eq!(result.commands.len(), 1);
 

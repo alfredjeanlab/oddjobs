@@ -6,7 +6,7 @@ use tempfile::tempdir;
 
 /// Test that agent log lookup supports prefix matching on filenames.
 ///
-/// Agent log files are named `{pipeline_id}-{step}.log` (e.g., `abc123-work.log`).
+/// Agent log files are named `{job_id}-{step}.log` (e.g., `abc123-work.log`).
 /// When looking up logs, users can provide a prefix (e.g., `abc123`) and it should
 /// find the matching file if there's exactly one match.
 #[test]

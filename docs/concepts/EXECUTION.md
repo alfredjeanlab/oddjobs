@@ -3,7 +3,7 @@
 Two abstractions sit beneath runbooks, decoupling "what to run" from "where to run it."
 
 ```text
-Runbook layer:    command → pipeline → step → agent
+Runbook layer:    command → job → step → agent
                                          │
 Execution layer:               workspace + session
                                          │
@@ -12,7 +12,7 @@ Adapter layer:              AgentAdapter + SessionAdapter
 
 ## Workspace
 
-An **isolated directory for work** -- typically populated by a pipeline's init step.
+An **isolated directory for work** -- typically populated by a job's init step.
 
 A workspace provides:
 - **Identity**: Unique name for this work context
@@ -27,7 +27,7 @@ A workspace provides:
 | `folder` | `workspace = "folder"` | Plain directory. Engine creates the directory; the init step populates it. |
 | `worktree` | `workspace { git = "worktree" }` | Engine-managed git worktree. The engine handles `git worktree add`, `git worktree remove`, and branch cleanup automatically. |
 
-**Storage location**: `~/.local/state/oj/workspaces/ws-<pipeline-name>-<nonce>/`
+**Storage location**: `~/.local/state/oj/workspaces/ws-<job-name>-<nonce>/`
 
 Using XDG state directory keeps the project directory clean and survives `git clean` operations.
 
@@ -43,7 +43,7 @@ workspace {
 }
 ```
 
-For `workspace = "folder"`, the engine creates an empty directory. The pipeline's init step populates it -- useful when fully custom worktree management is needed:
+For `workspace = "folder"`, the engine creates an empty directory. The job's init step populates it -- useful when fully custom worktree management is needed:
 
 ```hcl
 step "init" {
@@ -120,7 +120,7 @@ supported for agent steps. Here's why:
 
 **This is a dynamic, monitored system**
 
-Agents and pipelines are actively monitored by both automated systems (`on_idle`, `on_dead`,
+Agents and jobs are actively monitored by both automated systems (`on_idle`, `on_dead`,
 `on_error` handlers) and human operators. When something goes wrong, these monitoring systems
 detect the actual problem and respond appropriately -- not by guessing that "too much time passed."
 
@@ -152,7 +152,7 @@ the risk of accidental misconfiguration.
 ┌─────────────────────────────────────────────────────────────┐
 │  Runbook                                                    │
 │  ┌─────────────┐     ┌─────────────┐    ┌─────────────┐     │
-│  │  Command    │────►│  Pipeline   │───►│    Agent    │     │
+│  │  Command    │────►│   Job       │───►│    Agent    │     │
 │  └─────────────┘     └─────────────┘    └─────────────┘     │
 │                      ┌─────────────┐    ┌─────────────┐     │
 │                      │   Worker    │───►│    Queue    │     │
@@ -178,12 +178,12 @@ the risk of accidental misconfiguration.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- **Pipeline** creates and owns a **Workspace**
+- **Job** creates and owns a **Workspace**
 - **Agent** runs in a **Session** within that workspace
 - **AgentAdapter** manages the agent lifecycle using **SessionAdapter** for tmux operations
 - Session's `cwd` points to the workspace path (or an agent-specific `cwd` override)
-- Multiple agents in a pipeline share the same workspace
-- **Worker** polls a **Queue** and dispatches items to pipelines
+- Multiple agents in a job share the same workspace
+- **Worker** polls a **Queue** and dispatches items to jobs
 
 ## Summary
 

@@ -23,7 +23,7 @@
 //!
 //! # Features
 //!
-//! - **Full shell syntax**: Pipelines, AND/OR chains, subshells, brace groups
+//! - **Full shell syntax**: Jobs, AND/OR chains, subshells, brace groups
 //! - **Variable expansion**: `$VAR`, `${VAR}`, `${VAR:-default}`
 //! - **Command substitution**: `$(cmd)` and `` `cmd` ``
 //! - **Quoting**: Single quotes, double quotes, escape sequences
@@ -35,7 +35,7 @@
 //! CommandList
 //! └── AndOrList[]
 //!     └── CommandItem (with background flag)
-//!         └── Command (Simple | Pipeline | Subshell | BraceGroup)
+//!         └── Command (Simple | Job | Subshell | BraceGroup)
 //!             └── SimpleCommand
 //!                 ├── env: EnvAssignment[]
 //!                 ├── name: Word
@@ -80,7 +80,7 @@ pub use validation::ValidationError;
 // AST types
 pub use ast::{
     AndOrList, AstVisitor, BraceGroup, CliArg, Command, CommandItem, CommandList, EnvAssignment,
-    LogicalOp, Pipeline, QuoteStyle, Redirection, SimpleCommand, Subshell, SubstitutionBody, Word,
+    LogicalOp, Job, QuoteStyle, Redirection, SimpleCommand, Subshell, SubstitutionBody, Word,
     WordPart,
 };
 

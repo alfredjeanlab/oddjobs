@@ -7,10 +7,10 @@
 
 cron "security" {
   interval = "6h"
-  run      = { pipeline = "security-audit" }
+  run      = { job = "security-audit" }
 }
 
-pipeline "security-audit" {
+job "security-audit" {
   notify {
     on_fail = "Security audit failed"
   }

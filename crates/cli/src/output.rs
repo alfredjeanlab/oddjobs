@@ -49,7 +49,7 @@ pub fn format_time_ago(epoch_ms: u64) -> String {
 /// Handles the dry-run header, per-entry formatting, and summary line that is
 /// shared across all `oj <entity> prune` commands.
 ///
-/// - `entity` — singular name shown in the summary, e.g. `"pipeline"`.
+/// - `entity` — singular name shown in the summary, e.g. `"job"`.
 /// - `skipped_label` — suffix after the skipped count, e.g. `"skipped"` or
 ///   `"active workspace(s) skipped"`.
 /// - `format_entry` — returns the text to print after "Pruned" / "Would prune"

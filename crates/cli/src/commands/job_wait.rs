@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! `oj pipeline wait` - Block until pipeline(s) reach a terminal state
+//! `oj job wait` - Block until job(s) reach a terminal state
 
 use std::collections::HashMap;
 use std::time::Instant;
@@ -13,13 +13,13 @@ use oj_core::ShortId;
 use crate::client::DaemonClient;
 use crate::exit_error::ExitError;
 
-enum PipelineOutcome {
+enum JobOutcome {
     Done,
     Failed(String),
     Cancelled,
 }
 
-/// Tracks step progress for a single pipeline during wait polling.
+/// Tracks step progress for a single job during wait polling.
 pub(crate) struct StepTracker {
     /// Number of steps we've already printed final transitions for.
     pub(crate) printed_count: usize,
@@ -34,18 +34,18 @@ pub async fn handle(
     client: &DaemonClient,
 ) -> Result<()> {
     let timeout_dur = timeout
-        .map(|s| super::pipeline::parse_duration(&s))
+        .map(|s| super::job::parse_duration(&s))
         .transpose()?;
     let poll_interval = crate::client::wait_poll_interval();
     let start = Instant::now();
 
-    let mut finished: HashMap<String, PipelineOutcome> = HashMap::new();
+    let mut finished: HashMap<String, JobOutcome> = HashMap::new();
     let mut canonical_ids: HashMap<String, String> = HashMap::new();
     let mut step_trackers: HashMap<String, StepTracker> = HashMap::new();
     let show_prefix = ids.len() > 1;
 
     // Pin ctrl_c outside the loop so signals received between iterations
-    // (e.g. during get_pipeline) are not lost when the future is re-created.
+    // (e.g. during get_job) are not lost when the future is re-created.
     let ctrl_c = tokio::signal::ctrl_c();
     tokio::pin!(ctrl_c);
 
@@ -54,11 +54,11 @@ pub async fn handle(
             if finished.contains_key(input_id) {
                 continue;
             }
-            let detail = client.get_pipeline(input_id).await?;
+            let detail = client.get_job(input_id).await?;
             match detail {
                 None => {
                     return Err(
-                        ExitError::new(3, format!("Pipeline not found: {}", input_id)).into(),
+                        ExitError::new(3, format!("Job not found: {}", input_id)).into(),
                     );
                 }
                 Some(p) => {
@@ -76,24 +76,24 @@ pub async fn handle(
                     print_step_progress(&p, tracker, show_prefix, &mut stdout);
 
                     let outcome = match p.step.as_str() {
-                        "done" => Some(PipelineOutcome::Done),
-                        "failed" => Some(PipelineOutcome::Failed(
+                        "done" => Some(JobOutcome::Done),
+                        "failed" => Some(JobOutcome::Failed(
                             p.error.clone().unwrap_or_else(|| "unknown error".into()),
                         )),
-                        "cancelled" => Some(PipelineOutcome::Cancelled),
+                        "cancelled" => Some(JobOutcome::Cancelled),
                         _ => None,
                     };
                     if let Some(outcome) = outcome {
                         let short_id = canonical_ids[input_id].short(8);
                         match &outcome {
-                            PipelineOutcome::Done => {
-                                println!("Pipeline {} ({}) completed", p.name, short_id);
+                            JobOutcome::Done => {
+                                println!("Job {} ({}) completed", p.name, short_id);
                             }
-                            PipelineOutcome::Failed(msg) => {
-                                eprintln!("Pipeline {} ({}) failed: {}", p.name, short_id, msg);
+                            JobOutcome::Failed(msg) => {
+                                eprintln!("Job {} ({}) failed: {}", p.name, short_id, msg);
                             }
-                            PipelineOutcome::Cancelled => {
-                                eprintln!("Pipeline {} ({}) was cancelled", p.name, short_id);
+                            JobOutcome::Cancelled => {
+                                eprintln!("Job {} ({}) was cancelled", p.name, short_id);
                             }
                         }
                         finished.insert(input_id.clone(), outcome);
@@ -113,7 +113,7 @@ pub async fn handle(
         if let Some(t) = timeout_dur {
             if start.elapsed() >= t {
                 return Err(
-                    ExitError::new(2, "Timeout waiting for pipeline(s)".to_string()).into(),
+                    ExitError::new(2, "Timeout waiting for job(s)".to_string()).into(),
                 );
             }
         }
@@ -128,10 +128,10 @@ pub async fn handle(
 
     let any_failed = finished
         .values()
-        .any(|o| matches!(o, PipelineOutcome::Failed(_)));
+        .any(|o| matches!(o, JobOutcome::Failed(_)));
     let any_cancelled = finished
         .values()
-        .any(|o| matches!(o, PipelineOutcome::Cancelled));
+        .any(|o| matches!(o, JobOutcome::Cancelled));
     if any_failed {
         return Err(ExitError::new(1, String::new()).into());
     }
@@ -144,12 +144,12 @@ pub async fn handle(
 
 /// Print step transitions that occurred since the last poll.
 pub(crate) fn print_step_progress(
-    detail: &oj_daemon::PipelineDetail,
+    detail: &oj_daemon::JobDetail,
     tracker: &mut StepTracker,
-    show_pipeline_prefix: bool,
+    show_job_prefix: bool,
     out: &mut impl std::io::Write,
 ) {
-    let prefix = if show_pipeline_prefix {
+    let prefix = if show_job_prefix {
         format!("[{}] ", detail.name)
     } else {
         String::new()

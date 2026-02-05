@@ -48,7 +48,7 @@ pub enum WorkspaceCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Remove workspaces from completed/failed pipelines
+    /// Remove workspaces from completed/failed jobs
     Prune {
         /// Remove all terminal workspaces regardless of age
         #[arg(long)]

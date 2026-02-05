@@ -64,20 +64,20 @@ const CLAUDE_MULTI_VALUE_OPTIONS: &[&str] = &[
     "tools",
 ];
 
-/// Namespaces that are only available in pipeline context, not in command.run.
+/// Namespaces that are only available in job context, not in command.run.
 ///
 /// Each entry maps from the invalid namespace to a suggestion for the user.
-const PIPELINE_ONLY_NAMESPACES: &[(&str, &str)] = &[
+const JOB_ONLY_NAMESPACES: &[(&str, &str)] = &[
     ("var.", "use ${args.<name>} to reference command arguments"),
     (
         "input.",
         "use ${args.<name>} to reference command arguments",
     ),
-    ("local.", "${local.*} is only available in pipeline steps"),
-    ("step.", "${step.*} is only available in pipeline steps"),
+    ("local.", "${local.*} is only available in job steps"),
+    ("step.", "${step.*} is only available in job steps"),
 ];
 
-/// Validate that a command.run shell directive does not use pipeline-only
+/// Validate that a command.run shell directive does not use job-only
 /// template namespaces like `${var.*}` (which should be `${args.*}`).
 pub(crate) fn validate_command_template_refs(
     command: &str,
@@ -85,7 +85,7 @@ pub(crate) fn validate_command_template_refs(
 ) -> Result<(), ParseError> {
     for cap in crate::template::VAR_PATTERN.captures_iter(command) {
         let var_name = &cap[1];
-        for &(prefix, hint) in PIPELINE_ONLY_NAMESPACES {
+        for &(prefix, hint) in JOB_ONLY_NAMESPACES {
             if var_name.starts_with(prefix) {
                 return Err(ParseError::InvalidFormat {
                     location: location.to_string(),
@@ -187,7 +187,7 @@ pub(crate) fn validate_agent_command(
 
     let simple = match first_cmd {
         Some(shell::Command::Simple(cmd)) => cmd,
-        Some(shell::Command::Pipeline(p)) => match p.commands.first() {
+        Some(shell::Command::Job(p)) => match p.commands.first() {
             Some(cmd) => cmd,
             None => return Ok(()),
         },

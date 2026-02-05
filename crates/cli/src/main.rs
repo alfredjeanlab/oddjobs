@@ -19,7 +19,7 @@ use output::OutputFormat;
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{
-    agent, cron, daemon, decision, emit, env as env_cmd, pipeline, project, queue, resolve, run,
+    agent, cron, daemon, decision, emit, env as env_cmd, job, project, queue, resolve, run,
     session, status, worker, workspace,
 };
 use std::path::{Path, PathBuf};
@@ -60,8 +60,8 @@ struct Cli {
 enum Commands {
     /// Run a command from the runbook
     Run(run::RunArgs),
-    /// Pipeline management
-    Pipeline(pipeline::PipelineArgs),
+    /// Job management
+    Job(job::JobArgs),
     /// Agent management
     Agent(agent::AgentArgs),
     /// Session management
@@ -88,17 +88,17 @@ enum Commands {
     Status(status::StatusArgs),
     /// Peek at the active tmux session (auto-detects entity type)
     Peek {
-        /// Entity ID (pipeline, agent, or session — prefix match supported)
+        /// Entity ID (job, agent, or session — prefix match supported)
         id: String,
     },
     /// Attach to a tmux session (auto-detects entity type)
     Attach {
-        /// Entity ID (pipeline, agent, or session — prefix match supported)
+        /// Entity ID (job, agent, or session — prefix match supported)
         id: String,
     },
-    /// View logs for a pipeline or agent (auto-detects entity type)
+    /// View logs for a job or agent (auto-detects entity type)
     Logs {
-        /// Entity ID (pipeline or agent — prefix match supported)
+        /// Entity ID (job or agent — prefix match supported)
         id: String,
         /// Stream live activity (like tail -f)
         #[arg(long, short)]
@@ -110,29 +110,29 @@ enum Commands {
         #[arg(long, short = 's')]
         step: Option<String>,
     },
-    /// Show details of a pipeline, agent, session, or queue (auto-detects type)
+    /// Show details of a job, agent, session, or queue (auto-detects type)
     Show {
-        /// Entity ID or queue name (pipeline, agent, session, or queue)
+        /// Entity ID or queue name (job, agent, session, or queue)
         id: String,
         /// Show full variable values without truncation
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// Cancel one or more running pipelines
+    /// Cancel one or more running jobs
     Cancel {
-        /// Pipeline IDs or names (prefix match)
+        /// Job IDs or names (prefix match)
         #[arg(required = true)]
         ids: Vec<String>,
     },
-    /// Resume monitoring for an escalated pipeline
+    /// Resume monitoring for an escalated job
     Resume {
-        /// Pipeline ID or name
+        /// Job ID or name
         id: String,
         /// Message for nudge/recovery (required for agent steps)
         #[arg(short = 'm', long)]
         message: Option<String>,
-        /// Pipeline variables to set (can be repeated: --var key=value)
-        #[arg(long = "var", value_parser = pipeline::parse_key_value)]
+        /// Job variables to set (can be repeated: --var key=value)
+        #[arg(long = "var", value_parser = job::parse_key_value)]
         var: Vec<(String, String)>,
     },
 }
@@ -282,29 +282,29 @@ async fn run() -> Result<()> {
     // - Query commands: connect only, no restart (reads that need existing state)
     // - Signal commands: connect only, no restart (agent-initiated, context-dependent)
     match command {
-        // Run commands - shell commands execute inline, pipelines/agents need the daemon
+        // Run commands - shell commands execute inline, jobs/agents need the daemon
         Commands::Run(args) => run::handle(args, &project_root, &invoke_dir, &namespace).await?,
 
-        // Pipeline commands - mixed action/query
-        Commands::Pipeline(args) => {
-            use pipeline::PipelineCommand;
+        // Job commands - mixed action/query
+        Commands::Job(args) => {
+            use job::JobCommand;
             match &args.command {
-                // Action: mutates pipeline state
-                PipelineCommand::Resume { .. }
-                | PipelineCommand::Cancel { .. }
-                | PipelineCommand::Prune { .. } => {
+                // Action: mutates job state
+                JobCommand::Resume { .. }
+                | JobCommand::Cancel { .. }
+                | JobCommand::Prune { .. } => {
                     let client = DaemonClient::for_action()?;
-                    pipeline::handle(args.command, &client, cli.project.as_deref(), format).await?
+                    job::handle(args.command, &client, cli.project.as_deref(), format).await?
                 }
-                // Query: reads pipeline state
-                PipelineCommand::List { .. }
-                | PipelineCommand::Show { .. }
-                | PipelineCommand::Logs { .. }
-                | PipelineCommand::Peek { .. }
-                | PipelineCommand::Wait { .. }
-                | PipelineCommand::Attach { .. } => {
+                // Query: reads job state
+                JobCommand::List { .. }
+                | JobCommand::Show { .. }
+                | JobCommand::Logs { .. }
+                | JobCommand::Peek { .. }
+                | JobCommand::Wait { .. }
+                | JobCommand::Attach { .. } => {
                     let client = DaemonClient::for_query()?;
-                    pipeline::handle(args.command, &client, cli.project.as_deref(), format).await?
+                    job::handle(args.command, &client, cli.project.as_deref(), format).await?
                 }
             }
         }
@@ -514,11 +514,11 @@ async fn run() -> Result<()> {
             }
         }
 
-        // Convenience action commands - cancel/resume pipelines
+        // Convenience action commands - cancel/resume jobs
         Commands::Cancel { ids } => {
             let client = DaemonClient::for_action()?;
-            pipeline::handle(
-                pipeline::PipelineCommand::Cancel { ids },
+            job::handle(
+                job::JobCommand::Cancel { ids },
                 &client,
                 cli.project.as_deref(),
                 format,
@@ -527,8 +527,8 @@ async fn run() -> Result<()> {
         }
         Commands::Resume { id, message, var } => {
             let client = DaemonClient::for_action()?;
-            pipeline::handle(
-                pipeline::PipelineCommand::Resume { id, message, var },
+            job::handle(
+                job::JobCommand::Resume { id, message, var },
                 &client,
                 cli.project.as_deref(),
                 format,

@@ -13,7 +13,7 @@
 #
 # Boot decision matrix:
 #   Workers stopped          → START (restart them)
-#   Escalated pipelines      → RESUME or CANCEL
+#   Escalated jobs      → RESUME or CANCEL
 #   Dead queue items         → RETRY
 #   Everything healthy       → NOTHING (exit silently)
 #
@@ -22,10 +22,10 @@
 
 command "gt-triage" {
   args = ""
-  run  = { pipeline = "boot-triage" }
+  run  = { job = "boot-triage" }
 }
 
-pipeline "boot-triage" {
+job "boot-triage" {
   name      = "boot-triage"
   workspace = "ephemeral"
 
@@ -66,11 +66,11 @@ agent "boot-agent" {
     "echo '## Workers'",
     "oj worker list -o json 2>/dev/null || echo '[]'",
     "echo ''",
-    "echo '## Escalated Pipelines'",
-    "oj pipeline list --status escalated -o json 2>/dev/null || echo '[]'",
+    "echo '## Escalated Jobs'",
+    "oj job list --status escalated -o json 2>/dev/null || echo '[]'",
     "echo ''",
-    "echo '## Failed Pipelines (recent)'",
-    "oj pipeline list --status failed -o json 2>/dev/null || echo '[]'",
+    "echo '## Failed Jobs (recent)'",
+    "oj job list --status failed -o json 2>/dev/null || echo '[]'",
     "echo ''",
     "echo '## Pending Mail'",
     "for T in deacon witness refinery; do C=$(bd list -t message --label to:$T --status open --json 2>/dev/null | jq 'length' 2>/dev/null || echo 0); test \"$C\" -gt 0 && echo \"$T: $C pending\"; done",
@@ -93,8 +93,8 @@ agent "boot-agent" {
     | Condition              | Action                                          |
     |------------------------|-------------------------------------------------|
     | Worker stopped         | `oj worker start <name>`                        |
-    | Pipeline escalated     | `oj pipeline show <id>` → resume or cancel      |
-    | Pipeline failed        | Check logs: `oj pipeline logs <id>` → note it   |
+    | Job escalated     | `oj job show <id>` → resume or cancel      |
+    | Job failed        | Check logs: `oj job logs <id>` → note it   |
     | Dead queue items       | `oj queue show <queue>` → `oj queue retry ...`   |
     | Everything healthy     | Say "All clear, I'm done"                       |
 
@@ -102,7 +102,7 @@ agent "boot-agent" {
 
     - Be FAST. Read the state, act, exit.
     - Fix mechanical issues (stopped workers, dead queue items) directly
-    - For escalated pipelines: check logs, resume if transient, cancel if stuck
+    - For escalated jobs: check logs, resume if transient, cancel if stuck
     - Don't investigate deeply — that's the deacon's job
     - Healthy system = exit silently (Idle Town Principle)
 

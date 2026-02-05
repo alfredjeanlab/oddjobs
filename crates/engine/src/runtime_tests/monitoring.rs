@@ -5,18 +5,18 @@
 
 use super::*;
 use oj_adapters::SessionCall;
-use oj_core::{AgentRunId, AgentSignalKind, PipelineId, StepStatus, TimerId};
+use oj_core::{AgentRunId, AgentSignalKind, JobId, StepStatus, TimerId};
 
-/// Helper: create a pipeline and advance it to the "plan" agent step.
+/// Helper: create a job and advance it to the "plan" agent step.
 ///
-/// Returns (pipeline_id, session_id, agent_id).
-async fn setup_pipeline_at_agent_step(ctx: &TestContext) -> (String, String, AgentId) {
-    let pipeline_id = create_pipeline(ctx).await;
+/// Returns (job_id, session_id, agent_id).
+async fn setup_job_at_agent_step(ctx: &TestContext) -> (String, String, AgentId) {
+    let job_id = create_job(ctx).await;
 
     // Advance past init (shell) to plan (agent)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -25,13 +25,13 @@ async fn setup_pipeline_at_agent_step(ctx: &TestContext) -> (String, String, Age
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let session_id = pipeline.session_id.clone().unwrap();
-    let agent_id = get_agent_id(ctx, &pipeline_id).unwrap();
+    let session_id = job.session_id.clone().unwrap();
+    let agent_id = get_agent_id(ctx, &job_id).unwrap();
 
-    (pipeline_id, session_id, agent_id)
+    (job_id, session_id, agent_id)
 }
 
 // =============================================================================
@@ -41,7 +41,7 @@ async fn setup_pipeline_at_agent_step(ctx: &TestContext) -> (String, String, Age
 #[tokio::test]
 async fn liveness_timer_reschedules_when_session_alive() {
     let ctx = setup().await;
-    let (pipeline_id, session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+    let (job_id, session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
 
     // Register the session as alive in the fake adapter
     ctx.sessions.add_session(&session_id, true);
@@ -50,7 +50,7 @@ async fn liveness_timer_reschedules_when_session_alive() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -71,14 +71,14 @@ async fn liveness_timer_reschedules_when_session_alive() {
             _ => None,
         })
         .collect();
-    assert!(timer_ids.contains(&TimerId::liveness(&PipelineId::new(pipeline_id.clone())).as_str()));
+    assert!(timer_ids.contains(&TimerId::liveness(&JobId::new(job_id.clone())).as_str()));
     assert!(!timer_ids.iter().any(|id| id.starts_with("exit-deferred:")));
 }
 
 #[tokio::test]
 async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
     let ctx = setup().await;
-    let (pipeline_id, _session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
 
     // Don't add the session to FakeSessionAdapter — is_alive returns false for unknown sessions
 
@@ -86,7 +86,7 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::liveness(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -108,7 +108,7 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
         })
         .collect();
     assert!(
-        timer_ids.contains(&TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())).as_str())
+        timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str())
     );
 }
 
@@ -117,14 +117,14 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
 // =============================================================================
 
 #[tokio::test]
-async fn exit_deferred_timer_noop_when_pipeline_terminal() {
+async fn exit_deferred_timer_noop_when_job_terminal() {
     let ctx = setup().await;
-    let (pipeline_id, _session_id, _agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
 
-    // Fail the pipeline to make it terminal
+    // Fail the job to make it terminal
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "plan".to_string(),
             exit_code: 1,
             stdout: None,
@@ -133,14 +133,14 @@ async fn exit_deferred_timer_noop_when_pipeline_terminal() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
-    // Deferred exit on a terminal pipeline should be a no-op
+    // Deferred exit on a terminal job should be a no-op
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -152,22 +152,22 @@ async fn exit_deferred_timer_noop_when_pipeline_terminal() {
 const RUNBOOK_MONITORING: &str = r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name", "prompt"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 on_done = "plan"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "plan"
 run = { agent = "planner" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -181,12 +181,12 @@ on_error = "fail"
 #[tokio::test]
 async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
     let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to agent step
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -195,10 +195,10 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to WaitingForInput
     ctx.agents
@@ -208,25 +208,25 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
     let _result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // With on_idle = done, pipeline should advance past the agent step
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    // With on_idle = done, job should advance past the agent step
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 #[tokio::test]
 async fn exit_deferred_timer_on_error_when_agent_failed() {
     let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to agent step
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -235,10 +235,10 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to Failed
     ctx.agents.set_agent_state(
@@ -250,25 +250,25 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
     let _result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // With on_error = fail, pipeline should be failed
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "failed");
+    // With on_error = fail, job should be failed
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "failed");
 }
 
 #[tokio::test]
 async fn exit_deferred_timer_on_dead_for_exited_state() {
     let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to agent step
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -277,10 +277,10 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to Exited (maps to on_dead fallback)
     ctx.agents.set_agent_state(
@@ -292,14 +292,14 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
     let _result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // With on_dead = done, pipeline should advance
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    // With on_dead = done, job should advance
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 // =============================================================================
@@ -322,14 +322,14 @@ async fn agent_state_changed_unknown_agent_is_noop() {
 }
 
 #[tokio::test]
-async fn agent_state_changed_terminal_pipeline_is_noop() {
+async fn agent_state_changed_terminal_job_is_noop() {
     let ctx = setup().await;
-    let (pipeline_id, _session_id, agent_id) = setup_pipeline_at_agent_step(&ctx).await;
+    let (job_id, _session_id, agent_id) = setup_job_at_agent_step(&ctx).await;
 
-    // Fail the pipeline to make it terminal
+    // Fail the job to make it terminal
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "plan".to_string(),
             exit_code: 1,
             stdout: None,
@@ -338,10 +338,10 @@ async fn agent_state_changed_terminal_pipeline_is_noop() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.is_terminal());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.is_terminal());
 
-    // AgentWaiting for terminal pipeline should be a no-op
+    // AgentWaiting for terminal job should be a no-op
     let result = ctx
         .runtime
         .handle_event(Event::AgentWaiting { agent_id })
@@ -352,14 +352,14 @@ async fn agent_state_changed_terminal_pipeline_is_noop() {
 }
 
 #[tokio::test]
-async fn agent_state_changed_routes_through_agent_pipelines() {
+async fn agent_state_changed_routes_through_agent_jobs() {
     let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
-    // Advance to agent step (which calls spawn_agent, populating agent_pipelines)
+    // Advance to agent step (which calls spawn_agent, populating agent_jobs)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -368,10 +368,10 @@ async fn agent_state_changed_routes_through_agent_pipelines() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Emit AgentWaiting (on_idle = done → advance)
     let _result = ctx
@@ -380,9 +380,9 @@ async fn agent_state_changed_routes_through_agent_pipelines() {
         .await
         .unwrap();
 
-    // on_idle = done should advance the pipeline
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    // on_idle = done should advance the job
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 // =============================================================================
@@ -393,17 +393,17 @@ async fn agent_state_changed_routes_through_agent_pipelines() {
 const RUNBOOK_GATE_IDLE_FAIL: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -430,11 +430,11 @@ async fn gate_idle_escalates_when_command_fails() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Agent goes idle, on_idle gate runs "false" which fails → escalate
     ctx.agents
@@ -446,10 +446,10 @@ async fn gate_idle_escalates_when_command_fails() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    // Gate failed → escalate → Waiting status (pipeline does NOT advance)
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    // Gate failed → escalate → Waiting status (job does NOT advance)
+    assert_eq!(job.step, "work");
+    assert!(job.step_status.is_waiting());
 }
 
 #[tokio::test]
@@ -469,10 +469,10 @@ async fn agent_signal_complete_overrides_gate_escalation() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent goes idle → on_idle gate "false" fails → pipeline escalated to Waiting
+    // Agent goes idle → on_idle gate "false" fails → job escalated to Waiting
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -482,9 +482,9 @@ async fn agent_signal_complete_overrides_gate_escalation() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert!(job.step_status.is_waiting());
 
     // Agent signals complete — this should override the gate escalation
     let result = ctx
@@ -497,16 +497,16 @@ async fn agent_signal_complete_overrides_gate_escalation() {
         .await
         .unwrap();
 
-    // Signal should produce events (pipeline advances)
+    // Signal should produce events (job advances)
     assert!(!result.is_empty());
 
-    // Pipeline should have advanced past "work" to "done"
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    // Job should have advanced past "work" to "done"
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 #[tokio::test]
-async fn agent_signal_complete_advances_pipeline() {
+async fn agent_signal_complete_advances_job() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
@@ -522,15 +522,15 @@ async fn agent_signal_complete_advances_pipeline() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Pipeline is at "work" step, agent is running (no idle yet)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job is at "work" step, agent is running (no idle yet)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert_eq!(job.step_status, StepStatus::Running);
 
-    // Agent signals complete before going idle — pipeline advances immediately
+    // Agent signals complete before going idle — job advances immediately
     let result = ctx
         .runtime
         .handle_event(Event::AgentSignal {
@@ -543,8 +543,8 @@ async fn agent_signal_complete_advances_pipeline() {
 
     assert!(!result.is_empty());
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 }
 
 // =============================================================================
@@ -552,7 +552,7 @@ async fn agent_signal_complete_advances_pipeline() {
 // =============================================================================
 
 #[tokio::test]
-async fn agent_signal_continue_no_pipeline_state_change() {
+async fn agent_signal_continue_no_job_state_change() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
@@ -568,13 +568,13 @@ async fn agent_signal_continue_no_pipeline_state_change() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Pipeline is at "work" step, agent is running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job is at "work" step, agent is running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert_eq!(job.step_status, StepStatus::Running);
 
     // Agent signals continue — should be a no-op (no state change)
     let result = ctx
@@ -592,10 +592,10 @@ async fn agent_signal_continue_no_pipeline_state_change() {
         "continue signal should produce no events"
     );
 
-    // Pipeline should remain at same step with same status
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should remain at same step with same status
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 #[tokio::test]
@@ -637,7 +637,7 @@ async fn standalone_agent_signal_continue_no_state_change() {
 // =============================================================================
 
 #[tokio::test]
-async fn working_auto_resumes_pipeline_from_waiting() {
+async fn working_auto_resumes_job_from_waiting() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
@@ -653,10 +653,10 @@ async fn working_auto_resumes_pipeline_from_waiting() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Agent goes idle → on_idle gate "false" fails → pipeline escalated to Waiting
+    // Agent goes idle → on_idle gate "false" fails → job escalated to Waiting
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -666,9 +666,9 @@ async fn working_auto_resumes_pipeline_from_waiting() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert!(job.step_status.is_waiting());
 
     // Agent starts working again (e.g., human typed in tmux or agent recovered)
     ctx.runtime
@@ -678,21 +678,21 @@ async fn working_auto_resumes_pipeline_from_waiting() {
         .await
         .unwrap();
 
-    // Pipeline should be back to Running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should be back to Running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 #[tokio::test]
-async fn working_noop_when_pipeline_already_running() {
+async fn working_noop_when_job_already_running() {
     let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance to agent step
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -701,11 +701,11 @@ async fn working_noop_when_pipeline_already_running() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
+    assert_eq!(job.step_status, StepStatus::Running);
 
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // AgentWorking when already Running should be a no-op
     let result = ctx
@@ -718,10 +718,10 @@ async fn working_noop_when_pipeline_already_running() {
 
     assert!(result.is_empty());
 
-    // Pipeline should remain at same step with same status
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should remain at same step with same status
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 #[tokio::test]
@@ -741,8 +741,8 @@ async fn working_auto_resume_resets_action_attempts() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Agent goes idle → gate fails → escalate → Waiting
     ctx.agents
@@ -755,10 +755,10 @@ async fn working_auto_resume_resets_action_attempts() {
         .unwrap();
 
     // Verify action attempts are non-empty after escalation
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.step_status.is_waiting());
     assert!(
-        !pipeline.action_tracker.action_attempts.is_empty(),
+        !job.action_tracker.action_attempts.is_empty(),
         "action_attempts should be non-empty after escalation"
     );
 
@@ -771,12 +771,12 @@ async fn working_auto_resume_resets_action_attempts() {
         .unwrap();
 
     // Action attempts should be reset
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
     assert!(
-        pipeline.action_tracker.action_attempts.is_empty(),
+        job.action_tracker.action_attempts.is_empty(),
         "action_attempts should be cleared after auto-resume, got: {:?}",
-        pipeline.action_tracker.action_attempts
+        job.action_tracker.action_attempts
     );
 }
 
@@ -795,10 +795,10 @@ run = 'claude'
 prompt = "Do the work"
 on_idle = "escalate"
 
-[pipeline.build]
+[job.build]
 input = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run = "echo init"
 "#;
@@ -972,21 +972,21 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
 // Duplicate idle/prompt decision prevention
 // =============================================================================
 
-/// Runbook with pipeline agent that escalates on idle
-const RUNBOOK_PIPELINE_ESCALATE: &str = r#"
+/// Runbook with job agent that escalates on idle
+const RUNBOOK_JOB_ESCALATE: &str = r#"
 [command.build]
 args = "<name>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 input = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = { agent = "worker" }
 on_done = "done"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "done"
 run = "echo done"
 
@@ -998,7 +998,7 @@ on_idle = "escalate"
 
 #[tokio::test]
 async fn duplicate_idle_creates_only_one_decision() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1013,8 +1013,8 @@ async fn duplicate_idle_creates_only_one_decision() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state so grace timer check confirms idle
     ctx.agents
@@ -1031,14 +1031,14 @@ async fn duplicate_idle_creates_only_one_decision() {
     // Fire the grace timer → escalate → creates decision, sets step to Waiting
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     assert!(
-        pipeline.step_status.is_waiting(),
+        job.step_status.is_waiting(),
         "step should be waiting after first idle"
     );
     let decisions_after_first = ctx.runtime.lock_state(|s| s.decisions.len());
@@ -1048,7 +1048,7 @@ async fn duplicate_idle_creates_only_one_decision() {
     );
 
     // Second idle → should be dropped (step already waiting, grace timer handler
-    // checks pipeline.step_status.is_waiting())
+    // checks job.step_status.is_waiting())
     ctx.runtime
         .handle_event(Event::AgentIdle {
             agent_id: agent_id.clone(),
@@ -1060,7 +1060,7 @@ async fn duplicate_idle_creates_only_one_decision() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -1072,15 +1072,15 @@ async fn duplicate_idle_creates_only_one_decision() {
         "should still have exactly 1 decision after duplicate idle"
     );
 
-    // Pipeline should still be at work step, waiting
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
-    assert!(pipeline.step_status.is_waiting());
+    // Job should still be at work step, waiting
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
+    assert!(job.step_status.is_waiting());
 }
 
 #[tokio::test]
 async fn prompt_hook_noop_when_step_already_waiting() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1095,8 +1095,8 @@ async fn prompt_hook_noop_when_step_already_waiting() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state so grace timer check confirms idle
     ctx.agents
@@ -1113,13 +1113,13 @@ async fn prompt_hook_noop_when_step_already_waiting() {
     // Fire the grace timer → escalate → step waiting
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.step_status.is_waiting());
 
     // Prompt event while step is already waiting → should be dropped
     let result = ctx
@@ -1277,15 +1277,15 @@ async fn standalone_prompt_noop_when_agent_escalated() {
 // =============================================================================
 
 #[tokio::test]
-async fn stale_agent_event_dropped_after_pipeline_advances() {
+async fn stale_agent_event_dropped_after_job_advances() {
     // Use the default TEST_RUNBOOK which has: init (shell) → plan (agent) → execute (agent)
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance past init (shell) to plan (agent)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -1294,19 +1294,19 @@ async fn stale_agent_event_dropped_after_pipeline_advances() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
     // Capture the old agent_id from the "plan" step
-    let old_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let old_agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Advance from plan to execute (another agent step)
-    ctx.runtime.advance_pipeline(&pipeline).await.unwrap();
+    ctx.runtime.advance_job(&job).await.unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "execute");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "execute");
 
-    let new_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let new_agent_id = get_agent_id(&ctx, &job_id).unwrap();
     assert_ne!(old_agent_id.as_str(), new_agent_id.as_str());
 
     // Send a stale AgentWaiting event from the OLD agent — should be a no-op
@@ -1320,20 +1320,20 @@ async fn stale_agent_event_dropped_after_pipeline_advances() {
 
     assert!(result.is_empty());
 
-    // Pipeline should still be at "execute", not affected by the stale event
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "execute");
+    // Job should still be at "execute", not affected by the stale event
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "execute");
 }
 
 #[tokio::test]
-async fn stale_agent_signal_dropped_after_pipeline_advances() {
+async fn stale_agent_signal_dropped_after_job_advances() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Advance past init (shell) to plan (agent)
     ctx.runtime
         .handle_event(Event::ShellExited {
-            pipeline_id: PipelineId::new(pipeline_id.clone()),
+            job_id: JobId::new(job_id.clone()),
             step: "init".to_string(),
             exit_code: 0,
             stdout: None,
@@ -1342,16 +1342,16 @@ async fn stale_agent_signal_dropped_after_pipeline_advances() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "plan");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "plan");
 
-    let old_agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let old_agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Advance from plan to execute
-    ctx.runtime.advance_pipeline(&pipeline).await.unwrap();
+    ctx.runtime.advance_job(&job).await.unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "execute");
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "execute");
 
     // Send a stale AgentSignal::Complete from the OLD agent — should be a no-op
     let result = ctx
@@ -1366,9 +1366,9 @@ async fn stale_agent_signal_dropped_after_pipeline_advances() {
 
     assert!(result.is_empty());
 
-    // Pipeline should still be at "execute"
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "execute");
+    // Job should still be at "execute"
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "execute");
 }
 
 // =============================================================================
@@ -1529,11 +1529,11 @@ async fn standalone_agent_signal_escalate_keeps_session() {
 }
 
 // =============================================================================
-// Pipeline agent signal: session cleanup
+// Job agent signal: session cleanup
 // =============================================================================
 
 #[tokio::test]
-async fn pipeline_agent_signal_complete_kills_session() {
+async fn job_agent_signal_complete_kills_session() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
@@ -1549,15 +1549,15 @@ async fn pipeline_agent_signal_complete_kills_session() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    let session_id = pipeline.session_id.clone().unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    let session_id = job.session_id.clone().unwrap();
 
     // Register the session as alive
     ctx.sessions.add_session(&session_id, true);
 
-    // Agent signals complete — pipeline should advance AND kill the session
+    // Agent signals complete — job should advance AND kill the session
     ctx.runtime
         .handle_event(Event::AgentSignal {
             agent_id: agent_id.clone(),
@@ -1567,9 +1567,9 @@ async fn pipeline_agent_signal_complete_kills_session() {
         .await
         .unwrap();
 
-    // Pipeline advanced
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "done");
+    // Job advanced
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "done");
 
     // Session was killed
     let kills: Vec<_> = ctx
@@ -1580,7 +1580,7 @@ async fn pipeline_agent_signal_complete_kills_session() {
         .collect();
     assert!(
         !kills.is_empty(),
-        "session should be killed when pipeline agent signals complete"
+        "session should be killed when job agent signals complete"
     );
 }
 
@@ -1591,7 +1591,7 @@ async fn pipeline_agent_signal_complete_kills_session() {
 /// AgentIdle sets a grace timer and records log size; doesn't immediately trigger on_idle.
 #[tokio::test]
 async fn idle_grace_timer_set_on_agent_idle() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1606,8 +1606,8 @@ async fn idle_grace_timer_set_on_agent_idle() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set a known log size
     ctx.agents.set_session_log_size(&agent_id, Some(42));
@@ -1626,9 +1626,9 @@ async fn idle_grace_timer_set_on_agent_idle() {
         "AgentIdle should produce no immediate events (grace timer defers action)"
     );
 
-    // Pipeline should still be Running (not escalated)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should still be Running (not escalated)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
 
     // Grace timer should be scheduled
     let scheduler = ctx.runtime.executor.scheduler();
@@ -1648,15 +1648,15 @@ async fn idle_grace_timer_set_on_agent_idle() {
         timer_ids
     );
 
-    // Log size should be recorded on the pipeline
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.idle_grace_log_size, Some(42));
+    // Log size should be recorded on the job
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.idle_grace_log_size, Some(42));
 }
 
 /// Second AgentIdle while grace timer is pending is a no-op (deduplication).
 #[tokio::test]
 async fn idle_grace_timer_deduplicates() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1671,8 +1671,8 @@ async fn idle_grace_timer_deduplicates() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
 
@@ -1684,8 +1684,8 @@ async fn idle_grace_timer_deduplicates() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.idle_grace_log_size, Some(100));
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.idle_grace_log_size, Some(100));
 
     // Increase log size to simulate activity
     ctx.agents.set_session_log_size(&agent_id, Some(200));
@@ -1702,14 +1702,14 @@ async fn idle_grace_timer_deduplicates() {
     assert!(result.is_empty(), "duplicate AgentIdle should be no-op");
 
     // Log size should NOT be updated (still 100 from first idle)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.idle_grace_log_size, Some(100));
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.idle_grace_log_size, Some(100));
 }
 
 /// Working state cancels pending idle grace timer.
 #[tokio::test]
 async fn idle_grace_timer_cancelled_on_working() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1724,8 +1724,8 @@ async fn idle_grace_timer_cancelled_on_working() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
 
@@ -1737,8 +1737,8 @@ async fn idle_grace_timer_cancelled_on_working() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.idle_grace_log_size.is_some());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.idle_grace_log_size.is_some());
 
     // AgentWorking → should cancel grace timer and clear log size
     ctx.runtime
@@ -1748,9 +1748,9 @@ async fn idle_grace_timer_cancelled_on_working() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(
-        pipeline.idle_grace_log_size, None,
+        job.idle_grace_log_size, None,
         "idle_grace_log_size should be cleared on Working"
     );
 }
@@ -1758,7 +1758,7 @@ async fn idle_grace_timer_cancelled_on_working() {
 /// Grace timer fires but log grew → no action (agent was active during grace period).
 #[tokio::test]
 async fn idle_grace_timer_noop_when_log_grew() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1773,8 +1773,8 @@ async fn idle_grace_timer_noop_when_log_grew() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
 
@@ -1795,7 +1795,7 @@ async fn idle_grace_timer_noop_when_log_grew() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -1805,15 +1805,15 @@ async fn idle_grace_timer_noop_when_log_grew() {
         "grace timer should produce no events when log grew"
     );
 
-    // Pipeline should still be Running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should still be Running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 /// Grace timer fires, log unchanged but agent is Working → no action (race guard).
 #[tokio::test]
 async fn idle_grace_timer_noop_when_agent_working() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1828,8 +1828,8 @@ async fn idle_grace_timer_noop_when_agent_working() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
 
@@ -1849,7 +1849,7 @@ async fn idle_grace_timer_noop_when_agent_working() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
@@ -1859,15 +1859,15 @@ async fn idle_grace_timer_noop_when_agent_working() {
         "grace timer should produce no events when agent is Working"
     );
 
-    // Pipeline should still be Running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step_status, StepStatus::Running);
+    // Job should still be Running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step_status, StepStatus::Running);
 }
 
 /// Grace timer fires, log unchanged + agent WaitingForInput → proceeds with on_idle.
 #[tokio::test]
 async fn idle_grace_timer_proceeds_when_genuinely_idle() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -1882,8 +1882,8 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
     ctx.agents
@@ -1900,17 +1900,17 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
     // Fire the grace timer — log unchanged, agent idle → should proceed with on_idle
     ctx.runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&PipelineId::new(pipeline_id.clone())),
+            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
         })
         .await
         .unwrap();
 
-    // on_idle = escalate → pipeline should be Waiting
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    // on_idle = escalate → job should be Waiting
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
     assert!(
-        pipeline.step_status.is_waiting(),
-        "pipeline should be Waiting after genuine idle triggers on_idle=escalate"
+        job.step_status.is_waiting(),
+        "job should be Waiting after genuine idle triggers on_idle=escalate"
     );
 }
 
@@ -1932,10 +1932,10 @@ async fn auto_resume_suppressed_after_nudge() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Put pipeline into Waiting state via AgentWaiting (direct monitor path)
+    // Put job into Waiting state via AgentWaiting (direct monitor path)
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -1945,14 +1945,14 @@ async fn auto_resume_suppressed_after_nudge() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.step_status.is_waiting());
 
     // Simulate a nudge having been sent recently by setting last_nudge_at
     let now = ctx.clock.epoch_ms();
-    let pid = PipelineId::new(&pipeline_id);
+    let pid = JobId::new(&job_id);
     ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+        if let Some(p) = state.jobs.get_mut(pid.as_str()) {
             p.last_nudge_at = Some(now);
         }
     });
@@ -1971,11 +1971,11 @@ async fn auto_resume_suppressed_after_nudge() {
         "auto-resume should be suppressed within 60s of nudge"
     );
 
-    // Pipeline should still be Waiting (not resumed to Running)
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    // Job should still be Waiting (not resumed to Running)
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     assert!(
-        pipeline.step_status.is_waiting(),
-        "pipeline should remain Waiting when Working is suppressed after nudge"
+        job.step_status.is_waiting(),
+        "job should remain Waiting when Working is suppressed after nudge"
     );
 }
 
@@ -1997,10 +1997,10 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Put pipeline into Waiting state
+    // Put job into Waiting state
     ctx.agents
         .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
@@ -2010,14 +2010,14 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
         .await
         .unwrap();
 
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert!(pipeline.step_status.is_waiting());
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(job.step_status.is_waiting());
 
     // Set last_nudge_at to 61 seconds ago
     let now = ctx.clock.epoch_ms();
-    let pid = PipelineId::new(&pipeline_id);
+    let pid = JobId::new(&job_id);
     ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.pipelines.get_mut(pid.as_str()) {
+        if let Some(p) = state.jobs.get_mut(pid.as_str()) {
             p.last_nudge_at = Some(now.saturating_sub(61_000));
         }
     });
@@ -2030,19 +2030,19 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
         .await
         .unwrap();
 
-    // Pipeline should be auto-resumed to Running
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
+    // Job should be auto-resumed to Running
+    let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(
-        pipeline.step_status,
+        job.step_status,
         StepStatus::Running,
-        "pipeline should auto-resume after nudge cooldown expires"
+        "job should auto-resume after nudge cooldown expires"
     );
 }
 
 /// Rapid AgentIdle/Working cycling (simulating inter-tool-call gaps) never triggers nudge.
 #[tokio::test]
 async fn rapid_idle_working_cycling_no_nudge() {
-    let ctx = setup_with_runbook(RUNBOOK_PIPELINE_ESCALATE).await;
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -2057,8 +2057,8 @@ async fn rapid_idle_working_cycling_no_nudge() {
         .await
         .unwrap();
 
-    let pipeline_id = ctx.runtime.pipelines().keys().next().unwrap().clone();
-    let agent_id = get_agent_id(&ctx, &pipeline_id).unwrap();
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     ctx.agents.set_session_log_size(&agent_id, Some(100));
 
@@ -2084,16 +2084,16 @@ async fn rapid_idle_working_cycling_no_nudge() {
             .unwrap();
     }
 
-    // Pipeline should still be Running — no escalation happened
-    let pipeline = ctx.runtime.get_pipeline(&pipeline_id).unwrap();
-    assert_eq!(pipeline.step, "work");
+    // Job should still be Running — no escalation happened
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert_eq!(job.step, "work");
     assert_eq!(
-        pipeline.step_status,
+        job.step_status,
         StepStatus::Running,
         "rapid idle/working cycling should never trigger on_idle"
     );
     assert_eq!(
-        pipeline.idle_grace_log_size, None,
+        job.idle_grace_log_size, None,
         "grace log size should be cleared after Working"
     );
 }

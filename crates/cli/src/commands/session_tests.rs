@@ -59,11 +59,11 @@ fn session_exists(session_id: &str) -> bool {
 
 use oj_daemon::protocol::SessionSummary;
 
-fn make_session(id: &str, namespace: &str, pipeline_id: Option<&str>) -> SessionSummary {
+fn make_session(id: &str, namespace: &str, job_id: Option<&str>) -> SessionSummary {
     SessionSummary {
         id: id.to_string(),
         namespace: namespace.to_string(),
-        pipeline_id: pipeline_id.map(|s| s.to_string()),
+        job_id: job_id.map(|s| s.to_string()),
         updated_at_ms: 0,
     }
 }

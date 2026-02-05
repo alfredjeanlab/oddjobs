@@ -8,7 +8,7 @@ use crate::validate::{
     validate_duration_str, validate_shell_command,
 };
 use crate::{
-    ActionTrigger, AgentDef, ArgSpecError, CommandDef, CronDef, PipelineDef, PrimeDef, QueueDef,
+    ActionTrigger, AgentDef, ArgSpecError, CommandDef, CronDef, JobDef, PrimeDef, QueueDef,
     QueueType, RunDirective, WorkerDef,
 };
 use oj_shell as shell;
@@ -69,8 +69,8 @@ pub enum ParseError {
 pub struct Runbook {
     #[serde(default, alias = "command")]
     pub commands: HashMap<String, CommandDef>,
-    #[serde(default, alias = "pipeline")]
-    pub pipelines: HashMap<String, PipelineDef>,
+    #[serde(default, alias = "job")]
+    pub jobs: HashMap<String, JobDef>,
     #[serde(default, alias = "agent")]
     pub agents: HashMap<String, AgentDef>,
     #[serde(default, alias = "queue")]
@@ -87,9 +87,9 @@ impl Runbook {
         self.commands.get(name)
     }
 
-    /// Get a pipeline definition by name
-    pub fn get_pipeline(&self, name: &str) -> Option<&PipelineDef> {
-        self.pipelines.get(name)
+    /// Get a job definition by name
+    pub fn get_job(&self, name: &str) -> Option<&JobDef> {
+        self.jobs.get(name)
     }
 
     /// Get an agent definition by name
@@ -141,8 +141,8 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     for (name, cmd) in &mut runbook.commands {
         cmd.name = name.clone();
     }
-    for (name, pipeline) in &mut runbook.pipelines {
-        pipeline.kind = name.clone();
+    for (name, job) in &mut runbook.jobs {
+        job.kind = name.clone();
     }
     for (name, agent) in &mut runbook.agents {
         agent.name = name.clone();
@@ -158,11 +158,11 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     }
 
     // 3. Validation — step names must not be empty
-    for (pipeline_name, pipeline) in &runbook.pipelines {
-        for (i, step) in pipeline.steps.iter().enumerate() {
+    for (job_name, job) in &runbook.jobs {
+        for (i, step) in job.steps.iter().enumerate() {
             if step.name.is_empty() {
                 return Err(ParseError::InvalidFormat {
-                    location: format!("pipeline.{}.step[{}]", pipeline_name, i),
+                    location: format!("job.{}.step[{}]", job_name, i),
                     message: "step name is required".to_string(),
                 });
             }
@@ -178,12 +178,12 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    for (pipeline_name, pipeline) in &runbook.pipelines {
-        for (i, step) in pipeline.steps.iter().enumerate() {
+    for (job_name, job) in &runbook.jobs {
+        for (i, step) in job.steps.iter().enumerate() {
             if let RunDirective::Shell(ref shell_cmd) = step.run {
                 validate_shell_command(
                     shell_cmd,
-                    &format!("pipeline.{}.step[{}]({}).run", pipeline_name, i, step.name),
+                    &format!("job.{}.step[{}]({}).run", job_name, i, step.name),
                 )?;
             }
         }
@@ -321,14 +321,14 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 ),
             });
         }
-        if !runbook.pipelines.contains_key(&worker.handler.pipeline) {
+        if !runbook.jobs.contains_key(&worker.handler.job) {
             return Err(ParseError::InvalidFormat {
-                location: format!("worker.{}.handler.pipeline", name),
+                location: format!("worker.{}.handler.job", name),
                 message: format!(
-                    "references unknown pipeline '{}'; available pipelines: {}",
-                    worker.handler.pipeline,
+                    "references unknown job '{}'; available jobs: {}",
+                    worker.handler.job,
                     runbook
-                        .pipelines
+                        .jobs
                         .keys()
                         .cloned()
                         .collect::<Vec<_>>()
@@ -347,16 +347,16 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 message: e,
             });
         }
-        // Validate run is a pipeline or agent reference
+        // Validate run is a job or agent reference
         match &cron.run {
-            RunDirective::Pipeline { pipeline } => {
-                if !runbook.pipelines.contains_key(pipeline.as_str()) {
+            RunDirective::Job { job } => {
+                if !runbook.jobs.contains_key(job.as_str()) {
                     return Err(ParseError::InvalidFormat {
                         location: format!("cron.{}.run", name),
                         message: format!(
-                            "references unknown pipeline '{}'; available pipelines: {}",
-                            pipeline,
-                            sorted_keys(&runbook.pipelines),
+                            "references unknown job '{}'; available jobs: {}",
+                            job,
+                            sorted_keys(&runbook.jobs),
                         ),
                     });
                 }
@@ -376,7 +376,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             RunDirective::Shell(_) => {
                 return Err(ParseError::InvalidFormat {
                     location: format!("cron.{}.run", name),
-                    message: "cron run must reference a pipeline or agent".to_string(),
+                    message: "cron run must reference a job or agent".to_string(),
                 });
             }
         }
@@ -468,13 +468,13 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    // 8. Detect duplicate step names within pipelines
-    for (pipeline_name, pipeline) in &runbook.pipelines {
+    // 8. Detect duplicate step names within jobs
+    for (job_name, job) in &runbook.jobs {
         let mut seen = HashSet::new();
-        for (i, step) in pipeline.steps.iter().enumerate() {
+        for (i, step) in job.steps.iter().enumerate() {
             if !seen.insert(step.name.as_str()) {
                 return Err(ParseError::InvalidFormat {
-                    location: format!("pipeline.{}.step[{}]({})", pipeline_name, i, step.name),
+                    location: format!("job.{}.step[{}]({})", job_name, i, step.name),
                     message: format!("duplicate step name '{}'", step.name),
                 });
             }
@@ -482,19 +482,19 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     }
 
     // 9. Validate step transition references
-    for (pipeline_name, pipeline) in &runbook.pipelines {
-        let step_names: HashSet<&str> = pipeline.steps.iter().map(|s| s.name.as_str()).collect();
+    for (job_name, job) in &runbook.jobs {
+        let step_names: HashSet<&str> = job.steps.iter().map(|s| s.name.as_str()).collect();
 
-        // Check pipeline-level transitions
+        // Check job-level transitions
         for (field, transition) in [
-            ("on_done", &pipeline.on_done),
-            ("on_fail", &pipeline.on_fail),
-            ("on_cancel", &pipeline.on_cancel),
+            ("on_done", &job.on_done),
+            ("on_fail", &job.on_fail),
+            ("on_cancel", &job.on_cancel),
         ] {
             if let Some(t) = transition {
                 if !step_names.contains(t.step_name()) {
                     return Err(ParseError::InvalidFormat {
-                        location: format!("pipeline.{}.{}", pipeline_name, field),
+                        location: format!("job.{}.{}", job_name, field),
                         message: format!(
                             "references unknown step '{}'; available steps: {}",
                             t.step_name(),
@@ -506,7 +506,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
 
         // Check step-level transitions
-        for (i, step) in pipeline.steps.iter().enumerate() {
+        for (i, step) in job.steps.iter().enumerate() {
             for (field, transition) in [
                 ("on_done", &step.on_done),
                 ("on_fail", &step.on_fail),
@@ -516,8 +516,8 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                     if !step_names.contains(t.step_name()) {
                         return Err(ParseError::InvalidFormat {
                             location: format!(
-                                "pipeline.{}.step[{}]({}).{}",
-                                pipeline_name, i, step.name, field
+                                "job.{}.step[{}]({}).{}",
+                                job_name, i, step.name, field
                             ),
                             message: format!(
                                 "references unknown step '{}'; available steps: {}",
@@ -531,15 +531,15 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    // 10. Validate agent and pipeline references in steps and commands
-    for (pipeline_name, pipeline) in &runbook.pipelines {
-        for (i, step) in pipeline.steps.iter().enumerate() {
+    // 10. Validate agent and job references in steps and commands
+    for (job_name, job) in &runbook.jobs {
+        for (i, step) in job.steps.iter().enumerate() {
             if let Some(agent_name) = step.run.agent_name() {
                 if !runbook.agents.contains_key(agent_name) {
                     return Err(ParseError::InvalidFormat {
                         location: format!(
-                            "pipeline.{}.step[{}]({}).run",
-                            pipeline_name, i, step.name
+                            "job.{}.step[{}]({}).run",
+                            job_name, i, step.name
                         ),
                         message: format!(
                             "references unknown agent '{}'; available agents: {}",
@@ -549,17 +549,17 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                     });
                 }
             }
-            if let Some(pl_name) = step.run.pipeline_name() {
-                if !runbook.pipelines.contains_key(pl_name) {
+            if let Some(pl_name) = step.run.job_name() {
+                if !runbook.jobs.contains_key(pl_name) {
                     return Err(ParseError::InvalidFormat {
                         location: format!(
-                            "pipeline.{}.step[{}]({}).run",
-                            pipeline_name, i, step.name
+                            "job.{}.step[{}]({}).run",
+                            job_name, i, step.name
                         ),
                         message: format!(
-                            "references unknown pipeline '{}'; available pipelines: {}",
+                            "references unknown job '{}'; available jobs: {}",
                             pl_name,
-                            sorted_keys(&runbook.pipelines),
+                            sorted_keys(&runbook.jobs),
                         ),
                     });
                 }
@@ -580,14 +580,14 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 });
             }
         }
-        if let Some(pl_name) = cmd.run.pipeline_name() {
-            if !runbook.pipelines.contains_key(pl_name) {
+        if let Some(pl_name) = cmd.run.job_name() {
+            if !runbook.jobs.contains_key(pl_name) {
                 return Err(ParseError::InvalidFormat {
                     location: format!("command.{}.run", cmd_name),
                     message: format!(
-                        "references unknown pipeline '{}'; available pipelines: {}",
+                        "references unknown job '{}'; available jobs: {}",
                         pl_name,
-                        sorted_keys(&runbook.pipelines),
+                        sorted_keys(&runbook.jobs),
                     ),
                 });
             }
@@ -595,22 +595,22 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
     }
 
     // 11. Warn on unreachable steps
-    let mut sorted_pipelines: Vec<_> = runbook.pipelines.iter().collect();
-    sorted_pipelines.sort_by_key(|(name, _)| *name);
-    for (pipeline_name, pipeline) in sorted_pipelines {
-        if pipeline.steps.len() <= 1 {
+    let mut sorted_jobs: Vec<_> = runbook.jobs.iter().collect();
+    sorted_jobs.sort_by_key(|(name, _)| *name);
+    for (job_name, job) in sorted_jobs {
+        if job.steps.len() <= 1 {
             continue;
         }
         let mut referenced: HashSet<&str> = HashSet::new();
-        // Collect from pipeline-level transitions
-        for t in [&pipeline.on_done, &pipeline.on_fail, &pipeline.on_cancel]
+        // Collect from job-level transitions
+        for t in [&job.on_done, &job.on_fail, &job.on_cancel]
             .into_iter()
             .flatten()
         {
             referenced.insert(t.step_name());
         }
         // Collect from step-level transitions
-        for step in &pipeline.steps {
+        for step in &job.steps {
             for t in [&step.on_done, &step.on_fail, &step.on_cancel]
                 .into_iter()
                 .flatten()
@@ -619,10 +619,10 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             }
         }
         // Reject unreachable steps (skip first step)
-        for step in pipeline.steps.iter().skip(1) {
+        for step in job.steps.iter().skip(1) {
             if !referenced.contains(step.name.as_str()) {
                 return Err(ParseError::InvalidFormat {
-                    location: format!("pipeline.{}.step.{}", pipeline_name, step.name),
+                    location: format!("job.{}.step.{}", job_name, step.name),
                     message: format!(
                         "step '{}' is unreachable \
                          (not referenced by any on_done/on_fail/on_cancel)",

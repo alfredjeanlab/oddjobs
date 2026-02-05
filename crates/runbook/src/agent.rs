@@ -219,7 +219,7 @@ pub struct AgentDef {
     pub on_error: ErrorActionConfig,
 
     /// What to do when agent tries to exit (Stop hook).
-    /// None = context-dependent default (pipeline: signal, standalone: escalate)
+    /// None = context-dependent default (job: signal, standalone: escalate)
     #[serde(default)]
     pub on_stop: Option<StopActionConfig>,
 
@@ -229,7 +229,7 @@ pub struct AgentDef {
 
     /// Notification messages for agent lifecycle events
     #[serde(default)]
-    pub notify: crate::pipeline::NotifyConfig,
+    pub notify: crate::job::NotifyConfig,
 
     /// Adapter-specific session configuration (e.g., session "tmux" { ... })
     /// Keyed by provider name. Unknown providers are ignored.
@@ -353,8 +353,8 @@ pub enum ActionTrigger {
 #[serde(rename_all = "lowercase")]
 pub enum AgentAction {
     Nudge, // Send message prompting to continue
-    Done,  // Treat as success, advance pipeline
-    Fail,  // Mark pipeline as failed
+    Done,  // Treat as success, advance job
+    Fail,  // Mark job as failed
     #[serde(alias = "recover")]
     Resume, // Re-spawn with --resume, preserving conversation history
     #[default]
@@ -517,7 +517,7 @@ fn default_on_error() -> ErrorActionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum StopAction {
-    /// Block exit until agent calls `oj emit agent:signal` (pipeline default)
+    /// Block exit until agent calls `oj emit agent:signal` (job default)
     Signal,
     /// Treat stop as idle — fire on_idle handler
     Idle,

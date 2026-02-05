@@ -6,14 +6,14 @@
 use std::collections::HashMap;
 
 use super::*;
-use oj_core::{Event, PipelineId, StepOutcome, StepRecord};
+use oj_core::{Event, JobId, StepOutcome, StepRecord};
 
 #[test]
 fn encode_decode_roundtrip_request() {
     let request = Request::Event {
         event: Event::CommandRun {
-            pipeline_id: PipelineId::new("pipe-1"),
-            pipeline_name: "build".to_string(),
+            job_id: JobId::new("pipe-1"),
+            job_name: "build".to_string(),
             project_root: std::path::PathBuf::from("/test/project"),
             invoke_dir: std::path::PathBuf::from("/test/project"),
             command: "build".to_string(),
@@ -32,7 +32,7 @@ fn encode_decode_roundtrip_request() {
 fn encode_decode_roundtrip_response() {
     let response = Response::Status {
         uptime_secs: 3600,
-        pipelines_active: 5,
+        jobs_active: 5,
         sessions_active: 3,
         orphan_count: 0,
     };
@@ -46,7 +46,7 @@ fn encode_decode_roundtrip_response() {
 #[test]
 fn encode_decode_query() {
     let request = Request::Query {
-        query: Query::GetPipeline {
+        query: Query::GetJob {
             id: "pipe-123".to_string(),
         },
     };
@@ -72,8 +72,8 @@ fn encode_returns_json_without_length_prefix() {
 }
 
 #[test]
-fn pipeline_summary_serialization() {
-    let summary = PipelineSummary {
+fn job_summary_serialization() {
+    let summary = JobSummary {
         id: "pipe-1".to_string(),
         name: "build feature".to_string(),
         kind: "build".to_string(),
@@ -85,19 +85,19 @@ fn pipeline_summary_serialization() {
         retry_count: 0,
     };
 
-    let response = Response::Pipelines {
-        pipelines: vec![summary.clone()],
+    let response = Response::Jobs {
+        jobs: vec![summary.clone()],
     };
 
     let encoded = encode(&response).expect("encode failed");
     let decoded: Response = decode(&encoded).expect("decode failed");
 
     match decoded {
-        Response::Pipelines { pipelines } => {
-            assert_eq!(pipelines.len(), 1);
-            assert_eq!(pipelines[0], summary);
+        Response::Jobs { jobs } => {
+            assert_eq!(jobs.len(), 1);
+            assert_eq!(jobs[0], summary);
         }
-        _ => panic!("Expected Pipelines response"),
+        _ => panic!("Expected Jobs response"),
     }
 }
 
@@ -192,7 +192,7 @@ fn encode_decode_workers_response() {
 fn encode_decode_list_agents_query() {
     let request = Request::Query {
         query: Query::ListAgents {
-            pipeline_id: Some("pipe-".to_string()),
+            job_id: Some("pipe-".to_string()),
             status: Some("running".to_string()),
         },
     };
@@ -207,7 +207,7 @@ fn encode_decode_list_agents_query() {
 fn encode_decode_list_agents_query_no_filters() {
     let request = Request::Query {
         query: Query::ListAgents {
-            pipeline_id: None,
+            job_id: None,
             status: None,
         },
     };
@@ -222,7 +222,7 @@ fn encode_decode_list_agents_query_no_filters() {
 fn encode_decode_agents_response() {
     let response = Response::Agents {
         agents: vec![AgentSummary {
-            pipeline_id: "pipe-abc".to_string(),
+            job_id: "pipe-abc".to_string(),
             step_name: "build".to_string(),
             agent_id: "agent-123".to_string(),
             agent_name: Some("claude".to_string()),
@@ -253,11 +253,11 @@ fn encode_decode_agents_response_empty() {
 }
 
 #[test]
-fn agent_summary_pipeline_id_default() {
-    // Verify serde default works for pipeline_id (backward compat)
+fn agent_summary_job_id_default() {
+    // Verify serde default works for job_id (backward compat)
     let json = r#"{"step_name":"build","agent_id":"a1","status":"running","files_read":0,"files_written":0,"commands_run":0,"exit_reason":null}"#;
     let summary: AgentSummary = serde_json::from_str(json).expect("deserialize failed");
-    assert_eq!(summary.pipeline_id, "");
+    assert_eq!(summary.job_id, "");
     assert_eq!(summary.step_name, "build");
 }
 
@@ -292,7 +292,7 @@ fn encode_decode_roundtrip_agents_pruned_response() {
     let response = Response::AgentsPruned {
         pruned: vec![AgentEntry {
             agent_id: "agent-123".to_string(),
-            pipeline_id: "pipe-abc".to_string(),
+            job_id: "pipe-abc".to_string(),
             step_name: "build".to_string(),
         }],
         skipped: 2,
@@ -377,7 +377,7 @@ fn encode_decode_dismiss_orphan_query() {
 fn encode_decode_orphans_response() {
     let response = Response::Orphans {
         orphans: vec![OrphanSummary {
-            pipeline_id: "pipe-orphan".to_string(),
+            job_id: "pipe-orphan".to_string(),
             project: "myproject".to_string(),
             kind: "deploy".to_string(),
             name: "deploy-staging".to_string(),
@@ -403,7 +403,7 @@ fn encode_decode_orphans_response() {
 fn encode_decode_status_with_orphans() {
     let response = Response::Status {
         uptime_secs: 100,
-        pipelines_active: 2,
+        jobs_active: 2,
         sessions_active: 1,
         orphan_count: 3,
     };
@@ -417,7 +417,7 @@ fn encode_decode_status_with_orphans() {
 #[test]
 fn status_orphan_count_defaults_to_zero() {
     // Test backward compatibility: old Status without orphan_count should deserialize
-    let json = r#"{"type":"Status","uptime_secs":60,"pipelines_active":1,"sessions_active":0}"#;
+    let json = r#"{"type":"Status","uptime_secs":60,"jobs_active":1,"sessions_active":0}"#;
     let decoded: Response = serde_json::from_str(json).expect("deserialize failed");
     match decoded {
         Response::Status { orphan_count, .. } => assert_eq!(orphan_count, 0),
@@ -426,8 +426,8 @@ fn status_orphan_count_defaults_to_zero() {
 }
 
 #[test]
-fn encode_decode_roundtrip_pipeline_prune_with_failed() {
-    let request = Request::PipelinePrune {
+fn encode_decode_roundtrip_job_prune_with_failed() {
+    let request = Request::JobPrune {
         all: false,
         failed: true,
         orphans: false,
@@ -442,8 +442,8 @@ fn encode_decode_roundtrip_pipeline_prune_with_failed() {
 }
 
 #[test]
-fn encode_decode_roundtrip_pipeline_prune_with_orphans() {
-    let request = Request::PipelinePrune {
+fn encode_decode_roundtrip_job_prune_with_orphans() {
+    let request = Request::JobPrune {
         all: false,
         failed: false,
         orphans: true,
@@ -458,12 +458,12 @@ fn encode_decode_roundtrip_pipeline_prune_with_orphans() {
 }
 
 #[test]
-fn pipeline_prune_failed_defaults_to_false() {
-    // Backward compatibility: old PipelinePrune without `failed` should deserialize
-    let json = r#"{"type":"PipelinePrune","all":false,"dry_run":true}"#;
+fn job_prune_failed_defaults_to_false() {
+    // Backward compatibility: old JobPrune without `failed` should deserialize
+    let json = r#"{"type":"JobPrune","all":false,"dry_run":true}"#;
     let decoded: Request = serde_json::from_str(json).expect("deserialize failed");
     match decoded {
-        Request::PipelinePrune {
+        Request::JobPrune {
             all,
             failed,
             orphans,
@@ -476,17 +476,17 @@ fn pipeline_prune_failed_defaults_to_false() {
             assert!(dry_run);
             assert!(namespace.is_none());
         }
-        _ => panic!("Expected PipelinePrune request"),
+        _ => panic!("Expected JobPrune request"),
     }
 }
 
 #[test]
-fn pipeline_prune_orphans_defaults_to_false() {
-    // Backward compatibility: old PipelinePrune without `orphans` should deserialize
-    let json = r#"{"type":"PipelinePrune","all":true,"failed":false,"dry_run":false}"#;
+fn job_prune_orphans_defaults_to_false() {
+    // Backward compatibility: old JobPrune without `orphans` should deserialize
+    let json = r#"{"type":"JobPrune","all":true,"failed":false,"dry_run":false}"#;
     let decoded: Request = serde_json::from_str(json).expect("deserialize failed");
     match decoded {
-        Request::PipelinePrune {
+        Request::JobPrune {
             all,
             failed,
             orphans,
@@ -499,13 +499,13 @@ fn pipeline_prune_orphans_defaults_to_false() {
             assert!(!dry_run);
             assert!(namespace.is_none());
         }
-        _ => panic!("Expected PipelinePrune request"),
+        _ => panic!("Expected JobPrune request"),
     }
 }
 
 #[test]
-fn encode_decode_roundtrip_pipeline_prune_with_namespace() {
-    let request = Request::PipelinePrune {
+fn encode_decode_roundtrip_job_prune_with_namespace() {
+    let request = Request::JobPrune {
         all: true,
         failed: false,
         orphans: false,
@@ -520,16 +520,15 @@ fn encode_decode_roundtrip_pipeline_prune_with_namespace() {
 }
 
 #[test]
-fn pipeline_prune_namespace_defaults_to_none() {
-    // Backward compatibility: old PipelinePrune without `namespace` should deserialize
-    let json =
-        r#"{"type":"PipelinePrune","all":true,"failed":false,"orphans":false,"dry_run":false}"#;
+fn job_prune_namespace_defaults_to_none() {
+    // Backward compatibility: old JobPrune without `namespace` should deserialize
+    let json = r#"{"type":"JobPrune","all":true,"failed":false,"orphans":false,"dry_run":false}"#;
     let decoded: Request = serde_json::from_str(json).expect("deserialize failed");
     match decoded {
-        Request::PipelinePrune { namespace, .. } => {
+        Request::JobPrune { namespace, .. } => {
             assert!(namespace.is_none());
         }
-        _ => panic!("Expected PipelinePrune request"),
+        _ => panic!("Expected JobPrune request"),
     }
 }
 

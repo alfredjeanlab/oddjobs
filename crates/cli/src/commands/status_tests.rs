@@ -38,16 +38,16 @@ fn header_with_custom_watch_interval() {
 
 #[test]
 #[serial]
-fn header_with_active_pipelines_and_watch() {
+fn header_with_active_jobs_and_watch() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abc12345".to_string(),
             name: "build".to_string(),
-            kind: "pipeline".to_string(),
+            kind: "job".to_string(),
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
@@ -55,8 +55,8 @@ fn header_with_active_pipelines_and_watch() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -66,7 +66,7 @@ fn header_with_active_pipelines_and_watch() {
     let first_line = out.lines().next().unwrap();
     assert_eq!(
         first_line,
-        "oj daemon: running 1m | every 2s | 1 active pipeline"
+        "oj daemon: running 1m | every 2s | 1 active job"
     );
 }
 
@@ -78,10 +78,10 @@ fn header_without_watch_has_no_every() {
 
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abc12345".to_string(),
             name: "build".to_string(),
-            kind: "pipeline".to_string(),
+            kind: "job".to_string(),
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
@@ -89,8 +89,8 @@ fn header_without_watch_has_no_every() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -98,7 +98,7 @@ fn header_without_watch_has_no_every() {
     };
     let out = format_text(60, &[ns], None);
     let first_line = out.lines().next().unwrap();
-    assert_eq!(first_line, "oj daemon: running 1m | 1 active pipeline");
+    assert_eq!(first_line, "oj daemon: running 1m | 1 active job");
     assert!(!first_line.contains("every"));
 }
 
@@ -115,13 +115,13 @@ fn format_duration_values() {
 
 #[test]
 #[serial]
-fn active_pipeline_shows_kind_not_name() {
+fn active_job_shows_kind_not_name() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abcd1234-0000-0000-0000".to_string(),
             name: "abcd1234-0000-0000-0000".to_string(),
             kind: "build".to_string(),
@@ -132,8 +132,8 @@ fn active_pipeline_shows_kind_not_name() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -144,13 +144,13 @@ fn active_pipeline_shows_kind_not_name() {
 
     assert!(
         output.contains("build"),
-        "output should contain pipeline kind 'build':\n{output}"
+        "output should contain job kind 'build':\n{output}"
     );
     assert!(
         output.contains("check"),
         "output should contain step name 'check':\n{output}"
     );
-    // The pipeline UUID name should not appear in the rendered text
+    // The job UUID name should not appear in the rendered text
     assert!(
         !output.contains("abcd1234-0000"),
         "output should not contain the UUID name:\n{output}"
@@ -159,16 +159,16 @@ fn active_pipeline_shows_kind_not_name() {
 
 #[test]
 #[serial]
-fn active_pipeline_hides_nonce_only_name() {
+fn active_job_hides_nonce_only_name() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
-    // When a name template produces an empty slug, pipeline_display_name()
+    // When a name template produces an empty slug, job_display_name()
     // returns just the nonce (first 8 chars of the ID). This should be hidden
     // since it's redundant with the truncated ID already shown in the output.
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abcd1234-0000-0000-0000".to_string(),
             name: "abcd1234".to_string(), // nonce-only name (first 8 chars of ID)
             kind: "build".to_string(),
@@ -179,8 +179,8 @@ fn active_pipeline_hides_nonce_only_name() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -191,7 +191,7 @@ fn active_pipeline_hides_nonce_only_name() {
 
     assert!(
         output.contains("build"),
-        "output should contain pipeline kind 'build':\n{output}"
+        "output should contain job kind 'build':\n{output}"
     );
     assert!(
         output.contains("check"),
@@ -208,14 +208,14 @@ fn active_pipeline_hides_nonce_only_name() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_hides_name_when_same_as_id() {
+fn escalated_job_hides_name_when_same_as_id() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678-0000-0000-0000".to_string(),
             name: "efgh5678-0000-0000-0000".to_string(),
             kind: "deploy".to_string(),
@@ -226,7 +226,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -237,7 +237,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
 
     assert!(
         output.contains("deploy"),
-        "output should contain pipeline kind 'deploy':\n{output}"
+        "output should contain job kind 'deploy':\n{output}"
     );
     assert!(
         output.contains("test"),
@@ -247,7 +247,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
         output.contains("gate check failed"),
         "output should contain waiting reason:\n{output}"
     );
-    // The pipeline UUID name should not appear in the rendered text
+    // The job UUID name should not appear in the rendered text
     assert!(
         !output.contains("efgh5678-0000"),
         "output should not contain the UUID name:\n{output}"
@@ -256,15 +256,15 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
 
 #[test]
 #[serial]
-fn orphaned_pipeline_hides_name_when_same_as_id() {
+fn orphaned_job_hides_name_when_same_as_id() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![oj_daemon::JobStatusEntry {
             id: "ijkl9012-0000-0000-0000".to_string(),
             name: "ijkl9012-0000-0000-0000".to_string(),
             kind: "ci".to_string(),
@@ -285,13 +285,13 @@ fn orphaned_pipeline_hides_name_when_same_as_id() {
 
     assert!(
         output.contains("ci"),
-        "output should contain pipeline kind 'ci':\n{output}"
+        "output should contain job kind 'ci':\n{output}"
     );
     assert!(
         output.contains("lint"),
         "output should contain step name 'lint':\n{output}"
     );
-    // The pipeline UUID name should not appear in the rendered text
+    // The job UUID name should not appear in the rendered text
     assert!(
         !output.contains("ijkl9012-0000"),
         "output should not contain the UUID name:\n{output}"
@@ -335,15 +335,15 @@ fn truncate_reason_multiline_long_first_line() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_truncates_long_reason() {
+fn escalated_job_truncates_long_reason() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let long_reason = "e".repeat(200);
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678".to_string(),
             name: "efgh5678".to_string(),
             kind: "deploy".to_string(),
@@ -354,7 +354,7 @@ fn escalated_pipeline_truncates_long_reason() {
             waiting_reason: Some(long_reason.clone()),
             escalate_source: None,
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -387,7 +387,7 @@ fn friendly_name_label_empty_when_name_equals_id() {
 
 #[test]
 fn friendly_name_label_empty_when_name_equals_truncated_id() {
-    // When the name template produces an empty slug, pipeline_display_name()
+    // When the name template produces an empty slug, job_display_name()
     // returns just the nonce (first 8 chars of the ID). This should be hidden
     // since it's redundant with the truncated ID shown in status output.
     assert_eq!(
@@ -411,13 +411,13 @@ fn friendly_name_label_shown_when_meaningful() {
 
 #[test]
 #[serial]
-fn active_pipeline_shows_friendly_name() {
+fn active_job_shows_friendly_name() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abcd1234-0000-0000-0000".to_string(),
             name: "fix-login-button-abcd1234".to_string(),
             kind: "build".to_string(),
@@ -428,8 +428,8 @@ fn active_pipeline_shows_friendly_name() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -440,7 +440,7 @@ fn active_pipeline_shows_friendly_name() {
 
     assert!(
         output.contains("build"),
-        "output should contain pipeline kind 'build':\n{output}"
+        "output should contain job kind 'build':\n{output}"
     );
     assert!(
         output.contains("fix-login-button-abcd1234"),
@@ -454,14 +454,14 @@ fn active_pipeline_shows_friendly_name() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_shows_friendly_name() {
+fn escalated_job_shows_friendly_name() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678-0000-0000-0000".to_string(),
             name: "deploy-staging-efgh5678".to_string(),
             kind: "deploy".to_string(),
@@ -472,7 +472,7 @@ fn escalated_pipeline_shows_friendly_name() {
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -483,7 +483,7 @@ fn escalated_pipeline_shows_friendly_name() {
 
     assert!(
         output.contains("deploy"),
-        "output should contain pipeline kind 'deploy':\n{output}"
+        "output should contain job kind 'deploy':\n{output}"
     );
     assert!(
         output.contains("deploy-staging-efgh5678"),
@@ -493,15 +493,15 @@ fn escalated_pipeline_shows_friendly_name() {
 
 #[test]
 #[serial]
-fn orphaned_pipeline_shows_friendly_name() {
+fn orphaned_job_shows_friendly_name() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![oj_daemon::JobStatusEntry {
             id: "ijkl9012-0000-0000-0000".to_string(),
             name: "ci-main-branch-ijkl9012".to_string(),
             kind: "ci".to_string(),
@@ -522,7 +522,7 @@ fn orphaned_pipeline_shows_friendly_name() {
 
     assert!(
         output.contains("ci"),
-        "output should contain pipeline kind 'ci':\n{output}"
+        "output should contain job kind 'ci':\n{output}"
     );
     assert!(
         output.contains("ci-main-branch-ijkl9012"),
@@ -569,10 +569,10 @@ fn render_frame_content_identical_across_tty_modes() {
 
     let ns = NamespaceStatus {
         namespace: "proj".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "aaaa1111".to_string(),
             name: "build".to_string(),
-            kind: "pipeline".to_string(),
+            kind: "job".to_string(),
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
@@ -580,8 +580,8 @@ fn render_frame_content_identical_across_tty_modes() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -761,10 +761,10 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abcd1234".to_string(),
             name: "build".to_string(),
-            kind: "pipeline".to_string(),
+            kind: "job".to_string(),
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
@@ -772,7 +772,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678".to_string(),
             name: "deploy".to_string(),
             kind: "deploy".to_string(),
@@ -783,7 +783,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             waiting_reason: Some("needs manual approval".to_string()),
             escalate_source: None,
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![oj_daemon::WorkerSummary {
             name: "builder".to_string(),
             namespace: "myproject".to_string(),
@@ -816,7 +816,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
         "no ANSI escapes in non-TTY + NO_COLOR frame"
     );
     assert!(frame.contains("myproject"));
-    assert!(frame.contains("pipeline"));
+    assert!(frame.contains("job"));
     assert!(frame.contains("builder"));
     assert!(frame.contains("tasks"));
     assert!(frame.contains("agent-001"));
@@ -855,9 +855,9 @@ fn namespace_with_only_empty_queues_is_hidden() {
     // A namespace with only queues that have all-zero counts should not be displayed
     let ns = NamespaceStatus {
         namespace: "empty-project".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![oj_daemon::QueueStatus {
             name: "tasks".to_string(),
@@ -889,9 +889,9 @@ fn namespace_with_non_empty_queue_is_shown() {
     // A namespace with at least one queue with non-zero counts should be displayed
     let ns = NamespaceStatus {
         namespace: "active-project".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![oj_daemon::QueueStatus {
             name: "tasks".to_string(),
@@ -917,14 +917,14 @@ fn namespace_with_non_empty_queue_is_shown() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_shows_source_label() {
+fn escalated_job_shows_source_label() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678-0000-0000-0000".to_string(),
             name: "deploy-staging-efgh5678".to_string(),
             kind: "deploy".to_string(),
@@ -935,7 +935,7 @@ fn escalated_pipeline_shows_source_label() {
             waiting_reason: Some("Agent is idle".to_string()),
             escalate_source: Some("idle".to_string()),
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -952,14 +952,14 @@ fn escalated_pipeline_shows_source_label() {
 
 #[test]
 #[serial]
-fn escalated_pipeline_no_source_label_when_none() {
+fn escalated_job_no_source_label_when_none() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![],
+        escalated_jobs: vec![oj_daemon::JobStatusEntry {
             id: "efgh5678-0000-0000-0000".to_string(),
             name: "deploy-staging-efgh5678".to_string(),
             kind: "deploy".to_string(),
@@ -970,7 +970,7 @@ fn escalated_pipeline_no_source_label_when_none() {
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
-        orphaned_pipelines: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -993,7 +993,7 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abcd1234-0000-0000-0000".to_string(),
             name: "fix-login-abcd1234".to_string(),
             kind: "build".to_string(),
@@ -1004,8 +1004,8 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1014,11 +1014,11 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
 
     let output = format_text(30, &[ns], None);
 
-    // Find the pipeline row line
+    // Find the job row line
     let line = output
         .lines()
         .find(|l| l.contains("abcd1234"))
-        .expect("should find pipeline row");
+        .expect("should find job row");
 
     // Verify column order: id, then name, then kind/step, then status, then elapsed
     let id_pos = line.find("abcd1234").unwrap();
@@ -1050,8 +1050,8 @@ fn columns_are_aligned_across_rows() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![
-            oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![
+            oj_daemon::JobStatusEntry {
                 id: "aaaa1111-0000".to_string(),
                 name: "short-aaaa1111".to_string(),
                 kind: "build".to_string(),
@@ -1062,7 +1062,7 @@ fn columns_are_aligned_across_rows() {
                 waiting_reason: None,
                 escalate_source: None,
             },
-            oj_daemon::PipelineStatusEntry {
+            oj_daemon::JobStatusEntry {
                 id: "bbbb2222-0000".to_string(),
                 name: "much-longer-name-bbbb2222".to_string(),
                 kind: "deploy".to_string(),
@@ -1074,8 +1074,8 @@ fn columns_are_aligned_across_rows() {
                 escalate_source: None,
             },
         ],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1088,7 +1088,7 @@ fn columns_are_aligned_across_rows() {
         .lines()
         .filter(|l| l.contains("aaaa1111") || l.contains("bbbb2222"))
         .collect();
-    assert_eq!(lines.len(), 2, "should find exactly 2 pipeline rows");
+    assert_eq!(lines.len(), 2, "should find exactly 2 job rows");
 
     // The kind/step column should start at the same position in both lines
     let ks_pos_0 = lines[0].find("build/check").unwrap();
@@ -1117,8 +1117,8 @@ fn name_column_omitted_when_all_names_hidden() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![
-            oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![
+            oj_daemon::JobStatusEntry {
                 id: "aaaa1111-0000-0000-0000".to_string(),
                 name: "aaaa1111-0000-0000-0000".to_string(), // same as id → hidden
                 kind: "build".to_string(),
@@ -1129,7 +1129,7 @@ fn name_column_omitted_when_all_names_hidden() {
                 waiting_reason: None,
                 escalate_source: None,
             },
-            oj_daemon::PipelineStatusEntry {
+            oj_daemon::JobStatusEntry {
                 id: "bbbb2222-0000-0000-0000".to_string(),
                 name: "build".to_string(), // same as kind → hidden
                 kind: "build".to_string(),
@@ -1141,8 +1141,8 @@ fn name_column_omitted_when_all_names_hidden() {
                 escalate_source: None,
             },
         ],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1154,7 +1154,7 @@ fn name_column_omitted_when_all_names_hidden() {
     let line = output
         .lines()
         .find(|l| l.contains("aaaa1111"))
-        .expect("should find first pipeline row");
+        .expect("should find first job row");
 
     // With all names hidden, the kind/step should follow closely after the id
     // (just 2 spaces separator, no extra name column padding)
@@ -1175,9 +1175,9 @@ fn worker_columns_are_aligned_across_rows() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![
             oj_daemon::WorkerSummary {
                 name: "a".to_string(),
@@ -1226,9 +1226,9 @@ fn worker_shows_full_at_max_concurrency() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![oj_daemon::WorkerSummary {
             name: "busy".to_string(),
             namespace: "myproject".to_string(),
@@ -1263,9 +1263,9 @@ fn queue_columns_are_aligned_across_rows() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![
             oj_daemon::QueueStatus {
@@ -1318,9 +1318,9 @@ fn agent_columns_are_aligned_across_rows() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![
@@ -1369,10 +1369,10 @@ fn agent_columns_are_aligned_across_rows() {
 fn make_ns(name: &str) -> NamespaceStatus {
     NamespaceStatus {
         namespace: name.to_string(),
-        active_pipelines: vec![oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![oj_daemon::JobStatusEntry {
             id: "abc12345".to_string(),
             name: "build".to_string(),
-            kind: "pipeline".to_string(),
+            kind: "job".to_string(),
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
@@ -1380,8 +1380,8 @@ fn make_ns(name: &str) -> NamespaceStatus {
             waiting_reason: None,
             escalate_source: None,
         }],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1439,9 +1439,9 @@ fn header_shows_decisions_pending_singular() {
 
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1467,9 +1467,9 @@ fn header_shows_decisions_pending_plural() {
 
     let ns1 = NamespaceStatus {
         namespace: "proj-a".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1477,9 +1477,9 @@ fn header_shows_decisions_pending_plural() {
     };
     let ns2 = NamespaceStatus {
         namespace: "proj-b".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1501,9 +1501,9 @@ fn header_hides_decisions_when_zero() {
 
     let ns = NamespaceStatus {
         namespace: "test".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1526,9 +1526,9 @@ fn workers_sorted_alphabetically() {
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        active_jobs: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![
             oj_daemon::WorkerSummary {
                 name: "zebra".to_string(),
@@ -1579,14 +1579,14 @@ fn workers_sorted_alphabetically() {
 
 #[test]
 #[serial]
-fn pipelines_sorted_by_most_recent_activity() {
+fn jobs_sorted_by_most_recent_activity() {
     std::env::set_var("NO_COLOR", "1");
     std::env::remove_var("COLOR");
 
     let ns = NamespaceStatus {
         namespace: "myproject".to_string(),
-        active_pipelines: vec![
-            oj_daemon::PipelineStatusEntry {
+        active_jobs: vec![
+            oj_daemon::JobStatusEntry {
                 id: "oldest-0000".to_string(),
                 name: "oldest-0000".to_string(),
                 kind: "build".to_string(),
@@ -1597,7 +1597,7 @@ fn pipelines_sorted_by_most_recent_activity() {
                 waiting_reason: None,
                 escalate_source: None,
             },
-            oj_daemon::PipelineStatusEntry {
+            oj_daemon::JobStatusEntry {
                 id: "newest-0000".to_string(),
                 name: "newest-0000".to_string(),
                 kind: "build".to_string(),
@@ -1608,7 +1608,7 @@ fn pipelines_sorted_by_most_recent_activity() {
                 waiting_reason: None,
                 escalate_source: None,
             },
-            oj_daemon::PipelineStatusEntry {
+            oj_daemon::JobStatusEntry {
                 id: "middle-0000".to_string(),
                 name: "middle-0000".to_string(),
                 kind: "build".to_string(),
@@ -1620,8 +1620,8 @@ fn pipelines_sorted_by_most_recent_activity() {
                 escalate_source: None,
             },
         ],
-        escalated_pipelines: vec![],
-        orphaned_pipelines: vec![],
+        escalated_jobs: vec![],
+        orphaned_jobs: vec![],
         workers: vec![],
         queues: vec![],
         active_agents: vec![],
@@ -1635,6 +1635,6 @@ fn pipelines_sorted_by_most_recent_activity() {
     let oldest_pos = output.find("oldest").unwrap();
     assert!(
         newest_pos < middle_pos && middle_pos < oldest_pos,
-        "pipelines should be sorted by most recent activity first\n{output}"
+        "jobs should be sorted by most recent activity first\n{output}"
     );
 }

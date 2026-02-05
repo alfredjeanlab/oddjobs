@@ -24,7 +24,7 @@ Odd jobs coordinates multiple AI coding agents with runbook-defined workflows, t
 ┌──────────────────────┼─────────────────────────┐
 │                      │   Functional Core       │
 │  ┌───────────────────┴────────────────────┐    │
-│  │  Pipeline, Queue, Task, Lock,          │    │
+│  │  Job, Queue, Task, Lock,          │    │
 │  │  Semaphore, Guard state machines       │    │
 │  │                                        │    │
 │  │  transition(state, event) →            │    │

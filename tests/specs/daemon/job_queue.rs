@@ -1,61 +1,61 @@
-//! Pipeline↔Queue lifecycle specs
+//! Job↔Queue lifecycle specs
 //!
 //! Verify that queue items transition correctly when their associated
-//! pipeline is cancelled, fails, or completes.
+//! job is cancelled, fails, or completes.
 
 use crate::prelude::*;
 
-/// Runbook: persisted queue + worker + shell-only pipeline.
-/// Pipeline steps: work → done.
+/// Runbook: persisted queue + worker + shell-only job.
+/// Job steps: work → done.
 /// `work` runs a command provided via the queue item's `cmd` var.
 /// `done` always succeeds (echo done).
-const QUEUE_PIPELINE_RUNBOOK: &str = r#"
+const QUEUE_JOB_RUNBOOK: &str = r#"
 [queue.tasks]
 type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
 source = { queue = "tasks" }
-handler = { pipeline = "process" }
+handler = { job = "process" }
 concurrency = 1
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
 
-/// Same as QUEUE_PIPELINE_RUNBOOK but concurrency = 3.
-const QUEUE_PIPELINE_CONCURRENT_RUNBOOK: &str = r#"
+/// Same as QUEUE_JOB_RUNBOOK but concurrency = 3.
+const QUEUE_JOB_CONCURRENT_RUNBOOK: &str = r#"
 [queue.tasks]
 type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
 source = { queue = "tasks" }
-handler = { pipeline = "process" }
+handler = { job = "process" }
 concurrency = 3
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = "${var.cmd}"
 "#;
 
-/// Extract the first pipeline ID from `oj pipeline list` output
+/// Extract the first job ID from `oj job list` output
 /// by matching a line containing `name_filter`.
-fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
-    let output = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+fn extract_job_id(temp: &Project, name_filter: &str) -> String {
+    let output = temp.oj().args(&["job", "list"]).passes().stdout();
     output
         .lines()
         .find(|l| l.contains(name_filter))
         .unwrap_or_else(|| {
             panic!(
-                "no pipeline matching '{}' in output:\n{}",
+                "no job matching '{}' in output:\n{}",
                 name_filter, output
             )
         })
@@ -70,25 +70,25 @@ fn extract_pipeline_id(temp: &Project, name_filter: &str) -> String {
 // =============================================================================
 
 #[test]
-fn cancel_pipeline_transitions_queue_item_from_active() {
+fn cancel_job_transitions_queue_item_from_active() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push item with a blocking command so the pipeline stays on "work" step
+    // Push item with a blocking command so the job stays on "work" step
     temp.oj()
         .args(&["queue", "push", "tasks", r#"{"cmd": "sleep 30"}"#])
         .passes();
 
-    // Wait for the pipeline to reach "running" on the "work" step
+    // Wait for the job to reach "running" on the "work" step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("work") && out.contains("running")
     });
-    assert!(running, "pipeline should be running the work step");
+    assert!(running, "job should be running the work step");
 
     // Verify queue item is active
     let active = temp
@@ -98,10 +98,10 @@ fn cancel_pipeline_transitions_queue_item_from_active() {
         .stdout();
     assert!(active.contains("active"), "queue item should be active");
 
-    // Get pipeline ID and cancel it
-    let pipeline_id = extract_pipeline_id(&temp, "process");
+    // Get job ID and cancel it
+    let job_id = extract_job_id(&temp, "process");
     temp.oj()
-        .args(&["pipeline", "cancel", &pipeline_id])
+        .args(&["job", "cancel", &job_id])
         .passes();
 
     // Wait for queue item to reach a terminal status (dead or failed)
@@ -119,19 +119,19 @@ fn cancel_pipeline_transitions_queue_item_from_active() {
     }
     assert!(
         transitioned,
-        "cancelled pipeline should mark queue item as dead or failed"
+        "cancelled job should mark queue item as dead or failed"
     );
 }
 
 // =============================================================================
-// Test 2: Failed pipeline marks queue item dead
+// Test 2: Failed job marks queue item dead
 // =============================================================================
 
 #[test]
-fn failed_pipeline_marks_queue_item_dead() {
+fn failed_job_marks_queue_item_dead() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -154,18 +154,18 @@ fn failed_pipeline_marks_queue_item_dead() {
     if !dead {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(dead, "failed pipeline should mark queue item as dead");
+    assert!(dead, "failed job should mark queue item as dead");
 }
 
 // =============================================================================
-// Test 3: Completed pipeline marks queue item completed + frees concurrency
+// Test 3: Completed job marks queue item completed + frees concurrency
 // =============================================================================
 
 #[test]
-fn completed_pipeline_marks_queue_item_completed() {
+fn completed_job_marks_queue_item_completed() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -190,7 +190,7 @@ fn completed_pipeline_marks_queue_item_completed() {
     }
     assert!(
         completed,
-        "successful pipeline should mark queue item as completed"
+        "successful job should mark queue item as completed"
     );
 
     // Verify concurrency slot is freed by pushing another item
@@ -223,10 +223,10 @@ fn completed_pipeline_marks_queue_item_completed() {
 // =============================================================================
 
 #[test]
-fn one_pipeline_failure_does_not_affect_others() {
+fn one_job_failure_does_not_affect_others() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_CONCURRENT_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_CONCURRENT_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
@@ -275,35 +275,35 @@ fn one_pipeline_failure_does_not_affect_others() {
 // =============================================================================
 
 // =============================================================================
-// Test 6: Queue item released after daemon crash with terminal pipeline
+// Test 6: Queue item released after daemon crash with terminal job
 // =============================================================================
 
-/// When the daemon crashes after a pipeline reaches terminal state but before
+/// When the daemon crashes after a job reaches terminal state but before
 /// the QueueCompleted event is persisted to the WAL, restarting the daemon
 /// should reconcile the queue item during worker recovery.
 ///
-/// Uses a fast shell command so the pipeline completes quickly, then kills
+/// Uses a fast shell command so the job completes quickly, then kills
 /// the daemon and verifies the queue item is completed after restart.
 #[test]
-fn queue_item_released_after_crash_with_terminal_pipeline() {
+fn queue_item_released_after_crash_with_terminal_job() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/runbooks/queue.toml", QUEUE_PIPELINE_RUNBOOK);
+    temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
-    // Push item with a fast command so the pipeline completes quickly
+    // Push item with a fast command so the job completes quickly
     temp.oj()
         .args(&["queue", "push", "tasks", r#"{"cmd": "echo hello"}"#])
         .passes();
 
-    // Wait for the pipeline to reach a terminal state
-    let pipeline_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+    // Wait for the job to reach a terminal state
+    let job_done = wait_for(SPEC_WAIT_MAX_MS, || {
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("completed")
     });
-    assert!(pipeline_done, "pipeline should complete before crash");
+    assert!(job_done, "job should complete before crash");
 
     // Kill the daemon (simulates crash — queue event may or may not be persisted)
     let killed = temp.daemon_kill();
@@ -345,13 +345,13 @@ fn queue_item_released_after_crash_with_terminal_pipeline() {
                 .stdout()
         );
         eprintln!(
-            "=== PIPELINES ===\n{}\n=== END PIPELINES ===",
-            temp.oj().args(&["pipeline", "list"]).passes().stdout()
+            "=== JOBS ===\n{}\n=== END JOBS ===",
+            temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
     assert!(
         item_completed,
-        "queue item should be completed after daemon crash recovery with terminal pipeline"
+        "queue item should be completed after daemon crash recovery with terminal job"
     );
 }
 
@@ -372,7 +372,7 @@ mode = "live"
 
 /// Runbook where the agent always exits (via -p mode),
 /// and on_dead is configured with limited recover attempts.
-/// After exhausting attempts, the pipeline should escalate.
+/// After exhausting attempts, the job should escalate.
 fn circuit_breaker_runbook(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
@@ -382,13 +382,13 @@ vars = ["cmd"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ pipeline = "process" }}
+handler = {{ job = "process" }}
 concurrency = 1
 
-[pipeline.process]
+[job.process]
 vars = ["cmd"]
 
-[[pipeline.process.step]]
+[[job.process.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -421,9 +421,9 @@ fn circuit_breaker_escalates_after_max_attempts() {
         .args(&["queue", "push", "tasks", r#"{"cmd": "noop"}"#])
         .passes();
 
-    // Wait for pipeline to reach "waiting" (escalated) status
+    // Wait for job to reach "waiting" (escalated) status
     let escalated = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        let out = temp.oj().args(&["pipeline", "list"]).passes().stdout();
+        let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("waiting")
     });
 
@@ -432,10 +432,10 @@ fn circuit_breaker_escalates_after_max_attempts() {
     }
     assert!(
         escalated,
-        "pipeline should escalate to waiting after exhausting recover attempts"
+        "job should escalate to waiting after exhausting recover attempts"
     );
 
-    // Queue item should still be active (pipeline hasn't terminated, it's waiting)
+    // Queue item should still be active (job hasn't terminated, it's waiting)
     let items = temp
         .oj()
         .args(&["queue", "show", "tasks"])
@@ -443,7 +443,7 @@ fn circuit_breaker_escalates_after_max_attempts() {
         .stdout();
     assert!(
         items.contains("active"),
-        "queue item should remain active while pipeline is waiting for intervention, got: {}",
+        "queue item should remain active while job is waiting for intervention, got: {}",
         items
     );
 }

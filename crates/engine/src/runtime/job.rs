@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Pipeline lifecycle management
+//! Job lifecycle management
 
 use super::Runtime;
 use crate::error::RuntimeError;
 use crate::steps;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, Pipeline, PipelineId, SessionId, TimerId};
+use oj_core::{Clock, Effect, Event, Job, JobId, SessionId, TimerId};
 use oj_runbook::{NotifyConfig, RunDirective};
 use std::collections::HashMap;
 use std::path::Path;
@@ -21,42 +21,42 @@ where
 {
     pub(crate) async fn start_step(
         &self,
-        pipeline_id: &PipelineId,
+        job_id: &JobId,
         step_name: &str,
         input: &HashMap<String, String>,
         workspace_path: &Path,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let pipeline = self.require_pipeline(pipeline_id.as_str())?;
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
+        let job = self.require_job(job_id.as_str())?;
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
 
-        let pipeline_def = runbook
-            .get_pipeline(&pipeline.kind)
-            .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline.kind.clone()))?;
+        let job_def = runbook
+            .get_job(&job.kind)
+            .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
         // Circuit breaker: prevent runaway retry cycles by limiting how many
         // times any single step can be entered. step_visits is incremented
-        // when PipelineAdvanced is applied, so the count here is already
+        // when JobAdvanced is applied, so the count here is already
         // current for this visit.
-        let visits = pipeline.get_step_visits(step_name);
-        if visits > oj_core::pipeline::MAX_STEP_VISITS {
+        let visits = job.get_step_visits(step_name);
+        if visits > oj_core::job::MAX_STEP_VISITS {
             let error = format!(
                 "circuit breaker: step '{}' entered {} times (limit {})",
                 step_name,
                 visits,
-                oj_core::pipeline::MAX_STEP_VISITS,
+                oj_core::job::MAX_STEP_VISITS,
             );
-            tracing::warn!(pipeline_id = %pipeline.id, %error);
-            self.logger.append(pipeline_id.as_str(), step_name, &error);
-            let effects = steps::failure_effects(&pipeline, &error);
+            tracing::warn!(job_id = %job.id, %error);
+            self.logger.append(job_id.as_str(), step_name, &error);
+            let effects = steps::failure_effects(&job, &error);
             let mut result_events = self.executor.execute_all(effects).await?;
-            self.breadcrumb.delete(&pipeline.id);
+            self.breadcrumb.delete(&job.id);
 
             // Emit on_fail notification for the terminal failure
             result_events.extend(
                 self.emit_notify(
-                    &pipeline,
-                    &pipeline_def.notify,
-                    pipeline_def.notify.on_fail.as_ref(),
+                    &job,
+                    &job_def.notify,
+                    job_def.notify.on_fail.as_ref(),
                 )
                 .await?,
             );
@@ -64,35 +64,35 @@ where
             return Ok(result_events);
         }
 
-        let step_def = pipeline_def.get_step(step_name).ok_or_else(|| {
-            RuntimeError::PipelineNotFound(format!("step {} not found", step_name))
+        let step_def = job_def.get_step(step_name).ok_or_else(|| {
+            RuntimeError::JobNotFound(format!("step {} not found", step_name))
         })?;
 
         let mut result_events = Vec::new();
 
         // Mark step as running
-        let effects = steps::step_start_effects(pipeline_id, step_name);
+        let effects = steps::step_start_effects(job_id, step_name);
         result_events.extend(self.executor.execute_all(effects).await?);
         self.logger
-            .append(pipeline_id.as_str(), step_name, "step started");
+            .append(job_id.as_str(), step_name, "step started");
 
         // Write breadcrumb after step status change (captures agent info)
-        if let Some(pipeline) = self.get_pipeline(pipeline_id.as_str()) {
-            self.breadcrumb.write(&pipeline);
+        if let Some(job) = self.get_job(job_id.as_str()) {
+            self.breadcrumb.write(&job);
         }
 
         // Dispatch based on run directive
         match &step_def.run {
             RunDirective::Shell(cmd) => {
                 // Build template variables
-                // Namespace pipeline vars under "var." prefix (matching monitor.rs)
+                // Namespace job vars under "var." prefix (matching monitor.rs)
                 // Values are escaped by interpolate_shell() during substitution
                 let mut vars: HashMap<String, String> = input
                     .iter()
                     .map(|(k, v)| (format!("var.{}", k), v.clone()))
                     .collect();
-                vars.insert("pipeline_id".to_string(), pipeline_id.to_string());
-                vars.insert("name".to_string(), pipeline.name.clone());
+                vars.insert("job_id".to_string(), job_id.to_string());
+                vars.insert("name".to_string(), job.name.clone());
                 vars.insert(
                     "workspace".to_string(),
                     workspace_path.display().to_string(),
@@ -109,24 +109,24 @@ where
 
                 let command = oj_runbook::interpolate_shell(cmd, &vars);
                 self.logger.append(
-                    pipeline_id.as_str(),
+                    job_id.as_str(),
                     step_name,
                     &format!("shell (cwd: {}): {}", workspace_path.display(), command),
                 );
 
                 let mut shell_env = HashMap::new();
-                if !pipeline.namespace.is_empty() {
-                    shell_env.insert("OJ_NAMESPACE".to_string(), pipeline.namespace.clone());
+                if !job.namespace.is_empty() {
+                    shell_env.insert("OJ_NAMESPACE".to_string(), job.namespace.clone());
                 }
 
                 // Inject user-managed env vars (global + per-project)
-                let user_env = crate::env::load_merged_env(&self.state_dir, &pipeline.namespace);
+                let user_env = crate::env::load_merged_env(&self.state_dir, &job.namespace);
                 for (key, value) in user_env {
                     shell_env.entry(key).or_insert(value);
                 }
 
                 let effects = vec![Effect::Shell {
-                    pipeline_id: pipeline_id.clone(),
+                    job_id: job_id.clone(),
                     step: step_name.to_string(),
                     command,
                     cwd: workspace_path.to_path_buf(),
@@ -137,14 +137,14 @@ where
             }
 
             RunDirective::Agent { agent, .. } => {
-                result_events.extend(self.spawn_agent(pipeline_id, agent, input).await?);
+                result_events.extend(self.spawn_agent(job_id, agent, input).await?);
             }
 
-            RunDirective::Pipeline { pipeline } => {
+            RunDirective::Job { job } => {
                 return Err(Self::invalid_directive(
                     &format!("step {step_name}"),
-                    "nested pipeline",
-                    pipeline,
+                    "nested job",
+                    job,
                 ));
             }
         }
@@ -152,54 +152,54 @@ where
         Ok(result_events)
     }
 
-    pub(crate) async fn advance_pipeline(
+    pub(crate) async fn advance_job(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // If current step is terminal (done/failed), complete the pipeline
+        // If current step is terminal (done/failed), complete the job
         // This handles the case where a "done" step has a run command that just finished
-        if pipeline.is_terminal() {
-            return self.complete_pipeline(pipeline).await;
+        if job.is_terminal() {
+            return self.complete_job(job).await;
         }
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let pipeline_def = runbook.get_pipeline(&pipeline.kind);
-        let current_step_def = pipeline_def
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook.get_job(&job.kind);
+        let current_step_def = job_def
             .as_ref()
-            .and_then(|p| p.get_step(&pipeline.step));
+            .and_then(|p| p.get_step(&job.step));
 
         // Cancel session monitor timer when leaving an agent step
         let current_is_agent = current_step_def
             .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
             .unwrap_or(false);
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
         if current_is_agent {
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&pipeline_id),
+                    id: TimerId::liveness(&job_id),
                 })
                 .await?;
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&pipeline_id),
+                    id: TimerId::exit_deferred(&job_id),
                 })
                 .await?;
 
-            // Deregister the agent→pipeline mapping so stale watcher events
+            // Deregister the agent→job mapping so stale watcher events
             // from the old agent are dropped as unknown.
-            if let Some(agent_id) = pipeline
+            if let Some(agent_id) = job
                 .step_history
                 .iter()
-                .rfind(|r| r.name == pipeline.step)
+                .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_pipelines
+                self.agent_jobs
                     .lock()
                     .remove(&oj_core::AgentId::new(agent_id));
             }
 
             // Kill the agent's tmux session before moving to the next step
-            if let Some(session_id) = &pipeline.session_id {
+            if let Some(session_id) = &job.session_id {
                 let sid = SessionId::new(session_id);
                 self.executor
                     .execute(Effect::KillSession {
@@ -214,21 +214,21 @@ where
             }
         }
 
-        // Mark current step as completed so that PipelineAdvanced sees
+        // Mark current step as completed so that JobAdvanced sees
         // step_status == Completed and correctly resets action_attempts.
         // (Without this, an agent exiting non-zero with on_dead="done" would
         // leave step_status == Failed, causing action_attempts to carry over.)
         self.executor
             .execute(Effect::Emit {
                 event: Event::StepCompleted {
-                    pipeline_id: pipeline_id.clone(),
-                    step: pipeline.step.clone(),
+                    job_id: job_id.clone(),
+                    step: job.step.clone(),
                 },
             })
             .await?;
 
         // Determine next step: explicit on_done > complete
-        // Steps without on_done complete the pipeline (same as on_fail requiring explicit targets)
+        // Steps without on_done complete the job (same as on_fail requiring explicit targets)
         let next_transition = current_step_def.and_then(|p| p.on_done.clone());
 
         let mut result_events = Vec::new();
@@ -237,76 +237,76 @@ where
             Some(transition) => {
                 let next_step = transition.step_name();
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
+                    &job.id,
+                    &job.step,
                     &format!("advancing to {}", next_step),
                 );
-                let effects = steps::step_transition_effects(pipeline, next_step);
+                let effects = steps::step_transition_effects(job, next_step);
                 result_events.extend(self.executor.execute_all(effects).await?);
 
-                let has_step_def = pipeline_def
+                let has_step_def = job_def
                     .as_ref()
                     .and_then(|p| p.get_step(next_step))
                     .is_some();
                 let is_terminal = next_step == "done" || next_step == "failed";
 
                 if !has_step_def && is_terminal {
-                    result_events.extend(self.complete_pipeline(pipeline).await?);
+                    result_events.extend(self.complete_job(job).await?);
                 } else {
                     result_events.extend(
                         self.start_step(
-                            &pipeline_id,
+                            &job_id,
                             next_step,
-                            &pipeline.vars,
-                            &self.execution_dir(pipeline),
+                            &job.vars,
+                            &self.execution_dir(job),
                         )
                         .await?,
                     );
                 }
             }
             None => {
-                let pipeline_on_done = pipeline_def.as_ref().and_then(|p| p.on_done.clone());
-                if let Some(ref on_done) = pipeline_on_done {
+                let job_on_done = job_def.as_ref().and_then(|p| p.on_done.clone());
+                if let Some(ref on_done) = job_on_done {
                     let on_done_step = on_done.step_name();
-                    if pipeline.step != on_done_step {
-                        // Pipeline-level on_done: route to that step instead of completing
+                    if job.step != on_done_step {
+                        // Job-level on_done: route to that step instead of completing
                         self.logger.append(
-                            &pipeline.id,
-                            &pipeline.step,
-                            &format!("pipeline on_done: advancing to {}", on_done_step),
+                            &job.id,
+                            &job.step,
+                            &format!("job on_done: advancing to {}", on_done_step),
                         );
-                        let effects = steps::step_transition_effects(pipeline, on_done_step);
+                        let effects = steps::step_transition_effects(job, on_done_step);
                         result_events.extend(self.executor.execute_all(effects).await?);
                         result_events.extend(
                             self.start_step(
-                                &pipeline_id,
+                                &job_id,
                                 on_done_step,
-                                &pipeline.vars,
-                                &self.execution_dir(pipeline),
+                                &job.vars,
+                                &self.execution_dir(job),
                             )
                             .await?,
                         );
                     } else {
                         // Already at on_done target; complete normally
-                        let effects = steps::step_transition_effects(pipeline, "done");
+                        let effects = steps::step_transition_effects(job, "done");
                         result_events.extend(self.executor.execute_all(effects).await?);
-                        result_events.extend(self.complete_pipeline(pipeline).await?);
+                        result_events.extend(self.complete_job(job).await?);
                     }
-                } else if pipeline.cancelling {
+                } else if job.cancelling {
                     // Cancel cleanup step completed; go to terminal "cancelled"
-                    let mut effects = steps::cancellation_effects(pipeline);
-                    effects.extend(self.workspace_cleanup_effects(pipeline));
+                    let mut effects = steps::cancellation_effects(job);
+                    effects.extend(self.workspace_cleanup_effects(job));
                     result_events.extend(self.executor.execute_all(effects).await?);
-                    self.breadcrumb.delete(&pipeline.id);
+                    self.breadcrumb.delete(&job.id);
                     // Update queue item status immediately (don't rely on event loop)
                     result_events.extend(
-                        self.check_worker_pipeline_complete(&pipeline_id, "cancelled")
+                        self.check_worker_job_complete(&job_id, "cancelled")
                             .await?,
                     );
                 } else {
-                    let effects = steps::step_transition_effects(pipeline, "done");
+                    let effects = steps::step_transition_effects(job, "done");
                     result_events.extend(self.executor.execute_all(effects).await?);
-                    result_events.extend(self.complete_pipeline(pipeline).await?);
+                    result_events.extend(self.complete_job(job).await?);
                 }
             }
         }
@@ -314,50 +314,50 @@ where
         Ok(result_events)
     }
 
-    pub(crate) async fn fail_pipeline(
+    pub(crate) async fn fail_job(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         error: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let pipeline_def = runbook.get_pipeline(&pipeline.kind);
-        let current_step_def = pipeline_def
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook.get_job(&job.kind);
+        let current_step_def = job_def
             .as_ref()
-            .and_then(|p| p.get_step(&pipeline.step));
+            .and_then(|p| p.get_step(&job.step));
         let on_fail = current_step_def.and_then(|p| p.on_fail.as_ref());
 
         // Cancel session monitor timers when leaving an agent step
         let current_is_agent = current_step_def
             .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
             .unwrap_or(false);
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
         if current_is_agent {
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&pipeline_id),
+                    id: TimerId::liveness(&job_id),
                 })
                 .await?;
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&pipeline_id),
+                    id: TimerId::exit_deferred(&job_id),
                 })
                 .await?;
 
-            // Deregister the agent→pipeline mapping so stale watcher events
+            // Deregister the agent→job mapping so stale watcher events
             // from the old agent are dropped as unknown.
-            if let Some(agent_id) = pipeline
+            if let Some(agent_id) = job
                 .step_history
                 .iter()
-                .rfind(|r| r.name == pipeline.step)
+                .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_pipelines
+                self.agent_jobs
                     .lock()
                     .remove(&oj_core::AgentId::new(agent_id));
             }
 
             // Kill the agent's tmux session before moving to the failure step
-            if let Some(session_id) = &pipeline.session_id {
+            if let Some(session_id) = &job.session_id {
                 let sid = SessionId::new(session_id);
                 self.executor
                     .execute(Effect::KillSession {
@@ -373,78 +373,78 @@ where
         }
 
         self.logger.append(
-            &pipeline.id,
-            &pipeline.step,
-            &format!("pipeline failed: {}", error),
+            &job.id,
+            &job.step,
+            &format!("job failed: {}", error),
         );
 
         let mut result_events = Vec::new();
 
         if let Some(on_fail) = on_fail {
             let on_fail_step = on_fail.step_name();
-            let effects = steps::failure_transition_effects(pipeline, on_fail_step, error);
+            let effects = steps::failure_transition_effects(job, on_fail_step, error);
             result_events.extend(self.executor.execute_all(effects).await?);
             result_events.extend(
                 self.start_step(
-                    &pipeline_id,
+                    &job_id,
                     on_fail_step,
-                    &pipeline.vars,
-                    &self.execution_dir(pipeline),
+                    &job.vars,
+                    &self.execution_dir(job),
                 )
                 .await?,
             );
-        } else if let Some(ref pipeline_on_fail) =
-            pipeline_def.as_ref().and_then(|p| p.on_fail.clone())
+        } else if let Some(ref job_on_fail) =
+            job_def.as_ref().and_then(|p| p.on_fail.clone())
         {
-            let on_fail_step = pipeline_on_fail.step_name();
-            if pipeline.step != on_fail_step {
-                // Pipeline-level on_fail: route to that step
+            let on_fail_step = job_on_fail.step_name();
+            if job.step != on_fail_step {
+                // Job-level on_fail: route to that step
                 self.logger.append(
-                    &pipeline.id,
-                    &pipeline.step,
-                    &format!("pipeline on_fail: advancing to {}", on_fail_step),
+                    &job.id,
+                    &job.step,
+                    &format!("job on_fail: advancing to {}", on_fail_step),
                 );
-                let effects = steps::failure_transition_effects(pipeline, on_fail_step, error);
+                let effects = steps::failure_transition_effects(job, on_fail_step, error);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
                     self.start_step(
-                        &pipeline_id,
+                        &job_id,
                         on_fail_step,
-                        &pipeline.vars,
-                        &self.execution_dir(pipeline),
+                        &job.vars,
+                        &self.execution_dir(job),
                     )
                     .await?,
                 );
             } else {
-                // Already at the pipeline on_fail target; terminal failure
-                let effects = steps::failure_effects(pipeline, error);
+                // Already at the job on_fail target; terminal failure
+                let effects = steps::failure_effects(job, error);
                 result_events.extend(self.executor.execute_all(effects).await?);
-                self.breadcrumb.delete(&pipeline.id);
+                self.breadcrumb.delete(&job.id);
                 // Update queue item status immediately (don't rely on event loop)
                 result_events.extend(
-                    self.check_worker_pipeline_complete(&pipeline_id, "failed")
+                    self.check_worker_job_complete(&job_id, "failed")
                         .await?,
                 );
             }
         } else {
             // Terminal failure — no on_fail handler
-            let effects = steps::failure_effects(pipeline, error);
+            let effects = steps::failure_effects(job, error);
             result_events.extend(self.executor.execute_all(effects).await?);
-            self.breadcrumb.delete(&pipeline.id);
+            self.breadcrumb.delete(&job.id);
 
             // Update queue item status immediately (don't rely on event loop)
             result_events.extend(
-                self.check_worker_pipeline_complete(&pipeline_id, "failed")
+                self.check_worker_job_complete(&job_id, "failed")
                     .await?,
             );
 
             // Emit on_fail notification only on terminal failure (not on_fail transition)
-            if let Some(pipeline_def) = pipeline_def.as_ref() {
+            if let Some(job_def) = job_def.as_ref() {
                 result_events.extend(
                     self.emit_notify(
-                        pipeline,
-                        &pipeline_def.notify,
-                        pipeline_def.notify.on_fail.as_ref(),
+                        job,
+                        &job_def.notify,
+                        job_def.notify.on_fail.as_ref(),
                     )
                     .await?,
                 );
@@ -454,14 +454,14 @@ where
         Ok(result_events)
     }
 
-    /// Build workspace cleanup effects for a pipeline (if it has a workspace).
-    fn workspace_cleanup_effects(&self, pipeline: &Pipeline) -> Vec<Effect> {
-        // Try pipeline.workspace_id first; fall back to scanning workspaces by owner
-        let ws_id = pipeline.workspace_id.clone().or_else(|| {
+    /// Build workspace cleanup effects for a job (if it has a workspace).
+    fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
+        // Try job.workspace_id first; fall back to scanning workspaces by owner
+        let ws_id = job.workspace_id.clone().or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
-                    .find(|ws| ws.owner.as_deref() == Some(&pipeline.id))
+                    .find(|ws| ws.owner.as_deref() == Some(&job.id))
                     .map(|ws| oj_core::WorkspaceId::new(&ws.id))
             })
         });
@@ -477,35 +477,35 @@ where
         vec![]
     }
 
-    pub(crate) async fn complete_pipeline(
+    pub(crate) async fn complete_job(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
     ) -> Result<Vec<Event>, RuntimeError> {
         self.logger
-            .append(&pipeline.id, &pipeline.step, "pipeline completed");
-        self.breadcrumb.delete(&pipeline.id);
-        let mut effects = steps::completion_effects(pipeline);
+            .append(&job.id, &job.step, "job completed");
+        self.breadcrumb.delete(&job.id);
+        let mut effects = steps::completion_effects(job);
 
         // Clean up workspaces on successful completion
-        effects.extend(self.workspace_cleanup_effects(pipeline));
+        effects.extend(self.workspace_cleanup_effects(job));
 
         let mut result_events = self.executor.execute_all(effects).await?;
 
         // Update queue item status immediately (don't rely on event loop)
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
         result_events.extend(
-            self.check_worker_pipeline_complete(&pipeline_id, "done")
+            self.check_worker_job_complete(&job_id, "done")
                 .await?,
         );
 
         // Emit on_done notification if configured
-        if let Ok(runbook) = self.cached_runbook(&pipeline.runbook_hash) {
-            if let Some(pipeline_def) = runbook.get_pipeline(&pipeline.kind) {
+        if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
+            if let Some(job_def) = runbook.get_job(&job.kind) {
                 result_events.extend(
                     self.emit_notify(
-                        pipeline,
-                        &pipeline_def.notify,
-                        pipeline_def.notify.on_done.as_ref(),
+                        job,
+                        &job_def.notify,
+                        job_def.notify.on_done.as_ref(),
                     )
                     .await?,
                 );
@@ -518,20 +518,20 @@ where
     /// Emit a notification effect if a notify message template is configured.
     pub(crate) async fn emit_notify(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
         notify: &NotifyConfig,
         message_template: Option<&String>,
     ) -> Result<Vec<Event>, RuntimeError> {
         if let Some(template) = message_template {
-            // Build vars for interpolation (namespace pipeline vars under "var." like elsewhere)
-            let mut vars: HashMap<String, String> = pipeline
+            // Build vars for interpolation (namespace job vars under "var." like elsewhere)
+            let mut vars: HashMap<String, String> = job
                 .vars
                 .iter()
                 .map(|(k, v)| (format!("var.{}", k), v.clone()))
                 .collect();
-            vars.insert("pipeline_id".to_string(), pipeline.id.clone());
-            vars.insert("name".to_string(), pipeline.name.clone());
-            if let Some(err) = &pipeline.error {
+            vars.insert("job_id".to_string(), job.id.clone());
+            vars.insert("name".to_string(), job.name.clone());
+            if let Some(err) = &job.error {
                 vars.insert("error".to_string(), err.clone());
             }
 
@@ -539,7 +539,7 @@ where
             let event = self
                 .executor
                 .execute(Effect::Notify {
-                    title: pipeline.name.clone(),
+                    title: job.name.clone(),
                     message,
                 })
                 .await?;
@@ -549,64 +549,64 @@ where
         Ok(vec![])
     }
 
-    /// Cancel a running pipeline.
+    /// Cancel a running job.
     ///
-    /// If the current step (or pipeline) has `on_cancel` configured, routes to
+    /// If the current step (or job) has `on_cancel` configured, routes to
     /// that cleanup step instead of going straight to terminal. The cleanup step
     /// is non-cancellable — re-cancellation while `cancelling` is true is a no-op.
-    pub(crate) async fn cancel_pipeline(
+    pub(crate) async fn cancel_job(
         &self,
-        pipeline: &Pipeline,
+        job: &Job,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Already terminal — no-op
-        if pipeline.is_terminal() {
-            tracing::info!(pipeline_id = %pipeline.id, "cancel: pipeline already terminal");
+        if job.is_terminal() {
+            tracing::info!(job_id = %job.id, "cancel: job already terminal");
             return Ok(vec![]);
         }
 
         // If already running a cancel cleanup step, don't re-cancel — let it finish
-        if pipeline.cancelling {
-            tracing::info!(pipeline_id = %pipeline.id, "cancel: already running cleanup, ignoring");
+        if job.cancelling {
+            tracing::info!(job_id = %job.id, "cancel: already running cleanup, ignoring");
             return Ok(vec![]);
         }
 
-        let runbook = self.cached_runbook(&pipeline.runbook_hash)?;
-        let pipeline_def = runbook.get_pipeline(&pipeline.kind);
-        let current_step_def = pipeline_def
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook.get_job(&job.kind);
+        let current_step_def = job_def
             .as_ref()
-            .and_then(|p| p.get_step(&pipeline.step));
+            .and_then(|p| p.get_step(&job.step));
         let on_cancel = current_step_def.and_then(|s| s.on_cancel.as_ref());
 
-        let pipeline_id = PipelineId::new(&pipeline.id);
+        let job_id = JobId::new(&job.id);
 
-        // Cancel timers and kill session (same cleanup as fail_pipeline for agent steps)
+        // Cancel timers and kill session (same cleanup as fail_job for agent steps)
         let current_is_agent = current_step_def
             .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
             .unwrap_or(false);
         if current_is_agent {
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&pipeline_id),
+                    id: TimerId::liveness(&job_id),
                 })
                 .await?;
             self.executor
                 .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&pipeline_id),
+                    id: TimerId::exit_deferred(&job_id),
                 })
                 .await?;
 
-            if let Some(agent_id) = pipeline
+            if let Some(agent_id) = job
                 .step_history
                 .iter()
-                .rfind(|r| r.name == pipeline.step)
+                .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_pipelines
+                self.agent_jobs
                     .lock()
                     .remove(&oj_core::AgentId::new(agent_id));
             }
 
-            if let Some(session_id) = &pipeline.session_id {
+            if let Some(session_id) = &job.session_id {
                 let sid = SessionId::new(session_id);
                 self.executor
                     .execute(Effect::KillSession {
@@ -629,75 +629,75 @@ where
             result_events.extend(
                 self.executor
                     .execute(Effect::Emit {
-                        event: Event::PipelineCancelling {
-                            id: pipeline_id.clone(),
+                        event: Event::JobCancelling {
+                            id: job_id.clone(),
                         },
                     })
                     .await?,
             );
-            let effects = steps::cancellation_transition_effects(pipeline, target);
+            let effects = steps::cancellation_transition_effects(job, target);
             result_events.extend(self.executor.execute_all(effects).await?);
             result_events.extend(
                 self.start_step(
-                    &pipeline_id,
+                    &job_id,
                     target,
-                    &pipeline.vars,
-                    &self.execution_dir(pipeline),
+                    &job.vars,
+                    &self.execution_dir(job),
                 )
                 .await?,
             );
-        } else if let Some(ref pipeline_on_cancel) =
-            pipeline_def.as_ref().and_then(|p| p.on_cancel.clone())
+        } else if let Some(ref job_on_cancel) =
+            job_def.as_ref().and_then(|p| p.on_cancel.clone())
         {
-            // Pipeline-level on_cancel fallback
-            let target = pipeline_on_cancel.step_name();
-            if pipeline.step != target {
+            // Job-level on_cancel fallback
+            let target = job_on_cancel.step_name();
+            if job.step != target {
                 result_events.extend(
                     self.executor
                         .execute(Effect::Emit {
-                            event: Event::PipelineCancelling {
-                                id: pipeline_id.clone(),
+                            event: Event::JobCancelling {
+                                id: job_id.clone(),
                             },
                         })
                         .await?,
                 );
-                let effects = steps::cancellation_transition_effects(pipeline, target);
+                let effects = steps::cancellation_transition_effects(job, target);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
                     self.start_step(
-                        &pipeline_id,
+                        &job_id,
                         target,
-                        &pipeline.vars,
-                        &self.execution_dir(pipeline),
+                        &job.vars,
+                        &self.execution_dir(job),
                     )
                     .await?,
                 );
             } else {
                 // Already at the cancel target; go terminal
-                let mut effects = steps::cancellation_effects(pipeline);
-                effects.extend(self.workspace_cleanup_effects(pipeline));
+                let mut effects = steps::cancellation_effects(job);
+                effects.extend(self.workspace_cleanup_effects(job));
                 result_events.extend(self.executor.execute_all(effects).await?);
-                self.breadcrumb.delete(&pipeline.id);
+                self.breadcrumb.delete(&job.id);
                 // Update queue item status immediately (don't rely on event loop)
                 result_events.extend(
-                    self.check_worker_pipeline_complete(&pipeline_id, "cancelled")
+                    self.check_worker_job_complete(&job_id, "cancelled")
                         .await?,
                 );
             }
         } else {
             // No on_cancel configured; terminal cancellation as before
-            let mut effects = steps::cancellation_effects(pipeline);
-            effects.extend(self.workspace_cleanup_effects(pipeline));
+            let mut effects = steps::cancellation_effects(job);
+            effects.extend(self.workspace_cleanup_effects(job));
             result_events.extend(self.executor.execute_all(effects).await?);
-            self.breadcrumb.delete(&pipeline.id);
+            self.breadcrumb.delete(&job.id);
             // Update queue item status immediately (don't rely on event loop)
             result_events.extend(
-                self.check_worker_pipeline_complete(&pipeline_id, "cancelled")
+                self.check_worker_job_complete(&job_id, "cancelled")
                     .await?,
             );
         }
 
-        tracing::info!(pipeline_id = %pipeline.id, "cancelled pipeline");
+        tracing::info!(job_id = %job.id, "cancelled job");
         Ok(result_events)
     }
 }

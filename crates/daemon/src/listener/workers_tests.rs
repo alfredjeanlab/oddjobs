@@ -61,10 +61,10 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { pipeline = "handle" }
+  handler = { job = "handle" }
 }
 
-pipeline "handle" {
+job "handle" {
   step "run" {
     run = "echo task"
   }
@@ -110,7 +110,7 @@ fn stop_suggests_similar_worker_from_state() {
             project_root: PathBuf::from("/fake"),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: String::new(),
@@ -140,7 +140,7 @@ fn stop_suggests_cross_namespace_worker() {
             project_root: PathBuf::from("/other"),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "issues".to_string(),
             concurrency: 1,
             namespace: "other-project".to_string(),
@@ -188,7 +188,7 @@ fn restart_stops_existing_then_starts() {
             project_root: PathBuf::from("/fake"),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: String::new(),
@@ -233,10 +233,10 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { pipeline = "handle" }
+  handler = { job = "handle" }
 }
 
-pipeline "handle" {
+job "handle" {
   step "run" {
     run = "echo task"
   }
@@ -254,7 +254,7 @@ pipeline "handle" {
             project_root: project.path().to_path_buf(),
             runbook_hash: "old-hash".to_string(),
             status: "running".to_string(),
-            active_pipeline_ids: vec![],
+            active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
             namespace: String::new(),

@@ -4,13 +4,13 @@
 //! Tests for monitor module
 
 use super::*;
-use oj_core::{Pipeline, PipelineId, StepStatus, TimerId};
+use oj_core::{Job, JobId, StepStatus, TimerId};
 use oj_runbook::{parse_runbook, ActionConfig, AgentAction, AgentDef};
 use std::collections::HashMap;
 use std::time::Instant;
 
-fn test_pipeline() -> Pipeline {
-    Pipeline {
+fn test_job() -> Job {
+    Job {
         id: "test-1".to_string(),
         name: "test-feature".to_string(),
         kind: "build".to_string(),
@@ -48,54 +48,54 @@ fn test_agent_def() -> AgentDef {
 
 #[test]
 fn nudge_builds_send_effect() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Nudge);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "idle", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "idle", &HashMap::new(), None);
     assert!(matches!(result, Ok(ActionEffects::Nudge { .. })));
 }
 
 #[test]
-fn done_returns_advance_pipeline() {
-    let pipeline = test_pipeline();
+fn done_returns_advance_job() {
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Done);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "idle", &HashMap::new(), None);
-    assert!(matches!(result, Ok(ActionEffects::AdvancePipeline)));
+    let result = build_action_effects(&job, &agent, &config, "idle", &HashMap::new(), None);
+    assert!(matches!(result, Ok(ActionEffects::AdvanceJob)));
 }
 
 #[test]
-fn fail_returns_fail_pipeline() {
-    let pipeline = test_pipeline();
+fn fail_returns_fail_job() {
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Fail);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "error", &HashMap::new(), None);
-    assert!(matches!(result, Ok(ActionEffects::FailPipeline { .. })));
+    let result = build_action_effects(&job, &agent, &config, "error", &HashMap::new(), None);
+    assert!(matches!(result, Ok(ActionEffects::FailJob { .. })));
 }
 
 #[test]
 fn resume_returns_resume_effects() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Resume);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "exit", &HashMap::new(), None);
     assert!(matches!(result, Ok(ActionEffects::Resume { .. })));
 }
 
 #[test]
 fn resume_with_message_replaces_prompt() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::with_message(AgentAction::Resume, "New prompt.");
     let input = [("prompt".to_string(), "Original".to_string())]
         .into_iter()
         .collect();
 
-    let result = build_action_effects(&pipeline, &agent, &config, "exit", &input, None).unwrap();
+    let result = build_action_effects(&job, &agent, &config, "exit", &input, None).unwrap();
     if let ActionEffects::Resume {
         input,
         resume_session_id,
@@ -114,14 +114,14 @@ fn resume_with_message_replaces_prompt() {
 
 #[test]
 fn resume_with_append_sets_resume_message() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::with_append(AgentAction::Resume, "Try again.");
     let input = [("prompt".to_string(), "Original".to_string())]
         .into_iter()
         .collect();
 
-    let result = build_action_effects(&pipeline, &agent, &config, "exit", &input, None).unwrap();
+    let result = build_action_effects(&job, &agent, &config, "exit", &input, None).unwrap();
     if let ActionEffects::Resume {
         input,
         resume_session_id,
@@ -132,7 +132,7 @@ fn resume_with_append_sets_resume_message() {
         assert_eq!(input.get("resume_message"), Some(&"Try again.".to_string()));
         // Original prompt should not be modified
         assert_eq!(input.get("prompt"), Some(&"Original".to_string()));
-        // resume_session_id is None here because test_pipeline() has no step_history,
+        // resume_session_id is None here because test_job() has no step_history,
         // but the code path for append mode does set use_resume=true internally
         assert!(
             resume_session_id.is_none(),
@@ -145,9 +145,9 @@ fn resume_with_append_sets_resume_message() {
 
 #[test]
 fn resume_without_message_uses_resume_session() {
-    let mut pipeline = test_pipeline();
+    let mut job = test_job();
     // Add a step history record with an agent_id to simulate previous run
-    pipeline.step_history.push(oj_core::StepRecord {
+    job.step_history.push(oj_core::StepRecord {
         name: "execute".to_string(),
         started_at_ms: 0,
         finished_at_ms: None,
@@ -159,7 +159,7 @@ fn resume_without_message_uses_resume_session() {
     let config = ActionConfig::simple(AgentAction::Resume);
 
     let result =
-        build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new(), None).unwrap();
+        build_action_effects(&job, &agent, &config, "exit", &HashMap::new(), None).unwrap();
     if let ActionEffects::Resume {
         resume_session_id, ..
     } = result
@@ -172,12 +172,12 @@ fn resume_without_message_uses_resume_session() {
 
 #[test]
 fn resume_with_no_prior_session_falls_back() {
-    let pipeline = test_pipeline(); // no step_history
+    let job = test_job(); // no step_history
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Resume);
 
     let result =
-        build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new(), None).unwrap();
+        build_action_effects(&job, &agent, &config, "exit", &HashMap::new(), None).unwrap();
     if let ActionEffects::Resume {
         resume_session_id, ..
     } = result
@@ -193,22 +193,22 @@ fn resume_with_no_prior_session_falls_back() {
 
 #[test]
 fn escalate_returns_escalate_effects() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "idle", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "idle", &HashMap::new(), None);
     assert!(matches!(result, Ok(ActionEffects::Escalate { .. })));
 }
 
 #[test]
 fn escalate_emits_decision_created() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
     let result = build_action_effects(
-        &pipeline,
+        &job,
         &agent,
         &config,
         "gate_failed",
@@ -253,10 +253,10 @@ fn escalate_emits_decision_created() {
 // Tests for get_agent_def
 
 const RUNBOOK_WITH_AGENT: &str = r#"
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = { agent = "worker" }
 
@@ -266,10 +266,10 @@ prompt = "Do the task"
 "#;
 
 const RUNBOOK_WITHOUT_AGENT: &str = r#"
-[pipeline.build]
+[job.build]
 input  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = "echo hello"
 "#;
@@ -277,19 +277,19 @@ run = "echo hello"
 #[test]
 fn get_agent_def_finds_agent() {
     let runbook = parse_runbook(RUNBOOK_WITH_AGENT).unwrap();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let agent = get_agent_def(&runbook, &pipeline).unwrap();
+    let agent = get_agent_def(&runbook, &job).unwrap();
     assert_eq!(agent.name, "worker");
 }
 
 #[test]
-fn get_agent_def_fails_on_missing_pipeline() {
+fn get_agent_def_fails_on_missing_job() {
     let runbook = parse_runbook(RUNBOOK_WITH_AGENT).unwrap();
-    let mut pipeline = test_pipeline();
-    pipeline.kind = "nonexistent".to_string();
+    let mut job = test_job();
+    job.kind = "nonexistent".to_string();
 
-    let result = get_agent_def(&runbook, &pipeline);
+    let result = get_agent_def(&runbook, &job);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("nonexistent"));
 }
@@ -297,10 +297,10 @@ fn get_agent_def_fails_on_missing_pipeline() {
 #[test]
 fn get_agent_def_fails_on_missing_step() {
     let runbook = parse_runbook(RUNBOOK_WITH_AGENT).unwrap();
-    let mut pipeline = test_pipeline();
-    pipeline.step = "nonexistent".to_string();
+    let mut job = test_job();
+    job.step = "nonexistent".to_string();
 
-    let result = get_agent_def(&runbook, &pipeline);
+    let result = get_agent_def(&runbook, &job);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("nonexistent"));
 }
@@ -308,9 +308,9 @@ fn get_agent_def_fails_on_missing_step() {
 #[test]
 fn get_agent_def_fails_on_non_agent_step() {
     let runbook = parse_runbook(RUNBOOK_WITHOUT_AGENT).unwrap();
-    let pipeline = test_pipeline();
+    let job = test_job();
 
-    let result = get_agent_def(&runbook, &pipeline);
+    let result = get_agent_def(&runbook, &job);
     assert!(result.is_err());
     assert!(result
         .unwrap_err()
@@ -322,7 +322,7 @@ fn get_agent_def_fails_on_non_agent_step() {
 
 #[test]
 fn gate_returns_gate_effects() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::WithOptions {
         action: AgentAction::Gate,
@@ -333,7 +333,7 @@ fn gate_returns_gate_effects() {
         cooldown: None,
     };
 
-    let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "exit", &HashMap::new(), None);
     assert!(matches!(result, Ok(ActionEffects::Gate { .. })));
     if let Ok(ActionEffects::Gate { command, .. }) = result {
         assert_eq!(command, "make test");
@@ -342,11 +342,11 @@ fn gate_returns_gate_effects() {
 
 #[test]
 fn gate_without_run_field_errors() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Gate);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "exit", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "exit", &HashMap::new(), None);
     assert!(result.is_err());
 }
 
@@ -354,24 +354,24 @@ fn gate_without_run_field_errors() {
 
 #[test]
 fn nudge_fails_without_session_id() {
-    let mut pipeline = test_pipeline();
-    pipeline.session_id = None;
+    let mut job = test_job();
+    job.session_id = None;
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Nudge);
 
-    let result = build_action_effects(&pipeline, &agent, &config, "idle", &HashMap::new(), None);
+    let result = build_action_effects(&job, &agent, &config, "idle", &HashMap::new(), None);
     assert!(result.is_err());
     assert!(result.unwrap_err().to_string().contains("no session"));
 }
 
 #[test]
 fn escalate_cancels_exit_deferred_but_keeps_liveness() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
     let result =
-        build_action_effects(&pipeline, &agent, &config, "idle", &HashMap::new(), None).unwrap();
+        build_action_effects(&job, &agent, &config, "idle", &HashMap::new(), None).unwrap();
     if let ActionEffects::Escalate { effects } = result {
         let cancelled_timer_ids: Vec<&str> = effects
             .iter()
@@ -384,8 +384,8 @@ fn escalate_cancels_exit_deferred_but_keeps_liveness() {
             })
             .collect();
 
-        let expected_liveness = TimerId::liveness(&PipelineId::new(&pipeline.id));
-        let expected_exit_deferred = TimerId::exit_deferred(&PipelineId::new(&pipeline.id));
+        let expected_liveness = TimerId::liveness(&JobId::new(&job.id));
+        let expected_exit_deferred = TimerId::exit_deferred(&JobId::new(&job.id));
 
         assert!(
             !cancelled_timer_ids.contains(&expected_liveness.as_str()),
@@ -509,11 +509,11 @@ fn parse_duration_milliseconds() {
 
 #[test]
 fn agent_on_start_notify_renders_template() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let mut agent = test_agent_def();
     agent.notify.on_start = Some("Agent ${agent} started for ${name}".to_string());
 
-    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    let effect = build_agent_notify_effect(&job, &agent, agent.notify.on_start.as_ref());
     assert!(effect.is_some());
     match effect.unwrap() {
         Effect::Notify { title, message } => {
@@ -526,11 +526,11 @@ fn agent_on_start_notify_renders_template() {
 
 #[test]
 fn agent_on_done_notify_renders_template() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let mut agent = test_agent_def();
     agent.notify.on_done = Some("Agent ${agent} completed".to_string());
 
-    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_done.as_ref());
+    let effect = build_agent_notify_effect(&job, &agent, agent.notify.on_done.as_ref());
     match effect.unwrap() {
         Effect::Notify { title, message } => {
             assert_eq!(title, "worker");
@@ -542,12 +542,12 @@ fn agent_on_done_notify_renders_template() {
 
 #[test]
 fn agent_on_fail_notify_includes_error() {
-    let mut pipeline = test_pipeline();
-    pipeline.error = Some("task failed".to_string());
+    let mut job = test_job();
+    job.error = Some("task failed".to_string());
     let mut agent = test_agent_def();
     agent.notify.on_fail = Some("Agent ${agent} failed: ${error}".to_string());
 
-    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_fail.as_ref());
+    let effect = build_agent_notify_effect(&job, &agent, agent.notify.on_fail.as_ref());
     match effect.unwrap() {
         Effect::Notify { title, message } => {
             assert_eq!(title, "worker");
@@ -559,20 +559,20 @@ fn agent_on_fail_notify_includes_error() {
 
 #[test]
 fn agent_notify_none_when_no_template() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let agent = test_agent_def();
-    let effect = build_agent_notify_effect(&pipeline, &agent, None);
+    let effect = build_agent_notify_effect(&job, &agent, None);
     assert!(effect.is_none());
 }
 
 #[test]
-fn agent_notify_interpolates_pipeline_vars() {
-    let mut pipeline = test_pipeline();
-    pipeline.vars.insert("env".to_string(), "prod".to_string());
+fn agent_notify_interpolates_job_vars() {
+    let mut job = test_job();
+    job.vars.insert("env".to_string(), "prod".to_string());
     let mut agent = test_agent_def();
     agent.notify.on_start = Some("Deploying ${var.env}".to_string());
 
-    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    let effect = build_agent_notify_effect(&job, &agent, agent.notify.on_start.as_ref());
     match effect.unwrap() {
         Effect::Notify { message, .. } => {
             assert_eq!(message, "Deploying prod");
@@ -583,11 +583,11 @@ fn agent_notify_interpolates_pipeline_vars() {
 
 #[test]
 fn agent_notify_includes_step_variable() {
-    let pipeline = test_pipeline();
+    let job = test_job();
     let mut agent = test_agent_def();
     agent.notify.on_start = Some("Step: ${step}".to_string());
 
-    let effect = build_agent_notify_effect(&pipeline, &agent, agent.notify.on_start.as_ref());
+    let effect = build_agent_notify_effect(&job, &agent, agent.notify.on_start.as_ref());
     match effect.unwrap() {
         Effect::Notify { message, .. } => {
             assert_eq!(message, "Step: execute");

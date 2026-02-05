@@ -86,7 +86,7 @@ async fn redirect_failed_input_file_missing() {
 
 #[tokio::test]
 async fn parse_error_propagates_through_execute_str() {
-    // Malformed input: pipeline with missing command after pipe
+    // Malformed input: job with missing command after pipe
     let err = executor().execute_str("echo |").await.unwrap_err();
     match err {
         ExecError::Parse(parse_err) => {

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use crate::pipeline::PipelineId;
+use crate::job::JobId;
 
 #[test]
 fn timer_id_display() {
@@ -38,26 +38,26 @@ fn timer_id_serde() {
 
 #[test]
 fn liveness_timer_id() {
-    let pipeline_id = PipelineId::new("pipe-123");
-    let id = TimerId::liveness(&pipeline_id);
+    let job_id = JobId::new("pipe-123");
+    let id = TimerId::liveness(&job_id);
     assert_eq!(id.as_str(), "liveness:pipe-123");
 }
 
 #[test]
 fn exit_deferred_timer_id() {
-    let pipeline_id = PipelineId::new("pipe-123");
-    let id = TimerId::exit_deferred(&pipeline_id);
+    let job_id = JobId::new("pipe-123");
+    let id = TimerId::exit_deferred(&job_id);
     assert_eq!(id.as_str(), "exit-deferred:pipe-123");
 }
 
 #[test]
 fn cooldown_timer_id_format() {
-    let pipeline_id = PipelineId::new("pipe-123");
-    let id = TimerId::cooldown(&pipeline_id, "idle", 0);
+    let job_id = JobId::new("pipe-123");
+    let id = TimerId::cooldown(&job_id, "idle", 0);
     assert_eq!(id.as_str(), "cooldown:pipe-123:idle:0");
 
-    let pipeline_id2 = PipelineId::new("pipe-456");
-    let id2 = TimerId::cooldown(&pipeline_id2, "exit", 2);
+    let job_id2 = JobId::new("pipe-456");
+    let id2 = TimerId::cooldown(&job_id2, "exit", 2);
     assert_eq!(id2.as_str(), "cooldown:pipe-456:exit:2");
 }
 
@@ -98,27 +98,27 @@ fn is_cooldown() {
 }
 
 #[test]
-fn pipeline_id_str_liveness() {
+fn job_id_str_liveness() {
     let id = TimerId::new("liveness:pipe-123");
-    assert_eq!(id.pipeline_id_str(), Some("pipe-123"));
+    assert_eq!(id.job_id_str(), Some("pipe-123"));
 }
 
 #[test]
-fn pipeline_id_str_exit_deferred() {
+fn job_id_str_exit_deferred() {
     let id = TimerId::new("exit-deferred:pipe-456");
-    assert_eq!(id.pipeline_id_str(), Some("pipe-456"));
+    assert_eq!(id.job_id_str(), Some("pipe-456"));
 }
 
 #[test]
-fn pipeline_id_str_cooldown() {
+fn job_id_str_cooldown() {
     let id = TimerId::new("cooldown:pipe-789:idle:0");
-    assert_eq!(id.pipeline_id_str(), Some("pipe-789"));
+    assert_eq!(id.job_id_str(), Some("pipe-789"));
 }
 
 #[test]
-fn pipeline_id_str_unknown_timer() {
+fn job_id_str_unknown_timer() {
     let id = TimerId::new("other-timer");
-    assert_eq!(id.pipeline_id_str(), None);
+    assert_eq!(id.job_id_str(), None);
 }
 
 #[test]

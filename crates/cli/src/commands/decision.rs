@@ -297,10 +297,10 @@ pub(crate) fn format_decision_detail(
     show_resolve_hint: bool,
 ) {
     let short_id = d.id.short(8);
-    let pipeline_display = if d.pipeline_name.is_empty() {
-        d.pipeline_id.clone()
+    let job_display = if d.job_name.is_empty() {
+        d.job_id.clone()
     } else {
-        format!("{} ({})", d.pipeline_name, d.pipeline_id.short(8))
+        format!("{} ({})", d.job_name, d.job_id.short(8))
     };
     let age = format_time_ago(d.created_at_ms);
 
@@ -310,7 +310,7 @@ pub(crate) fn format_decision_detail(
         color::header("Decision:"),
         color::muted(short_id)
     );
-    let _ = writeln!(out, "{} {}", color::context("Pipeline:"), pipeline_display);
+    let _ = writeln!(out, "{} {}", color::context("Job:"), job_display);
     let _ = writeln!(out, "{} {}", color::context("Source:  "), d.source);
     let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
     if let Some(ref aid) = d.agent_id {
@@ -411,7 +411,7 @@ pub(crate) fn format_decision_list(
         cols.push(Column::left("PROJECT"));
     }
     cols.extend([
-        Column::left("PIPELINE").with_max(18),
+        Column::left("JOB").with_max(18),
         Column::left("AGE"),
         Column::left("SOURCE"),
         Column::left("SUMMARY").with_max(50),
@@ -419,17 +419,17 @@ pub(crate) fn format_decision_list(
     let mut table = Table::new(cols);
 
     for d in decisions {
-        let pipeline = if d.pipeline_name.is_empty() {
-            &d.pipeline_id
+        let job = if d.job_name.is_empty() {
+            &d.job_id
         } else {
-            &d.pipeline_name
+            &d.job_name
         };
         let mut cells = vec![d.id.clone()];
         if show_project {
             cells.push(project_cell(&d.namespace));
         }
         cells.extend([
-            pipeline.to_string(),
+            job.to_string(),
             format_time_ago(d.created_at_ms),
             d.source.clone(),
             d.summary.clone(),

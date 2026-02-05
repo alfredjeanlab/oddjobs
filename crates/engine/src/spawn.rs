@@ -5,7 +5,7 @@
 
 use crate::error::RuntimeError;
 use crate::ExecuteError;
-use oj_core::{AgentId, AgentRunId, Effect, Pipeline, PipelineId, ShortId, TimerId};
+use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, ShortId, TimerId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -15,31 +15,31 @@ use uuid::Uuid;
 /// Liveness check interval (30 seconds)
 pub const LIVENESS_INTERVAL: Duration = Duration::from_secs(30);
 
-/// Context for spawning an agent, abstracting over pipelines and standalone runs.
+/// Context for spawning an agent, abstracting over jobs and standalone runs.
 pub struct SpawnContext<'a> {
-    /// Pipeline ID (set for pipeline agents, empty for standalone)
-    pub pipeline_id: &'a PipelineId,
+    /// Job ID (set for job agents, empty for standalone)
+    pub job_id: &'a JobId,
     /// Optional agent run ID (set for standalone agents)
     pub agent_run_id: Option<&'a AgentRunId>,
-    /// Display name (pipeline name or command name)
+    /// Display name (job name or command name)
     pub name: &'a str,
     /// Namespace for scoping
     pub namespace: &'a str,
 }
 
 impl<'a> SpawnContext<'a> {
-    /// Create a SpawnContext from a Pipeline.
-    pub fn from_pipeline(pipeline: &'a Pipeline, pipeline_id: &'a PipelineId) -> Self {
+    /// Create a SpawnContext from a Job.
+    pub fn from_job(job: &'a Job, job_id: &'a JobId) -> Self {
         Self {
-            pipeline_id,
+            job_id,
             agent_run_id: None,
-            name: &pipeline.name,
-            namespace: &pipeline.namespace,
+            name: &job.name,
+            namespace: &job.namespace,
         }
     }
 }
 
-/// Spawn an agent for a pipeline or standalone run.
+/// Spawn an agent for a job or standalone run.
 ///
 /// Returns the effects to execute for spawning the agent.
 /// When `resume_session_id` is `Some`, the agent is spawned with `--resume <id>`
@@ -59,7 +59,7 @@ pub fn build_spawn_effects(
     let project_root = workspace_path.to_path_buf();
 
     tracing::debug!(
-        owner_id = %ctx.pipeline_id,
+        owner_id = %ctx.job_id,
         agent_name,
         workspace_path = %workspace_path.display(),
         project_root = %project_root.display(),
@@ -67,7 +67,7 @@ pub fn build_spawn_effects(
     );
 
     // Step 1: Build variables for prompt interpolation
-    // Namespace pipeline vars under "var." prefix
+    // Namespace job vars under "var." prefix
     let mut prompt_vars: HashMap<String, String> = input
         .iter()
         .map(|(k, v)| (format!("var.{}", k), v.clone()))
@@ -78,7 +78,7 @@ pub fn build_spawn_effects(
     // Generate a unique UUID for agent_id (used as --session-id for claude/claudeless)
     let agent_id = Uuid::new_v4().to_string();
     prompt_vars.insert("agent_id".to_string(), agent_id.clone());
-    prompt_vars.insert("pipeline_id".to_string(), ctx.pipeline_id.to_string());
+    prompt_vars.insert("job_id".to_string(), ctx.job_id.to_string());
     prompt_vars.insert("name".to_string(), ctx.name.to_string());
     prompt_vars.insert(
         "workspace".to_string(),
@@ -297,7 +297,7 @@ pub fn build_spawn_effects(
     );
 
     tracing::info!(
-        owner_id = %ctx.pipeline_id,
+        owner_id = %ctx.job_id,
         agent_name,
         command,
         effective_cwd = ?effective_cwd,
@@ -335,14 +335,14 @@ pub fn build_spawn_effects(
     let liveness_timer_id = if let Some(ar_id) = ctx.agent_run_id {
         TimerId::liveness_agent_run(ar_id)
     } else {
-        TimerId::liveness(ctx.pipeline_id)
+        TimerId::liveness(ctx.job_id)
     };
 
     Ok(vec![
         Effect::SpawnAgent {
             agent_id: AgentId::new(agent_id),
             agent_name: agent_name.to_string(),
-            pipeline_id: ctx.pipeline_id.clone(),
+            job_id: ctx.job_id.clone(),
             agent_run_id: ctx.agent_run_id.cloned(),
             workspace_path: workspace_path.to_path_buf(),
             input: vars,

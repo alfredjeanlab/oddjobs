@@ -408,8 +408,8 @@ fn test_deeply_nested_mixed_constructs_10() {
 }
 
 #[test]
-fn test_pipeline_in_subshell() {
-    // (a | b | c) - pipeline inside subshell
+fn test_job_in_subshell() {
+    // (a | b | c) - job inside subshell
     let result = Parser::parse("(a | b | c)").unwrap();
     assert_eq!(result.commands.len(), 1);
 
@@ -417,10 +417,10 @@ fn test_pipeline_in_subshell() {
         Command::Subshell(subshell) => {
             assert_eq!(subshell.body.commands.len(), 1);
             match get_command(&subshell.body.commands[0]) {
-                Command::Pipeline(p) => {
+                Command::Job(p) => {
                     assert_eq!(p.commands.len(), 3);
                 }
-                _ => panic!("expected pipeline inside subshell"),
+                _ => panic!("expected job inside subshell"),
             }
         }
         _ => panic!("expected subshell"),
@@ -428,16 +428,16 @@ fn test_pipeline_in_subshell() {
 }
 
 #[test]
-fn test_subshell_in_pipeline_limitation() {
-    // (sub) | cmd - subshell as first element of pipeline
+fn test_subshell_in_job_limitation() {
+    // (sub) | cmd - subshell as first element of job
     // Currently NOT supported: after subshell, parser expects ';' or newline
     let result = Parser::parse("(sub) | cmd");
     assert!(result.is_err(), "subshell | cmd is currently not supported");
 }
 
 #[test]
-fn test_brace_group_in_pipeline_limitation() {
-    // { grp; } | cmd - brace group as first element of pipeline
+fn test_brace_group_in_job_limitation() {
+    // { grp; } | cmd - brace group as first element of job
     // Currently NOT supported: after brace group, parser expects ';' or newline
     let result = Parser::parse("{ grp; } | cmd");
     assert!(
@@ -459,8 +459,8 @@ fn test_logical_and_with_subshells() {
 }
 
 #[test]
-fn test_substitution_containing_pipeline() {
-    // echo $(a | b) - command substitution with pipeline inside
+fn test_substitution_containing_job() {
+    // echo $(a | b) - command substitution with job inside
     let result = Parser::parse("echo $(a | b)").unwrap();
     assert_eq!(result.commands.len(), 1);
 
@@ -473,13 +473,13 @@ fn test_substitution_containing_pipeline() {
         panic!("expected command substitution");
     };
 
-    // The inner content should be a pipeline
+    // The inner content should be a job
     assert_eq!(body.commands.len(), 1);
     match get_command(&body.commands[0]) {
-        Command::Pipeline(p) => {
+        Command::Job(p) => {
             assert_eq!(p.commands.len(), 2);
         }
-        _ => panic!("expected pipeline in substitution"),
+        _ => panic!("expected job in substitution"),
     }
 }
 

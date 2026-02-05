@@ -1,7 +1,7 @@
 //! Tests for on_dead gate action behavior.
 //!
 //! Verifies the full lifecycle: agent spawns → agent process exits → on_dead
-//! action triggers → gate command runs → pipeline advances on exit 0 or
+//! action triggers → gate command runs → job advances on exit 0 or
 //! escalates on non-zero.
 
 use crate::prelude::*;
@@ -33,18 +33,18 @@ tools.Bash.auto_approve = true
 // =============================================================================
 
 /// Runbook with on_dead gate that runs `true` (always exits 0).
-/// Pipeline should complete successfully.
+/// Job should complete successfully.
 fn runbook_gate_passes(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -58,18 +58,18 @@ on_dead = {{ action = "gate", run = "true" }}
 }
 
 /// Runbook with on_dead gate that runs `false` (always exits 1).
-/// Pipeline should escalate to Waiting status.
+/// Job should escalate to Waiting status.
 fn runbook_gate_fails(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -89,12 +89,12 @@ fn runbook_gate_checks_output(scenario_path: &std::path::Path) -> String {
         r#"
 [command.build]
 args = "<name>"
-run = {{ pipeline = "build" }}
+run = {{ job = "build" }}
 
-[pipeline.build]
+[job.build]
 vars  = ["name"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -114,9 +114,9 @@ on_dead = {{ action = "gate", run = "test -f output.txt" }}
 /// Tests the full on_dead gate lifecycle with a passing gate command.
 ///
 /// Lifecycle: agent spawns → agent exits → on_dead triggers → gate runs `true`
-/// (exit 0) → pipeline advances to Completed.
+/// (exit 0) → job advances to Completed.
 #[test]
-fn on_dead_gate_exit_zero_advances_pipeline() {
+fn on_dead_gate_exit_zero_advances_job() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/gate.toml", scenario_simple());
@@ -129,17 +129,17 @@ fn on_dead_gate_exit_zero_advances_pipeline() {
     temp.oj().args(&["run", "build", "gate-pass"]).passes();
 
     // claudeless -p exits immediately. The watcher detects session death
-    // and runs the gate command. Exit 0 should advance the pipeline.
+    // and runs the gate command. Exit 0 should advance the job.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete when gate command exits 0\ndaemon log:\n{}",
+        "job should complete when gate command exits 0\ndaemon log:\n{}",
         temp.daemon_log()
     );
 }
@@ -147,9 +147,9 @@ fn on_dead_gate_exit_zero_advances_pipeline() {
 /// Tests the full on_dead gate lifecycle with a failing gate command.
 ///
 /// Lifecycle: agent spawns → agent exits → on_dead triggers → gate runs `false`
-/// (exit 1) → pipeline escalates to Waiting.
+/// (exit 1) → job escalates to Waiting.
 #[test]
-fn on_dead_gate_nonzero_exit_escalates_pipeline() {
+fn on_dead_gate_nonzero_exit_escalates_job() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/gate.toml", scenario_simple());
@@ -162,17 +162,17 @@ fn on_dead_gate_nonzero_exit_escalates_pipeline() {
     temp.oj().args(&["run", "build", "gate-fail"]).passes();
 
     // claudeless -p exits immediately. The watcher detects session death
-    // and runs the gate command. Non-zero exit should escalate the pipeline.
+    // and runs the gate command. Non-zero exit should escalate the job.
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("waiting")
     });
     assert!(
         waiting,
-        "pipeline should be in Waiting status when gate command exits non-zero\ndaemon log:\n{}",
+        "job should be in Waiting status when gate command exits non-zero\ndaemon log:\n{}",
         temp.daemon_log()
     );
 }
@@ -181,7 +181,7 @@ fn on_dead_gate_nonzero_exit_escalates_pipeline() {
 ///
 /// This test uses a scenario where the agent creates output.txt via Bash tool.
 /// The gate command `test -f output.txt` verifies the file was created before
-/// advancing the pipeline.
+/// advancing the job.
 #[test]
 fn on_dead_gate_verifies_agent_output() {
     let temp = Project::empty();
@@ -218,14 +218,14 @@ tools.Bash.auto_approve = true
     // Agent creates output.txt, then exits. Gate checks file exists.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
     });
     assert!(
         done,
-        "pipeline should complete when gate verifies agent output\ndaemon log:\n{}",
+        "job should complete when gate verifies agent output\ndaemon log:\n{}",
         temp.daemon_log()
     );
 }

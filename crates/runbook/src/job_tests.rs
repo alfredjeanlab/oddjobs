@@ -4,8 +4,8 @@
 use super::*;
 use crate::parser::{parse_runbook, parse_runbook_with_format, Format};
 
-fn sample_pipeline() -> PipelineDef {
-    PipelineDef {
+fn sample_job() -> JobDef {
+    JobDef {
         kind: "build".to_string(),
         name: None,
         vars: vec!["name".to_string(), "prompt".to_string()],
@@ -68,63 +68,63 @@ fn sample_pipeline() -> PipelineDef {
 }
 
 #[test]
-fn pipeline_step_lookup() {
-    let p = sample_pipeline();
+fn job_step_lookup() {
+    let p = sample_job();
     assert!(p.get_step("init").is_some());
     assert!(p.get_step("nonexistent").is_none());
 }
 
 #[test]
 fn step_is_shell() {
-    let p = sample_pipeline();
+    let p = sample_job();
     assert!(p.get_step("init").unwrap().is_shell());
     assert!(!p.get_step("plan").unwrap().is_shell());
 }
 
 #[test]
 fn step_is_agent() {
-    let p = sample_pipeline();
+    let p = sample_job();
     assert!(!p.get_step("init").unwrap().is_agent());
     assert!(p.get_step("plan").unwrap().is_agent());
     assert_eq!(p.get_step("plan").unwrap().agent_name(), Some("planner"));
 }
 
 #[test]
-fn parse_toml_pipeline_on_done_on_fail() {
+fn parse_toml_job_on_done_on_fail() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 vars  = ["name"]
 on_done = "teardown"
 on_fail = "cleanup"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "teardown"
 run = "echo teardown"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "cleanup"
 run = "echo cleanup"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.on_done.as_ref().map(|t| t.step_name()),
+        job.on_done.as_ref().map(|t| t.step_name()),
         Some("teardown")
     );
     assert_eq!(
-        pipeline.on_fail.as_ref().map(|t| t.step_name()),
+        job.on_fail.as_ref().map(|t| t.step_name()),
         Some("cleanup")
     );
 }
 
 #[test]
-fn parse_hcl_pipeline_on_done_on_fail() {
+fn parse_hcl_job_on_done_on_fail() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
     vars  = ["name"]
     on_done = "teardown"
     on_fail = "cleanup"
@@ -143,13 +143,13 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.on_done.as_ref().map(|t| t.step_name()),
+        job.on_done.as_ref().map(|t| t.step_name()),
         Some("teardown")
     );
     assert_eq!(
-        pipeline.on_fail.as_ref().map(|t| t.step_name()),
+        job.on_fail.as_ref().map(|t| t.step_name()),
         Some("cleanup")
     );
 }
@@ -157,30 +157,30 @@ pipeline "deploy" {
 #[test]
 fn parse_toml_structured_step_transition() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 vars = ["name"]
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 
-[pipeline.deploy.step.on_done]
+[job.deploy.step.on_done]
 step = "next"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "next"
 run = "echo next"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
-    let init = pipeline.get_step("init").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
+    let init = job.get_step("init").unwrap();
     assert_eq!(init.on_done.as_ref().map(|t| t.step_name()), Some("next"));
 }
 
 #[test]
 fn parse_hcl_structured_step_transition() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
     vars = ["name"]
 
     step "init" {
@@ -194,62 +194,62 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
-    let init = pipeline.get_step("init").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
+    let init = job.get_step("init").unwrap();
     assert_eq!(init.on_done.as_ref().map(|t| t.step_name()), Some("next"));
 }
 
 #[test]
-fn parse_pipeline_without_lifecycle_hooks() {
+fn parse_job_without_lifecycle_hooks() {
     let toml = r#"
-[pipeline.simple]
+[job.simple]
 vars  = ["name"]
 
-[[pipeline.simple.step]]
+[[job.simple.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("simple").unwrap();
-    assert!(pipeline.on_done.is_none());
-    assert!(pipeline.on_fail.is_none());
+    let job = runbook.get_job("simple").unwrap();
+    assert!(job.on_done.is_none());
+    assert!(job.on_fail.is_none());
 }
 
 #[test]
-fn parse_toml_pipeline_notify() {
+fn parse_toml_job_notify() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 vars  = ["env"]
 
-[pipeline.deploy.notify]
+[job.deploy.notify]
 on_start = "Deploy started: ${var.env}"
 on_done  = "Deploy complete: ${var.env}"
 on_fail  = "Deploy failed: ${var.env}"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.notify.on_start.as_deref(),
+        job.notify.on_start.as_deref(),
         Some("Deploy started: ${var.env}")
     );
     assert_eq!(
-        pipeline.notify.on_done.as_deref(),
+        job.notify.on_done.as_deref(),
         Some("Deploy complete: ${var.env}")
     );
     assert_eq!(
-        pipeline.notify.on_fail.as_deref(),
+        job.notify.on_fail.as_deref(),
         Some("Deploy failed: ${var.env}")
     );
 }
 
 #[test]
-fn parse_hcl_pipeline_notify() {
+fn parse_hcl_job_notify() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
     vars = ["env"]
 
     notify {
@@ -264,56 +264,56 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.notify.on_start.as_deref(),
+        job.notify.on_start.as_deref(),
         Some("Deploy started: ${var.env}")
     );
     assert_eq!(
-        pipeline.notify.on_done.as_deref(),
+        job.notify.on_done.as_deref(),
         Some("Deploy complete: ${var.env}")
     );
     assert_eq!(
-        pipeline.notify.on_fail.as_deref(),
+        job.notify.on_fail.as_deref(),
         Some("Deploy failed: ${var.env}")
     );
 }
 
 #[test]
-fn parse_pipeline_notify_partial() {
+fn parse_job_notify_partial() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 vars = ["env"]
 
-[pipeline.deploy.notify]
+[job.deploy.notify]
 on_done = "Done!"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
-    assert!(pipeline.notify.on_start.is_none());
-    assert_eq!(pipeline.notify.on_done.as_deref(), Some("Done!"));
-    assert!(pipeline.notify.on_fail.is_none());
+    let job = runbook.get_job("deploy").unwrap();
+    assert!(job.notify.on_start.is_none());
+    assert_eq!(job.notify.on_done.as_deref(), Some("Done!"));
+    assert!(job.notify.on_fail.is_none());
 }
 
 #[test]
-fn parse_pipeline_notify_defaults_to_empty() {
+fn parse_job_notify_defaults_to_empty() {
     let toml = r#"
-[pipeline.simple]
+[job.simple]
 vars = ["name"]
 
-[[pipeline.simple.step]]
+[[job.simple.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("simple").unwrap();
-    assert!(pipeline.notify.on_start.is_none());
-    assert!(pipeline.notify.on_done.is_none());
-    assert!(pipeline.notify.on_fail.is_none());
+    let job = runbook.get_job("simple").unwrap();
+    assert!(job.notify.on_start.is_none());
+    assert!(job.notify.on_done.is_none());
+    assert!(job.notify.on_fail.is_none());
 }
 
 #[test]
@@ -329,9 +329,9 @@ fn notify_config_render_interpolates() {
 }
 
 #[test]
-fn parse_hcl_pipeline_locals() {
+fn parse_hcl_job_locals() {
     let hcl = r#"
-pipeline "build" {
+job "build" {
     vars = ["name"]
 
     locals {
@@ -346,88 +346,88 @@ pipeline "build" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("build").unwrap();
-    assert_eq!(pipeline.locals.len(), 3);
+    let job = runbook.get_job("build").unwrap();
+    assert_eq!(job.locals.len(), 3);
     assert_eq!(
-        pipeline.locals.get("repo").unwrap(),
+        job.locals.get("repo").unwrap(),
         "$(git rev-parse --show-toplevel)"
     );
     assert_eq!(
-        pipeline.locals.get("branch").unwrap(),
+        job.locals.get("branch").unwrap(),
         "feature/${var.name}-${workspace.nonce}"
     );
-    assert_eq!(pipeline.locals.get("title").unwrap(), "feat: ${var.name}");
+    assert_eq!(job.locals.get("title").unwrap(), "feat: ${var.name}");
 }
 
 #[test]
-fn parse_toml_pipeline_locals() {
+fn parse_toml_job_locals() {
     let toml = r#"
-[pipeline.build]
+[job.build]
 vars = ["name"]
 
-[pipeline.build.locals]
+[job.build.locals]
 repo   = "$(git rev-parse --show-toplevel)"
 branch = "feature/${var.name}"
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "init"
 run  = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("build").unwrap();
-    assert_eq!(pipeline.locals.len(), 2);
+    let job = runbook.get_job("build").unwrap();
+    assert_eq!(job.locals.len(), 2);
     assert_eq!(
-        pipeline.locals.get("repo").unwrap(),
+        job.locals.get("repo").unwrap(),
         "$(git rev-parse --show-toplevel)"
     );
     assert_eq!(
-        pipeline.locals.get("branch").unwrap(),
+        job.locals.get("branch").unwrap(),
         "feature/${var.name}"
     );
 }
 
 #[test]
-fn parse_pipeline_locals_defaults_to_empty() {
+fn parse_job_locals_defaults_to_empty() {
     let toml = r#"
-[pipeline.simple]
+[job.simple]
 vars = ["name"]
 
-[[pipeline.simple.step]]
+[[job.simple.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("simple").unwrap();
-    assert!(pipeline.locals.is_empty());
+    let job = runbook.get_job("simple").unwrap();
+    assert!(job.locals.is_empty());
 }
 
 #[test]
-fn parse_toml_pipeline_on_cancel() {
+fn parse_toml_job_on_cancel() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 vars  = ["name"]
 on_cancel = "cleanup"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 on_cancel = "teardown"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "teardown"
 run = "echo teardown"
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "cleanup"
 run = "echo cleanup"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.on_cancel.as_ref().map(|t| t.step_name()),
+        job.on_cancel.as_ref().map(|t| t.step_name()),
         Some("cleanup")
     );
-    let init = pipeline.get_step("init").unwrap();
+    let init = job.get_step("init").unwrap();
     assert_eq!(
         init.on_cancel.as_ref().map(|t| t.step_name()),
         Some("teardown")
@@ -435,9 +435,9 @@ run = "echo cleanup"
 }
 
 #[test]
-fn parse_hcl_pipeline_on_cancel() {
+fn parse_hcl_job_on_cancel() {
     let hcl = r#"
-pipeline "deploy" {
+job "deploy" {
     vars  = ["name"]
     on_cancel = "cleanup"
 
@@ -456,12 +456,12 @@ pipeline "deploy" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
+    let job = runbook.get_job("deploy").unwrap();
     assert_eq!(
-        pipeline.on_cancel.as_ref().map(|t| t.step_name()),
+        job.on_cancel.as_ref().map(|t| t.step_name()),
         Some("cleanup")
     );
-    let init = pipeline.get_step("init").unwrap();
+    let init = job.get_step("init").unwrap();
     assert_eq!(
         init.on_cancel.as_ref().map(|t| t.step_name()),
         Some("teardown")
@@ -469,26 +469,26 @@ pipeline "deploy" {
 }
 
 #[test]
-fn parse_pipeline_without_on_cancel() {
+fn parse_job_without_on_cancel() {
     let toml = r#"
-[pipeline.simple]
+[job.simple]
 vars  = ["name"]
 
-[[pipeline.simple.step]]
+[[job.simple.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("simple").unwrap();
-    assert!(pipeline.on_cancel.is_none());
-    let init = pipeline.get_step("init").unwrap();
+    let job = runbook.get_job("simple").unwrap();
+    assert!(job.on_cancel.is_none());
+    let init = job.get_step("init").unwrap();
     assert!(init.on_cancel.is_none());
 }
 
 #[test]
-fn parse_hcl_pipeline_name_template() {
+fn parse_hcl_job_name_template() {
     let hcl = r#"
-pipeline "fix" {
+job "fix" {
     name = "${var.bug.title}"
     vars = ["bug"]
 
@@ -498,15 +498,15 @@ pipeline "fix" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("fix").unwrap();
-    assert_eq!(pipeline.kind, "fix");
-    assert_eq!(pipeline.name.as_deref(), Some("${var.bug.title}"));
+    let job = runbook.get_job("fix").unwrap();
+    assert_eq!(job.kind, "fix");
+    assert_eq!(job.name.as_deref(), Some("${var.bug.title}"));
 }
 
 #[test]
-fn parse_pipeline_without_name_template() {
+fn parse_job_without_name_template() {
     let hcl = r#"
-pipeline "build" {
+job "build" {
     vars = ["name"]
 
     step "init" {
@@ -515,32 +515,32 @@ pipeline "build" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("build").unwrap();
-    assert_eq!(pipeline.kind, "build");
-    assert!(pipeline.name.is_none());
+    let job = runbook.get_job("build").unwrap();
+    assert_eq!(job.kind, "build");
+    assert!(job.name.is_none());
 }
 
 #[test]
-fn parse_toml_pipeline_name_template() {
+fn parse_toml_job_name_template() {
     let toml = r#"
-[pipeline.deploy]
+[job.deploy]
 name = "${var.env}"
 vars = ["env"]
 
-[[pipeline.deploy.step]]
+[[job.deploy.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("deploy").unwrap();
-    assert_eq!(pipeline.kind, "deploy");
-    assert_eq!(pipeline.name.as_deref(), Some("${var.env}"));
+    let job = runbook.get_job("deploy").unwrap();
+    assert_eq!(job.kind, "deploy");
+    assert_eq!(job.name.as_deref(), Some("${var.env}"));
 }
 
 #[test]
 fn parse_hcl_workspace_folder() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
     workspace = "folder"
 
@@ -550,18 +550,18 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
+    let job = runbook.get_job("test").unwrap();
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
     );
-    assert!(!pipeline.workspace.as_ref().unwrap().is_git_worktree());
+    assert!(!job.workspace.as_ref().unwrap().is_git_worktree());
 }
 
 #[test]
 fn parse_hcl_workspace_git_worktree() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
 
     workspace {
@@ -574,10 +574,10 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
-    assert!(pipeline.workspace.as_ref().unwrap().is_git_worktree());
+    let job = runbook.get_job("test").unwrap();
+    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: None,
@@ -589,7 +589,7 @@ pipeline "test" {
 #[test]
 fn parse_hcl_workspace_ephemeral_compat() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
     workspace = "ephemeral"
 
@@ -599,9 +599,9 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
+    let job = runbook.get_job("test").unwrap();
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
     );
 }
@@ -609,18 +609,18 @@ pipeline "test" {
 #[test]
 fn parse_toml_workspace_folder() {
     let toml = r#"
-[pipeline.test]
+[job.test]
 vars = ["name"]
 workspace = "folder"
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "init"
 run = "echo init"
 "#;
     let runbook = parse_runbook(toml).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
+    let job = runbook.get_job("test").unwrap();
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
     );
 }
@@ -641,7 +641,7 @@ fn workspace_config_is_git_worktree() {
 #[test]
 fn parse_hcl_workspace_git_worktree_with_branch() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
 
     workspace {
@@ -655,10 +655,10 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
-    assert!(pipeline.workspace.as_ref().unwrap().is_git_worktree());
+    let job = runbook.get_job("test").unwrap();
+    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: Some("feat/${var.name}".to_string()),
@@ -670,7 +670,7 @@ pipeline "test" {
 #[test]
 fn parse_hcl_workspace_git_worktree_with_ref() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
 
     workspace {
@@ -684,10 +684,10 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
-    assert!(pipeline.workspace.as_ref().unwrap().is_git_worktree());
+    let job = runbook.get_job("test").unwrap();
+    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: None,
@@ -699,7 +699,7 @@ pipeline "test" {
 #[test]
 fn parse_hcl_workspace_git_worktree_with_branch_and_ref() {
     let hcl = r#"
-pipeline "test" {
+job "test" {
     vars = ["name"]
 
     workspace {
@@ -714,10 +714,10 @@ pipeline "test" {
 }
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let pipeline = runbook.get_pipeline("test").unwrap();
-    assert!(pipeline.workspace.as_ref().unwrap().is_git_worktree());
+    let job = runbook.get_job("test").unwrap();
+    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        pipeline.workspace,
+        job.workspace,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: Some("feat/${var.name}-${workspace.nonce}".to_string()),

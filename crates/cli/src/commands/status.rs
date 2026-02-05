@@ -47,7 +47,7 @@ pub async fn handle(
         return handle_once(format, None, project_filter).await;
     }
 
-    let interval = crate::commands::pipeline::parse_duration(&args.interval)?;
+    let interval = crate::commands::job::parse_duration(&args.interval)?;
     if interval.is_zero() {
         anyhow::bail!("duration must be > 0");
     }
@@ -215,10 +215,10 @@ fn format_text(
 
     // Header line with uptime and global counts
     let uptime = format_duration(uptime_secs);
-    let total_active: usize = namespaces.iter().map(|ns| ns.active_pipelines.len()).sum();
+    let total_active: usize = namespaces.iter().map(|ns| ns.active_jobs.len()).sum();
     let total_escalated: usize = namespaces
         .iter()
-        .map(|ns| ns.escalated_pipelines.len())
+        .map(|ns| ns.escalated_jobs.len())
         .sum();
 
     let _ = write!(
@@ -234,7 +234,7 @@ fn format_text(
     if total_active > 0 {
         let _ = write!(
             out,
-            " | {} active pipeline{}",
+            " | {} active job{}",
             total_active,
             if total_active == 1 { "" } else { "s" }
         );
@@ -244,7 +244,7 @@ fn format_text(
     }
     let total_orphaned: usize = namespaces
         .iter()
-        .map(|ns| ns.orphaned_pipelines.len())
+        .map(|ns| ns.orphaned_jobs.len())
         .sum();
     if total_orphaned > 0 {
         let _ = write!(out, " | {} {}", total_orphaned, color::status("orphaned"));
@@ -281,9 +281,9 @@ fn format_text(
             .queues
             .iter()
             .any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
-        let has_content = !ns.active_pipelines.is_empty()
-            || !ns.escalated_pipelines.is_empty()
-            || !ns.orphaned_pipelines.is_empty()
+        let has_content = !ns.active_jobs.is_empty()
+            || !ns.escalated_jobs.is_empty()
+            || !ns.orphaned_jobs.is_empty()
             || !ns.workers.is_empty()
             || has_non_empty_queues
             || !ns.active_agents.is_empty();
@@ -301,32 +301,32 @@ fn format_text(
         }
         out.push('\n');
 
-        // Sort pipelines by most recent activity (descending) and workers alphabetically
-        let mut active_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
-            ns.active_pipelines.iter().collect();
-        active_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+        // Sort jobs by most recent activity (descending) and workers alphabetically
+        let mut active_jobs: Vec<&oj_daemon::JobStatusEntry> =
+            ns.active_jobs.iter().collect();
+        active_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
-        let mut escalated_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
-            ns.escalated_pipelines.iter().collect();
-        escalated_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+        let mut escalated_jobs: Vec<&oj_daemon::JobStatusEntry> =
+            ns.escalated_jobs.iter().collect();
+        escalated_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
-        let mut orphaned_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
-            ns.orphaned_pipelines.iter().collect();
-        orphaned_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+        let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> =
+            ns.orphaned_jobs.iter().collect();
+        orphaned_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
         let mut workers: Vec<&oj_daemon::WorkerSummary> = ns.workers.iter().collect();
         workers.sort_by(|a, b| a.name.cmp(&b.name));
 
-        // Active pipelines
-        if !active_pipelines.is_empty() {
+        // Active jobs
+        if !active_jobs.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!("Pipelines ({} active):", active_pipelines.len()))
+                color::header(&format!("Jobs ({} active):", active_jobs.len()))
             );
-            let rows: Vec<PipelineRow> = active_pipelines
+            let rows: Vec<JobRow> = active_jobs
                 .iter()
-                .map(|p| PipelineRow {
+                .map(|p| JobRow {
                     prefix: "    ".to_string(),
                     id: p.id.short(8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
@@ -336,18 +336,18 @@ fn format_text(
                     reason: None,
                 })
                 .collect();
-            write_aligned_pipeline_rows(&mut out, &rows);
+            write_aligned_job_rows(&mut out, &rows);
             out.push('\n');
         }
 
-        // Escalated pipelines
-        if !escalated_pipelines.is_empty() {
+        // Escalated jobs
+        if !escalated_jobs.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!("Escalated ({}):", escalated_pipelines.len()))
+                color::header(&format!("Escalated ({}):", escalated_jobs.len()))
             );
-            let rows: Vec<PipelineRow> = escalated_pipelines
+            let rows: Vec<JobRow> = escalated_jobs
                 .iter()
                 .map(|p| {
                     let source_label = p
@@ -356,7 +356,7 @@ fn format_text(
                         .map(|s| format!("[{}]  ", s))
                         .unwrap_or_default();
                     let elapsed = format_duration_ms(p.elapsed_ms);
-                    PipelineRow {
+                    JobRow {
                         prefix: format!("    {} ", color::yellow("⚠")),
                         id: p.id.short(8).to_string(),
                         name: friendly_name_label(&p.name, &p.kind, &p.id),
@@ -367,20 +367,20 @@ fn format_text(
                     }
                 })
                 .collect();
-            write_aligned_pipeline_rows(&mut out, &rows);
+            write_aligned_job_rows(&mut out, &rows);
             out.push('\n');
         }
 
-        // Orphaned pipelines
-        if !orphaned_pipelines.is_empty() {
+        // Orphaned jobs
+        if !orphaned_jobs.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!("Orphaned ({}):", orphaned_pipelines.len()))
+                color::header(&format!("Orphaned ({}):", orphaned_jobs.len()))
             );
-            let rows: Vec<PipelineRow> = orphaned_pipelines
+            let rows: Vec<JobRow> = orphaned_jobs
                 .iter()
-                .map(|p| PipelineRow {
+                .map(|p| JobRow {
                     prefix: format!("    {} ", color::yellow("⚠")),
                     id: p.id.short(8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
@@ -390,7 +390,7 @@ fn format_text(
                     reason: None,
                 })
                 .collect();
-            write_aligned_pipeline_rows(&mut out, &rows);
+            write_aligned_job_rows(&mut out, &rows);
             let _ = writeln!(out, "    Run `oj daemon orphans` for recovery details");
             out.push('\n');
         }
@@ -517,11 +517,11 @@ fn format_duration_ms(ms: u64) -> String {
     format_duration(ms / 1000)
 }
 
-/// Returns the pipeline name when it is a meaningful friendly name,
+/// Returns the job name when it is a meaningful friendly name,
 /// or an empty string when it would be redundant (same as kind) or opaque (same as id).
 fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     // Hide name when it's empty, matches the kind, or matches the full/truncated ID.
-    // When the name template produces an empty slug, pipeline_display_name() returns
+    // When the name template produces an empty slug, job_display_name() returns
     // just the nonce (first 8 chars of the ID), which would be redundant with the
     // truncated ID shown in the status output.
     let truncated_id = id.short(8);
@@ -532,8 +532,8 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     }
 }
 
-/// A row of pipeline data for aligned rendering.
-struct PipelineRow {
+/// A row of job data for aligned rendering.
+struct JobRow {
     prefix: String,
     id: String,
     name: String,
@@ -543,11 +543,11 @@ struct PipelineRow {
     reason: Option<String>,
 }
 
-/// Render pipeline rows with aligned columns.
+/// Render job rows with aligned columns.
 ///
 /// Columns: `{prefix}{id}  [{name}  ]{kind/step}  {status}  {suffix}`
 /// The name column is omitted entirely when all names are empty.
-fn write_aligned_pipeline_rows(out: &mut String, rows: &[PipelineRow]) {
+fn write_aligned_job_rows(out: &mut String, rows: &[JobRow]) {
     if rows.is_empty() {
         return;
     }

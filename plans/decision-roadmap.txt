@@ -1,16 +1,16 @@
 ## Phase 1: Data Model, Storage & CLI (DONE)
-- Decision struct: id, pipeline_id, agent_id, source (question/approval/gate/error/idle), context, options[], chosen, created_at, resolved_at
-- Store decisions in materialized state (new top-level map, not nested under pipeline)
+- Decision struct: id, job_id, agent_id, source (question/approval/gate/error/idle), context, options[], chosen, created_at, resolved_at
+- Store decisions in materialized state (new top-level map, not nested under job)
 - Events: DecisionCreated, DecisionResolved
 - StepStatus::Waiting carries decision_id instead of bare reason string
-- oj decision list — id, pipeline, age, source, summary
+- oj decision list — id, job, age, source, summary
 - oj decision show <id> — full context + numbered options
 - oj decision resolve <id> [choice] [-m message] — choice picks numbered option, -m adds freeform text (nudge message, custom answer). Either or both. No choice + -m = freeform answer.
 - oj decisions shorthand
 
 ## Phase 2: Decision Debug Bundle
-- Write {logs_dir}/decision/{decision_id}.crumb.json on creation (same atomic-write pattern as pipeline crumbs)
-- Write {logs_dir}/decision/{decision_id}.debug.txt with human-readable context snapshot (agent log tail, gate stderr, pipeline state)
+- Write {logs_dir}/decision/{decision_id}.crumb.json on creation (same atomic-write pattern as job crumbs)
+- Write {logs_dir}/decision/{decision_id}.debug.txt with human-readable context snapshot (agent log tail, gate stderr, job state)
 - Delete crumb on resolve; keep debug.txt for post-mortem
 - Orphan detection at startup: scan decision crumbs vs materialized state
 
@@ -30,5 +30,5 @@
 
 ## Phase 6: Polish
 - oj status shows decision count per project
-- Decision auto-expires if pipeline is cancelled externally
+- Decision auto-expires if job is cancelled externally
 - oj decision list --resolved for history

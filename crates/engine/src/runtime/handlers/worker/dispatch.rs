@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Queue item dispatch: take items from queue and create pipelines
+//! Queue item dispatch: take items from queue and create jobs
 
 use super::WorkerStatus;
 use crate::error::RuntimeError;
-use crate::runtime::handlers::CreatePipelineParams;
+use crate::runtime::handlers::CreateJobParams;
 use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, PipelineId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, IdGen, JobId, UuidIdGen};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ where
                 _ => return Ok(result_events),
             };
 
-            let active = state.active_pipelines.len() as u32 + state.pending_takes;
+            let active = state.active_jobs.len() as u32 + state.pending_takes;
             let available = state.concurrency.saturating_sub(active);
             if available == 0 || items.is_empty() {
                 let scoped = scoped_name(&state.namespace, worker_name);
@@ -85,7 +85,7 @@ where
             match queue_type {
                 QueueType::External => {
                     // Guard against overlapping polls: skip items that already
-                    // have an in-flight take command or an active pipeline.
+                    // have an in-flight take command or an active job.
                     {
                         let workers = self.worker_states.lock();
                         if let Some(state) = workers.get(worker_name) {
@@ -123,7 +123,7 @@ where
                         }
                     }
 
-                    // Fire take command as background task. Pipeline creation is
+                    // Fire take command as background task. Job creation is
                     // deferred to handle_worker_take_complete when the command
                     // succeeds.
                     self.executor
@@ -141,7 +141,7 @@ where
                     // Guard against stale WorkerPollComplete events: if multiple
                     // polls run before any dispatches are processed, their payloads
                     // overlap. Skip items that are no longer Pending to avoid
-                    // creating duplicate pipelines for the same queue item.
+                    // creating duplicate jobs for the same queue item.
                     let scoped_queue = scoped_name(&worker_namespace, &queue_name);
                     let still_pending = self.lock_state(|state| {
                         state
@@ -169,7 +169,7 @@ where
                             .await?,
                     );
 
-                    // Dispatch pipeline immediately for persisted queues
+                    // Dispatch job immediately for persisted queues
                     result_events.extend(self.dispatch_queue_item(worker_name, item).await?);
                     dispatched_count += 1;
                 }
@@ -181,7 +181,7 @@ where
 
     /// Handle a completed take command for an external queue item.
     ///
-    /// On success (exit_code == 0), creates a pipeline for the item.
+    /// On success (exit_code == 0), creates a job for the item.
     /// On failure, logs the error and skips the item.
     pub(crate) async fn handle_worker_take_complete(
         &self,
@@ -243,7 +243,7 @@ where
         Ok(result_events)
     }
 
-    /// Create and dispatch a pipeline for a single queue item.
+    /// Create and dispatch a job for a single queue item.
     ///
     /// Shared by persisted-queue dispatch (inline in [`handle_worker_poll_complete`])
     /// and external-queue dispatch (deferred in [`handle_worker_take_complete`]).
@@ -260,29 +260,29 @@ where
             .unwrap_or("unknown")
             .to_string();
 
-        let (pipeline_kind, runbook_hash, cwd, worker_namespace) = {
+        let (job_kind, runbook_hash, cwd, worker_namespace) = {
             let workers = self.worker_states.lock();
             let state = match workers.get(worker_name) {
                 Some(s) if s.status != WorkerStatus::Stopped => s,
                 _ => return Ok(result_events),
             };
             (
-                state.pipeline_kind.clone(),
+                state.job_kind.clone(),
                 state.runbook_hash.clone(),
                 state.project_root.clone(),
                 state.namespace.clone(),
             )
         };
 
-        // Create pipeline for this item
-        let pipeline_id = PipelineId::new(UuidIdGen.next());
+        // Create job for this item
+        let job_id = JobId::new(UuidIdGen.next());
 
-        // Look up pipeline definition to build input
+        // Look up job definition to build input
         // Runbook refreshed at top of caller, no need to emit RunbookLoaded
         let runbook = self.cached_runbook(&runbook_hash)?;
-        let pipeline_def = runbook
-            .get_pipeline(&pipeline_kind)
-            .ok_or_else(|| RuntimeError::PipelineDefNotFound(pipeline_kind.clone()))?;
+        let job_def = runbook
+            .get_job(&job_kind)
+            .ok_or_else(|| RuntimeError::JobDefNotFound(job_kind.clone()))?;
 
         // Build input from item fields
         let mut input = HashMap::new();
@@ -296,22 +296,22 @@ where
                 };
                 input.insert(format!("item.{}", key), v.clone());
                 input.insert(key.clone(), v.clone());
-                // Map fields into the namespace of the pipeline's first declared var
+                // Map fields into the namespace of the job's first declared var
                 // e.g. if vars = ["bug"], map "bug.title", "bug.id", etc.
-                if let Some(first_input) = pipeline_def.vars.first() {
+                if let Some(first_input) = job_def.vars.first() {
                     input.insert(format!("{}.{}", first_input, key), v);
                 }
             }
         }
 
-        // Build pipeline name
-        let name = format!("{}-{}", pipeline_kind, item_id);
+        // Build job name
+        let name = format!("{}-{}", job_kind, item_id);
 
         result_events.extend(
-            self.create_and_start_pipeline(CreatePipelineParams {
-                pipeline_id: pipeline_id.clone(),
-                pipeline_name: name,
-                pipeline_kind: pipeline_kind.clone(),
+            self.create_and_start_job(CreateJobParams {
+                job_id: job_id.clone(),
+                job_name: name,
+                job_kind: job_kind.clone(),
                 vars: input,
                 runbook_hash: runbook_hash.clone(),
                 runbook_json: None,
@@ -322,14 +322,14 @@ where
             .await?,
         );
 
-        // Track pipeline in worker state and item-pipeline mapping
+        // Track job in worker state and item-job mapping
         {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_name) {
-                state.active_pipelines.insert(pipeline_id.clone());
+                state.active_jobs.insert(job_id.clone());
                 state
-                    .item_pipeline_map
-                    .insert(pipeline_id.clone(), item_id.clone());
+                    .item_job_map
+                    .insert(job_id.clone(), item_id.clone());
             }
         }
 
@@ -337,7 +337,7 @@ where
         let dispatch_event = Event::WorkerItemDispatched {
             worker_name: worker_name.to_string(),
             item_id: item_id.clone(),
-            pipeline_id: pipeline_id.clone(),
+            job_id: job_id.clone(),
             namespace: worker_namespace.clone(),
         };
         result_events.extend(
@@ -352,9 +352,9 @@ where
         self.worker_logger.append(
             &scoped,
             &format!(
-                "dispatched item {} \u{2192} pipeline {}",
+                "dispatched item {} \u{2192} job {}",
                 item_id,
-                pipeline_id.as_str()
+                job_id.as_str()
             ),
         );
 

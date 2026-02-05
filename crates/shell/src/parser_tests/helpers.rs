@@ -10,7 +10,7 @@ use crate::ast::*;
 pub fn get_simple_command(and_or: &AndOrList) -> &SimpleCommand {
     match get_command(and_or) {
         Command::Simple(cmd) => cmd,
-        Command::Pipeline(_) => panic!("Expected simple command, not pipeline"),
+        Command::Job(_) => panic!("Expected simple command, not job"),
         Command::Subshell(_) => panic!("Expected simple command, not subshell"),
         Command::BraceGroup(_) => panic!("Expected simple command, not brace group"),
     }
@@ -23,11 +23,11 @@ pub fn get_command(and_or: &AndOrList) -> &Command {
     &and_or.first.command
 }
 
-/// Extract a pipeline from an AndOrList.
-pub fn get_pipeline(and_or: &AndOrList) -> &Pipeline {
+/// Extract a job from an AndOrList.
+pub fn get_job(and_or: &AndOrList) -> &Job {
     match get_command(and_or) {
-        Command::Pipeline(p) => p,
-        _ => panic!("Expected pipeline"),
+        Command::Job(p) => p,
+        _ => panic!("Expected job"),
     }
 }
 

@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::MaterializedState;
-use oj_core::{Pipeline, PipelineConfig, SystemClock};
+use oj_core::{Job, JobConfig, SystemClock};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -159,8 +159,8 @@ impl CheckpointWriter for FakeCheckpointWriter {
 // Test helpers
 // =============================================================================
 
-fn test_config(id: &str, name: &str) -> PipelineConfig {
-    PipelineConfig {
+fn test_config(id: &str, name: &str) -> JobConfig {
+    JobConfig {
         id: id.to_string(),
         name: name.to_string(),
         kind: "feature".to_string(),
@@ -173,11 +173,14 @@ fn test_config(id: &str, name: &str) -> PipelineConfig {
     }
 }
 
-fn create_test_state(num_pipelines: usize) -> MaterializedState {
+fn create_test_state(num_jobs: usize) -> MaterializedState {
     let mut state = MaterializedState::default();
-    for i in 0..num_pipelines {
-        let pipeline = Pipeline::new(test_config(&format!("pipe-{i}"), &format!("test-{i}")), &SystemClock);
-        state.pipelines.insert(format!("pipe-{i}"), pipeline);
+    for i in 0..num_jobs {
+        let job = Job::new(
+            test_config(&format!("pipe-{i}"), &format!("test-{i}")),
+            &SystemClock,
+        );
+        state.jobs.insert(format!("pipe-{i}"), job);
     }
     state
 }
@@ -189,7 +192,8 @@ fn create_test_state(num_pipelines: usize) -> MaterializedState {
 #[test]
 fn test_checkpoint_basic_flow() {
     let writer = FakeCheckpointWriter::new();
-    let checkpointer = Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
+    let checkpointer =
+        Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
 
     let state = create_test_state(3);
     let handle = checkpointer.start(42, &state);
@@ -217,7 +221,8 @@ fn test_checkpoint_fsync_ordering_for_wal_safety() {
     // This test verifies the critical invariant:
     // Directory fsync MUST happen after rename for WAL truncation safety
     let writer = FakeCheckpointWriter::new();
-    let checkpointer = Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
+    let checkpointer =
+        Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
 
     let state = create_test_state(1);
     let handle = checkpointer.start(100, &state);
@@ -265,13 +270,17 @@ fn test_checkpoint_produces_compressed_output() {
 
     // Verify zstd magic number
     assert!(data.len() >= 4);
-    assert_eq!(&data[0..4], &[0x28, 0xB5, 0x2F, 0xFD], "should be zstd format");
+    assert_eq!(
+        &data[0..4],
+        &[0x28, 0xB5, 0x2F, 0xFD],
+        "should be zstd format"
+    );
 
     // Decompress and verify content
     let decompressed = zstd::decode_all(data.as_slice()).unwrap();
     let snapshot: Snapshot = serde_json::from_slice(&decompressed).unwrap();
     assert_eq!(snapshot.seq, 1);
-    assert_eq!(snapshot.state.pipelines.len(), 10);
+    assert_eq!(snapshot.state.jobs.len(), 10);
 }
 
 #[test]
@@ -322,7 +331,8 @@ fn test_checkpoint_error_on_dir_fsync_failure() {
 #[test]
 fn test_checkpoint_sync_for_shutdown() {
     let writer = FakeCheckpointWriter::new();
-    let checkpointer = Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
+    let checkpointer =
+        Checkpointer::with_writer(writer.clone(), PathBuf::from("/data/snapshot.json"));
 
     let state = create_test_state(5);
     let result = checkpointer.checkpoint_sync(99, &state).unwrap();
@@ -361,7 +371,7 @@ fn test_load_snapshot_detects_compression() {
     // Load it back
     let loaded = load_snapshot(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 42);
-    assert_eq!(loaded.state.pipelines.len(), 3);
+    assert_eq!(loaded.state.jobs.len(), 3);
 }
 
 #[test]
@@ -377,7 +387,7 @@ fn test_load_snapshot_backward_compat_uncompressed() {
     // load_snapshot should handle uncompressed format
     let loaded = load_snapshot(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 10);
-    assert_eq!(loaded.state.pipelines.len(), 2);
+    assert_eq!(loaded.state.jobs.len(), 2);
 }
 
 #[test]
@@ -431,7 +441,7 @@ fn test_load_zstd_snapshot_with_too_new_version_fails() {
         "v": 99,
         "seq": 42,
         "state": {
-            "pipelines": {},
+            "jobs": {},
             "sessions": {},
             "workspaces": {},
             "runbooks": {},
@@ -473,7 +483,7 @@ fn test_load_zstd_snapshot_with_current_version_succeeds() {
         "v": {version},
         "seq": 42,
         "state": {{
-            "pipelines": {{}},
+            "jobs": {{}},
             "sessions": {{}},
             "workspaces": {{}},
             "runbooks": {{}},

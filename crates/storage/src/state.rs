@@ -4,8 +4,8 @@
 //! Materialized state from WAL replay
 
 use oj_core::{
-    pipeline::AgentSignal, scoped_name, AgentRun, AgentRunStatus, AgentSignalKind, Decision,
-    DecisionId, Event, Pipeline, PipelineConfig, StepOutcome, StepStatus, WorkspaceStatus,
+    job::AgentSignal, scoped_name, AgentRun, AgentRunStatus, AgentSignalKind, Decision, DecisionId,
+    Event, Job, JobConfig, StepOutcome, StepStatus, WorkspaceStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ fn epoch_ms_now() -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
     pub id: String,
-    pub pipeline_id: String,
+    pub job_id: String,
 }
 
 /// Workspace type for lifecycle management
@@ -63,7 +63,7 @@ pub struct Workspace {
     pub path: PathBuf,
     /// Branch for the worktree (None for folder workspaces)
     pub branch: Option<String>,
-    /// Owner of the workspace (pipeline_id or worker_name)
+    /// Owner of the workspace (job_id or worker_name)
     pub owner: Option<String>,
     /// Current lifecycle status
     pub status: WorkspaceStatus,
@@ -93,7 +93,7 @@ pub struct WorkerRecord {
     /// "running" or "stopped"
     pub status: String,
     #[serde(default)]
-    pub active_pipeline_ids: Vec<String>,
+    pub active_job_ids: Vec<String>,
     #[serde(default)]
     pub queue_name: String,
     #[serde(default)]
@@ -137,14 +137,14 @@ pub struct CronRecord {
     pub status: String,
     pub interval: String,
     /// Deprecated: use run_target. Kept for backward compat.
-    pub pipeline_name: String,
-    /// What this cron runs: "pipeline:name" or "agent:name"
+    pub job_name: String,
+    /// What this cron runs: "job:name" or "agent:name"
     #[serde(default)]
     pub run_target: String,
     /// Epoch ms when the cron was started (timer began)
     #[serde(default)]
     pub started_at_ms: u64,
-    /// Epoch ms when the cron last fired (spawned a pipeline)
+    /// Epoch ms when the cron last fired (spawned a job)
     #[serde(default)]
     pub last_fired_at_ms: Option<u64>,
 }
@@ -152,7 +152,7 @@ pub struct CronRecord {
 /// Materialized state built from WAL operations
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MaterializedState {
-    pub pipelines: HashMap<String, Pipeline>,
+    pub jobs: HashMap<String, Job>,
     pub sessions: HashMap<String, Session>,
     pub workspaces: HashMap<String, Workspace>,
     #[serde(default)]
@@ -170,16 +170,16 @@ pub struct MaterializedState {
 }
 
 impl MaterializedState {
-    /// Get a pipeline by ID or unique prefix (like git commit hashes)
-    pub fn get_pipeline(&self, id: &str) -> Option<&Pipeline> {
+    /// Get a job by ID or unique prefix (like git commit hashes)
+    pub fn get_job(&self, id: &str) -> Option<&Job> {
         // Try exact match first
-        if let Some(pipeline) = self.pipelines.get(id) {
-            return Some(pipeline);
+        if let Some(job) = self.jobs.get(id) {
+            return Some(job);
         }
 
         // Try prefix match
         let matches: Vec<_> = self
-            .pipelines
+            .jobs
             .iter()
             .filter(|(k, _)| k.starts_with(id))
             .collect();
@@ -192,9 +192,9 @@ impl MaterializedState {
         }
     }
 
-    /// Find a pipeline by agent_id in its current step
-    fn find_pipeline_by_agent_id(&mut self, agent_id: &str) -> Option<&mut Pipeline> {
-        self.pipelines
+    /// Find a job by agent_id in its current step
+    fn find_job_by_agent_id(&mut self, agent_id: &str) -> Option<&mut Job> {
+        self.jobs
             .values_mut()
             .find(|p| p.step_history.last().and_then(|r| r.agent_id.as_deref()) == Some(agent_id))
     }
@@ -240,9 +240,9 @@ impl MaterializedState {
     pub fn apply_event(&mut self, event: &Event) {
         match event {
             Event::AgentWorking { agent_id } => {
-                let pipeline_id = agent_id.as_str().to_string();
-                if let Some(pipeline) = self.pipelines.get_mut(&pipeline_id) {
-                    pipeline.step_status = StepStatus::Running;
+                let job_id = agent_id.as_str().to_string();
+                if let Some(job) = self.jobs.get_mut(&job_id) {
+                    job.step_status = StepStatus::Running;
                 }
             }
             Event::AgentWaiting { .. } => {
@@ -252,52 +252,50 @@ impl MaterializedState {
                 agent_id,
                 exit_code,
             } => {
-                let pipeline_id = agent_id.as_str().to_string();
-                if let Some(pipeline) = self.pipelines.get_mut(&pipeline_id) {
+                let job_id = agent_id.as_str().to_string();
+                if let Some(job) = self.jobs.get_mut(&job_id) {
                     if *exit_code == Some(0) {
-                        pipeline.step_status = StepStatus::Completed;
+                        job.step_status = StepStatus::Completed;
                     } else {
-                        pipeline.step_status = StepStatus::Failed;
-                        pipeline.error = Some(format!("exit code: {:?}", exit_code));
+                        job.step_status = StepStatus::Failed;
+                        job.error = Some(format!("exit code: {:?}", exit_code));
                     }
                 }
             }
             Event::AgentFailed { agent_id, error } => {
-                let pipeline_id = agent_id.as_str().to_string();
-                if let Some(pipeline) = self.pipelines.get_mut(&pipeline_id) {
-                    pipeline.step_status = StepStatus::Failed;
-                    pipeline.error = Some(error.to_string());
+                let job_id = agent_id.as_str().to_string();
+                if let Some(job) = self.jobs.get_mut(&job_id) {
+                    job.step_status = StepStatus::Failed;
+                    job.error = Some(error.to_string());
                 }
             }
             Event::AgentGone { agent_id } => {
-                let pipeline_id = agent_id.as_str().to_string();
-                if let Some(pipeline) = self.pipelines.get_mut(&pipeline_id) {
-                    pipeline.step_status = StepStatus::Failed;
-                    pipeline.error = Some("session terminated unexpectedly".to_string());
+                let job_id = agent_id.as_str().to_string();
+                if let Some(job) = self.jobs.get_mut(&job_id) {
+                    job.step_status = StepStatus::Failed;
+                    job.error = Some("session terminated unexpectedly".to_string());
                 }
             }
 
             Event::ShellExited {
-                pipeline_id,
-                exit_code,
-                ..
+                job_id, exit_code, ..
             } => {
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                     let now = epoch_ms_now();
                     if *exit_code == 0 {
-                        pipeline.step_status = StepStatus::Completed;
-                        pipeline.finalize_current_step(StepOutcome::Completed, now);
+                        job.step_status = StepStatus::Completed;
+                        job.finalize_current_step(StepOutcome::Completed, now);
                     } else {
                         let error_msg = format!("shell exit code: {}", exit_code);
-                        pipeline.step_status = StepStatus::Failed;
-                        pipeline.error = Some(error_msg.clone());
-                        pipeline.finalize_current_step(StepOutcome::Failed(error_msg), now);
+                        job.step_status = StepStatus::Failed;
+                        job.error = Some(error_msg.clone());
+                        job.finalize_current_step(StepOutcome::Failed(error_msg), now);
                     }
                 }
             }
 
             // === Typed state mutations ===
-            Event::PipelineCreated {
+            Event::JobCreated {
                 id,
                 kind,
                 name,
@@ -309,7 +307,7 @@ impl MaterializedState {
                 namespace,
                 cron_name,
             } => {
-                let config = PipelineConfig {
+                let config = JobConfig {
                     id: id.to_string(),
                     name: name.clone(),
                     kind: kind.clone(),
@@ -320,8 +318,8 @@ impl MaterializedState {
                     namespace: namespace.clone(),
                     cron_name: cron_name.clone(),
                 };
-                let pipeline = Pipeline::new_with_epoch_ms(config, *created_at_epoch_ms);
-                self.pipelines.insert(id.to_string(), pipeline);
+                let job = Job::new_with_epoch_ms(config, *created_at_epoch_ms);
+                self.jobs.insert(id.to_string(), job);
             }
 
             Event::RunbookLoaded {
@@ -341,35 +339,35 @@ impl MaterializedState {
                 }
             }
 
-            Event::PipelineAdvanced { id, step } => {
-                if let Some(pipeline) = self.pipelines.get_mut(id.as_str()) {
+            Event::JobAdvanced { id, step } => {
+                if let Some(job) = self.jobs.get_mut(id.as_str()) {
                     // Idempotency: skip if already on this step, UNLESS recovering
                     // from failure (on_fail → same step cycle).
-                    let is_failure_transition = pipeline.step_status == StepStatus::Failed;
-                    if pipeline.step == *step && !is_failure_transition {
+                    let is_failure_transition = job.step_status == StepStatus::Failed;
+                    if job.step == *step && !is_failure_transition {
                         return;
                     }
                     // Clear stale error and session when resuming from terminal state
-                    let was_terminal = pipeline.is_terminal();
+                    let was_terminal = job.is_terminal();
                     let target_is_nonterminal =
                         step != "done" && step != "failed" && step != "cancelled";
                     if was_terminal && target_is_nonterminal {
-                        pipeline.error = None;
-                        pipeline.session_id = None;
+                        job.error = None;
+                        job.session_id = None;
                     }
 
                     let now = epoch_ms_now();
                     // Finalize the previous step
                     let outcome = match step.as_str() {
                         "failed" | "cancelled" => {
-                            StepOutcome::Failed(pipeline.error.clone().unwrap_or_default())
+                            StepOutcome::Failed(job.error.clone().unwrap_or_default())
                         }
                         _ => StepOutcome::Completed,
                     };
-                    pipeline.finalize_current_step(outcome, now);
+                    job.finalize_current_step(outcome, now);
 
-                    pipeline.step = step.clone();
-                    pipeline.step_status = match step.as_str() {
+                    job.step = step.clone();
+                    job.step_status = match step.as_str() {
                         "failed" | "cancelled" => StepStatus::Failed,
                         "done" => StepStatus::Completed,
                         _ => StepStatus::Pending,
@@ -380,111 +378,106 @@ impl MaterializedState {
                     // cycle limits work — the agent action's `attempts` field should
                     // bound retries across the entire on_fail chain, not per-step.
                     if !is_failure_transition {
-                        pipeline.reset_action_attempts();
+                        job.reset_action_attempts();
                     }
-                    pipeline.clear_agent_signal();
+                    job.clear_agent_signal();
 
                     // Push new step record and track visits (unless terminal)
                     if step != "done" && step != "failed" && step != "cancelled" {
-                        pipeline.record_step_visit(step);
-                        pipeline.push_step(step, now);
+                        job.record_step_visit(step);
+                        job.push_step(step, now);
                     }
                 }
 
-                // Remove from worker active_pipeline_ids on terminal states
+                // Remove from worker active_job_ids on terminal states
                 if step == "done" || step == "failed" || step == "cancelled" {
-                    let pipeline_id_str = id.to_string();
+                    let job_id_str = id.to_string();
                     for record in self.workers.values_mut() {
-                        record
-                            .active_pipeline_ids
-                            .retain(|pid| pid != &pipeline_id_str);
+                        record.active_job_ids.retain(|pid| pid != &job_id_str);
                     }
-                    // Clean up unresolved decisions for the completed pipeline
+                    // Clean up unresolved decisions for the completed job
                     let pid = id.as_str();
                     self.decisions
-                        .retain(|_, d| d.pipeline_id != pid || d.is_resolved());
+                        .retain(|_, d| d.job_id != pid || d.is_resolved());
                 }
             }
 
             Event::StepStarted {
-                pipeline_id,
+                job_id,
                 agent_id,
                 agent_name,
                 ..
             } => {
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.step_status = StepStatus::Running;
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.step_status = StepStatus::Running;
                     if let Some(aid) = agent_id {
-                        pipeline.set_current_step_agent_id(aid.as_str());
+                        job.set_current_step_agent_id(aid.as_str());
                     }
                     if let Some(aname) = agent_name {
-                        pipeline.set_current_step_agent_name(aname.as_str());
+                        job.set_current_step_agent_name(aname.as_str());
                     }
-                    pipeline.update_current_step_outcome(StepOutcome::Running);
+                    job.update_current_step_outcome(StepOutcome::Running);
                 }
             }
 
             Event::StepWaiting {
-                pipeline_id,
+                job_id,
                 reason,
                 decision_id,
                 ..
             } => {
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.step_status = StepStatus::Waiting(decision_id.clone());
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.step_status = StepStatus::Waiting(decision_id.clone());
                     if reason.is_some() {
-                        pipeline.error.clone_from(reason);
+                        job.error.clone_from(reason);
                     }
                     let reason_str = reason.clone().unwrap_or_default();
-                    pipeline.update_current_step_outcome(StepOutcome::Waiting(reason_str));
+                    job.update_current_step_outcome(StepOutcome::Waiting(reason_str));
                 }
             }
 
-            Event::StepCompleted { pipeline_id, .. } => {
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.step_status = StepStatus::Completed;
-                    pipeline.finalize_current_step(StepOutcome::Completed, epoch_ms_now());
+            Event::StepCompleted { job_id, .. } => {
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.step_status = StepStatus::Completed;
+                    job.finalize_current_step(StepOutcome::Completed, epoch_ms_now());
                 }
             }
 
-            Event::StepFailed {
-                pipeline_id, error, ..
-            } => {
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.step_status = StepStatus::Failed;
-                    pipeline.error = Some(error.clone());
-                    pipeline
-                        .finalize_current_step(StepOutcome::Failed(error.clone()), epoch_ms_now());
+            Event::StepFailed { job_id, error, .. } => {
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.step_status = StepStatus::Failed;
+                    job.error = Some(error.clone());
+                    job.finalize_current_step(StepOutcome::Failed(error.clone()), epoch_ms_now());
                 }
             }
 
-            Event::PipelineCancelling { id } => {
-                if let Some(pipeline) = self.pipelines.get_mut(id.as_str()) {
-                    pipeline.cancelling = true;
+            Event::JobCancelling { id } => {
+                if let Some(job) = self.jobs.get_mut(id.as_str()) {
+                    job.cancelling = true;
                 }
             }
 
-            Event::PipelineDeleted { id } => {
-                self.pipelines.remove(id.as_str());
-                // Clean up all decisions associated with the deleted pipeline
-                self.decisions.retain(|_, d| d.pipeline_id != id.as_str());
+            Event::JobDeleted { id } => {
+                self.jobs.remove(id.as_str());
+                // Clean up all decisions associated with the deleted job
+                self.decisions.retain(|_, d| d.job_id != id.as_str());
             }
 
             Event::SessionCreated {
                 id,
-                pipeline_id,
+                job_id,
                 agent_run_id,
             } => {
                 self.sessions.insert(
                     id.to_string(),
                     Session {
                         id: id.to_string(),
-                        pipeline_id: pipeline_id.to_string(),
+                        job_id: job_id.to_string(),
                     },
                 );
-                // Update the pipeline's session_id
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.session_id = Some(id.to_string());
+                // Update the job's session_id
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.session_id = Some(id.to_string());
                 }
                 // Update the agent_run's session_id (standalone agents)
                 if let Some(ref ar_id) = agent_run_id {
@@ -514,11 +507,11 @@ impl MaterializedState {
                     })
                     .unwrap_or_default();
 
-                // Also update the pipeline's workspace info if owner matches
+                // Also update the job's workspace info if owner matches
                 if let Some(ref owner_id) = owner {
-                    if let Some(pipeline) = self.pipelines.get_mut(owner_id.as_str()) {
-                        pipeline.workspace_path = Some(path.clone());
-                        pipeline.workspace_id = Some(id.clone());
+                    if let Some(job) = self.jobs.get_mut(owner_id.as_str()) {
+                        job.workspace_path = Some(path.clone());
+                        job.workspace_id = Some(id.clone());
                     }
                 }
 
@@ -554,10 +547,10 @@ impl MaterializedState {
                 self.workspaces.remove(id.as_str());
             }
 
-            Event::PipelineUpdated { id, vars } => {
-                if let Some(pipeline) = self.pipelines.get_mut(id.as_str()) {
+            Event::JobUpdated { id, vars } => {
+                if let Some(job) = self.jobs.get_mut(id.as_str()) {
                     for (key, value) in vars {
-                        pipeline.vars.insert(key.clone(), value.clone());
+                        job.vars.insert(key.clone(), value.clone());
                     }
                 }
             }
@@ -584,9 +577,9 @@ impl MaterializedState {
                         kind: kind.clone(),
                         message: message.clone(),
                     });
-                } else if let Some(pipeline) = self.find_pipeline_by_agent_id(agent_id.as_str()) {
-                    // Find pipeline by agent_id in current step
-                    pipeline.action_tracker.agent_signal = Some(AgentSignal {
+                } else if let Some(job) = self.find_job_by_agent_id(agent_id.as_str()) {
+                    // Find job by agent_id in current step
+                    job.action_tracker.agent_signal = Some(AgentSignal {
                         kind: kind.clone(),
                         message: message.clone(),
                     });
@@ -603,11 +596,11 @@ impl MaterializedState {
                 namespace,
             } => {
                 let key = scoped_name(namespace, worker_name);
-                // Preserve active_pipeline_ids from before restart
-                let existing_pipeline_ids = self
+                // Preserve active_job_ids from before restart
+                let existing_job_ids = self
                     .workers
                     .get(&key)
-                    .map(|w| w.active_pipeline_ids.clone())
+                    .map(|w| w.active_job_ids.clone())
                     .unwrap_or_default();
 
                 self.workers.insert(
@@ -618,7 +611,7 @@ impl MaterializedState {
                         project_root: project_root.clone(),
                         runbook_hash: runbook_hash.clone(),
                         status: "running".to_string(),
-                        active_pipeline_ids: existing_pipeline_ids,
+                        active_job_ids: existing_job_ids,
                         queue_name: queue_name.clone(),
                         concurrency: *concurrency,
                     },
@@ -627,15 +620,15 @@ impl MaterializedState {
 
             Event::WorkerItemDispatched {
                 worker_name,
-                pipeline_id,
+                job_id,
                 namespace,
                 ..
             } => {
                 let key = scoped_name(namespace, worker_name);
                 if let Some(record) = self.workers.get_mut(&key) {
-                    let pid = pipeline_id.to_string();
-                    if !record.active_pipeline_ids.contains(&pid) {
-                        record.active_pipeline_ids.push(pid);
+                    let pid = job_id.to_string();
+                    if !record.active_job_ids.contains(&pid) {
+                        record.active_job_ids.push(pid);
                     }
                 }
             }
@@ -770,7 +763,7 @@ impl MaterializedState {
                 project_root,
                 runbook_hash,
                 interval,
-                pipeline_name,
+                job_name,
                 run_target,
                 namespace,
             } => {
@@ -781,9 +774,9 @@ impl MaterializedState {
                     .as_millis() as u64;
                 // Preserve last_fired_at_ms across restarts (re-emitted CronStarted)
                 let last_fired_at_ms = self.crons.get(&key).and_then(|r| r.last_fired_at_ms);
-                // Use run_target if present, fall back to pipeline_name for backward compat
+                // Use run_target if present, fall back to job_name for backward compat
                 let effective_target = if run_target.is_empty() {
-                    format!("pipeline:{}", pipeline_name)
+                    format!("job:{}", job_name)
                 } else {
                     run_target.clone()
                 };
@@ -796,7 +789,7 @@ impl MaterializedState {
                         runbook_hash: runbook_hash.clone(),
                         status: "running".to_string(),
                         interval: interval.clone(),
-                        pipeline_name: pipeline_name.clone(),
+                        job_name: job_name.clone(),
                         run_target: effective_target,
                         started_at_ms: now_ms,
                         last_fired_at_ms,
@@ -840,7 +833,7 @@ impl MaterializedState {
             // -- decision events --
             Event::DecisionCreated {
                 id,
-                pipeline_id,
+                job_id,
                 agent_id,
                 source,
                 context,
@@ -854,7 +847,7 @@ impl MaterializedState {
                         id.clone(),
                         Decision {
                             id: DecisionId::new(id.clone()),
-                            pipeline_id: pipeline_id.to_string(),
+                            job_id: job_id.to_string(),
                             agent_id: agent_id.clone(),
                             source: source.clone(),
                             context: context.clone(),
@@ -868,9 +861,9 @@ impl MaterializedState {
                     );
                 }
 
-                // Update pipeline step status to Waiting with decision_id
-                if let Some(pipeline) = self.pipelines.get_mut(pipeline_id.as_str()) {
-                    pipeline.step_status = StepStatus::Waiting(Some(id.clone()));
+                // Update job step status to Waiting with decision_id
+                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                    job.step_status = StepStatus::Waiting(Some(id.clone()));
                 }
             }
 
@@ -951,8 +944,8 @@ impl MaterializedState {
             | Event::TimerStart { .. }
             | Event::SessionInput { .. }
             | Event::AgentInput { .. }
-            | Event::PipelineResume { .. }
-            | Event::PipelineCancel { .. }
+            | Event::JobResume { .. }
+            | Event::JobCancel { .. }
             | Event::WorkspaceDrop { .. }
             | Event::WorkerWake { .. }
             | Event::WorkerPollComplete { .. }

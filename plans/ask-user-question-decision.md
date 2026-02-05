@@ -8,7 +8,7 @@ When an agent calls Claude Code's `AskUserQuestion` tool, the decision system cu
 2. The prompt type distinction (`Question` vs `Permission`) is lost during escalation — `monitor.rs` maps all prompt triggers to `EscalationTrigger::Prompt { prompt_type: "permission" }`
 3. The decision builder has no `Question` variant, so all prompts get `DecisionSource::Approval` with Approve/Deny/Cancel options
 
-This plan threads the actual AskUserQuestion data (question text, options with labels/descriptions, multiSelect flag) through the hook → event → decision pipeline so that `oj decision show` and `oj status` display the real question and choices.
+This plan threads the actual AskUserQuestion data (question text, options with labels/descriptions, multiSelect flag) through the hook → event → decision job so that `oj decision show` and `oj status` display the real question and choices.
 
 ## Project Structure
 
@@ -219,7 +219,7 @@ Choose Option A. Add a `question_data` parameter (defaulting to `None`) to `buil
 
 ```rust
 pub fn build_action_effects(
-    pipeline: &Pipeline,
+    job: &Job,
     agent_def: &AgentDef,
     action_config: &ActionConfig,
     trigger: &str,
@@ -262,7 +262,7 @@ EscalationTrigger::Question { ref question_data } => {
     // Always add Cancel as the last option
     options.push(DecisionOption {
         label: "Cancel".to_string(),
-        description: Some("Cancel the pipeline".to_string()),
+        description: Some("Cancel the job".to_string()),
         recommended: false,
     });
 
@@ -278,8 +278,8 @@ EscalationTrigger::Question { ref question_data } => {
         if let Some(entry) = qd.questions.first() {
             let header = entry.header.as_deref().unwrap_or("Question");
             parts.push(format!(
-                "Agent in pipeline \"{}\" is asking a question.",
-                self.pipeline_name
+                "Agent in job \"{}\" is asking a question.",
+                self.job_name
             ));
             parts.push(String::new()); // blank line
             parts.push(format!("[{}] {}", header, entry.question));
@@ -291,14 +291,14 @@ EscalationTrigger::Question { ref question_data } => {
             }
         } else {
             parts.push(format!(
-                "Agent in pipeline \"{}\" is asking a question.",
-                self.pipeline_name
+                "Agent in job \"{}\" is asking a question.",
+                self.job_name
             ));
         }
     } else {
         parts.push(format!(
-            "Agent in pipeline \"{}\" is asking a question (no details available).",
-            self.pipeline_name
+            "Agent in job \"{}\" is asking a question (no details available).",
+            self.job_name
         ));
     }
 }
@@ -312,7 +312,7 @@ EscalationTrigger::Question { ref question_data } => {
 
 **4a. Update `map_decision_to_action` in `crates/daemon/src/listener/decisions.rs`:**
 
-The existing `DecisionSource::Question` handler already does `PipelineResume`. Enhance it to include the selected option label in the message, making it actionable for the agent:
+The existing `DecisionSource::Question` handler already does `JobResume`. Enhance it to include the selected option label in the message, making it actionable for the agent:
 
 ```rust
 DecisionSource::Question => {
@@ -325,12 +325,12 @@ DecisionSource::Question => {
     if let Some(c) = chosen {
         // Last option is always Cancel
         if c == options.len() {
-            return Some(Event::PipelineCancel { id: pid });
+            return Some(Event::JobCancel { id: pid });
         }
     }
 
     // For non-Cancel choices: resume with the selected option info
-    Some(Event::PipelineResume {
+    Some(Event::JobResume {
         id: pid,
         message: Some(build_question_resume_message(chosen, message, decision_id, options)),
         vars: HashMap::new(),
@@ -372,20 +372,20 @@ fn build_question_resume_message(
 
 **4c. Keep the options list accessible during resolution:**
 
-The current `handle_decision_resolve` reads the decision from state, extracts `source` and `pipeline_id`, then drops the state lock. For Question decisions, we also need the `options` list to determine if the chosen option is Cancel (last option). Read `options` before dropping the lock:
+The current `handle_decision_resolve` reads the decision from state, extracts `source` and `job_id`, then drops the state lock. For Question decisions, we also need the `options` list to determine if the chosen option is Cancel (last option). Read `options` before dropping the lock:
 
 ```rust
 let decision_options = decision.options.clone();
 // ... later in map_decision_to_action, use decision_options
 ```
 
-**Verification:** Resolve a Question decision with choice 1, verify `PipelineResume` emits with the option label. Resolve with the last choice number, verify `PipelineCancel` emits.
+**Verification:** Resolve a Question decision with choice 1, verify `JobResume` emits with the option label. Resolve with the last choice number, verify `JobCancel` emits.
 
 ### Phase 5: Update Status Display
 
 **Goal:** Show "question" as the escalation source in `oj status` and enrich `oj decision show` for Question-type decisions.
 
-**5a. The `escalate_source` field in `PipelineStatusEntry` already exists and is populated from `DecisionSource`.**
+**5a. The `escalate_source` field in `JobStatusEntry` already exists and is populated from `DecisionSource`.**
 
 With Phase 2 routing AskUserQuestion to `DecisionSource::Question`, the status display will automatically show `[question]` instead of `[approval]`. No changes needed in `protocol_status.rs` or `status.rs` — the source label derives from the `DecisionSource` enum's serialization (`"question"`).
 
@@ -420,7 +420,7 @@ This is clean. No changes needed to `PromptType` or `DecisionSource` enums.
 **6b. Update existing tests:**
 
 - `decision_builder_tests.rs`: Add tests for `Question` trigger
-- `decisions_tests.rs`: Add tests for Question resolution → PipelineResume with label
+- `decisions_tests.rs`: Add tests for Question resolution → JobResume with label
 - Any tests that assert on the exact trigger mapping for "prompt" trigger strings
 
 **Verification:** `make check` passes. All existing tests pass. New tests cover Question decision creation and resolution.
@@ -446,7 +446,7 @@ Claude Code agent calls AskUserQuestion
     → context: "Agent is asking: [Header] Question text?"
     → options: [Option1, Option2, ..., Cancel]
   → Decision stored in MaterializedState
-  → Desktop notification: "Decision needed: pipeline-name"
+  → Desktop notification: "Decision needed: job-name"
   → oj status shows [question] source
   → oj decision show shows question + options
 
@@ -455,8 +455,8 @@ User resolves:
   → handle_decision_resolve validates choice
   → Emits DecisionResolved
   → map_decision_to_action:
-    → If last option (Cancel) → PipelineCancel
-    → Otherwise → PipelineResume with "Selected: <label> (option N); custom note"
+    → If last option (Cancel) → JobCancel
+    → Otherwise → JobResume with "Selected: <label> (option N); custom note"
   → Agent receives message via tmux session
 ```
 
@@ -487,7 +487,7 @@ Options:
   1. Unreachable step - "step 'X' is unreachable..."
   2. Dead-end step - "step 'X' has no on_done..."
   3. Both - Remove both parser warnings
-  4. Cancel - Cancel the pipeline
+  4. Cancel - Cancel the job
 
 Use: oj decision resolve abc12345 <number> [-m message]
 ```
@@ -501,10 +501,10 @@ Use: oj decision resolve abc12345 <number> [-m message]
 5. **Full suite:** `cargo test --all`
 6. **Manual smoke test:**
    ```bash
-   # Create a pipeline with an agent that calls AskUserQuestion
-   oj run test-pipeline
+   # Create a job with an agent that calls AskUserQuestion
+   oj run test-job
    # When agent asks a question...
-   oj status                     # See [question] source on escalated pipeline
+   oj status                     # See [question] source on escalated job
    oj decision list              # See pending question decision
    oj decision show <id>         # See actual question text + options
    oj decision resolve <id> 1    # Select first option

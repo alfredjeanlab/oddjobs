@@ -13,11 +13,11 @@ fn accepts_simple_command() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo 'hello world'"
 "#,
@@ -26,9 +26,9 @@ run = "echo 'hello world'"
     temp.oj().args(&["run", "test"]).passes();
 }
 
-/// Pipeline with multiple commands
+/// Job with multiple commands
 #[test]
-fn accepts_pipeline_commands() {
+fn accepts_job_commands() {
     let temp = Project::empty();
     temp.git_init();
     temp.file("README.md", "# Readme file");
@@ -36,11 +36,11 @@ fn accepts_pipeline_commands() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "cat README.md | grep -i readme | wc -l"
 "#,
@@ -58,11 +58,11 @@ fn accepts_logical_operators() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "test -f README.md && cat README.md || echo 'not found'"
 "#,
@@ -80,11 +80,11 @@ fn accepts_subshell() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "(cd /tmp && pwd)"
 "#,
@@ -102,11 +102,11 @@ fn accepts_brace_group() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "{ echo start; echo end; }"
 "#,
@@ -124,11 +124,11 @@ fn accepts_redirections() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo output > /tmp/test.txt 2>&1"
 "#,
@@ -146,11 +146,11 @@ fn accepts_env_assignment() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "FOO=bar BAZ=qux env | grep FOO"
 "#,
@@ -168,11 +168,11 @@ fn accepts_variable_substitution() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo $HOME ${USER:-default}"
 "#,
@@ -190,11 +190,11 @@ fn accepts_command_substitution() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo \"Today is $(date +%Y-%m-%d)\""
 "#,
@@ -212,11 +212,11 @@ fn accepts_multiline_command() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = """
 echo 'line 1'
@@ -238,11 +238,11 @@ fn accepts_background_command() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "sleep 0.1 & echo 'started'"
 "#,
@@ -260,11 +260,11 @@ fn accepts_nested_subshells() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "((echo deep))"
 "#,
@@ -282,11 +282,11 @@ fn accepts_escaped_characters() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo \"quoted \\\"string\\\" here\""
 "#,
@@ -304,11 +304,11 @@ fn accepts_here_string() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "cat <<< 'here string'"
 "#,
@@ -326,11 +326,11 @@ fn accepts_semicolon_separated() {
         ".oj/runbooks/test.toml",
         r#"
 [command.test]
-run = { pipeline = "test" }
+run = { job = "test" }
 
-[pipeline.test]
+[job.test]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "run"
 run = "echo one; echo two; echo three"
 "#,

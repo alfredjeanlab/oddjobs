@@ -9,14 +9,14 @@
 
 command "epic" {
   args = "<name> <instructions> [--blocked-by <ids>]"
-  run  = { pipeline = "epic" }
+  run  = { job = "epic" }
 
   defaults = {
     blocked-by = ""
   }
 }
 
-pipeline "epic" {
+job "epic" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "blocked-by"]
 

@@ -169,7 +169,7 @@ impl CliBuilder {
 
         // Prevent parent OJ_NAMESPACE from leaking into tests.
         // It overrides auto-resolved namespace, which would scope
-        // operations (e.g. pipeline run) to the wrong project.
+        // operations (e.g. job run) to the wrong project.
         cmd.env_remove("OJ_NAMESPACE");
 
         for (key, value) in self.envs {
@@ -416,12 +416,12 @@ impl Drop for Project {
 pub const MINIMAL_RUNBOOK: &str = r#"
 [command.build]
 args = "<name> <prompt>"
-run = { pipeline = "build" }
+run = { job = "build" }
 
-[pipeline.build]
+[job.build]
 vars  = ["name", "prompt"]
 
-[[pipeline.build.step]]
+[[job.build.step]]
 name = "execute"
 run = "echo 'Building ${name}'"
 "#;

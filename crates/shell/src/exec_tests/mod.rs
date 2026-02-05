@@ -10,7 +10,7 @@ mod builder;
 mod errors;
 mod expansion;
 mod groups;
-mod pipelines;
+mod jobs;
 mod redirections;
 mod variables;
 

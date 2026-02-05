@@ -32,7 +32,7 @@ fn test_event_bus(dir: &std::path::Path) -> EventBus {
 }
 
 #[tokio::test]
-async fn shell_command_uses_command_name_as_pipeline_name() {
+async fn shell_command_uses_command_name_as_job_name() {
     let project = project_with_runbook(
         r#"
 [command.deploy]
@@ -58,24 +58,24 @@ run = "echo deploying"
     .unwrap();
 
     match result {
-        Response::CommandStarted { pipeline_name, .. } => {
-            assert_eq!(pipeline_name, "deploy");
+        Response::CommandStarted { job_name, .. } => {
+            assert_eq!(job_name, "deploy");
         }
         other => panic!("expected CommandStarted, got {:?}", other),
     }
 }
 
 #[tokio::test]
-async fn pipeline_command_uses_pipeline_name() {
+async fn job_command_uses_job_name() {
     let project = project_with_runbook(
         r#"
 [command.build]
-run = { pipeline = "build-all" }
+run = { job = "build-all" }
 
-[pipeline.build-all]
+[job.build-all]
 input  = []
 
-[[pipeline.build-all.step]]
+[[job.build-all.step]]
 name = "compile"
 run = "make"
 "#,
@@ -99,8 +99,8 @@ run = "make"
     .unwrap();
 
     match result {
-        Response::CommandStarted { pipeline_name, .. } => {
-            assert_eq!(pipeline_name, "build-all");
+        Response::CommandStarted { job_name, .. } => {
+            assert_eq!(job_name, "build-all");
         }
         other => panic!("expected CommandStarted, got {:?}", other),
     }

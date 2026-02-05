@@ -17,14 +17,14 @@ State is derived from WAL. On startup, load latest snapshot then replay WAL entr
 JSONL format — one JSON object per line:
 
 ```
-{"seq":1,"event":{"type":"pipeline:created","id":"p1","kind":"build",...}}\n
-{"seq":2,"event":{"type":"step:completed","pipeline_id":"p1","step":"build"}}\n
+{"seq":1,"event":{"type":"job:created","id":"p1","kind":"build",...}}\n
+{"seq":2,"event":{"type":"step:completed","job_id":"p1","step":"build"}}\n
 ```
 
 - **seq**: Monotonic sequence number, never repeats
 - **event**: JSON-serialized `Event` from oj-core (tagged via `{"type": "event:name", ...fields}`)
 
-The WAL stores core `Event` values directly. State mutations use typed `Event` variants (e.g., `PipelineCreated`, `StepFailed`) emitted via `Effect::Emit`.
+The WAL stores core `Event` values directly. State mutations use typed `Event` variants (e.g., `JobCreated`, `StepFailed`) emitted via `Effect::Emit`.
 
 ### Group Commit
 
@@ -41,40 +41,40 @@ State mutations use typed `Event` variants emitted via `Effect::Emit`. These eve
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `pipeline:created` | PipelineCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace | Insert pipeline |
-| `pipeline:advanced` | PipelineAdvanced | id, step | Finalize current step, advance pipeline |
-| `pipeline:deleted` | PipelineDeleted | id | Remove pipeline |
-| `pipeline:updated` | PipelineUpdated | id, vars | Merge new vars into pipeline |
-| `step:started` | StepStarted | pipeline_id, step, agent_id? | Mark step running, set agent_id |
-| `step:waiting` | StepWaiting | pipeline_id, step, reason? | Mark step waiting for intervention |
-| `step:completed` | StepCompleted | pipeline_id, step | Mark step completed |
-| `step:failed` | StepFailed | pipeline_id, step, error | Mark step failed with error |
+| `job:created` | JobCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace | Insert job |
+| `job:advanced` | JobAdvanced | id, step | Finalize current step, advance job |
+| `job:deleted` | JobDeleted | id | Remove job |
+| `job:updated` | JobUpdated | id, vars | Merge new vars into job |
+| `step:started` | StepStarted | job_id, step, agent_id? | Mark step running, set agent_id |
+| `step:waiting` | StepWaiting | job_id, step, reason? | Mark step waiting for intervention |
+| `step:completed` | StepCompleted | job_id, step | Mark step completed |
+| `step:failed` | StepFailed | job_id, step, error | Mark step failed with error |
 | `runbook:loaded` | RunbookLoaded | hash, version, runbook | Cache runbook by content hash (dedup) |
-| `session:created` | SessionCreated | id, pipeline_id | Insert session, link to pipeline |
+| `session:created` | SessionCreated | id, job_id | Insert session, link to job |
 | `session:deleted` | SessionDeleted | id | Remove session |
-| `workspace:created` | WorkspaceCreated | id, path, branch, owner, mode | Insert workspace (status=Creating), link to pipeline |
+| `workspace:created` | WorkspaceCreated | id, path, branch, owner, mode | Insert workspace (status=Creating), link to job |
 | `workspace:ready` | WorkspaceReady | id | Set workspace status to Ready |
 | `workspace:failed` | WorkspaceFailed | id, reason | Set workspace status to Failed |
 | `workspace:deleted` | WorkspaceDeleted | id | Remove workspace |
 
-Agent signal and lifecycle events also update pipeline status during replay:
+Agent signal and lifecycle events also update job status during replay:
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `agent:working` | AgentWorking | agent_id | Set pipeline step_status to Running |
+| `agent:working` | AgentWorking | agent_id | Set job step_status to Running |
 | `agent:waiting` | AgentWaiting | agent_id | No state change (agent idle but alive) |
-| `agent:exited` | AgentExited | agent_id, exit_code | Set pipeline Completed (exit 0) or Failed |
-| `agent:failed` | AgentFailed | agent_id, error | Set pipeline step_status to Failed |
-| `agent:gone` | AgentGone | agent_id | Set pipeline Failed (session terminated) |
-| `agent:signal` | AgentSignal | agent_id, kind, message? | Set pipeline agent_signal |
-| `shell:exited` | ShellExited | pipeline_id, step, exit_code | Finalize step as Completed (0) or Failed |
+| `agent:exited` | AgentExited | agent_id, exit_code | Set job Completed (exit 0) or Failed |
+| `agent:failed` | AgentFailed | agent_id, error | Set job step_status to Failed |
+| `agent:gone` | AgentGone | agent_id | Set job Failed (session terminated) |
+| `agent:signal` | AgentSignal | agent_id, kind, message? | Set job agent_signal |
+| `shell:exited` | ShellExited | job_id, step, exit_code | Finalize step as Completed (0) or Failed |
 
 ### Worker and queue lifecycle
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
 | `worker:started` | WorkerStarted | worker_name, project_root, runbook_hash, queue_name, concurrency, namespace | Insert or update worker record |
-| `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, pipeline_id | Track dispatched item on worker |
+| `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, job_id | Track dispatched item on worker |
 | `worker:stopped` | WorkerStopped | worker_name | Remove worker record |
 | `queue:pushed` | QueuePushed | queue_name, item_id, data, pushed_at_epoch_ms, namespace | Insert queue item (status=Pending) |
 | `queue:taken` | QueueTaken | queue_name, item_id, worker_name, namespace | Set queue item status to Taken |
@@ -83,7 +83,7 @@ Agent signal and lifecycle events also update pipeline status during replay:
 | `queue:item_retry` | QueueItemRetry | queue_name, item_id, namespace | Reset item to Pending, clear failure_count |
 | `queue:item_dead` | QueueItemDead | queue_name, item_id, namespace | Set queue item status to Dead (terminal) |
 
-Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `PipelineResume`, `PipelineCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake` and `WorkerPollComplete` are also signals that do not mutate state.
+Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `JobResume`, `JobCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake` and `WorkerPollComplete` are also signals that do not mutate state.
 
 ## Materialized State
 
@@ -91,7 +91,7 @@ State is rebuilt by replaying events:
 
 ```rust
 pub struct MaterializedState {
-    pub pipelines: HashMap<String, Pipeline>,
+    pub jobs: HashMap<String, Job>,
     pub sessions: HashMap<String, Session>,
     pub workspaces: HashMap<String, Workspace>,
     pub runbooks: HashMap<String, StoredRunbook>,
@@ -147,8 +147,8 @@ Snapshots use zstd compression (level 3) for ~70-80% size reduction:
 
 | State size | JSON | zstd |
 |------------|------|------|
-| 100 pipelines | ~1MB | ~200KB |
-| 1000 pipelines | ~10MB | ~2MB |
+| 100 jobs | ~1MB | ~200KB |
+| 1000 jobs | ~10MB | ~2MB |
 
 Loading auto-detects format via magic bytes, providing backward compatibility with uncompressed snapshots.
 

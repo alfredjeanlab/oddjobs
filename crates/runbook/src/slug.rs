@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Slugify strings for use as pipeline name components.
+//! Slugify strings for use as job name components.
 
 const STOP_WORDS: &[&str] = &[
     "the",
@@ -127,7 +127,7 @@ const STOP_WORDS: &[&str] = &[
     "needn",
 ];
 
-/// Slugify a string for use as a pipeline name component.
+/// Slugify a string for use as a job name component.
 ///
 /// Lowercases, replaces non-alphanumeric with hyphens, removes stop words,
 /// collapses hyphens, and truncates to `max_len` characters (trimming trailing hyphens).
@@ -184,11 +184,11 @@ pub fn slugify(input: &str, max_len: usize) -> String {
     result
 }
 
-/// Build a pipeline name from a template result and nonce.
+/// Build a job name from a template result and nonce.
 ///
 /// Slugifies the input, truncates to 28 chars, strips the namespace prefix
 /// (if present), and appends `-{nonce}`.
-pub fn pipeline_display_name(raw: &str, nonce: &str, namespace: &str) -> String {
+pub fn job_display_name(raw: &str, nonce: &str, namespace: &str) -> String {
     let slug = slugify(raw, 28);
     let slug = if !namespace.is_empty() {
         let prefix = format!("{}-", namespace);

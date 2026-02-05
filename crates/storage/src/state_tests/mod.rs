@@ -4,11 +4,11 @@
 mod cron;
 
 use super::*;
-use oj_core::{Event, PipelineId, SessionId, StepOutcome, WorkspaceId};
+use oj_core::{Event, JobId, SessionId, StepOutcome, WorkspaceId};
 
-fn pipeline_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -> Event {
-    Event::PipelineCreated {
-        id: PipelineId::new(id),
+fn job_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -> Event {
+    Event::JobCreated {
+        id: JobId::new(id),
         kind: kind.to_string(),
         name: name.to_string(),
         runbook_hash: "testhash".to_string(),
@@ -21,32 +21,30 @@ fn pipeline_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -
     }
 }
 
-fn pipeline_delete_event(id: &str) -> Event {
-    Event::PipelineDeleted {
-        id: PipelineId::new(id),
-    }
+fn job_delete_event(id: &str) -> Event {
+    Event::JobDeleted { id: JobId::new(id) }
 }
 
-fn pipeline_transition_event(id: &str, step: &str) -> Event {
-    Event::PipelineAdvanced {
-        id: PipelineId::new(id),
+fn job_transition_event(id: &str, step: &str) -> Event {
+    Event::JobAdvanced {
+        id: JobId::new(id),
         step: step.to_string(),
     }
 }
 
-fn step_started_event(pipeline_id: &str) -> Event {
+fn step_started_event(job_id: &str) -> Event {
     Event::StepStarted {
-        pipeline_id: PipelineId::new(pipeline_id),
+        job_id: JobId::new(job_id),
         step: "init".to_string(),
         agent_id: None,
         agent_name: None,
     }
 }
 
-fn session_create_event(id: &str, pipeline_id: &str) -> Event {
+fn session_create_event(id: &str, job_id: &str) -> Event {
     Event::SessionCreated {
         id: SessionId::new(id),
-        pipeline_id: PipelineId::new(pipeline_id),
+        job_id: JobId::new(job_id),
         agent_run_id: None,
     }
 }
@@ -85,20 +83,20 @@ fn workspace_delete_event(id: &str) -> Event {
 }
 
 #[test]
-fn apply_event_pipeline_create() {
+fn apply_event_job_create() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
-    assert!(state.pipelines.contains_key("pipe-1"));
+    assert!(state.jobs.contains_key("pipe-1"));
 }
 
 #[test]
-fn apply_event_pipeline_delete() {
+fn apply_event_job_delete() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_delete_event("pipe-1"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_delete_event("pipe-1"));
 
-    assert!(!state.pipelines.contains_key("pipe-1"));
+    assert!(!state.jobs.contains_key("pipe-1"));
 }
 
 #[test]
@@ -244,7 +242,7 @@ fn workspace_backward_compat_mode_alias_deserializes() {
 fn workspace_snapshot_backward_compat_mode_field() {
     // Simulate an old snapshot with "mode" field on workspace records
     let json = r#"{
-        "pipelines": {},
+        "jobs": {},
         "sessions": {},
         "workspaces": {
             "ws-old": {
@@ -272,78 +270,53 @@ fn workspace_snapshot_backward_compat_mode_field() {
 }
 
 #[test]
-fn get_pipeline_exact_match() {
+fn get_job_exact_match() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event(
-        "pipe-abc123",
-        "build",
-        "test",
-        "init",
-    ));
+    state.apply_event(&job_create_event("pipe-abc123", "build", "test", "init"));
 
-    assert!(state.get_pipeline("pipe-abc123").is_some());
-    assert_eq!(state.get_pipeline("pipe-abc123").unwrap().id, "pipe-abc123");
+    assert!(state.get_job("pipe-abc123").is_some());
+    assert_eq!(state.get_job("pipe-abc123").unwrap().id, "pipe-abc123");
 }
 
 #[test]
-fn get_pipeline_prefix_match() {
+fn get_job_prefix_match() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event(
-        "pipe-abc123",
-        "build",
-        "test",
-        "init",
-    ));
+    state.apply_event(&job_create_event("pipe-abc123", "build", "test", "init"));
 
-    assert!(state.get_pipeline("pipe-abc").is_some());
-    assert_eq!(state.get_pipeline("pipe-abc").unwrap().id, "pipe-abc123");
+    assert!(state.get_job("pipe-abc").is_some());
+    assert_eq!(state.get_job("pipe-abc").unwrap().id, "pipe-abc123");
 }
 
 #[test]
-fn get_pipeline_ambiguous_prefix() {
+fn get_job_ambiguous_prefix() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event(
-        "pipe-abc123",
-        "build",
-        "test1",
-        "init",
-    ));
-    state.apply_event(&pipeline_create_event(
-        "pipe-abc456",
-        "build",
-        "test2",
-        "init",
-    ));
+    state.apply_event(&job_create_event("pipe-abc123", "build", "test1", "init"));
+    state.apply_event(&job_create_event("pipe-abc456", "build", "test2", "init"));
 
     // "pipe-abc" matches both, so returns None
-    assert!(state.get_pipeline("pipe-abc").is_none());
+    assert!(state.get_job("pipe-abc").is_none());
 }
 
 #[test]
-fn get_pipeline_no_match() {
+fn get_job_no_match() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event(
-        "pipe-abc123",
-        "build",
-        "test",
-        "init",
-    ));
+    state.apply_event(&job_create_event("pipe-abc123", "build", "test", "init"));
 
-    assert!(state.get_pipeline("pipe-xyz").is_none());
+    assert!(state.get_job("pipe-xyz").is_none());
 }
 
 #[test]
-fn apply_event_pipeline_transition() {
+fn apply_event_job_transition() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
-    assert_eq!(state.pipelines["pipe-1"].step, "init");
+    assert_eq!(state.jobs["pipe-1"].step, "init");
 
-    state.apply_event(&pipeline_transition_event("pipe-1", "build"));
+    state.apply_event(&job_transition_event("pipe-1", "build"));
 
-    assert_eq!(state.pipelines["pipe-1"].step, "build");
+    assert_eq!(state.jobs["pipe-1"].step, "build");
     assert_eq!(
-        state.pipelines["pipe-1"].step_status,
+        state.jobs["pipe-1"].step_status,
         oj_core::StepStatus::Pending
     );
 }
@@ -351,33 +324,33 @@ fn apply_event_pipeline_transition() {
 #[test]
 fn apply_event_step_started() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
     state.apply_event(&step_started_event("pipe-1"));
 
     assert_eq!(
-        state.pipelines["pipe-1"].step_status,
+        state.jobs["pipe-1"].step_status,
         oj_core::StepStatus::Running
     );
 }
 
 #[test]
-fn apply_event_step_waiting_with_reason_sets_pipeline_error() {
+fn apply_event_step_waiting_with_reason_sets_job_error() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
-    assert!(state.pipelines["pipe-1"].error.is_none());
+    assert!(state.jobs["pipe-1"].error.is_none());
 
     state.apply_event(&Event::StepWaiting {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         reason: Some("gate `make test` failed (exit 1): tests failed".to_string()),
         decision_id: None,
     });
 
-    assert!(state.pipelines["pipe-1"].step_status.is_waiting());
+    assert!(state.jobs["pipe-1"].step_status.is_waiting());
     assert_eq!(
-        state.pipelines["pipe-1"].error.as_deref(),
+        state.jobs["pipe-1"].error.as_deref(),
         Some("gate `make test` failed (exit 1): tests failed")
     );
 }
@@ -385,11 +358,11 @@ fn apply_event_step_waiting_with_reason_sets_pipeline_error() {
 #[test]
 fn apply_event_step_started_preserves_existing_error() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
     // Set an error via StepWaiting
     state.apply_event(&Event::StepWaiting {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         reason: Some("previous error".to_string()),
         decision_id: None,
@@ -399,7 +372,7 @@ fn apply_event_step_started_preserves_existing_error() {
     state.apply_event(&step_started_event("pipe-1"));
 
     assert_eq!(
-        state.pipelines["pipe-1"].error.as_deref(),
+        state.jobs["pipe-1"].error.as_deref(),
         Some("previous error")
     );
 }
@@ -410,7 +383,7 @@ fn apply_event_session_lifecycle() {
     state.apply_event(&session_create_event("sess-1", "pipe-1"));
 
     assert!(state.sessions.contains_key("sess-1"));
-    assert_eq!(state.sessions["sess-1"].pipeline_id, "pipe-1");
+    assert_eq!(state.sessions["sess-1"].job_id, "pipe-1");
 
     state.apply_event(&session_delete_event("sess-1"));
 
@@ -442,7 +415,7 @@ fn session_created_with_agent_run_id_sets_session_on_agent_run() {
     // SessionCreated with agent_run_id should link the session
     state.apply_event(&Event::SessionCreated {
         id: SessionId::new("sess-1"),
-        pipeline_id: PipelineId::new(""),
+        job_id: JobId::new(""),
         agent_run_id: Some(ar_id),
     });
 
@@ -458,51 +431,51 @@ fn session_created_with_agent_run_id_sets_session_on_agent_run() {
 #[test]
 fn step_history_initialized_on_create() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert_eq!(pipeline.step_history.len(), 1);
-    assert_eq!(pipeline.step_history[0].name, "init");
-    assert!(pipeline.step_history[0].finished_at_ms.is_none());
-    assert_eq!(pipeline.step_history[0].outcome, StepOutcome::Running);
+    let job = &state.jobs["pipe-1"];
+    assert_eq!(job.step_history.len(), 1);
+    assert_eq!(job.step_history[0].name, "init");
+    assert!(job.step_history[0].finished_at_ms.is_none());
+    assert_eq!(job.step_history[0].outcome, StepOutcome::Running);
 }
 
 #[test]
 fn step_history_transition_appends_record() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert_eq!(pipeline.step_history.len(), 2);
+    let job = &state.jobs["pipe-1"];
+    assert_eq!(job.step_history.len(), 2);
 
     // First step finalized as completed
-    assert_eq!(pipeline.step_history[0].name, "init");
-    assert!(pipeline.step_history[0].finished_at_ms.is_some());
-    assert_eq!(pipeline.step_history[0].outcome, StepOutcome::Completed);
+    assert_eq!(job.step_history[0].name, "init");
+    assert!(job.step_history[0].finished_at_ms.is_some());
+    assert_eq!(job.step_history[0].outcome, StepOutcome::Completed);
 
     // New step started
-    assert_eq!(pipeline.step_history[1].name, "plan");
-    assert!(pipeline.step_history[1].finished_at_ms.is_none());
-    assert_eq!(pipeline.step_history[1].outcome, StepOutcome::Running);
+    assert_eq!(job.step_history[1].name, "plan");
+    assert!(job.step_history[1].finished_at_ms.is_none());
+    assert_eq!(job.step_history[1].outcome, StepOutcome::Running);
 }
 
 #[test]
 fn step_history_waiting_sets_outcome() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&Event::StepWaiting {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         reason: Some("gate failed: exit 2".to_string()),
         decision_id: None,
     });
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert_eq!(pipeline.step_history.len(), 1);
-    assert!(pipeline.step_history[0].finished_at_ms.is_none()); // still open
+    let job = &state.jobs["pipe-1"];
+    assert_eq!(job.step_history.len(), 1);
+    assert!(job.step_history[0].finished_at_ms.is_none()); // still open
     assert_eq!(
-        pipeline.step_history[0].outcome,
+        job.step_history[0].outcome,
         StepOutcome::Waiting("gate failed: exit 2".to_string())
     );
 }
@@ -510,60 +483,60 @@ fn step_history_waiting_sets_outcome() {
 #[test]
 fn step_history_multi_step_sequence() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "implement"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_transition_event("pipe-1", "implement"));
+    state.apply_event(&job_transition_event("pipe-1", "done"));
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert_eq!(pipeline.step_history.len(), 3); // init, plan, implement (done is terminal)
+    let job = &state.jobs["pipe-1"];
+    assert_eq!(job.step_history.len(), 3); // init, plan, implement (done is terminal)
 
-    assert_eq!(pipeline.step_history[0].name, "init");
-    assert_eq!(pipeline.step_history[0].outcome, StepOutcome::Completed);
-    assert!(pipeline.step_history[0].finished_at_ms.is_some());
+    assert_eq!(job.step_history[0].name, "init");
+    assert_eq!(job.step_history[0].outcome, StepOutcome::Completed);
+    assert!(job.step_history[0].finished_at_ms.is_some());
 
-    assert_eq!(pipeline.step_history[1].name, "plan");
-    assert_eq!(pipeline.step_history[1].outcome, StepOutcome::Completed);
-    assert!(pipeline.step_history[1].finished_at_ms.is_some());
+    assert_eq!(job.step_history[1].name, "plan");
+    assert_eq!(job.step_history[1].outcome, StepOutcome::Completed);
+    assert!(job.step_history[1].finished_at_ms.is_some());
 
-    assert_eq!(pipeline.step_history[2].name, "implement");
-    assert_eq!(pipeline.step_history[2].outcome, StepOutcome::Completed);
-    assert!(pipeline.step_history[2].finished_at_ms.is_some());
+    assert_eq!(job.step_history[2].name, "implement");
+    assert_eq!(job.step_history[2].outcome, StepOutcome::Completed);
+    assert!(job.step_history[2].finished_at_ms.is_some());
 }
 
 #[test]
 fn step_history_shell_completed_success() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&Event::ShellExited {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         exit_code: 0,
         stdout: None,
         stderr: None,
     });
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert!(pipeline.step_history[0].finished_at_ms.is_some());
-    assert_eq!(pipeline.step_history[0].outcome, StepOutcome::Completed);
+    let job = &state.jobs["pipe-1"];
+    assert!(job.step_history[0].finished_at_ms.is_some());
+    assert_eq!(job.step_history[0].outcome, StepOutcome::Completed);
 }
 
 #[test]
 fn step_history_shell_completed_failure() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&Event::ShellExited {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         exit_code: 42,
         stdout: None,
         stderr: None,
     });
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert!(pipeline.step_history[0].finished_at_ms.is_some());
+    let job = &state.jobs["pipe-1"];
+    assert!(job.step_history[0].finished_at_ms.is_some());
     assert_eq!(
-        pipeline.step_history[0].outcome,
+        job.step_history[0].outcome,
         StepOutcome::Failed("shell exit code: 42".to_string())
     );
 }
@@ -571,26 +544,26 @@ fn step_history_shell_completed_failure() {
 #[test]
 fn step_history_serde_roundtrip() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
 
     // Serialize and deserialize
     let json = serde_json::to_string(&state).unwrap();
     let restored: MaterializedState = serde_json::from_str(&json).unwrap();
 
-    let pipeline = &restored.pipelines["pipe-1"];
-    assert_eq!(pipeline.step_history.len(), 2);
-    assert_eq!(pipeline.step_history[0].name, "init");
-    assert_eq!(pipeline.step_history[0].outcome, StepOutcome::Completed);
-    assert_eq!(pipeline.step_history[1].name, "plan");
-    assert_eq!(pipeline.step_history[1].outcome, StepOutcome::Running);
+    let job = &restored.jobs["pipe-1"];
+    assert_eq!(job.step_history.len(), 2);
+    assert_eq!(job.step_history[0].name, "init");
+    assert_eq!(job.step_history[0].outcome, StepOutcome::Completed);
+    assert_eq!(job.step_history[1].name, "plan");
+    assert_eq!(job.step_history[1].outcome, StepOutcome::Running);
 }
 
 #[test]
 fn step_history_backward_compat_empty_on_old_snapshot() {
     // Simulate an old snapshot without step_history by deserializing JSON without it
     let json = r#"{
-        "pipelines": {
+        "jobs": {
             "pipe-old": {
                 "id": "pipe-old",
                 "name": "legacy",
@@ -613,8 +586,8 @@ fn step_history_backward_compat_empty_on_old_snapshot() {
     }"#;
 
     let state: MaterializedState = serde_json::from_str(json).unwrap();
-    let pipeline = &state.pipelines["pipe-old"];
-    assert!(pipeline.step_history.is_empty());
+    let job = &state.jobs["pipe-old"];
+    assert!(job.step_history.is_empty());
 }
 
 #[test]
@@ -632,7 +605,7 @@ fn apply_event_worker_started_with_queue_and_concurrency() {
     assert_eq!(worker.status, "running");
     assert_eq!(worker.queue_name, "bugs");
     assert_eq!(worker.concurrency, 3);
-    assert!(worker.active_pipeline_ids.is_empty());
+    assert!(worker.active_job_ids.is_empty());
 }
 
 #[test]
@@ -652,7 +625,7 @@ fn apply_event_worker_stopped_sets_status() {
 fn worker_record_backward_compat_missing_fields() {
     // Simulate an old snapshot without queue_name and concurrency
     let json = r#"{
-        "pipelines": {},
+        "jobs": {},
         "sessions": {},
         "workspaces": {},
         "workers": {
@@ -661,7 +634,7 @@ fn worker_record_backward_compat_missing_fields() {
                 "project_root": "/tmp",
                 "runbook_hash": "abc",
                 "status": "running",
-                "active_pipeline_ids": []
+                "active_job_ids": []
             }
         },
         "runbooks": {}
@@ -674,129 +647,126 @@ fn worker_record_backward_compat_missing_fields() {
 }
 
 #[test]
-fn cancelled_pipeline_is_terminal_after_event_replay() {
+fn cancelled_job_is_terminal_after_event_replay() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "execute"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "execute"));
     state.apply_event(&step_started_event("pipe-1"));
 
     // Apply cancellation events (as they would appear in WAL replay after daemon restart)
-    state.apply_event(&pipeline_transition_event("pipe-1", "cancelled"));
+    state.apply_event(&job_transition_event("pipe-1", "cancelled"));
     state.apply_event(&Event::StepFailed {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "execute".to_string(),
         error: "cancelled".to_string(),
     });
 
-    let pipeline = &state.pipelines["pipe-1"];
-    assert!(pipeline.is_terminal());
-    assert_eq!(pipeline.step, "cancelled");
-    assert_eq!(pipeline.step_status, oj_core::StepStatus::Failed);
-    assert_eq!(pipeline.error.as_deref(), Some("cancelled"));
+    let job = &state.jobs["pipe-1"];
+    assert!(job.is_terminal());
+    assert_eq!(job.step, "cancelled");
+    assert_eq!(job.step_status, oj_core::StepStatus::Failed);
+    assert_eq!(job.error.as_deref(), Some("cancelled"));
 }
 
 #[test]
-fn worker_started_preserves_active_pipeline_ids_on_restart() {
+fn worker_started_preserves_active_job_ids_on_restart() {
     let mut state = MaterializedState::default();
 
-    // Simulate pre-restart state: worker with active pipelines
+    // Simulate pre-restart state: worker with active jobs
     state.apply_event(&worker_start_event("fixer", ""));
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         namespace: String::new(),
     });
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-2".to_string(),
-        pipeline_id: PipelineId::new("pipe-2"),
+        job_id: JobId::new("pipe-2"),
         namespace: String::new(),
     });
 
-    assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 2);
+    assert_eq!(state.workers["fixer"].active_job_ids.len(), 2);
 
     // Simulate daemon restart: WorkerStarted replayed from WAL
     state.apply_event(&worker_start_event("fixer", ""));
 
-    // Active pipeline IDs must be preserved
+    // Active job IDs must be preserved
     let worker = &state.workers["fixer"];
-    assert_eq!(worker.active_pipeline_ids.len(), 2);
-    assert!(worker.active_pipeline_ids.contains(&"pipe-1".to_string()));
-    assert!(worker.active_pipeline_ids.contains(&"pipe-2".to_string()));
+    assert_eq!(worker.active_job_ids.len(), 2);
+    assert!(worker.active_job_ids.contains(&"pipe-1".to_string()));
+    assert!(worker.active_job_ids.contains(&"pipe-2".to_string()));
 }
 
 #[test]
-fn worker_started_preserves_active_pipeline_ids_with_namespace() {
+fn worker_started_preserves_active_job_ids_with_namespace() {
     let mut state = MaterializedState::default();
 
-    // Simulate pre-restart state: namespaced worker with active pipelines
+    // Simulate pre-restart state: namespaced worker with active jobs
     state.apply_event(&worker_start_event("fixer", "myproject"));
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         namespace: "myproject".to_string(),
     });
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-2".to_string(),
-        pipeline_id: PipelineId::new("pipe-2"),
+        job_id: JobId::new("pipe-2"),
         namespace: "myproject".to_string(),
     });
 
-    assert_eq!(
-        state.workers["myproject/fixer"].active_pipeline_ids.len(),
-        2
-    );
+    assert_eq!(state.workers["myproject/fixer"].active_job_ids.len(), 2);
 
     // Simulate daemon restart: WorkerStarted replayed from WAL
     state.apply_event(&worker_start_event("fixer", "myproject"));
 
-    // Active pipeline IDs must be preserved under the scoped key
+    // Active job IDs must be preserved under the scoped key
     let worker = &state.workers["myproject/fixer"];
-    assert_eq!(worker.active_pipeline_ids.len(), 2);
-    assert!(worker.active_pipeline_ids.contains(&"pipe-1".to_string()));
-    assert!(worker.active_pipeline_ids.contains(&"pipe-2".to_string()));
+    assert_eq!(worker.active_job_ids.len(), 2);
+    assert!(worker.active_job_ids.contains(&"pipe-1".to_string()));
+    assert!(worker.active_job_ids.contains(&"pipe-2".to_string()));
 }
 
 // === Idempotency tests ===
 
 #[test]
-fn apply_event_pipeline_advanced_idempotent() {
+fn apply_event_job_advanced_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
 
-    let history_len = state.pipelines["pipe-1"].step_history.len();
+    let history_len = state.jobs["pipe-1"].step_history.len();
 
     // Apply the same transition again (simulates WAL round-trip double-apply)
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
 
     // Step history should NOT grow — the duplicate is a no-op
-    assert_eq!(state.pipelines["pipe-1"].step_history.len(), history_len);
-    assert_eq!(state.pipelines["pipe-1"].step, "plan");
+    assert_eq!(state.jobs["pipe-1"].step_history.len(), history_len);
+    assert_eq!(state.jobs["pipe-1"].step, "plan");
 }
 
 #[test]
 fn apply_event_step_completed_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&Event::StepCompleted {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
     });
 
-    let finished_at = state.pipelines["pipe-1"].step_history[0].finished_at_ms;
+    let finished_at = state.jobs["pipe-1"].step_history[0].finished_at_ms;
 
     // Apply again — finalize_current_step is already guarded by finished_at_ms
     state.apply_event(&Event::StepCompleted {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
     });
 
     // finished_at should be unchanged (not overwritten)
     assert_eq!(
-        state.pipelines["pipe-1"].step_history[0].finished_at_ms,
+        state.jobs["pipe-1"].step_history[0].finished_at_ms,
         finished_at
     );
 }
@@ -804,24 +774,24 @@ fn apply_event_step_completed_idempotent() {
 #[test]
 fn apply_event_step_failed_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&Event::StepFailed {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         error: "boom".to_string(),
     });
 
-    let finished_at = state.pipelines["pipe-1"].step_history[0].finished_at_ms;
+    let finished_at = state.jobs["pipe-1"].step_history[0].finished_at_ms;
 
     // Apply again — finalize_current_step is already guarded by finished_at_ms
     state.apply_event(&Event::StepFailed {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
         error: "boom".to_string(),
     });
 
     assert_eq!(
-        state.pipelines["pipe-1"].step_history[0].finished_at_ms,
+        state.jobs["pipe-1"].step_history[0].finished_at_ms,
         finished_at
     );
 }
@@ -833,21 +803,21 @@ fn apply_event_worker_item_dispatched_idempotent() {
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         namespace: String::new(),
     });
 
-    assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 1);
+    assert_eq!(state.workers["fixer"].active_job_ids.len(), 1);
 
     // Apply again — should not add a duplicate
     state.apply_event(&Event::WorkerItemDispatched {
         worker_name: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         namespace: String::new(),
     });
 
-    assert_eq!(state.workers["fixer"].active_pipeline_ids.len(), 1);
+    assert_eq!(state.workers["fixer"].active_job_ids.len(), 1);
 }
 
 #[test]
@@ -947,7 +917,7 @@ fn queue_failed_marks_failed() {
     let mut state = MaterializedState::default();
     state.apply_event(&queue_pushed_event("bugs", "item-1"));
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
-    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
 
     let items = &state.queue_items["bugs"];
     assert_eq!(items[0].status, QueueItemStatus::Failed);
@@ -1015,17 +985,13 @@ fn queue_failed_increments_failure_count() {
 
     assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
 
-    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
     assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
     assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
 
     // Simulate retry (back to active, then fail again)
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
-    state.apply_event(&queue_failed_event(
-        "bugs",
-        "item-1",
-        "pipeline failed again",
-    ));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed again"));
     assert_eq!(state.queue_items["bugs"][0].failure_count, 2);
 }
 
@@ -1034,7 +1000,7 @@ fn queue_item_retry_resets_to_pending() {
     let mut state = MaterializedState::default();
     state.apply_event(&queue_pushed_event("bugs", "item-1"));
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
-    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
 
     assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
     assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
@@ -1062,7 +1028,7 @@ fn queue_item_dead_sets_dead_status() {
     let mut state = MaterializedState::default();
     state.apply_event(&queue_pushed_event("bugs", "item-1"));
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
-    state.apply_event(&queue_failed_event("bugs", "item-1", "pipeline failed"));
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
 
     state.apply_event(&Event::QueueItemDead {
         queue_name: "bugs".to_string(),
@@ -1127,7 +1093,7 @@ fn queue_item_retry_on_dead_item_resets_to_pending() {
 fn failure_count_backward_compat_defaults_to_zero() {
     // Simulate an old snapshot without failure_count field
     let json = r#"{
-        "pipelines": {},
+        "jobs": {},
         "sessions": {},
         "workspaces": {},
         "workers": {},
@@ -1200,10 +1166,10 @@ fn apply_event_worker_deleted_lifecycle_and_ghost() {
 // Decision Tests
 // =============================================================================
 
-fn decision_created_event(id: &str, pipeline_id: &str) -> Event {
+fn decision_created_event(id: &str, job_id: &str) -> Event {
     Event::DecisionCreated {
         id: id.to_string(),
-        pipeline_id: PipelineId::new(pipeline_id),
+        job_id: JobId::new(job_id),
         agent_id: Some("agent-1".to_string()),
         source: oj_core::DecisionSource::Gate,
         context: "Gate check failed".to_string(),
@@ -1215,7 +1181,7 @@ fn decision_created_event(id: &str, pipeline_id: &str) -> Event {
             },
             oj_core::DecisionOption {
                 label: "Reject".to_string(),
-                description: Some("Stop the pipeline".to_string()),
+                description: Some("Stop the job".to_string()),
                 recommended: false,
             },
         ],
@@ -1227,13 +1193,13 @@ fn decision_created_event(id: &str, pipeline_id: &str) -> Event {
 #[test]
 fn apply_event_decision_created() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-abc123", "pipe-1"));
 
     // Decision is stored
     assert!(state.decisions.contains_key("dec-abc123"));
     let dec = &state.decisions["dec-abc123"];
-    assert_eq!(dec.pipeline_id, "pipe-1");
+    assert_eq!(dec.job_id, "pipe-1");
     assert_eq!(dec.agent_id.as_deref(), Some("agent-1"));
     assert_eq!(dec.source, oj_core::DecisionSource::Gate);
     assert_eq!(dec.context, "Gate check failed");
@@ -1242,10 +1208,10 @@ fn apply_event_decision_created() {
     assert!(dec.resolved_at_ms.is_none());
     assert_eq!(dec.namespace, "testns");
 
-    // Pipeline is set to Waiting with decision_id
-    let pipeline = &state.pipelines["pipe-1"];
+    // Job is set to Waiting with decision_id
+    let job = &state.jobs["pipe-1"];
     assert_eq!(
-        pipeline.step_status,
+        job.step_status,
         oj_core::StepStatus::Waiting(Some("dec-abc123".to_string()))
     );
 }
@@ -1253,7 +1219,7 @@ fn apply_event_decision_created() {
 #[test]
 fn apply_event_decision_created_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-abc123", "pipe-1"));
 
     // Apply same event again — should be a no-op
@@ -1264,7 +1230,7 @@ fn apply_event_decision_created_idempotent() {
 #[test]
 fn apply_event_decision_resolved() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-abc123", "pipe-1"));
 
     state.apply_event(&Event::DecisionResolved {
@@ -1285,7 +1251,7 @@ fn apply_event_decision_resolved() {
 #[test]
 fn get_decision_prefix_lookup() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-abc123", "pipe-1"));
 
     // Exact match
@@ -1303,29 +1269,29 @@ fn get_decision_prefix_lookup() {
 }
 
 // =============================================================================
-// Decision cleanup on pipeline completion and deletion
+// Decision cleanup on job completion and deletion
 // =============================================================================
 
 #[test]
-fn pipeline_terminal_removes_unresolved_decisions() {
+fn job_terminal_removes_unresolved_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
 
     assert!(state.decisions.contains_key("dec-1"));
     assert!(!state.decisions["dec-1"].is_resolved());
 
-    // Pipeline advances to terminal "done" state
-    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+    // Job advances to terminal "done" state
+    state.apply_event(&job_transition_event("pipe-1", "done"));
 
     // Unresolved decision should be removed
     assert!(!state.decisions.contains_key("dec-1"));
 }
 
 #[test]
-fn pipeline_terminal_preserves_resolved_decisions() {
+fn job_terminal_preserves_resolved_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
 
     // Resolve the decision
@@ -1338,43 +1304,43 @@ fn pipeline_terminal_preserves_resolved_decisions() {
     });
     assert!(state.decisions["dec-1"].is_resolved());
 
-    // Pipeline advances to terminal "done" state
-    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+    // Job advances to terminal "done" state
+    state.apply_event(&job_transition_event("pipe-1", "done"));
 
     // Resolved decision should be preserved
     assert!(state.decisions.contains_key("dec-1"));
 }
 
 #[test]
-fn pipeline_cancelled_removes_unresolved_decisions() {
+fn job_cancelled_removes_unresolved_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
 
-    // Pipeline advances to terminal "cancelled" state
-    state.apply_event(&pipeline_transition_event("pipe-1", "cancelled"));
+    // Job advances to terminal "cancelled" state
+    state.apply_event(&job_transition_event("pipe-1", "cancelled"));
 
     // Unresolved decision should be removed
     assert!(!state.decisions.contains_key("dec-1"));
 }
 
 #[test]
-fn pipeline_failed_removes_unresolved_decisions() {
+fn job_failed_removes_unresolved_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
 
-    // Pipeline advances to terminal "failed" state
-    state.apply_event(&pipeline_transition_event("pipe-1", "failed"));
+    // Job advances to terminal "failed" state
+    state.apply_event(&job_transition_event("pipe-1", "failed"));
 
     // Unresolved decision should be removed
     assert!(!state.decisions.contains_key("dec-1"));
 }
 
 #[test]
-fn pipeline_deleted_removes_all_decisions() {
+fn job_deleted_removes_all_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
     // Create both unresolved and resolved decisions
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
@@ -1389,18 +1355,18 @@ fn pipeline_deleted_removes_all_decisions() {
 
     assert_eq!(state.decisions.len(), 2);
 
-    // Delete the pipeline
-    state.apply_event(&pipeline_delete_event("pipe-1"));
+    // Delete the job
+    state.apply_event(&job_delete_event("pipe-1"));
 
-    // All decisions for the pipeline should be removed
+    // All decisions for the job should be removed
     assert!(state.decisions.is_empty());
 }
 
 #[test]
-fn pipeline_deleted_only_removes_own_decisions() {
+fn job_deleted_only_removes_own_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_create_event("pipe-2", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-2", "build", "test", "init"));
 
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
     state.apply_event(&decision_created_event("dec-2", "pipe-2"));
@@ -1408,7 +1374,7 @@ fn pipeline_deleted_only_removes_own_decisions() {
     assert_eq!(state.decisions.len(), 2);
 
     // Delete only pipe-1
-    state.apply_event(&pipeline_delete_event("pipe-1"));
+    state.apply_event(&job_delete_event("pipe-1"));
 
     // Only pipe-1's decision should be removed
     assert_eq!(state.decisions.len(), 1);
@@ -1417,16 +1383,16 @@ fn pipeline_deleted_only_removes_own_decisions() {
 }
 
 #[test]
-fn pipeline_terminal_only_removes_own_unresolved_decisions() {
+fn job_terminal_only_removes_own_unresolved_decisions() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&pipeline_create_event("pipe-2", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-2", "build", "test", "init"));
 
     state.apply_event(&decision_created_event("dec-1", "pipe-1"));
     state.apply_event(&decision_created_event("dec-2", "pipe-2"));
 
-    // Pipeline 1 advances to terminal state
-    state.apply_event(&pipeline_transition_event("pipe-1", "done"));
+    // Job 1 advances to terminal state
+    state.apply_event(&job_transition_event("pipe-1", "done"));
 
     // Only pipe-1's unresolved decision should be removed
     assert!(!state.decisions.contains_key("dec-1"));
@@ -1437,9 +1403,9 @@ fn pipeline_terminal_only_removes_own_unresolved_decisions() {
 // Action attempts preservation on on_fail transitions
 // =============================================================================
 
-fn step_failed_event(pipeline_id: &str, step: &str, error: &str) -> Event {
+fn step_failed_event(job_id: &str, step: &str, error: &str) -> Event {
     Event::StepFailed {
-        pipeline_id: PipelineId::new(pipeline_id),
+        job_id: JobId::new(job_id),
         step: step.to_string(),
         error: error.to_string(),
     }
@@ -1448,61 +1414,61 @@ fn step_failed_event(pipeline_id: &str, step: &str, error: &str) -> Event {
 #[test]
 fn on_done_transition_resets_action_attempts() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
 
     // Simulate some action attempts on the current step
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
-    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 2);
+    assert_eq!(state.jobs["pipe-1"].get_action_attempt("exit", 0), 2);
 
     // Mark step as completed (success path)
     state.apply_event(&Event::StepCompleted {
-        pipeline_id: PipelineId::new("pipe-1"),
+        job_id: JobId::new("pipe-1"),
         step: "init".to_string(),
     });
 
     // Advance to next step (success transition)
-    state.apply_event(&pipeline_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_transition_event("pipe-1", "plan"));
 
     // action_attempts should be reset on success transition
-    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 0);
+    assert_eq!(state.jobs["pipe-1"].get_action_attempt("exit", 0), 0);
 }
 
 #[test]
 fn on_fail_transition_preserves_action_attempts() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "work"));
 
     // Simulate action attempts (e.g., on_dead fail action fired)
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
-    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 2);
+    assert_eq!(state.jobs["pipe-1"].get_action_attempt("exit", 0), 2);
 
     // Step fails (StepFailed sets step_status to Failed)
     state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
 
     // on_fail transition to a different step
-    state.apply_event(&pipeline_transition_event("pipe-1", "recover"));
+    state.apply_event(&job_transition_event("pipe-1", "recover"));
 
     // action_attempts should be preserved across on_fail transitions
     assert_eq!(
-        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        state.jobs["pipe-1"].get_action_attempt("exit", 0),
         2,
         "action_attempts must be preserved on on_fail transition"
     );
@@ -1511,33 +1477,33 @@ fn on_fail_transition_preserves_action_attempts() {
 #[test]
 fn on_fail_same_step_cycle_preserves_action_attempts() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "work"));
 
     // Simulate action attempts
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
-    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 1);
+    assert_eq!(state.jobs["pipe-1"].get_action_attempt("exit", 0), 1);
 
     // Step fails
     state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
 
     // on_fail → same step (self-cycle)
-    state.apply_event(&pipeline_transition_event("pipe-1", "work"));
+    state.apply_event(&job_transition_event("pipe-1", "work"));
 
     // action_attempts should be preserved
     assert_eq!(
-        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        state.jobs["pipe-1"].get_action_attempt("exit", 0),
         1,
         "action_attempts must be preserved on same-step on_fail cycle"
     );
 
     // Step should be re-initialized (new step record pushed)
-    assert_eq!(state.pipelines["pipe-1"].step, "work");
+    assert_eq!(state.jobs["pipe-1"].step, "work");
     assert_eq!(
-        state.pipelines["pipe-1"].step_status,
+        state.jobs["pipe-1"].step_status,
         oj_core::StepStatus::Pending
     );
 }
@@ -1545,35 +1511,35 @@ fn on_fail_same_step_cycle_preserves_action_attempts() {
 #[test]
 fn on_fail_same_step_cycle_pushes_new_step_record() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "work"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "work"));
 
     // Initially one step record
-    assert_eq!(state.pipelines["pipe-1"].step_history.len(), 1);
+    assert_eq!(state.jobs["pipe-1"].step_history.len(), 1);
 
     // Step fails
     state.apply_event(&step_failed_event("pipe-1", "work", "agent exited"));
 
     // on_fail → same step
-    state.apply_event(&pipeline_transition_event("pipe-1", "work"));
+    state.apply_event(&job_transition_event("pipe-1", "work"));
 
     // Should have 2 records: the failed one and the new one
     assert_eq!(
-        state.pipelines["pipe-1"].step_history.len(),
+        state.jobs["pipe-1"].step_history.len(),
         2,
         "same-step on_fail should push a new step record"
     );
     assert_eq!(
-        state.pipelines["pipe-1"].step_history[0].outcome,
+        state.jobs["pipe-1"].step_history[0].outcome,
         StepOutcome::Failed("agent exited".to_string())
     );
-    assert!(state.pipelines["pipe-1"].step_history[0]
+    assert!(state.jobs["pipe-1"].step_history[0]
         .finished_at_ms
         .is_some());
     assert_eq!(
-        state.pipelines["pipe-1"].step_history[1].outcome,
+        state.jobs["pipe-1"].step_history[1].outcome,
         StepOutcome::Running
     );
-    assert!(state.pipelines["pipe-1"].step_history[1]
+    assert!(state.jobs["pipe-1"].step_history[1]
         .finished_at_ms
         .is_none());
 }
@@ -1581,34 +1547,34 @@ fn on_fail_same_step_cycle_pushes_new_step_record() {
 #[test]
 fn on_fail_multi_step_cycle_preserves_attempts_across_chain() {
     let mut state = MaterializedState::default();
-    state.apply_event(&pipeline_create_event("pipe-1", "build", "test", "step-a"));
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "step-a"));
 
     // Attempt 1 on step-a
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
 
     // step-a fails → on_fail → step-b
     state.apply_event(&step_failed_event("pipe-1", "step-a", "failed"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "step-b"));
-    assert_eq!(state.pipelines["pipe-1"].get_action_attempt("exit", 0), 1);
+    state.apply_event(&job_transition_event("pipe-1", "step-b"));
+    assert_eq!(state.jobs["pipe-1"].get_action_attempt("exit", 0), 1);
 
     // Attempt 2 on step-b
     state
-        .pipelines
+        .jobs
         .get_mut("pipe-1")
         .unwrap()
         .increment_action_attempt("exit", 0);
 
     // step-b fails → on_fail → step-a (cycle)
     state.apply_event(&step_failed_event("pipe-1", "step-b", "failed"));
-    state.apply_event(&pipeline_transition_event("pipe-1", "step-a"));
+    state.apply_event(&job_transition_event("pipe-1", "step-a"));
 
     // Attempts should accumulate across the cycle: 1 + 1 = 2
     assert_eq!(
-        state.pipelines["pipe-1"].get_action_attempt("exit", 0),
+        state.jobs["pipe-1"].get_action_attempt("exit", 0),
         2,
         "action_attempts must accumulate across multi-step on_fail cycles"
     );

@@ -12,7 +12,7 @@ use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    AndOrList, BraceGroup, Command, CommandItem, CommandList, LogicalOp, Pipeline, SimpleCommand,
+    AndOrList, BraceGroup, Command, CommandItem, CommandList, LogicalOp, Job, SimpleCommand,
     Span, Subshell,
 };
 
@@ -142,7 +142,7 @@ async fn execute_and_or_list(
 // Command item dispatch
 // ---------------------------------------------------------------------------
 
-/// Execute a single command item (dispatches to simple/pipeline/subshell/brace).
+/// Execute a single command item (dispatches to simple/job/subshell/brace).
 async fn execute_command_item(
     ctx: &mut ExecContext,
     item: &CommandItem,
@@ -159,7 +159,7 @@ async fn execute_command_item(
             let (exit_code, trace) = execute_simple_command(ctx, cmd).await?;
             Ok((exit_code, vec![trace]))
         }
-        Command::Pipeline(pipeline) => execute_pipeline(ctx, pipeline).await,
+        Command::Job(job) => execute_job(ctx, job).await,
         Command::Subshell(subshell) => execute_subshell(ctx, subshell).await,
         Command::BraceGroup(group) => execute_brace_group(ctx, group).await,
     }
@@ -287,22 +287,22 @@ async fn execute_simple_command(
 }
 
 // ---------------------------------------------------------------------------
-// Pipelines
+// Jobs
 // ---------------------------------------------------------------------------
 
-/// Execute a pipeline, wiring stdout→stdin between stages.
+/// Execute a job, wiring stdout→stdin between stages.
 ///
-/// All pipeline stages are spawned first, then connected via async relay
+/// All job stages are spawned first, then connected via async relay
 /// tasks that copy data between `ChildStdout` and `ChildStdin`. This avoids
-/// requiring unsafe fd conversion while still providing true pipeline
+/// requiring unsafe fd conversion while still providing true job
 /// concurrency.
-async fn execute_pipeline(
+async fn execute_job(
     ctx: &mut ExecContext,
-    pipeline: &Pipeline,
+    job: &Job,
 ) -> Result<(i32, Vec<CommandTrace>), ExecError> {
-    let _pipeline_span = tracing::info_span!("shell.pipeline").entered();
+    let _job_span = tracing::info_span!("shell.job").entered();
 
-    let n = pipeline.commands.len();
+    let n = job.commands.len();
     if n == 0 {
         return Ok((0, Vec::new()));
     }
@@ -318,7 +318,7 @@ async fn execute_pipeline(
 
     let glob_config = super::expand_glob::GlobConfig::default();
     let mut expanded = Vec::with_capacity(n);
-    for (i, cmd) in pipeline.commands.iter().enumerate() {
+    for (i, cmd) in job.commands.iter().enumerate() {
         let name = expand::expand_word(ctx, &cmd.name).await?;
         let mut args = Vec::new();
         for arg in &cmd.args {
@@ -375,7 +375,7 @@ async fn execute_pipeline(
         // Apply redirections (may override the defaults above).
         let applied = redirect::apply_redirections(
             &mut process,
-            &pipeline.commands[ec.redirections_idx].redirections,
+            &job.commands[ec.redirections_idx].redirections,
             ctx,
         )
         .await?;
@@ -460,7 +460,7 @@ async fn execute_pipeline(
         let trace = handle.await.map_err(|e| ExecError::SpawnFailed {
             command: String::new(),
             source: std::io::Error::other(e),
-            span: pipeline.span,
+            span: job.span,
         })??;
 
         last_exit = trace.exit_code;

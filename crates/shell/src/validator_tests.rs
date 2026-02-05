@@ -32,7 +32,7 @@ fn valid_command_with_args() {
 }
 
 #[test]
-fn valid_pipeline() {
+fn valid_job() {
     assert!(validate_str("cat file | grep pattern | wc -l").is_ok());
 }
 
@@ -123,7 +123,7 @@ fn error_ifs_assignment_with_command() {
 }
 
 #[test]
-fn error_ifs_assignment_in_pipeline() {
+fn error_ifs_assignment_in_job() {
     let err = validate_str("echo data | IFS=, read -r a b").unwrap_err();
     assert_eq!(err.len(), 1);
     assert!(matches!(err[0], ValidationError::IfsAssignment { .. }));

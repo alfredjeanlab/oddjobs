@@ -191,7 +191,7 @@ fn agent_build_env() {
     };
 
     let vars: HashMap<String, String> = [
-        ("pipeline_id".to_string(), "pipe-1".to_string()),
+        ("job_id".to_string(), "pipe-1".to_string()),
         ("name".to_string(), "feature".to_string()),
     ]
     .into_iter()

@@ -7,7 +7,7 @@ Events provide observability and enable loose coupling between components.
 All events are serialized as flat JSON objects with a `type` field using `namespace:action` format and persisted to the WAL for crash recovery:
 
 ```json
-{"type":"pipeline:created","id":"p1","kind":"build","name":"test",...}
+{"type":"job:created","id":"p1","kind":"build","name":"test",...}
 {"type":"agent:failed","agent_id":"a1","error":"RateLimited"}
 {"type":"system:shutdown"}
 ```
@@ -16,8 +16,8 @@ All events are serialized as flat JSON objects with a `type` field using `namesp
 
 Event origin distinguishes categories:
 - **Signals** (bare verb/noun): Emitted **internally by the engine** to notify about things that happened. Examples: `command:run`, `timer:start`, `system:shutdown`, `agent:waiting`
-- **State mutations** (past participle/adjective): `pipeline:created`, `session:deleted`, `agent:working`, `step:started`
-- **Actions** (imperative): Emitted **externally by the CLI or agents** to trigger runtime operations. Examples: `session:input`, `pipeline:resume`, `pipeline:cancel`, `agent:signal`
+- **State mutations** (past participle/adjective): `job:created`, `session:deleted`, `agent:working`, `step:started`
+- **Actions** (imperative): Emitted **externally by the CLI or agents** to trigger runtime operations. Examples: `session:input`, `job:resume`, `job:cancel`, `agent:signal`
 
 ## Signal Events
 
@@ -25,7 +25,7 @@ Emitted **internally by the engine** to notify about things that happened. These
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `command:run` | CommandRun | `pipeline_id`, `pipeline_name`, `project_root`, `invoke_dir`, `command`, `args` |
+| `command:run` | CommandRun | `job_id`, `job_name`, `project_root`, `invoke_dir`, `command`, `args` |
 | `timer:start` | TimerStart | `id` |
 | `agent:waiting` | AgentWaiting | `agent_id` |
 | `system:shutdown` | Shutdown | _(none)_ |
@@ -36,25 +36,25 @@ Emitted **internally by the engine** to notify about things that happened. These
 
 Applied via `MaterializedState::apply_event()` to update in-memory state. All events (including signals) are persisted to WAL; this section lists those that actually mutate state.
 
-### Pipeline lifecycle
+### Job lifecycle
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
 | `runbook:loaded` | RunbookLoaded | `hash`, `version`, `runbook` |
-| `pipeline:created` | PipelineCreated | `id`, `kind`, `name`, `runbook_hash`, `cwd`, `vars`, `initial_step`, `created_at_epoch_ms`, `namespace` |
-| `pipeline:advanced` | PipelineAdvanced | `id`, `step` |
-| `pipeline:updated` | PipelineUpdated | `id`, `vars` |
-| `pipeline:deleted` | PipelineDeleted | `id` |
+| `job:created` | JobCreated | `id`, `kind`, `name`, `runbook_hash`, `cwd`, `vars`, `initial_step`, `created_at_epoch_ms`, `namespace` |
+| `job:advanced` | JobAdvanced | `id`, `step` |
+| `job:updated` | JobUpdated | `id`, `vars` |
+| `job:deleted` | JobDeleted | `id` |
 
 ### Step lifecycle
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `step:started` | StepStarted | `pipeline_id`, `step`, `agent_id?` |
-| `step:waiting` | StepWaiting | `pipeline_id`, `step`, `reason?` |
-| `step:completed` | StepCompleted | `pipeline_id`, `step` |
-| `step:failed` | StepFailed | `pipeline_id`, `step`, `error` |
-| `shell:exited` | ShellExited | `pipeline_id`, `step`, `exit_code` |
+| `step:started` | StepStarted | `job_id`, `step`, `agent_id?` |
+| `step:waiting` | StepWaiting | `job_id`, `step`, `reason?` |
+| `step:completed` | StepCompleted | `job_id`, `step` |
+| `step:failed` | StepFailed | `job_id`, `step`, `error` |
+| `shell:exited` | ShellExited | `job_id`, `step`, `exit_code` |
 
 ### Agent lifecycle
 
@@ -69,7 +69,7 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `session:created` | SessionCreated | `id`, `pipeline_id` |
+| `session:created` | SessionCreated | `id`, `job_id` |
 | `session:deleted` | SessionDeleted | `id` |
 | `workspace:created` | WorkspaceCreated | `id`, `path`, `branch?`, `owner?`, `mode?` |
 | `workspace:ready` | WorkspaceReady | `id` |
@@ -80,12 +80,12 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `cron:started` | CronStarted | `cron_name`, `project_root`, `runbook_hash`, `interval`, `pipeline_name`, `namespace` |
+| `cron:started` | CronStarted | `cron_name`, `project_root`, `runbook_hash`, `interval`, `job_name`, `namespace` |
 | `cron:stopped` | CronStopped | `cron_name`, `namespace` |
-| `cron:fired` | CronFired | `cron_name`, `pipeline_id`, `namespace` |
+| `cron:fired` | CronFired | `cron_name`, `job_id`, `namespace` |
 | `cron:deleted` | CronDeleted | `cron_name`, `namespace` |
 
-`cron:fired` is a tracking event — it does not mutate state directly (pipeline creation is handled by `pipeline:created`).
+`cron:fired` is a tracking event — it does not mutate state directly (job creation is handled by `job:created`).
 
 ### Worker lifecycle
 
@@ -94,7 +94,7 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 | `worker:started` | WorkerStarted | `worker_name`, `project_root`, `runbook_hash`, `queue_name`, `concurrency`, `namespace` |
 | `worker:wake` | WorkerWake | `worker_name` |
 | `worker:poll_complete` | WorkerPollComplete | `worker_name`, `items` |
-| `worker:item_dispatched` | WorkerItemDispatched | `worker_name`, `item_id`, `pipeline_id` |
+| `worker:item_dispatched` | WorkerItemDispatched | `worker_name`, `item_id`, `job_id` |
 | `worker:stopped` | WorkerStopped | `worker_name` |
 | `worker:deleted` | WorkerDeleted | `worker_name`, `namespace` |
 
@@ -120,9 +120,9 @@ Action events trigger runtime operations. They are emitted **externally by the C
 | Type tag | Variant | Fields |
 |----------|---------|--------|
 | `session:input` | SessionInput | `id`, `input` |
-| `pipeline:resume` | PipelineResume | `id`, `message?`, `vars` |
-| `pipeline:cancel` | PipelineCancel | `id` |
+| `job:resume` | JobResume | `id`, `message?`, `vars` |
+| `job:cancel` | JobCancel | `id` |
 | `workspace:drop` | WorkspaceDrop | `id` |
 | `agent:signal` | AgentSignal | `agent_id`, `kind`, `message?` |
 
-Unlike other actions, `agent:signal` stores the signal on the pipeline for the engine to act on; `kind` is `"complete"` (advance pipeline) or `"escalate"` (pause and notify human).
+Unlike other actions, `agent:signal` stores the signal on the job for the engine to act on; `kind` is `"complete"` (advance job) or `"escalate"` (pause and notify human).

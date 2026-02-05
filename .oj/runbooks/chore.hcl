@@ -22,11 +22,11 @@ queue "chores" {
 
 worker "chore" {
   source      = { queue = "chores" }
-  handler     = { pipeline = "chore" }
+  handler     = { job = "chore" }
   concurrency = 3
 }
 
-pipeline "chore" {
+job "chore" {
   name      = "${var.task.title}"
   vars      = ["task"]
   on_cancel = { step = "cancel" }
@@ -53,7 +53,7 @@ pipeline "chore" {
     on_done = { step = "submit" }
   }
 
-  # TODO: hook into merge pipeline to mark issue done instead
+  # TODO: hook into merge job to mark issue done instead
   step "submit" {
     run = <<-SHELL
       git add -A
@@ -72,11 +72,11 @@ pipeline "chore" {
   }
 
   step "reopen" {
-    run = "wok reopen ${var.task.id} --reason 'Chore pipeline failed'"
+    run = "wok reopen ${var.task.id} --reason 'Chore job failed'"
   }
 
   step "cancel" {
-    run = "wok close ${var.task.id} --reason 'Chore pipeline cancelled'"
+    run = "wok close ${var.task.id} --reason 'Chore job cancelled'"
   }
 }
 

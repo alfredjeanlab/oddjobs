@@ -34,18 +34,18 @@ queue "merge-conflicts" {
 
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { pipeline = "merge" }
+  handler     = { job = "merge" }
   concurrency = 1
 }
 
 worker "merge-conflicts" {
   source      = { queue = "merge-conflicts" }
-  handler     = { pipeline = "merge-conflicts" }
+  handler     = { job = "merge-conflicts" }
   concurrency = 1
 }
 
 # Fast-path: clean merges only. Conflicts get forwarded to the resolve queue.
-pipeline "merge" {
+job "merge" {
   name      = "${var.mr.title}"
   vars      = ["mr"]
   workspace = "folder"
@@ -122,7 +122,7 @@ pipeline "merge" {
 }
 
 # Slow-path: agent-assisted conflict resolution.
-pipeline "merge-conflicts" {
+job "merge-conflicts" {
   name      = "Conflicts: ${var.mr.title}"
   vars      = ["mr"]
   workspace = "folder"

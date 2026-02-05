@@ -218,18 +218,18 @@ fn parse_error_duplicate_name() {
 fn run_directive_shell() {
     let directive = RunDirective::Shell("echo hello".to_string());
     assert!(directive.is_shell());
-    assert!(!directive.is_pipeline());
+    assert!(!directive.is_job());
     assert_eq!(directive.shell_command(), Some("echo hello"));
 }
 
 #[test]
-fn run_directive_pipeline() {
-    let directive = RunDirective::Pipeline {
-        pipeline: "build".to_string(),
+fn run_directive_job() {
+    let directive = RunDirective::Job {
+        job: "build".to_string(),
     };
-    assert!(directive.is_pipeline());
+    assert!(directive.is_job());
     assert!(!directive.is_shell());
-    assert_eq!(directive.pipeline_name(), Some("build"));
+    assert_eq!(directive.job_name(), Some("build"));
 }
 
 #[test]
@@ -257,14 +257,14 @@ fn deserialize_shell_run() {
 }
 
 #[test]
-fn deserialize_pipeline_run() {
+fn deserialize_job_run() {
     #[derive(Deserialize)]
     struct Test {
         run: RunDirective,
     }
-    let toml = r#"run = { pipeline = "build" }"#;
+    let toml = r#"run = { job = "build" }"#;
     let test: Test = toml::from_str(toml).unwrap();
-    assert_eq!(test.run.pipeline_name(), Some("build"));
+    assert_eq!(test.run.job_name(), Some("build"));
 }
 
 #[test]
@@ -332,8 +332,8 @@ command "mayor" {
 fn attach_accessor_returns_none_for_non_agent() {
     assert_eq!(RunDirective::Shell("echo".to_string()).attach(), None);
     assert_eq!(
-        RunDirective::Pipeline {
-            pipeline: "build".to_string()
+        RunDirective::Job {
+            job: "build".to_string()
         }
         .attach(),
         None
@@ -376,8 +376,8 @@ fn command_parse_args() {
         defaults: [("branch".to_string(), "main".to_string())]
             .into_iter()
             .collect(),
-        run: RunDirective::Pipeline {
-            pipeline: "build".to_string(),
+        run: RunDirective::Job {
+            job: "build".to_string(),
         },
     };
 
@@ -412,8 +412,8 @@ fn command_named_overrides() {
         defaults: [("branch".to_string(), "main".to_string())]
             .into_iter()
             .collect(),
-        run: RunDirective::Pipeline {
-            pipeline: "build".to_string(),
+        run: RunDirective::Job {
+            job: "build".to_string(),
         },
     };
 
@@ -646,26 +646,26 @@ fn command_def_description_none_by_default() {
 fn command_def_description_some() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: Some("Run a build pipeline".to_string()),
+        description: Some("Run a build job".to_string()),
         args: ArgSpec::default(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
     };
-    assert_eq!(cmd.description.as_deref(), Some("Run a build pipeline"));
+    assert_eq!(cmd.description.as_deref(), Some("Run a build job"));
 }
 
 #[test]
 fn deserialize_description_from_hcl() {
     let hcl = r#"
 command "build" {
-  description = "Run a build pipeline"
+  description = "Run a build job"
   args = "<name>"
   run  = "echo build"
 }
 "#;
     let runbook: crate::Runbook = hcl::from_str(hcl).unwrap();
     let cmd = runbook.commands.get("build").unwrap();
-    assert_eq!(cmd.description.as_deref(), Some("Run a build pipeline"));
+    assert_eq!(cmd.description.as_deref(), Some("Run a build job"));
 }
 
 // split_raw_args tests

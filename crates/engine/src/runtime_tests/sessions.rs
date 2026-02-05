@@ -9,7 +9,7 @@ use oj_core::TimerId;
 #[tokio::test]
 async fn timer_event_for_non_session_monitor_ignored() {
     let ctx = setup().await;
-    let _pipeline_id = create_pipeline(&ctx).await;
+    let _job_id = create_job(&ctx).await;
 
     // Timer with unknown prefix should be ignored
     let result = ctx
@@ -26,7 +26,7 @@ async fn timer_event_for_non_session_monitor_ignored() {
 #[tokio::test]
 async fn custom_event_unknown_is_ignored() {
     let ctx = setup().await;
-    let _pipeline_id = create_pipeline(&ctx).await;
+    let _job_id = create_job(&ctx).await;
 
     let result = ctx.runtime.handle_event(Event::Custom).await.unwrap();
 
@@ -34,10 +34,10 @@ async fn custom_event_unknown_is_ignored() {
 }
 
 #[tokio::test]
-async fn liveness_timer_for_nonexistent_pipeline_is_noop() {
+async fn liveness_timer_for_nonexistent_job_is_noop() {
     let ctx = setup().await;
 
-    // Liveness timer for a nonexistent pipeline should be a no-op
+    // Liveness timer for a nonexistent job should be a no-op
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
@@ -50,10 +50,10 @@ async fn liveness_timer_for_nonexistent_pipeline_is_noop() {
 }
 
 #[tokio::test]
-async fn exit_deferred_timer_for_nonexistent_pipeline_is_noop() {
+async fn exit_deferred_timer_for_nonexistent_job_is_noop() {
     let ctx = setup().await;
 
-    // Deferred exit timer for a nonexistent pipeline should be a no-op
+    // Deferred exit timer for a nonexistent job should be a no-op
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
@@ -66,35 +66,35 @@ async fn exit_deferred_timer_for_nonexistent_pipeline_is_noop() {
 }
 
 #[tokio::test]
-async fn get_pipeline_returns_none_for_nonexistent() {
+async fn get_job_returns_none_for_nonexistent() {
     let ctx = setup().await;
 
-    let pipeline = ctx.runtime.get_pipeline("nonexistent");
-    assert!(pipeline.is_none());
+    let job = ctx.runtime.get_job("nonexistent");
+    assert!(job.is_none());
 }
 
 #[tokio::test]
-async fn get_pipeline_returns_pipeline_by_prefix() {
+async fn get_job_returns_job_by_prefix() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
     // Get by full ID
-    let p1 = ctx.runtime.get_pipeline(&pipeline_id);
+    let p1 = ctx.runtime.get_job(&job_id);
     assert!(p1.is_some());
 
     // Get by prefix (pipe-1 -> pipe)
-    let prefix = &pipeline_id[..4];
-    let p2 = ctx.runtime.get_pipeline(prefix);
+    let prefix = &job_id[..4];
+    let p2 = ctx.runtime.get_job(prefix);
     assert!(p2.is_some());
-    assert_eq!(p2.unwrap().id, pipeline_id);
+    assert_eq!(p2.unwrap().id, job_id);
 }
 
 #[tokio::test]
-async fn pipelines_returns_all_pipelines() {
+async fn jobs_returns_all_jobs() {
     let ctx = setup().await;
-    let pipeline_id = create_pipeline(&ctx).await;
+    let job_id = create_job(&ctx).await;
 
-    let pipelines = ctx.runtime.pipelines();
-    assert_eq!(pipelines.len(), 1);
-    assert!(pipelines.contains_key(&pipeline_id));
+    let jobs = ctx.runtime.jobs();
+    assert_eq!(jobs.len(), 1);
+    assert!(jobs.contains_key(&job_id));
 }

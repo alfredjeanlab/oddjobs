@@ -15,10 +15,10 @@
 
 command "gt-deacon-patrol" {
   args = ""
-  run  = { pipeline = "deacon-patrol" }
+  run  = { job = "deacon-patrol" }
 }
 
-pipeline "deacon-patrol" {
+job "deacon-patrol" {
   name      = "deacon-patrol"
   workspace = "ephemeral"
 
@@ -94,11 +94,11 @@ agent "deacon-agent" {
     "echo '## Workers'",
     "oj worker list -o json 2>/dev/null || echo '[]'",
     "echo ''",
-    "echo '## Running Pipelines'",
-    "oj pipeline list --status running -o json 2>/dev/null || echo '[]'",
+    "echo '## Running Jobs'",
+    "oj job list --status running -o json 2>/dev/null || echo '[]'",
     "echo ''",
-    "echo '## Escalated Pipelines'",
-    "oj pipeline list --status escalated -o json 2>/dev/null || echo '[]'",
+    "echo '## Escalated Jobs'",
+    "oj job list --status escalated -o json 2>/dev/null || echo '[]'",
     "echo ''",
     "echo '## Queues'",
     "oj queue list -o json 2>/dev/null || echo '[]'",
@@ -122,10 +122,10 @@ agent "deacon-agent" {
     1. **Workers**: ensure all workers are running
        - `oj worker start <name>` for any stopped workers
 
-    2. **Escalated pipelines**: investigate and resolve
-       - `oj pipeline show <id>` and `oj pipeline logs <id>` to understand the issue
-       - `oj pipeline resume <id>` if the error is transient
-       - `oj pipeline cancel <id>` if unrecoverable
+    2. **Escalated jobs**: investigate and resolve
+       - `oj job show <id>` and `oj job logs <id>` to understand the issue
+       - `oj job resume <id>` if the error is transient
+       - `oj job cancel <id>` if unrecoverable
        - File a bug if the failure reveals a systemic issue:
          `bd create -t bug --title "..."`
 

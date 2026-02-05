@@ -41,10 +41,10 @@ pub enum LogicalOp {
     Or,
 }
 
-/// A command or pipeline with optional background execution.
+/// A command or job with optional background execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandItem {
-    /// The command (simple or pipeline).
+    /// The command (simple or job).
     pub command: Command,
     /// True if command should run in background (`&`).
     pub background: bool,
@@ -57,8 +57,8 @@ pub struct CommandItem {
 pub enum Command {
     /// A simple command (command name with arguments).
     Simple(SimpleCommand),
-    /// A pipeline of commands connected by `|`.
-    Pipeline(Pipeline),
+    /// A job of commands connected by `|`.
+    Job(Job),
     /// A subshell: `(command_list)`.
     Subshell(Subshell),
     /// A brace group: `{ command_list; }`.
@@ -70,19 +70,19 @@ impl Command {
     pub fn span(&self) -> Span {
         match self {
             Command::Simple(c) => c.span,
-            Command::Pipeline(p) => p.span,
+            Command::Job(p) => p.span,
             Command::Subshell(s) => s.span,
             Command::BraceGroup(b) => b.span,
         }
     }
 }
 
-/// A pipeline of commands connected by `|`.
+/// A job of commands connected by `|`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pipeline {
-    /// Commands in the pipeline (at least 2).
+pub struct Job {
+    /// Commands in the job (at least 2).
     pub commands: Vec<SimpleCommand>,
-    /// Source span covering the entire pipeline.
+    /// Source span covering the entire job.
     pub span: Span,
 }
 

@@ -40,12 +40,12 @@ fn frequent_output_runbook(scenario_path: &std::path::Path) -> String {
         r#"
 [command.test]
 args = "<name>"
-run = {{ pipeline = "test" }}
+run = {{ job = "test" }}
 
-[pipeline.test]
+[job.test]
 vars  = ["name"]
 
-[[pipeline.test.step]]
+[[job.test.step]]
 name = "work"
 run = {{ agent = "worker" }}
 
@@ -99,7 +99,7 @@ fn timer_check_fires_during_event_activity() {
     // The fix ensures timer checks fire consistently regardless of events.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
         temp.oj()
-            .args(&["pipeline", "list"])
+            .args(&["job", "list"])
             .passes()
             .stdout()
             .contains("completed")
@@ -110,12 +110,12 @@ fn timer_check_fires_during_event_activity() {
     }
     assert!(
         done,
-        "pipeline should complete - timer check must fire during event activity"
+        "job should complete - timer check must fire during event activity"
     );
 
-    // Verify the pipeline completed successfully
+    // Verify the job completed successfully
     temp.oj()
-        .args(&["pipeline", "list"])
+        .args(&["job", "list"])
         .passes()
         .stdout_has("completed");
 }
