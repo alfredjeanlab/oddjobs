@@ -180,6 +180,47 @@ where
         Ok(vec![])
     }
 
+    pub(crate) async fn handle_worker_resized(
+        &self,
+        worker_name: &str,
+        namespace: &str,
+        concurrency: u32,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let (old_concurrency, queue_name, queue_type) = {
+            let mut workers = self.worker_states.lock();
+            if let Some(state) = workers.get_mut(worker_name) {
+                let old = state.concurrency;
+                state.concurrency = concurrency;
+                let scoped = scoped_name(&state.namespace, worker_name);
+                self.worker_logger.append(
+                    &scoped,
+                    &format!("resized concurrency {} -> {}", old, concurrency),
+                );
+                (old, state.queue_name.clone(), state.queue_type)
+            } else {
+                return Ok(vec![]);
+            }
+        };
+
+        // If concurrency increased and we have capacity, trigger a poll to pick up more items
+        if concurrency > old_concurrency {
+            match queue_type {
+                QueueType::Persisted => {
+                    return self.poll_persisted_queue(worker_name, &queue_name, namespace);
+                }
+                QueueType::External => {
+                    // For external queues, wake the worker to trigger a poll
+                    return Ok(vec![Event::WorkerWake {
+                        worker_name: worker_name.to_string(),
+                        namespace: namespace.to_string(),
+                    }]);
+                }
+            }
+        }
+
+        Ok(vec![])
+    }
+
     /// Reconcile queue items after daemon recovery.
     ///
     /// Handles two cases:

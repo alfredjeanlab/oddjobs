@@ -257,6 +257,17 @@ where
                 result_events.extend(self.handle_worker_stopped(worker_name).await?);
             }
 
+            Event::WorkerResized {
+                worker_name,
+                namespace,
+                concurrency,
+            } => {
+                result_events.extend(
+                    self.handle_worker_resized(worker_name, namespace, *concurrency)
+                        .await?,
+                );
+            }
+
             // Job terminal state -> check worker re-poll
             // NOTE: check_worker_job_complete is also called directly from
             // fail_job/cancel_job/complete_job for immediate queue
