@@ -1184,6 +1184,7 @@ fn make_decision(id: &str, job_id: &str, created_at_ms: u64) -> Decision {
         id: DecisionId::new(id),
         job_id: job_id.to_string(),
         agent_id: None,
+        owner: None,
         source: DecisionSource::Idle,
         context: "test context".to_string(),
         options: vec![],

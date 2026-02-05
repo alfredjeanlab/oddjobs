@@ -512,6 +512,9 @@ pub enum Event {
         job_id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
+        /// Owner of this decision (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
         source: DecisionSource,
         context: String,
         #[serde(default)]
@@ -891,8 +894,17 @@ impl Event {
                 ..
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::DecisionCreated {
-                id, job_id, source, ..
-            } => format!("{t} id={id} job={job_id} source={source:?}"),
+                id,
+                job_id,
+                owner,
+                source,
+                ..
+            } => match owner {
+                Some(OwnerId::AgentRun(ar_id)) => {
+                    format!("{t} id={id} agent_run={ar_id} source={source:?}")
+                }
+                _ => format!("{t} id={id} job={job_id} source={source:?}"),
+            },
             Event::DecisionResolved { id, chosen, .. } => {
                 if let Some(c) = chosen {
                     format!("{t} id={id} chosen={c}")
@@ -963,7 +975,14 @@ impl Event {
                     Some(job_id)
                 }
             }
-            Event::DecisionCreated { job_id, .. } => Some(job_id),
+            Event::DecisionCreated { job_id, owner, .. } => {
+                // Return None for agent run owners (job_id is empty for them)
+                if matches!(owner, Some(OwnerId::AgentRun(_))) {
+                    None
+                } else {
+                    Some(job_id)
+                }
+            }
             _ => None,
         }
     }

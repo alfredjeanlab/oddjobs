@@ -3,6 +3,7 @@
 
 //! Decision types for human-in-the-loop job control.
 
+use crate::owner::OwnerId;
 use serde::{Deserialize, Serialize};
 
 crate::define_id! {
@@ -35,9 +36,13 @@ pub struct DecisionOption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Decision {
     pub id: DecisionId,
+    /// Job ID (kept for backward compatibility; empty for agent runs)
     pub job_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Owner of this decision (job or agent_run). None for legacy events.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<OwnerId>,
     pub source: DecisionSource,
     pub context: String,
     #[serde(default)]

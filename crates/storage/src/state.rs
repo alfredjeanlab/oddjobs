@@ -870,6 +870,7 @@ impl MaterializedState {
                 id,
                 job_id,
                 agent_id,
+                owner,
                 source,
                 context,
                 options,
@@ -884,6 +885,7 @@ impl MaterializedState {
                             id: DecisionId::new(id.clone()),
                             job_id: job_id.to_string(),
                             agent_id: agent_id.clone(),
+                            owner: owner.clone(),
                             source: source.clone(),
                             context: context.clone(),
                             options: options.clone(),
@@ -896,9 +898,24 @@ impl MaterializedState {
                     );
                 }
 
-                // Update job step status to Waiting with decision_id
-                if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
-                    job.step_status = StepStatus::Waiting(Some(id.clone()));
+                // Route by owner for setting status
+                match owner {
+                    Some(OwnerId::Job(jid)) => {
+                        if let Some(job) = self.jobs.get_mut(jid.as_str()) {
+                            job.step_status = StepStatus::Waiting(Some(id.clone()));
+                        }
+                    }
+                    Some(OwnerId::AgentRun(ar_id)) => {
+                        if let Some(agent_run) = self.agent_runs.get_mut(ar_id.as_str()) {
+                            agent_run.status = AgentRunStatus::Waiting;
+                        }
+                    }
+                    None => {
+                        // Legacy fallback via job_id
+                        if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                            job.step_status = StepStatus::Waiting(Some(id.clone()));
+                        }
+                    }
                 }
             }
 
@@ -965,6 +982,17 @@ impl MaterializedState {
                         run.error = Some(reason.clone());
                     }
                     run.updated_at_ms = epoch_ms_now();
+                }
+
+                // Clean up unresolved decisions for terminal agent runs
+                if status.is_terminal() {
+                    let ar_id = id.as_str().to_string();
+                    self.decisions.retain(|_, d| match &d.owner {
+                        Some(OwnerId::AgentRun(owner_id)) if owner_id.as_str() == ar_id => {
+                            d.is_resolved()
+                        }
+                        _ => true,
+                    });
                 }
             }
 

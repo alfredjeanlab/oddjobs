@@ -603,7 +603,7 @@ where
                         let (exit_code, stderr) = parse_gate_error(&gate_error);
 
                         // Create decision with gate failure context
-                        let (_decision_id, decision_event) = EscalationDecisionBuilder::new(
+                        let (_decision_id, decision_event) = EscalationDecisionBuilder::for_job(
                             job_id.clone(),
                             job.name.clone(),
                             EscalationTrigger::GateFailed {

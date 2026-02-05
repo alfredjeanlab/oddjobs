@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use oj_core::{DecisionSource, Event, JobId, QuestionData, QuestionEntry, QuestionOption};
+use oj_core::{
+    AgentRunId, DecisionSource, Event, JobId, OwnerId, QuestionData, QuestionEntry, QuestionOption,
+};
 
 #[test]
 fn test_idle_trigger_builds_correct_options() {
-    let (id, event) = EscalationDecisionBuilder::new(
+    let (id, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Idle,
@@ -36,7 +38,7 @@ fn test_idle_trigger_builds_correct_options() {
 
 #[test]
 fn test_dead_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Dead {
@@ -66,7 +68,7 @@ fn test_dead_trigger_builds_correct_options() {
 
 #[test]
 fn test_error_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Error {
@@ -95,7 +97,7 @@ fn test_error_trigger_builds_correct_options() {
 
 #[test]
 fn test_gate_failure_includes_command_and_stderr() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::GateFailed {
@@ -121,7 +123,7 @@ fn test_gate_failure_includes_command_and_stderr() {
 
 #[test]
 fn test_prompt_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Prompt {
@@ -150,7 +152,7 @@ fn test_prompt_trigger_builds_correct_options() {
 
 #[test]
 fn test_builder_with_agent_id_and_namespace() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Idle,
@@ -174,7 +176,7 @@ fn test_builder_with_agent_id_and_namespace() {
 
 #[test]
 fn test_builder_with_agent_log_tail() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Idle,
@@ -193,7 +195,7 @@ fn test_builder_with_agent_log_tail() {
 
 #[test]
 fn test_dead_trigger_without_exit_code() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Dead { exit_code: None },
@@ -211,7 +213,7 @@ fn test_dead_trigger_without_exit_code() {
 
 #[test]
 fn test_gate_failure_empty_stderr() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::GateFailed {
@@ -252,7 +254,7 @@ fn test_question_trigger_with_data() {
         }],
     };
 
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Question {
@@ -288,7 +290,7 @@ fn test_question_trigger_with_data() {
 
 #[test]
 fn test_question_trigger_without_data() {
-    let (_, event) = EscalationDecisionBuilder::new(
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Question {
@@ -344,7 +346,8 @@ fn test_question_trigger_multi_question_context() {
         ],
     };
 
-    let (_, event) = EscalationDecisionBuilder::new(
+    #[allow(deprecated)]
+    let (_, event) = EscalationDecisionBuilder::for_job(
         JobId::new("pipe-1"),
         "test-job".to_string(),
         EscalationTrigger::Question {
@@ -363,6 +366,114 @@ fn test_question_trigger_multi_question_context() {
             assert_eq!(options.len(), 2); // "Yes" + "Cancel"
             assert_eq!(options[0].label, "Yes");
             assert_eq!(options[1].label, "Cancel");
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+// ===================== Tests for for_agent_run() =====================
+
+#[test]
+fn test_for_agent_run_idle_trigger() {
+    let (id, event) = EscalationDecisionBuilder::for_agent_run(
+        AgentRunId::new("ar-123"),
+        "my-command".to_string(),
+        EscalationTrigger::Idle,
+    )
+    .build();
+
+    assert!(!id.is_empty());
+
+    match event {
+        Event::DecisionCreated {
+            job_id,
+            owner,
+            source,
+            options,
+            context,
+            ..
+        } => {
+            // job_id should be empty for agent runs
+            assert!(job_id.as_str().is_empty());
+            // owner should be AgentRun
+            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-123"))));
+            assert_eq!(source, DecisionSource::Idle);
+            assert_eq!(options.len(), 4);
+            assert_eq!(options[0].label, "Nudge");
+            // Context should use the command name
+            assert!(context.contains("my-command"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_for_agent_run_error_trigger() {
+    let (_, event) = EscalationDecisionBuilder::for_agent_run(
+        AgentRunId::new("ar-456"),
+        "build-project".to_string(),
+        EscalationTrigger::Error {
+            error_type: "OutOfCredits".to_string(),
+            message: "API quota exceeded".to_string(),
+        },
+    )
+    .namespace("test-ns")
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            owner,
+            source,
+            options,
+            namespace,
+            context,
+            ..
+        } => {
+            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-456"))));
+            assert_eq!(source, DecisionSource::Error);
+            assert_eq!(options.len(), 3);
+            assert_eq!(options[0].label, "Retry");
+            assert_eq!(namespace, "test-ns");
+            assert!(context.contains("OutOfCredits"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_for_job_creates_job_owner() {
+    let (_, event) = EscalationDecisionBuilder::for_job(
+        JobId::new("job-789"),
+        "test-job".to_string(),
+        EscalationTrigger::Idle,
+    )
+    .build();
+
+    match event {
+        Event::DecisionCreated { job_id, owner, .. } => {
+            assert_eq!(job_id.as_str(), "job-789");
+            assert_eq!(owner, Some(OwnerId::Job(JobId::new("job-789"))));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_for_agent_run_with_agent_id() {
+    let (_, event) = EscalationDecisionBuilder::for_agent_run(
+        AgentRunId::new("ar-001"),
+        "deploy".to_string(),
+        EscalationTrigger::Dead { exit_code: Some(1) },
+    )
+    .agent_id("agent-uuid-123")
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            agent_id, owner, ..
+        } => {
+            assert_eq!(agent_id, Some("agent-uuid-123".to_string()));
+            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-001"))));
         }
         _ => panic!("expected DecisionCreated"),
     }

@@ -731,6 +731,7 @@ fn event_decision_created_roundtrip() {
         id: "dec-abc123".to_string(),
         job_id: JobId::new("pipe-1"),
         agent_id: Some("agent-1".to_string()),
+        owner: None,
         source: DecisionSource::Gate,
         context: "Gate check failed".to_string(),
         options: vec![
@@ -805,6 +806,7 @@ fn event_decision_name() {
             id: "d".to_string(),
             job_id: JobId::new("p"),
             agent_id: None,
+            owner: None,
             source: DecisionSource::Question,
             context: "ctx".to_string(),
             options: vec![],
