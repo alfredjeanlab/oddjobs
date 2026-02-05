@@ -105,7 +105,6 @@ job "plan" {
   }
 }
 
-# Implementation queue: picks up planned issues ready to build
 queue "epics" {
   type = "external"
   list = "wok ready -t epic,feature -l build:needed -l plan:ready -p oj -o json"

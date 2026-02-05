@@ -12,7 +12,9 @@ use oj_storage::{MaterializedState, Wal};
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
-use super::{handle_worker_restart, handle_worker_start, handle_worker_stop};
+use super::{
+    handle_worker_restart, handle_worker_start, handle_worker_stop, resolve_effective_project_root,
+};
 
 /// Helper: create an EventBus backed by a temp WAL, returning the bus and WAL path.
 fn test_event_bus(dir: &std::path::Path) -> (EventBus, PathBuf) {
@@ -276,6 +278,149 @@ job "handle" {
     assert!(
         matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "processor"),
         "expected WorkerStarted response, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn resolve_effective_project_root_uses_known_root_when_namespace_differs() {
+    // Create two projects with different namespaces
+    let project_a = tempdir().unwrap();
+    let project_b = tempdir().unwrap();
+
+    // Set up .oj directories for both
+    std::fs::create_dir_all(project_a.path().join(".oj")).unwrap();
+    std::fs::create_dir_all(project_b.path().join(".oj")).unwrap();
+
+    // Configure project_b with a specific namespace "wok"
+    std::fs::write(
+        project_b.path().join(".oj/config.toml"),
+        "[project]\nname = \"wok\"\n",
+    )
+    .unwrap();
+
+    // Set up state with a known worker from project_b namespace
+    let mut initial_state = MaterializedState::default();
+    initial_state.workers.insert(
+        "wok/merge".to_string(),
+        oj_storage::WorkerRecord {
+            name: "merge".to_string(),
+            project_root: project_b.path().to_path_buf(),
+            runbook_hash: "hash".to_string(),
+            status: "running".to_string(),
+            active_job_ids: vec![],
+            queue_name: "merges".to_string(),
+            concurrency: 1,
+            namespace: "wok".to_string(),
+        },
+    );
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // When called with project_a's path but namespace "wok",
+    // should resolve to project_b's path (the known root for "wok")
+    let result = resolve_effective_project_root(project_a.path(), "wok", &state);
+
+    assert_eq!(
+        result,
+        project_b.path().to_path_buf(),
+        "should use known root for namespace 'wok', not the provided project_a path"
+    );
+}
+
+#[test]
+fn resolve_effective_project_root_uses_provided_root_when_namespace_matches() {
+    // Create a project
+    let project = tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".oj")).unwrap();
+
+    // Configure project with namespace "myproject"
+    std::fs::write(
+        project.path().join(".oj/config.toml"),
+        "[project]\nname = \"myproject\"\n",
+    )
+    .unwrap();
+
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // When called with matching namespace, should use provided root
+    let result = resolve_effective_project_root(project.path(), "myproject", &state);
+
+    assert_eq!(
+        result,
+        project.path().to_path_buf(),
+        "should use provided root when namespace matches"
+    );
+}
+
+#[test]
+fn start_uses_known_root_when_namespace_differs_from_project_root() {
+    let dir = tempdir().unwrap();
+    let (event_bus, _wal_path) = test_event_bus(dir.path());
+
+    // Create two projects: project_a (wrong one) and project_b (correct one with "wok" namespace)
+    let project_a = tempdir().unwrap();
+    let project_b = tempdir().unwrap();
+
+    // Set up both projects with .oj directories
+    std::fs::create_dir_all(project_a.path().join(".oj/runbooks")).unwrap();
+    std::fs::create_dir_all(project_b.path().join(".oj/runbooks")).unwrap();
+
+    // Configure project_b with namespace "wok"
+    std::fs::write(
+        project_b.path().join(".oj/config.toml"),
+        "[project]\nname = \"wok\"\n",
+    )
+    .unwrap();
+
+    // Create a worker "merge" in project_b
+    std::fs::write(
+        project_b.path().join(".oj/runbooks/test.hcl"),
+        r#"
+queue "merges" {
+  type = "persisted"
+  vars = ["merge"]
+}
+
+worker "merge" {
+  source  = { queue = "merges" }
+  handler = { job = "handle-merge" }
+}
+
+job "handle-merge" {
+  step "run" {
+    run = "echo merge"
+  }
+}
+"#,
+    )
+    .unwrap();
+
+    // Set up state with known project root for "wok" namespace
+    let mut initial_state = MaterializedState::default();
+    initial_state.workers.insert(
+        "wok/other-worker".to_string(),
+        oj_storage::WorkerRecord {
+            name: "other-worker".to_string(),
+            project_root: project_b.path().to_path_buf(),
+            runbook_hash: "hash".to_string(),
+            status: "stopped".to_string(),
+            active_job_ids: vec![],
+            queue_name: "other".to_string(),
+            concurrency: 1,
+            namespace: "wok".to_string(),
+        },
+    );
+    let state = Arc::new(Mutex::new(initial_state));
+
+    // Start worker with project_a's path but namespace "wok"
+    // This simulates `oj --project wok worker start merge` from a different directory
+    let result =
+        handle_worker_start(project_a.path(), "wok", "merge", false, &event_bus, &state).unwrap();
+
+    // Should succeed by using project_b's root (the known root for "wok")
+    assert!(
+        matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "merge"),
+        "expected WorkerStarted for 'merge', got {:?}",
         result
     );
 }
