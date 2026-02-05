@@ -104,7 +104,7 @@ impl FakeAgentAdapter {
 
         if let Some(tx) = event_tx {
             let _ = tx
-                .send(Event::from_agent_state(agent_id.clone(), state))
+                .send(Event::from_agent_state(agent_id.clone(), state, None))
                 .await;
         }
     }

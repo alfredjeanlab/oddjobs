@@ -128,6 +128,7 @@ async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -263,6 +264,7 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -401,6 +403,7 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -409,6 +412,7 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -557,6 +561,7 @@ async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();

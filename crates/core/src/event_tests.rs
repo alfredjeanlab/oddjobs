@@ -20,10 +20,12 @@ fn event_serialization_roundtrip() {
         },
         Event::AgentWaiting {
             agent_id: AgentId::new("agent-1"),
+            owner: None,
         },
         Event::AgentFailed {
             agent_id: AgentId::new("agent-2"),
             error: AgentError::RateLimited,
+            owner: None,
         },
         Event::ShellExited {
             job_id: JobId::new("pipe-1"),
@@ -59,6 +61,7 @@ fn event_unknown_type_becomes_custom() {
 fn event_agent_working_roundtrip() {
     let event = Event::AgentWorking {
         agent_id: AgentId::new("a1"),
+        owner: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "agent:working");
@@ -74,6 +77,7 @@ fn event_agent_failed_roundtrip() {
     let event = Event::AgentFailed {
         agent_id: AgentId::new("a2"),
         error: AgentError::RateLimited,
+        owner: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "agent:failed");
@@ -89,6 +93,7 @@ fn event_agent_exited_roundtrip() {
     let event = Event::AgentExited {
         agent_id: AgentId::new("a3"),
         exit_code: Some(42),
+        owner: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "agent:exited");
@@ -104,6 +109,7 @@ fn event_agent_exited_no_code_roundtrip() {
     let event = Event::AgentExited {
         agent_id: AgentId::new("a4"),
         exit_code: None,
+        owner: None,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "agent:exited");
@@ -118,6 +124,7 @@ fn event_agent_exited_no_code_roundtrip() {
 fn event_agent_gone_roundtrip() {
     let event = Event::AgentGone {
         agent_id: AgentId::new("a5"),
+        owner: None,
     };
     let json_str = serde_json::to_string(&event).unwrap();
     let parsed: Event = serde_json::from_str(&json_str).unwrap();
@@ -370,15 +377,15 @@ fn event_from_agent_state() {
     let agent_id = AgentId::new("test");
 
     assert!(matches!(
-        Event::from_agent_state(agent_id.clone(), AgentState::Working),
+        Event::from_agent_state(agent_id.clone(), AgentState::Working, None),
         Event::AgentWorking { .. }
     ));
     assert!(matches!(
-        Event::from_agent_state(agent_id.clone(), AgentState::WaitingForInput),
+        Event::from_agent_state(agent_id.clone(), AgentState::WaitingForInput, None),
         Event::AgentWaiting { .. }
     ));
     assert!(matches!(
-        Event::from_agent_state(agent_id.clone(), AgentState::SessionGone),
+        Event::from_agent_state(agent_id.clone(), AgentState::SessionGone, None),
         Event::AgentGone { .. }
     ));
 }
@@ -389,8 +396,9 @@ fn event_as_agent_state() {
 
     let event = Event::AgentWorking {
         agent_id: agent_id.clone(),
+        owner: None,
     };
-    let (id, state) = event.as_agent_state().unwrap();
+    let (id, state, _owner) = event.as_agent_state().unwrap();
     assert_eq!(id, &agent_id);
     assert!(matches!(state, AgentState::Working));
 

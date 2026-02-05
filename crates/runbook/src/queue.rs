@@ -35,6 +35,26 @@ fn default_cooldown() -> String {
     "0s".into()
 }
 
+/// Report configuration for external queues.
+///
+/// Executes shell commands when items complete or fail, reporting back to external systems.
+/// Optionally tracks completed/failed counts for visibility in `oj status` and `oj queue show`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReportConfig {
+    /// Shell command to execute when an item completes successfully; supports {item.*} interpolation
+    #[serde(default)]
+    pub on_done: Option<String>,
+    /// Shell command to execute when an item fails; supports {item.*} and {error} interpolation
+    #[serde(default)]
+    pub on_fail: Option<String>,
+    /// Track and display completed item count in status output
+    #[serde(default)]
+    pub show_completed: bool,
+    /// Track and display failed item count in status output
+    #[serde(default)]
+    pub show_failed: bool,
+}
+
 /// A queue definition for listing and claiming work items.
 ///
 /// External queues use shell commands (`list`/`take`).
@@ -66,4 +86,7 @@ pub struct QueueDef {
     /// When set, workers periodically check the queue at this interval
     #[serde(default)]
     pub poll: Option<String>,
+    /// Report configuration for external queues (item completion/failure callbacks)
+    #[serde(default)]
+    pub report: Option<ReportConfig>,
 }

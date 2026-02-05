@@ -35,6 +35,16 @@ pub(crate) struct WorkerState {
     /// Item IDs that are in-flight (pending take or active job) for external queues.
     /// Prevents duplicate dispatches when overlapping polls return the same items.
     pub inflight_items: HashSet<String>,
+    /// Maps item_id -> item data (for report command interpolation)
+    pub item_data: HashMap<String, serde_json::Value>,
+    /// Count of completed items (ephemeral, for status display)
+    pub completed_count: usize,
+    /// Count of failed items (ephemeral, for status display)
+    pub failed_count: usize,
+    /// Whether to track completed count (from report.show_completed)
+    pub track_completed: bool,
+    /// Whether to track failed count (from report.show_failed)
+    pub track_failed: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

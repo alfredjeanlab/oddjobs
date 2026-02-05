@@ -128,6 +128,16 @@ pub enum Effect {
         item: serde_json::Value,
     },
 
+    /// Report queue item completion/failure to external system
+    ReportQueueItem {
+        worker_name: String,
+        command: String,
+        cwd: PathBuf,
+        item_id: String,
+        /// true for on_done, false for on_fail
+        is_completion: bool,
+    },
+
     // === Notification effects ===
     /// Send a desktop notification
     Notify {
@@ -155,6 +165,7 @@ impl Effect {
             Effect::Shell { .. } => "shell",
             Effect::PollQueue { .. } => "poll_queue",
             Effect::TakeQueueItem { .. } => "take_queue_item",
+            Effect::ReportQueueItem { .. } => "report_queue_item",
             Effect::Notify { .. } => "notify",
         }
     }
@@ -235,6 +246,18 @@ impl Effect {
                 ("worker_name", worker_name.clone()),
                 ("cwd", cwd.display().to_string()),
                 ("item_id", item_id.clone()),
+            ],
+            Effect::ReportQueueItem {
+                worker_name,
+                cwd,
+                item_id,
+                is_completion,
+                ..
+            } => vec![
+                ("worker_name", worker_name.clone()),
+                ("cwd", cwd.display().to_string()),
+                ("item_id", item_id.clone()),
+                ("is_completion", is_completion.to_string()),
             ],
             Effect::Notify { title, .. } => vec![("title", title.clone())],
         }

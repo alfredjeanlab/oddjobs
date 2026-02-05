@@ -312,6 +312,7 @@ async fn agent_state_changed_unknown_agent_is_noop() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id: AgentId::new("unknown-agent".to_string()),
+            owner: None,
         })
         .await
         .unwrap();
@@ -342,7 +343,10 @@ async fn agent_state_changed_terminal_job_is_noop() {
     // AgentWaiting for terminal job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::AgentWaiting { agent_id })
+        .handle_event(Event::AgentWaiting {
+            agent_id,
+            owner: None,
+        })
         .await
         .unwrap();
 
@@ -374,7 +378,10 @@ async fn agent_state_changed_routes_through_agent_jobs() {
     // Emit AgentWaiting (on_idle = done → advance)
     let _result = ctx
         .runtime
-        .handle_event(Event::AgentWaiting { agent_id })
+        .handle_event(Event::AgentWaiting {
+            agent_id,
+            owner: None,
+        })
         .await
         .unwrap();
 
@@ -440,6 +447,7 @@ async fn gate_idle_escalates_when_command_fails() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -476,6 +484,7 @@ async fn agent_signal_complete_overrides_gate_escalation() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -660,6 +669,7 @@ async fn working_auto_resumes_job_from_waiting() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -672,6 +682,7 @@ async fn working_auto_resumes_job_from_waiting() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -710,6 +721,7 @@ async fn working_noop_when_job_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -748,6 +760,7 @@ async fn working_auto_resume_resets_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -764,6 +777,7 @@ async fn working_auto_resume_resets_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -835,6 +849,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -848,6 +863,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -892,6 +908,7 @@ async fn working_noop_when_standalone_agent_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -932,6 +949,7 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -950,6 +968,7 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1312,6 +1331,7 @@ async fn stale_agent_event_dropped_after_job_advances() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id: old_agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1464,6 +1484,7 @@ async fn standalone_agent_on_idle_done_kills_session() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1742,6 +1763,7 @@ async fn idle_grace_timer_cancelled_on_working() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1939,6 +1961,7 @@ async fn auto_resume_suppressed_after_nudge() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1960,6 +1983,7 @@ async fn auto_resume_suppressed_after_nudge() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -2004,6 +2028,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -2024,6 +2049,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -2077,6 +2103,7 @@ async fn rapid_idle_working_cycling_no_nudge() {
         ctx.runtime
             .handle_event(Event::AgentWorking {
                 agent_id: agent_id.clone(),
+                owner: None,
             })
             .await
             .unwrap();

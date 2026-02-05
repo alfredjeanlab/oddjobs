@@ -212,6 +212,7 @@ async fn gate_failure_does_not_produce_automatic_notification() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -281,6 +282,7 @@ async fn gate_dead_failure_does_not_produce_automatic_notification() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
+            owner: None,
         })
         .await
         .unwrap();

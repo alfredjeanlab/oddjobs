@@ -622,6 +622,65 @@ where
                 Ok(None)
             }
 
+            Effect::ReportQueueItem {
+                worker_name,
+                command,
+                cwd,
+                item_id,
+                is_completion,
+            } => {
+                // Fire-and-forget: spawn async task, log errors but don't block
+                tokio::spawn(async move {
+                    let action = if is_completion { "done" } else { "fail" };
+                    tracing::info!(
+                        %worker_name,
+                        %command,
+                        %item_id,
+                        action,
+                        cwd = %cwd.display(),
+                        "reporting queue item"
+                    );
+
+                    let wrapped = format!("set -euo pipefail\n{command}");
+                    let mut cmd = tokio::process::Command::new("bash");
+                    cmd.arg("-c").arg(&wrapped).current_dir(&cwd);
+                    let result = run_with_timeout(cmd, QUEUE_COMMAND_TIMEOUT, "queue report").await;
+
+                    match result {
+                        Ok(output) if output.status.success() => {
+                            tracing::info!(
+                                %worker_name,
+                                %item_id,
+                                action,
+                                "report command succeeded"
+                            );
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            tracing::warn!(
+                                %worker_name,
+                                %item_id,
+                                action,
+                                exit_code = output.status.code().unwrap_or(-1),
+                                stderr = %stderr,
+                                "report command failed"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                %worker_name,
+                                %item_id,
+                                action,
+                                error = %e,
+                                "report command execution failed"
+                            );
+                        }
+                    }
+                });
+
+                Ok(None)
+            }
+
             // === Notification effects ===
             Effect::Notify { title, message } => {
                 if let Err(e) = self.notifier.notify(&title, &message).await {

@@ -18,6 +18,7 @@ pub mod event;
 pub mod id;
 pub mod job;
 pub mod namespace;
+pub mod owner;
 pub mod session;
 pub mod timer;
 pub mod worker;
@@ -33,6 +34,7 @@ pub use event::{AgentSignalKind, Event, PromptType, QuestionData, QuestionEntry,
 pub use id::{IdGen, ShortId, UuidIdGen};
 pub use job::{Job, JobConfig, JobId, StepOutcome, StepRecord, StepStatus};
 pub use namespace::{scoped_name, split_scoped_name};
+pub use owner::OwnerId;
 pub use session::SessionId;
 pub use timer::TimerId;
 // WorkerId available via worker module if needed
