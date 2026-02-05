@@ -21,6 +21,7 @@ where
         job_id: &JobId,
         message: Option<&str>,
         vars: &HashMap<String, String>,
+        kill: bool,
     ) -> Result<Vec<Event>, RuntimeError> {
         let job = self.require_job(job_id.as_str())?;
 
@@ -102,7 +103,7 @@ where
                 .agent_name()
                 .ok_or_else(|| RuntimeError::AgentNotFound("no agent name in step".into()))?;
 
-            self.handle_agent_resume(&job, &resume_step, agent_name, msg, &merged_inputs)
+            self.handle_agent_resume(&job, &resume_step, agent_name, msg, &merged_inputs, kill)
                 .await
         } else if step_def.is_shell() {
             // Shell step: re-run command

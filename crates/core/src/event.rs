@@ -204,6 +204,9 @@ pub enum Event {
         message: Option<String>,
         #[serde(default, skip_serializing_if = "is_empty_map")]
         vars: HashMap<String, String>,
+        /// Kill the existing session and start fresh (don't use --resume)
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        kill: bool,
     },
 
     #[serde(rename = "job:cancelling")]

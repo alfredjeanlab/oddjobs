@@ -203,9 +203,12 @@ async fn handle_request(
             mutations::handle_agent_send(state, event_bus, agent_id, message).await
         }
 
-        Request::JobResume { id, message, vars } => {
-            mutations::handle_job_resume(state, orphans, event_bus, id, message, vars)
-        }
+        Request::JobResume {
+            id,
+            message,
+            vars,
+            kill,
+        } => mutations::handle_job_resume(state, orphans, event_bus, id, message, vars, kill),
 
         Request::JobCancel { ids } => mutations::handle_job_cancel(state, event_bus, ids),
 

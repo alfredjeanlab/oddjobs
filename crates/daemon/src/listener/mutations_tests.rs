@@ -121,6 +121,7 @@ fn resume_existing_job_emits_event() {
         "pipe-1".to_string(),
         Some("try again".to_string()),
         HashMap::new(),
+        false,
     );
 
     assert!(matches!(result, Ok(Response::Ok)));
@@ -140,6 +141,7 @@ fn resume_nonexistent_job_returns_error() {
         "nonexistent".to_string(),
         None,
         HashMap::new(),
+        false,
     );
 
     match result {
@@ -172,6 +174,7 @@ fn resume_orphan_without_runbook_hash_returns_error() {
         "orphan-1".to_string(),
         None,
         HashMap::new(),
+        false,
     );
 
     match result {
@@ -202,6 +205,7 @@ fn resume_orphan_without_runbook_in_state_returns_error() {
         "orphan-2".to_string(),
         None,
         HashMap::new(),
+        false,
     );
 
     match result {
@@ -234,6 +238,7 @@ fn resume_orphan_with_runbook_reconstructs_and_resumes() {
         "orphan-3".to_string(),
         Some("fix it".to_string()),
         HashMap::new(),
+        false,
     );
 
     // Should succeed (events emitted to WAL)
@@ -262,6 +267,7 @@ fn resume_orphan_by_prefix() {
         "orphan-long".to_string(),
         Some("try again".to_string()),
         HashMap::new(),
+        false,
     );
 
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
@@ -991,6 +997,7 @@ fn resume_agent_step_without_message_returns_error() {
         "pipe-agent".to_string(),
         None, // No message provided
         HashMap::new(),
+        false,
     );
 
     match result {
@@ -1036,6 +1043,7 @@ fn resume_agent_step_with_message_succeeds() {
         "pipe-agent-2".to_string(),
         Some("I fixed the issue".to_string()),
         HashMap::new(),
+        false,
     );
 
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
@@ -1072,6 +1080,7 @@ fn resume_shell_step_without_message_succeeds() {
         "pipe-shell".to_string(),
         None,
         HashMap::new(),
+        false,
     );
 
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
@@ -1112,6 +1121,7 @@ fn resume_failed_job_without_message_succeeds() {
         "pipe-failed-agent".to_string(),
         None,
         HashMap::new(),
+        false,
     );
 
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);

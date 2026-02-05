@@ -65,6 +65,10 @@ pub enum JobCommand {
         /// Job variables to set (can be repeated: --var key=value)
         #[arg(long = "var", value_parser = parse_key_value)]
         var: Vec<(String, String)>,
+
+        /// Kill running agent and restart (still preserves conversation via --resume)
+        #[arg(long)]
+        kill: bool,
     },
     /// Cancel one or more running jobs
     Cancel {
@@ -414,9 +418,17 @@ pub async fn handle(
                 }
             }
         }
-        JobCommand::Resume { id, message, var } => {
+        JobCommand::Resume {
+            id,
+            message,
+            var,
+            kill,
+        } => {
             let var_map: HashMap<String, String> = var.into_iter().collect();
-            match client.job_resume(&id, message.as_deref(), &var_map).await {
+            match client
+                .job_resume(&id, message.as_deref(), &var_map, kill)
+                .await
+            {
                 Ok(()) => {
                     if !var_map.is_empty() {
                         println!("Updated vars and resumed job {}", id);

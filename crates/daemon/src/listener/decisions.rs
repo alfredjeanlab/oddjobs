@@ -162,6 +162,7 @@ fn map_decision_to_job_action(
                 id: pid,
                 message: Some(format!("decision {} freeform: {}", decision_id, msg)),
                 vars: HashMap::new(),
+                kill: false,
             });
         }
     };
@@ -178,6 +179,7 @@ fn map_decision_to_job_action(
                 id: pid,
                 message: Some(build_resume_message(chosen, message, decision_id)),
                 vars: HashMap::new(),
+                kill: false,
             }),
             // 2 = Done: mark step complete
             2 => job_step.map(|step| Event::StepCompleted {
@@ -194,6 +196,7 @@ fn map_decision_to_job_action(
                 id: pid,
                 message: Some(build_resume_message(chosen, message, decision_id)),
                 vars: HashMap::new(),
+                kill: false,
             }),
             // 2 = Skip: mark step complete
             2 => job_step.map(|step| Event::StepCompleted {
@@ -208,6 +211,7 @@ fn map_decision_to_job_action(
                 id: pid,
                 message: Some(format!("decision {} approved", decision_id)),
                 vars: HashMap::new(),
+                kill: false,
             }),
             // 2 = Deny: cancel (deny usually means abort)
             2 => Some(Event::JobCancel { id: pid }),
@@ -230,6 +234,7 @@ fn map_decision_to_job_action(
                     options,
                 )),
                 vars: HashMap::new(),
+                kill: false,
             })
         }
     }

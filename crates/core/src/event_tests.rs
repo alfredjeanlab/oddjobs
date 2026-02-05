@@ -241,6 +241,7 @@ fn event_job_resume_roundtrip() {
         vars: [("key".to_string(), "value".to_string())]
             .into_iter()
             .collect(),
+        kill: false,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "job:resume");
@@ -258,6 +259,7 @@ fn event_job_resume_no_message_roundtrip() {
         id: JobId::new("pipe-1"),
         message: None,
         vars: HashMap::new(),
+        kill: false,
     };
     let json: serde_json::Value = serde_json::to_value(&event).unwrap();
     assert_eq!(json["type"], "job:resume");

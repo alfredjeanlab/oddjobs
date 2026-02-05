@@ -162,6 +162,7 @@ pub(super) fn handle_job_resume(
     id: String,
     message: Option<String>,
     vars: std::collections::HashMap<String, String>,
+    kill: bool,
 ) -> Result<Response, ConnectionError> {
     // Check if job exists in state and get relevant info for validation
     let job_info = {
@@ -192,6 +193,7 @@ pub(super) fn handle_job_resume(
                 id: JobId::new(job_id),
                 message,
                 vars,
+                kill,
             },
         )?;
         return Ok(Response::Ok);
@@ -279,6 +281,7 @@ pub(super) fn handle_job_resume(
             id: job_id,
             message,
             vars,
+            kill,
         },
     )?;
 
@@ -1262,6 +1265,7 @@ pub(super) async fn handle_agent_resume(
                 id: JobId::new(&job_id),
                 message: None,
                 vars: std::collections::HashMap::new(),
+                kill,
             },
         )?;
         resumed.push(aid);

@@ -140,8 +140,14 @@ where
                     .await?;
             }
 
-            Event::JobResume { id, message, vars } => {
-                result_events.extend(self.handle_job_resume(id, message.as_deref(), vars).await?);
+            Event::JobResume {
+                id,
+                message,
+                vars,
+                kill,
+            } => {
+                result_events
+                    .extend(self.handle_job_resume(id, message.as_deref(), vars, *kill).await?);
             }
 
             Event::JobCancel { id } => {

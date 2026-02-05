@@ -60,6 +60,9 @@ pub enum Request {
         /// Variable updates to persist
         #[serde(default, alias = "input")]
         vars: HashMap<String, String>,
+        /// Kill running agent and restart (still uses --resume to preserve conversation)
+        #[serde(default)]
+        kill: bool,
     },
 
     /// Cancel one or more running jobs

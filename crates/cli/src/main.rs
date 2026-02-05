@@ -134,6 +134,9 @@ enum Commands {
         /// Job variables to set (can be repeated: --var key=value)
         #[arg(long = "var", value_parser = job::parse_key_value)]
         var: Vec<(String, String)>,
+        /// Kill running agent and restart (still preserves conversation via --resume)
+        #[arg(long)]
+        kill: bool,
     },
 }
 
@@ -525,10 +528,20 @@ async fn run() -> Result<()> {
             )
             .await?
         }
-        Commands::Resume { id, message, var } => {
+        Commands::Resume {
+            id,
+            message,
+            var,
+            kill,
+        } => {
             let client = DaemonClient::for_action()?;
             job::handle(
-                job::JobCommand::Resume { id, message, var },
+                job::JobCommand::Resume {
+                    id,
+                    message,
+                    var,
+                    kill,
+                },
                 &client,
                 cli.project.as_deref(),
                 format,

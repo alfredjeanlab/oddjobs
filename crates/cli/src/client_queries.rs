@@ -152,11 +152,13 @@ impl DaemonClient {
         id: &str,
         message: Option<&str>,
         vars: &HashMap<String, String>,
+        kill: bool,
     ) -> Result<(), ClientError> {
         let request = Request::JobResume {
             id: id.to_string(),
             message: message.map(String::from),
             vars: vars.clone(),
+            kill,
         };
         self.send_simple(&request).await
     }

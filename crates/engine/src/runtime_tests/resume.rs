@@ -92,6 +92,7 @@ async fn resume_agent_without_message_fails() {
             id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -141,6 +142,7 @@ async fn resume_agent_alive_sends_nudge() {
             id: JobId::new(job_id.clone()),
             message: Some("I fixed the import, try again".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -171,6 +173,7 @@ async fn resume_agent_dead_attempts_recovery() {
             id: JobId::new(job_id.clone()),
             message: Some("I fixed the issue, try again".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -208,6 +211,7 @@ async fn resume_shell_reruns_command() {
             id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -234,6 +238,7 @@ async fn resume_shell_with_message_succeeds_with_warning() {
             id: JobId::new(job_id.clone()),
             message: Some("This message will be ignored".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -262,6 +267,7 @@ async fn resume_persists_input_updates() {
             ]
             .into_iter()
             .collect(),
+            kill: false,
         })
         .await;
 
@@ -293,6 +299,7 @@ async fn resume_agent_session_gone_recovers() {
             id: JobId::new(job_id.clone()),
             message: Some("Session died, recovering".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -339,6 +346,7 @@ async fn resume_agent_waiting_nudges() {
             id: JobId::new(job_id.clone()),
             message: Some("Continue with the work".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -383,6 +391,7 @@ async fn resume_from_terminal_failure_shell_step() {
             id: JobId::new(job_id.clone()),
             message: None,
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -420,6 +429,7 @@ async fn resume_from_terminal_failure_agent_step() {
             id: JobId::new(job_id.clone()),
             message: Some("Try again with the fix".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
@@ -477,6 +487,7 @@ async fn resume_from_terminal_failure_clears_stale_session() {
             id: JobId::new(job_id.clone()),
             message: Some("Retry".to_string()),
             vars: HashMap::new(),
+            kill: false,
         })
         .await;
 
