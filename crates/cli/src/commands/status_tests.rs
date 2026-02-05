@@ -51,6 +51,7 @@ fn header_with_active_pipelines_and_watch() {
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -84,6 +85,7 @@ fn header_without_watch_has_no_every() {
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -126,6 +128,7 @@ fn active_pipeline_shows_kind_not_name() {
             step: "check".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -172,6 +175,7 @@ fn active_pipeline_hides_nonce_only_name() {
             step: "check".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -218,6 +222,7 @@ fn escalated_pipeline_hides_name_when_same_as_id() {
             step: "test".to_string(),
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
@@ -266,6 +271,7 @@ fn orphaned_pipeline_hides_name_when_same_as_id() {
             step: "lint".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -344,6 +350,7 @@ fn escalated_pipeline_truncates_long_reason() {
             step: "test".to_string(),
             step_status: "Waiting".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: Some(long_reason.clone()),
             escalate_source: None,
         }],
@@ -417,6 +424,7 @@ fn active_pipeline_shows_friendly_name() {
             step: "check".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -460,6 +468,7 @@ fn escalated_pipeline_shows_friendly_name() {
             step: "test".to_string(),
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
@@ -499,6 +508,7 @@ fn orphaned_pipeline_shows_friendly_name() {
             step: "lint".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -565,6 +575,7 @@ fn render_frame_content_identical_across_tty_modes() {
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -682,6 +693,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -692,6 +704,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
             step: "approve".to_string(),
             step_status: "waiting".to_string(),
             elapsed_ms: 120_000,
+            last_activity_ms: 0,
             waiting_reason: Some("needs manual approval".to_string()),
             escalate_source: None,
         }],
@@ -842,6 +855,7 @@ fn escalated_pipeline_shows_source_label() {
             step: "test".to_string(),
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: Some("Agent is idle".to_string()),
             escalate_source: Some("idle".to_string()),
         }],
@@ -876,6 +890,7 @@ fn escalated_pipeline_no_source_label_when_none() {
             step: "test".to_string(),
             step_status: "waiting".to_string(),
             elapsed_ms: 60_000,
+            last_activity_ms: 0,
             waiting_reason: Some("gate check failed".to_string()),
             escalate_source: None,
         }],
@@ -909,6 +924,7 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
             step: "check".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 420_000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -966,6 +982,7 @@ fn columns_are_aligned_across_rows() {
                 step: "check".to_string(),
                 step_status: "running".to_string(),
                 elapsed_ms: 60_000,
+                last_activity_ms: 0,
                 waiting_reason: None,
                 escalate_source: None,
             },
@@ -976,6 +993,7 @@ fn columns_are_aligned_across_rows() {
                 step: "implement".to_string(),
                 step_status: "waiting".to_string(),
                 elapsed_ms: 120_000,
+                last_activity_ms: 0,
                 waiting_reason: None,
                 escalate_source: None,
             },
@@ -1031,6 +1049,7 @@ fn name_column_omitted_when_all_names_hidden() {
                 step: "check".to_string(),
                 step_status: "running".to_string(),
                 elapsed_ms: 60_000,
+                last_activity_ms: 0,
                 waiting_reason: None,
                 escalate_source: None,
             },
@@ -1041,6 +1060,7 @@ fn name_column_omitted_when_all_names_hidden() {
                 step: "test".to_string(),
                 step_status: "running".to_string(),
                 elapsed_ms: 120_000,
+                last_activity_ms: 0,
                 waiting_reason: None,
                 escalate_source: None,
             },
@@ -1243,6 +1263,7 @@ fn make_ns(name: &str) -> NamespaceStatus {
             step: "compile".to_string(),
             step_status: "running".to_string(),
             elapsed_ms: 5000,
+            last_activity_ms: 0,
             waiting_reason: None,
             escalate_source: None,
         }],
@@ -1379,5 +1400,128 @@ fn header_hides_decisions_when_zero() {
     assert!(
         !out.contains("decision"),
         "header should not mention decisions when count is zero: {out}"
+    );
+}
+
+// ── sorting tests ───────────────────────────────────────────────────
+
+#[test]
+#[serial]
+fn workers_sorted_alphabetically() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![
+            oj_daemon::WorkerSummary {
+                name: "zebra".to_string(),
+                namespace: "myproject".to_string(),
+                queue: "default".to_string(),
+                status: "running".to_string(),
+                active: 1,
+                concurrency: 2,
+                updated_at_ms: 0,
+            },
+            oj_daemon::WorkerSummary {
+                name: "alpha".to_string(),
+                namespace: "myproject".to_string(),
+                queue: "default".to_string(),
+                status: "running".to_string(),
+                active: 0,
+                concurrency: 2,
+                updated_at_ms: 0,
+            },
+            oj_daemon::WorkerSummary {
+                name: "mid".to_string(),
+                namespace: "myproject".to_string(),
+                queue: "default".to_string(),
+                status: "idle".to_string(),
+                active: 0,
+                concurrency: 1,
+                updated_at_ms: 0,
+            },
+        ],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 0,
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let worker_lines: Vec<&str> = output.lines().filter(|l| l.contains("active")).collect();
+    assert_eq!(worker_lines.len(), 3, "should find 3 worker rows");
+
+    let alpha_pos = output.find("alpha").unwrap();
+    let mid_pos = output.find("mid").unwrap();
+    let zebra_pos = output.find("zebra").unwrap();
+    assert!(
+        alpha_pos < mid_pos && mid_pos < zebra_pos,
+        "workers should be sorted alphabetically: alpha < mid < zebra\n{output}"
+    );
+}
+
+#[test]
+#[serial]
+fn pipelines_sorted_by_most_recent_activity() {
+    std::env::set_var("NO_COLOR", "1");
+    std::env::remove_var("COLOR");
+
+    let ns = NamespaceStatus {
+        namespace: "myproject".to_string(),
+        active_pipelines: vec![
+            oj_daemon::PipelineStatusEntry {
+                id: "oldest-0000".to_string(),
+                name: "oldest-0000".to_string(),
+                kind: "build".to_string(),
+                step: "check".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 300_000,
+                last_activity_ms: 1000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+            oj_daemon::PipelineStatusEntry {
+                id: "newest-0000".to_string(),
+                name: "newest-0000".to_string(),
+                kind: "build".to_string(),
+                step: "test".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 60_000,
+                last_activity_ms: 3000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+            oj_daemon::PipelineStatusEntry {
+                id: "middle-0000".to_string(),
+                name: "middle-0000".to_string(),
+                kind: "build".to_string(),
+                step: "lint".to_string(),
+                step_status: "running".to_string(),
+                elapsed_ms: 120_000,
+                last_activity_ms: 2000,
+                waiting_reason: None,
+                escalate_source: None,
+            },
+        ],
+        escalated_pipelines: vec![],
+        orphaned_pipelines: vec![],
+        workers: vec![],
+        queues: vec![],
+        active_agents: vec![],
+        pending_decisions: 0,
+    };
+
+    let output = format_text(30, &[ns], None);
+
+    let newest_pos = output.find("newest").unwrap();
+    let middle_pos = output.find("middle").unwrap();
+    let oldest_pos = output.find("oldest").unwrap();
+    assert!(
+        newest_pos < middle_pos && middle_pos < oldest_pos,
+        "pipelines should be sorted by most recent activity first\n{output}"
     );
 }

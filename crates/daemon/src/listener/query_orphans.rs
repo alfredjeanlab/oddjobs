@@ -174,6 +174,7 @@ pub(super) fn collect_orphan_status_entries(
                 step: bc.current_step.clone(),
                 step_status: "orphaned".to_string(),
                 elapsed_ms,
+                last_activity_ms: updated_at_ms,
                 waiting_reason: None,
                 escalate_source: None,
             });

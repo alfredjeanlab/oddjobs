@@ -795,6 +795,11 @@ pub(super) fn handle_query(
 
                 let created_at_ms = p.step_history.first().map(|r| r.started_at_ms).unwrap_or(0);
                 let elapsed_ms = now_ms.saturating_sub(created_at_ms);
+                let last_activity_ms = p
+                    .step_history
+                    .last()
+                    .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
+                    .unwrap_or(0);
 
                 let waiting_reason = match p.step_history.last().map(|r| &r.outcome) {
                     Some(StepOutcome::Waiting(reason)) => Some(reason.clone()),
@@ -816,6 +821,7 @@ pub(super) fn handle_query(
                     step: p.step.clone(),
                     step_status: p.step_status.to_string(),
                     elapsed_ms,
+                    last_activity_ms,
                     waiting_reason,
                     escalate_source,
                 };

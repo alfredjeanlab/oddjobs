@@ -294,18 +294,30 @@ fn format_text(
         }
         out.push('\n');
 
+        // Sort pipelines by most recent activity (descending) and workers alphabetically
+        let mut active_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
+            ns.active_pipelines.iter().collect();
+        active_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+
+        let mut escalated_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
+            ns.escalated_pipelines.iter().collect();
+        escalated_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+
+        let mut orphaned_pipelines: Vec<&oj_daemon::PipelineStatusEntry> =
+            ns.orphaned_pipelines.iter().collect();
+        orphaned_pipelines.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+
+        let mut workers: Vec<&oj_daemon::WorkerSummary> = ns.workers.iter().collect();
+        workers.sort_by(|a, b| a.name.cmp(&b.name));
+
         // Active pipelines
-        if !ns.active_pipelines.is_empty() {
+        if !active_pipelines.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!(
-                    "Pipelines ({} active):",
-                    ns.active_pipelines.len()
-                ))
+                color::header(&format!("Pipelines ({} active):", active_pipelines.len()))
             );
-            let rows: Vec<PipelineRow> = ns
-                .active_pipelines
+            let rows: Vec<PipelineRow> = active_pipelines
                 .iter()
                 .map(|p| PipelineRow {
                     prefix: "    ".to_string(),
@@ -322,14 +334,13 @@ fn format_text(
         }
 
         // Escalated pipelines
-        if !ns.escalated_pipelines.is_empty() {
+        if !escalated_pipelines.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!("Escalated ({}):", ns.escalated_pipelines.len()))
+                color::header(&format!("Escalated ({}):", escalated_pipelines.len()))
             );
-            let rows: Vec<PipelineRow> = ns
-                .escalated_pipelines
+            let rows: Vec<PipelineRow> = escalated_pipelines
                 .iter()
                 .map(|p| {
                     let source_label = p
@@ -354,14 +365,13 @@ fn format_text(
         }
 
         // Orphaned pipelines
-        if !ns.orphaned_pipelines.is_empty() {
+        if !orphaned_pipelines.is_empty() {
             let _ = writeln!(
                 out,
                 "  {}",
-                color::header(&format!("Orphaned ({}):", ns.orphaned_pipelines.len()))
+                color::header(&format!("Orphaned ({}):", orphaned_pipelines.len()))
             );
-            let rows: Vec<PipelineRow> = ns
-                .orphaned_pipelines
+            let rows: Vec<PipelineRow> = orphaned_pipelines
                 .iter()
                 .map(|p| PipelineRow {
                     prefix: format!("    {} ", color::yellow("⚠")),
@@ -379,11 +389,11 @@ fn format_text(
         }
 
         // Workers
-        if !ns.workers.is_empty() {
+        if !workers.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Workers:"));
-            let w_name = ns.workers.iter().map(|w| w.name.len()).max().unwrap_or(0);
-            let w_st = ns.workers.iter().map(|w| w.status.len()).max().unwrap_or(0);
-            for w in &ns.workers {
+            let w_name = workers.iter().map(|w| w.name.len()).max().unwrap_or(0);
+            let w_st = workers.iter().map(|w| w.status.len()).max().unwrap_or(0);
+            for w in &workers {
                 let indicator = if w.status == "running" {
                     color::green("●")
                 } else {

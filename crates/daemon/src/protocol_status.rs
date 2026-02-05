@@ -53,6 +53,9 @@ pub struct PipelineStatusEntry {
     pub step_status: String,
     /// Duration since pipeline started (ms)
     pub elapsed_ms: u64,
+    /// Epoch ms of the most recent step activity (start or finish)
+    #[serde(default)]
+    pub last_activity_ms: u64,
     /// Reason pipeline is waiting (from StepOutcome::Waiting)
     pub waiting_reason: Option<String>,
     /// Escalation source category (e.g., "idle", "error", "gate", "approval")
