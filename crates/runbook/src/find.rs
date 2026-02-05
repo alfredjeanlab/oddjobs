@@ -17,6 +17,12 @@ pub struct FileComment {
     pub long: String,
 }
 
+/// Strip the `# ` or `#` prefix from a comment line.
+fn strip_comment_prefix(line: &str) -> &str {
+    line.strip_prefix("# ")
+        .unwrap_or(line.strip_prefix('#').unwrap_or(""))
+}
+
 /// Extract the leading comment block from a runbook file's raw content.
 ///
 /// Reads lines starting with `#`, strips the `# ` prefix, and returns:
@@ -29,10 +35,7 @@ pub fn extract_file_comment(content: &str) -> Option<FileComment> {
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with('#') {
-            let text = trimmed
-                .strip_prefix("# ")
-                .unwrap_or(trimmed.strip_prefix('#').unwrap_or(""));
-            lines.push(text.to_string());
+            lines.push(strip_comment_prefix(trimmed).to_string());
         } else if trimmed.is_empty() && lines.is_empty() {
             continue;
         } else {
@@ -90,10 +93,7 @@ pub fn extract_block_comments(content: &str) -> HashMap<String, FileComment> {
             j -= 1;
             let prev = lines[j].trim();
             if prev.starts_with('#') {
-                let text = prev
-                    .strip_prefix("# ")
-                    .unwrap_or(prev.strip_prefix('#').unwrap_or(""));
-                comment_lines.push(text);
+                comment_lines.push(strip_comment_prefix(prev));
             } else if prev.is_empty() {
                 if comment_lines.is_empty() {
                     continue; // skip blanks between block and comment
@@ -207,86 +207,85 @@ pub fn find_runbook_by_cron(runbook_dir: &Path, name: &str) -> Result<Option<Run
     find_runbook(runbook_dir, name, |rb| rb.get_cron(name).is_some())
 }
 
+/// Generic helper to scan runbooks and collect items.
+///
+/// Iterates all runbook files, parses them, and applies an extractor function
+/// to collect items. Returns sorted results. Skips unreadable/invalid files.
+fn collect_all<T, F>(runbook_dir: &Path, extractor: F) -> Result<Vec<(String, T)>, FindError>
+where
+    F: Fn(&Runbook, &str) -> Vec<(String, T)>,
+{
+    if !runbook_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let files = collect_runbook_files(runbook_dir)?;
+    let mut items = Vec::new();
+    for (path, format) in files {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
+                continue;
+            }
+        };
+        let runbook = match parse_runbook_with_format(&content, format) {
+            Ok(rb) => rb,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
+                continue;
+            }
+        };
+        items.extend(extractor(&runbook, &content));
+    }
+    items.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(items)
+}
+
 /// Scan `.oj/runbooks/` and collect all command definitions.
 /// Returns a sorted vec of (command_name, CommandDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_commands(
     runbook_dir: &Path,
 ) -> Result<Vec<(String, crate::CommandDef)>, FindError> {
-    if !runbook_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let files = collect_runbook_files(runbook_dir)?;
-    let mut commands = Vec::new();
-    for (path, format) in files {
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
-                continue;
-            }
-        };
-        let runbook = match parse_runbook_with_format(&content, format) {
-            Ok(rb) => rb,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
-                continue;
-            }
-        };
-        let block_comments = extract_block_comments(&content);
-        let file_comment = extract_file_comment(&content);
-        for (name, mut cmd) in runbook.commands {
-            if cmd.description.is_none() {
-                let comment = block_comments.get(&name).or(file_comment.as_ref());
-                if let Some(comment) = comment {
-                    let desc_line = comment
-                        .short
-                        .lines()
-                        .nth(1)
-                        .or_else(|| comment.short.lines().next())
-                        .unwrap_or("");
-                    if !desc_line.is_empty() {
-                        cmd.description = Some(desc_line.to_string());
+    collect_all(runbook_dir, |runbook, content| {
+        let block_comments = extract_block_comments(content);
+        let file_comment = extract_file_comment(content);
+        runbook
+            .commands
+            .iter()
+            .map(|(name, cmd)| {
+                let mut cmd = cmd.clone();
+                if cmd.description.is_none() {
+                    let comment = block_comments.get(name).or(file_comment.as_ref());
+                    if let Some(comment) = comment {
+                        let desc_line = comment
+                            .short
+                            .lines()
+                            .nth(1)
+                            .or_else(|| comment.short.lines().next())
+                            .unwrap_or("");
+                        if !desc_line.is_empty() {
+                            cmd.description = Some(desc_line.to_string());
+                        }
                     }
                 }
-            }
-            commands.push((name, cmd));
-        }
-    }
-    commands.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(commands)
+                (name.clone(), cmd)
+            })
+            .collect()
+    })
 }
 
 /// Scan `.oj/runbooks/` and collect all queue definitions.
 /// Returns a sorted vec of (queue_name, QueueDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_queues(runbook_dir: &Path) -> Result<Vec<(String, crate::QueueDef)>, FindError> {
-    if !runbook_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let files = collect_runbook_files(runbook_dir)?;
-    let mut queues = Vec::new();
-    for (path, format) in files {
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
-                continue;
-            }
-        };
-        let runbook = match parse_runbook_with_format(&content, format) {
-            Ok(rb) => rb,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
-                continue;
-            }
-        };
-        for (name, queue) in runbook.queues {
-            queues.push((name, queue));
-        }
-    }
-    queues.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(queues)
+    collect_all(runbook_dir, |runbook, _| {
+        runbook
+            .queues
+            .iter()
+            .map(|(name, queue)| (name.clone(), queue.clone()))
+            .collect()
+    })
 }
 
 /// Scan `.oj/runbooks/` and collect all worker definitions.
@@ -295,64 +294,26 @@ pub fn collect_all_queues(runbook_dir: &Path) -> Result<Vec<(String, crate::Queu
 pub fn collect_all_workers(
     runbook_dir: &Path,
 ) -> Result<Vec<(String, crate::WorkerDef)>, FindError> {
-    if !runbook_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let files = collect_runbook_files(runbook_dir)?;
-    let mut workers = Vec::new();
-    for (path, format) in files {
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
-                continue;
-            }
-        };
-        let runbook = match parse_runbook_with_format(&content, format) {
-            Ok(rb) => rb,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
-                continue;
-            }
-        };
-        for (name, worker) in runbook.workers {
-            workers.push((name, worker));
-        }
-    }
-    workers.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(workers)
+    collect_all(runbook_dir, |runbook, _| {
+        runbook
+            .workers
+            .iter()
+            .map(|(name, worker)| (name.clone(), worker.clone()))
+            .collect()
+    })
 }
 
 /// Scan `.oj/runbooks/` and collect all cron definitions.
 /// Returns a sorted vec of (cron_name, CronDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_crons(runbook_dir: &Path) -> Result<Vec<(String, crate::CronDef)>, FindError> {
-    if !runbook_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let files = collect_runbook_files(runbook_dir)?;
-    let mut crons = Vec::new();
-    for (path, format) in files {
-        let content = match std::fs::read_to_string(&path) {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
-                continue;
-            }
-        };
-        let runbook = match parse_runbook_with_format(&content, format) {
-            Ok(rb) => rb,
-            Err(e) => {
-                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
-                continue;
-            }
-        };
-        for (name, cron) in runbook.crons {
-            crons.push((name, cron));
-        }
-    }
-    crons.sort_by(|a, b| a.0.cmp(&b.0));
-    Ok(crons)
+    collect_all(runbook_dir, |runbook, _| {
+        runbook
+            .crons
+            .iter()
+            .map(|(name, cron)| (name.clone(), cron.clone()))
+            .collect()
+    })
 }
 
 /// Validate all runbooks in a directory for cross-file conflicts.
