@@ -204,8 +204,8 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
     } = params;
 
     // Check initial state - agent may have become idle while daemon was down
-    let (initial_state_opt, mut last_state_offset) = parse_session_log_from(&log_path, 0);
-    let initial_state = initial_state_opt.unwrap_or(AgentState::Working);
+    let mut parser = SessionLogParser::new();
+    let initial_state = parser.parse(&log_path);
     let mut last_state = initial_state.clone();
     let mut last_log_offset: u64 = 0;
 
@@ -237,27 +237,24 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
         tokio::select! {
             // File changed
             Some(_) = file_rx.recv() => {
-                let (new_state_opt, new_offset) = parse_session_log_from(&log_path, last_state_offset);
-                last_state_offset = new_offset;
+                let new_state = parser.parse(&log_path);
 
-                if let Some(new_state) = new_state_opt {
-                    if new_state != last_state {
-                        last_state = new_state.clone();
+                if new_state != last_state {
+                    last_state = new_state.clone();
 
-                        // WaitingForInput is emitted as AgentIdle (same event the
-                        // Notification hook produces) for instant idle detection
-                        // without the old timeout delay.
-                        if new_state == AgentState::WaitingForInput {
-                            let _ = event_tx
-                                .send(Event::AgentIdle {
-                                    agent_id: agent_id.clone(),
-                                })
-                                .await;
-                        } else {
-                            let _ = event_tx
-                                .send(Event::from_agent_state(agent_id.clone(), new_state))
-                                .await;
-                        }
+                    // WaitingForInput is emitted as AgentIdle (same event the
+                    // Notification hook produces) for instant idle detection
+                    // without the old timeout delay.
+                    if new_state == AgentState::WaitingForInput {
+                        let _ = event_tx
+                            .send(Event::AgentIdle {
+                                agent_id: agent_id.clone(),
+                            })
+                            .await;
+                    } else {
+                        let _ = event_tx
+                            .send(Event::from_agent_state(agent_id.clone(), new_state))
+                            .await;
                     }
                 }
 
@@ -493,89 +490,107 @@ fn create_file_watcher(
     Ok(watcher)
 }
 
-/// Parse Claude's session log to determine current state.
+/// Incremental parser for Claude's JSONL session log.
 ///
-/// Reads the entire file. For incremental reading from a known offset,
-/// use [`parse_session_log_from`].
-pub fn parse_session_log(path: &Path) -> AgentState {
-    let (state, _) = parse_session_log_from(path, 0);
-    state.unwrap_or(AgentState::Working)
+/// Tracks the last-read byte offset to avoid re-reading the entire file
+/// on each invocation. Only new bytes appended since the previous parse
+/// are read, similar to how `tail -f` works.
+struct SessionLogParser {
+    last_offset: u64,
+    last_line: String,
 }
 
-/// Parse Claude's session log incrementally from a byte offset.
-///
-/// Returns `(Some(state), new_offset)` when new complete lines are found,
-/// or `(None, offset)` when there is no new content. If the file appears
-/// to have been truncated (size < offset), re-reads from the beginning.
-fn parse_session_log_from(path: &Path, offset: u64) -> (Option<AgentState>, u64) {
-    let Ok(file) = File::open(path) else {
-        return (None, 0);
-    };
-
-    let mut reader = BufReader::new(file);
-
-    // If the file shrank (truncated or replaced), start over
-    let file_len = reader
-        .get_ref()
-        .metadata()
-        .ok()
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let start_offset = if offset > 0 && file_len < offset {
-        0
-    } else {
-        offset
-    };
-
-    if reader.seek(SeekFrom::Start(start_offset)).is_err() {
-        return (None, start_offset);
-    }
-
-    let mut last_line = String::new();
-    let mut current_offset = start_offset;
-    let mut line = String::new();
-
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break, // EOF
-            Ok(n) => {
-                if !line.ends_with('\n') {
-                    // Incomplete line — include it only on a full read (offset 0)
-                    // where we know we're at the true end of file. For incremental
-                    // reads the file may still be mid-write.
-                    if start_offset == 0 {
-                        current_offset += n as u64;
-                        let trimmed = line.trim();
-                        if !trimmed.is_empty() {
-                            last_line.clear();
-                            last_line.push_str(trimmed);
-                        }
-                    }
-                    break;
-                }
-                current_offset += n as u64;
-
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    last_line.clear();
-                    last_line.push_str(trimmed);
-                }
-            }
-            Err(_) => break,
+impl SessionLogParser {
+    fn new() -> Self {
+        Self {
+            last_offset: 0,
+            last_line: String::new(),
         }
     }
 
-    if last_line.is_empty() {
-        return (None, current_offset);
-    }
+    /// Parse the session log incrementally, reading only content appended
+    /// since the last call.
+    fn parse(&mut self, path: &Path) -> AgentState {
+        let Ok(file) = File::open(path) else {
+            return AgentState::Working; // File not ready yet
+        };
 
-    let state = state_from_json_line(&last_line);
-    (Some(state), current_offset)
+        let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+        // If file was truncated (rewritten), reset to beginning
+        if file_len < self.last_offset {
+            self.last_offset = 0;
+            self.last_line.clear();
+        }
+
+        // No new content — return state from cached last line
+        if file_len == self.last_offset {
+            return parse_state_from_line(&self.last_line);
+        }
+
+        // Seek to where we left off
+        let mut reader = BufReader::new(file);
+        if reader.seek(SeekFrom::Start(self.last_offset)).is_err() {
+            return parse_state_from_line(&self.last_line);
+        }
+
+        let mut current_offset = self.last_offset;
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    let is_complete = line.ends_with('\n');
+                    // Only advance offset for complete lines so incomplete
+                    // lines are re-read on the next call.
+                    if is_complete {
+                        current_offset += n as u64;
+                    }
+
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        if !is_complete {
+                            break;
+                        }
+                        continue;
+                    }
+
+                    // Always update last_line so we return the correct state
+                    // even for the final line at EOF without a trailing newline.
+                    self.last_line.clear();
+                    self.last_line.push_str(trimmed);
+
+                    if !is_complete {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+
+        self.last_offset = current_offset;
+        parse_state_from_line(&self.last_line)
+    }
 }
 
-/// Determine agent state from a single JSON line.
-fn state_from_json_line(line: &str) -> AgentState {
+/// Parse Claude's session log to determine current state.
+///
+/// Reads the entire file from the beginning. For repeated calls on a
+/// growing log, prefer [`SessionLogParser`] which tracks byte offsets.
+pub fn parse_session_log(path: &Path) -> AgentState {
+    let mut parser = SessionLogParser::new();
+    parser.parse(path)
+}
+
+/// Determine agent state from a single JSONL line.
+fn parse_state_from_line(line: &str) -> AgentState {
+    if line.is_empty() {
+        return AgentState::Working;
+    }
+
+    // Parse line as JSON
     let Ok(json) = serde_json::from_str::<serde_json::Value>(line) else {
         return AgentState::Working;
     };

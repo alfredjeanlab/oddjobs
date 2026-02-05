@@ -309,68 +309,149 @@ async fn watcher_emits_working_state_on_state_change() {
     let _ = shutdown_tx.send(());
 }
 
+// --- SessionLogParser incremental tests ---
+
 #[test]
-fn incremental_parse_reads_only_new_content() {
+fn incremental_parser_reads_only_new_content() {
     let dir = TempDir::new().unwrap();
     let log_path = dir.path().join("session.jsonl");
 
-    // Write initial line
+    // Write initial content
     std::fs::write(
         &log_path,
-        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+        r#"{"type":"user","message":{"content":"hello"}}
+"#,
     )
     .unwrap();
 
-    // First read from offset 0 — gets the full file
-    let (state, offset) = parse_session_log_from(&log_path, 0);
-    assert_eq!(state, Some(AgentState::Working));
-    assert!(offset > 0, "offset should advance past first line");
+    let mut parser = SessionLogParser::new();
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::Working);
+    assert!(parser.last_offset > 0, "offset should advance");
 
-    // Read again from same offset — no new content
-    let (state, offset2) = parse_session_log_from(&log_path, offset);
-    assert_eq!(state, None, "no new content should return None");
-    assert_eq!(offset2, offset, "offset should not change");
+    let offset_after_first = parser.last_offset;
 
-    // Append a new line
-    append_line(
-        &log_path,
-        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
+    // Append new content
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Done!"}}]}}}}"#,
+    )
+    .unwrap();
+
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
+    assert!(
+        parser.last_offset > offset_after_first,
+        "offset should advance past appended content"
     );
-
-    // Incremental read picks up only the new line
-    let (state, offset3) = parse_session_log_from(&log_path, offset);
-    assert_eq!(state, Some(AgentState::WaitingForInput));
-    assert!(offset3 > offset, "offset should advance past new line");
 }
 
 #[test]
-fn incremental_parse_handles_truncated_file() {
+fn incremental_parser_returns_cached_state_when_no_new_content() {
     let dir = TempDir::new().unwrap();
     let log_path = dir.path().join("session.jsonl");
 
-    // Write a long initial file
     std::fs::write(
         &log_path,
-        "{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n\
-         {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Hi\"}]}}\n",
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}
+"#,
     )
     .unwrap();
 
-    let (_, offset) = parse_session_log_from(&log_path, 0);
-    assert!(offset > 50);
+    let mut parser = SessionLogParser::new();
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
 
-    // Replace with a shorter file (simulates truncation)
-    std::fs::write(&log_path, "{\"error\":\"Rate limit exceeded\"}\n").unwrap();
+    // Parse again with no new content — should return same state from cache
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
+}
 
-    // Incremental read detects truncation and re-reads from start
-    let (state, new_offset) = parse_session_log_from(&log_path, offset);
-    assert_eq!(
-        state,
-        Some(AgentState::Failed(AgentError::RateLimited)),
-        "should detect truncation and re-read from start"
-    );
+#[test]
+fn incremental_parser_handles_file_truncation() {
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write a long initial log
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}
+"#,
+    )
+    .unwrap();
+
+    let mut parser = SessionLogParser::new();
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
+    let large_offset = parser.last_offset;
+
+    // Truncate and write shorter content (simulates log file being replaced)
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"retry"}}
+"#,
+    )
+    .unwrap();
+
+    // File is now shorter than last_offset — parser should reset
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::Working);
     assert!(
-        new_offset < offset,
-        "offset should be from the shorter file"
+        parser.last_offset < large_offset,
+        "offset should reset after truncation"
     );
+}
+
+#[test]
+fn incremental_parser_handles_multiple_appends() {
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"hello"}}
+"#,
+    )
+    .unwrap();
+
+    let mut parser = SessionLogParser::new();
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Append assistant thinking (working)
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .unwrap();
+    writeln!(
+        file,
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"thinking","thinking":"..."}}]}}}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Append tool use result (working — user message)
+    writeln!(
+        file,
+        r#"{{"type":"user","message":{{"content":"tool result"}}}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Append final text-only response (idle)
+    writeln!(
+        file,
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"All done"}}]}}}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(parser.parse(&log_path), AgentState::WaitingForInput);
 }
