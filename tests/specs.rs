@@ -65,6 +65,8 @@ mod job_show;
 mod job_wait;
 
 // agent/
+#[path = "specs/agent/concurrency.rs"]
+mod agent_concurrency;
 #[path = "specs/agent/config.rs"]
 mod agent_config;
 #[path = "specs/agent/events.rs"]
