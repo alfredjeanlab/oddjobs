@@ -578,5 +578,5 @@ fn truncate_reason(reason: &str, max_len: usize) -> String {
 }
 
 #[cfg(test)]
-#[path = "status_tests.rs"]
+#[path = "status_tests/mod.rs"]
 mod tests;
