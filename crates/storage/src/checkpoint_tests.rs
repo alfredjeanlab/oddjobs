@@ -414,3 +414,86 @@ fn test_compression_reduces_size() {
         "compressed ({compressed_size}) should be less than half of uncompressed ({uncompressed_size})"
     );
 }
+
+// =============================================================================
+// Migration Tests
+// =============================================================================
+
+#[test]
+fn test_load_zstd_snapshot_with_too_new_version_fails() {
+    use crate::MigrationError;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("snapshot.json");
+
+    // Create a zstd-compressed snapshot with version 99 (too new)
+    let snapshot_json = r#"{
+        "v": 99,
+        "seq": 42,
+        "state": {
+            "pipelines": {},
+            "sessions": {},
+            "workspaces": {},
+            "runbooks": {},
+            "workers": {},
+            "queue_items": {},
+            "crons": {},
+            "decisions": {},
+            "agent_runs": {}
+        },
+        "created_at": "2025-01-01T00:00:00Z"
+    }"#;
+
+    // Compress with zstd and write
+    let compressed = zstd::encode_all(snapshot_json.as_bytes(), 3).unwrap();
+    std::fs::write(&path, &compressed).unwrap();
+
+    // Verify it's detected as zstd
+    assert_eq!(&compressed[0..4], &[0x28, 0xB5, 0x2F, 0xFD]);
+
+    // Load should fail with migration error
+    let result = load_snapshot(&path);
+    assert!(result.is_err());
+
+    let err = result.unwrap_err();
+    assert!(
+        matches!(err, SnapshotError::Migration(MigrationError::TooNew(99, _))),
+        "expected TooNew migration error, got: {err:?}"
+    );
+}
+
+#[test]
+fn test_load_zstd_snapshot_with_current_version_succeeds() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("snapshot.json");
+
+    // Create a zstd-compressed snapshot with current version
+    let snapshot_json = format!(
+        r#"{{
+        "v": {version},
+        "seq": 42,
+        "state": {{
+            "pipelines": {{}},
+            "sessions": {{}},
+            "workspaces": {{}},
+            "runbooks": {{}},
+            "workers": {{}},
+            "queue_items": {{}},
+            "crons": {{}},
+            "decisions": {{}},
+            "agent_runs": {{}}
+        }},
+        "created_at": "2025-01-01T00:00:00Z"
+    }}"#,
+        version = CURRENT_SNAPSHOT_VERSION
+    );
+
+    // Compress with zstd and write
+    let compressed = zstd::encode_all(snapshot_json.as_bytes(), 3).unwrap();
+    std::fs::write(&path, &compressed).unwrap();
+
+    // Load should succeed
+    let result = load_snapshot(&path).unwrap().unwrap();
+    assert_eq!(result.seq, 42);
+    assert_eq!(result.version, CURRENT_SNAPSHOT_VERSION);
+}

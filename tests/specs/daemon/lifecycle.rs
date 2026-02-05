@@ -526,3 +526,45 @@ fn sessions_survive_normal_shutdown() {
         }
     }
 }
+
+// =============================================================================
+// Migration Error Tests
+// =============================================================================
+
+/// Tests that snapshot migration errors are correctly displayed in CLI output.
+///
+/// When a snapshot has a version newer than the daemon supports, the daemon
+/// should fail to start with a clear error message that propagates to the CLI.
+#[test]
+fn daemon_start_shows_migration_error_for_too_new_snapshot() {
+    let temp = Project::empty();
+
+    // Write a snapshot with a version that's too new (v99)
+    // The daemon only supports up to CURRENT_SNAPSHOT_VERSION (currently 1)
+    let snapshot_json = r#"{
+        "v": 99,
+        "seq": 1,
+        "state": {
+            "pipelines": {},
+            "sessions": {},
+            "workspaces": {},
+            "runbooks": {},
+            "workers": {},
+            "queue_items": {},
+            "crons": {},
+            "decisions": {},
+            "agent_runs": {}
+        },
+        "created_at": "2025-01-01T00:00:00Z"
+    }"#;
+    let snapshot_path = temp.state_path().join("snapshot.json");
+    std::fs::create_dir_all(temp.state_path()).unwrap();
+    std::fs::write(&snapshot_path, snapshot_json).unwrap();
+
+    // Daemon start should fail with a migration error
+    temp.oj()
+        .args(&["daemon", "start"])
+        .fails()
+        .stderr_has("snapshot version 99 is newer than supported")
+        .stderr_lacks("Connection timeout");
+}

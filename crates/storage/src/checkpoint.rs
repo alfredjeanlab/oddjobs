@@ -31,7 +31,9 @@
 //! - Error injection for crash scenario testing
 //! - Verification of fsync ordering guarantees
 
+use crate::migration::MigrationRegistry;
 use crate::{MaterializedState, Snapshot, SnapshotError, CURRENT_SNAPSHOT_VERSION};
+use serde_json::Value;
 use chrono::Utc;
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
@@ -294,11 +296,16 @@ pub fn load_snapshot(path: &Path) -> Result<Option<Snapshot>, SnapshotError> {
     let is_zstd = magic == [0x28, 0xB5, 0x2F, 0xFD];
 
     if is_zstd {
-        // Reopen and decompress
+        // Reopen and decompress to Value for migration support
         let file = File::open(path)?;
         let decoder = zstd::stream::read::Decoder::new(file)
             .map_err(|e| SnapshotError::Io(std::io::Error::other(e.to_string())))?;
-        let snapshot: Snapshot = serde_json::from_reader(decoder)?;
+        let value: Value = serde_json::from_reader(decoder)?;
+
+        // Run through migration (same as JSON path)
+        let registry = MigrationRegistry::new();
+        let migrated = registry.migrate_to(value, CURRENT_SNAPSHOT_VERSION)?;
+        let snapshot: Snapshot = serde_json::from_value(migrated)?;
         Ok(Some(snapshot))
     } else {
         // Fall back to uncompressed JSON (backward compat)
