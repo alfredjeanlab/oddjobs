@@ -745,5 +745,5 @@ fn project_dir_name(path: &Path) -> String {
 }
 
 #[cfg(test)]
-#[path = "watcher_tests.rs"]
+#[path = "watcher_tests/mod.rs"]
 mod tests;
