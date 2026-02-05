@@ -257,6 +257,23 @@ pub enum Request {
         item_id: String,
     },
 
+    /// Retry multiple dead or failed queue items (bulk operation)
+    QueueRetryBulk {
+        project_root: PathBuf,
+        #[serde(default)]
+        namespace: String,
+        queue_name: String,
+        /// Specific item IDs to retry (ignored if all_dead is true)
+        #[serde(default)]
+        item_ids: Vec<String>,
+        /// Retry all dead items in the queue
+        #[serde(default)]
+        all_dead: bool,
+        /// Filter by status (e.g., "dead", "failed")
+        #[serde(default)]
+        status_filter: Option<String>,
+    },
+
     /// Drain all pending items from a persisted queue
     QueueDrain {
         project_root: PathBuf,
@@ -627,6 +644,15 @@ pub enum Response {
 
     /// Item was retried (moved back to pending)
     QueueRetried { queue_name: String, item_id: String },
+
+    /// Bulk retry result
+    QueueRetriedBulk {
+        queue_name: String,
+        /// Item IDs that were successfully retried
+        retried: Vec<String>,
+        /// Items that were skipped with reasons (item_id, reason)
+        skipped: Vec<(String, String)>,
+    },
 
     /// Queue was drained (all pending items removed)
     QueueDrained {

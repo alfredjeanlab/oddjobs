@@ -1634,3 +1634,434 @@ fn prune_empty_queue_returns_empty() {
     let events = drain_events(&wal);
     assert!(events.is_empty());
 }
+
+// ── Bulk retry tests ─────────────────────────────────────────────────
+
+use super::handle_queue_retry_bulk;
+
+#[test]
+fn retry_bulk_multiple_items() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // Create multiple dead items
+    push_and_mark_dead(&state, "", "tasks", "dead-item-1", &[("task", "a")]);
+    push_and_mark_dead(&state, "", "tasks", "dead-item-2", &[("task", "b")]);
+    push_and_mark_dead(&state, "", "tasks", "dead-item-3", &[("task", "c")]);
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &["dead-item-1".to_string(), "dead-item-2".to_string()],
+        false,
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref queue_name,
+            ref retried,
+            ref skipped,
+        } => {
+            assert_eq!(queue_name, "tasks");
+            assert_eq!(retried.len(), 2);
+            assert!(retried.contains(&"dead-item-1".to_string()));
+            assert!(retried.contains(&"dead-item-2".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    // 2 QueueItemRetry events
+    let retry_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::QueueItemRetry { .. }))
+        .collect();
+    assert_eq!(retry_events.len(), 2);
+}
+
+#[test]
+fn retry_bulk_all_dead() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // Create mix of dead and pending items
+    push_and_mark_dead(&state, "", "tasks", "dead-1", &[("task", "a")]);
+    push_and_mark_dead(&state, "", "tasks", "dead-2", &[("task", "b")]);
+    state.lock().apply_event(&Event::QueuePushed {
+        queue_name: "tasks".to_string(),
+        item_id: "pending-1".to_string(),
+        data: [("task".to_string(), "c".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[],
+        true, // all_dead
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert_eq!(retried.len(), 2, "should retry all dead items");
+            assert!(retried.contains(&"dead-1".to_string()));
+            assert!(retried.contains(&"dead-2".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    let retry_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::QueueItemRetry { .. }))
+        .collect();
+    assert_eq!(retry_events.len(), 2);
+}
+
+#[test]
+fn retry_bulk_status_filter_dead() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // Create dead and failed items
+    push_and_mark_dead(&state, "", "tasks", "dead-1", &[("task", "a")]);
+    push_and_mark_failed(&state, "", "tasks", "failed-1", &[("task", "b")], 1_000_000);
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[],
+        false,
+        Some("dead"), // status filter
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert_eq!(retried.len(), 1, "should only retry dead items");
+            assert!(retried.contains(&"dead-1".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    let retry_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::QueueItemRetry { .. }))
+        .collect();
+    assert_eq!(retry_events.len(), 1);
+}
+
+#[test]
+fn retry_bulk_status_filter_failed() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // Create dead and failed items
+    push_and_mark_dead(&state, "", "tasks", "dead-1", &[("task", "a")]);
+    push_and_mark_failed(&state, "", "tasks", "failed-1", &[("task", "b")], 1_000_000);
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[],
+        false,
+        Some("failed"), // status filter
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert_eq!(retried.len(), 1, "should only retry failed items");
+            assert!(retried.contains(&"failed-1".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+}
+
+#[test]
+fn retry_bulk_mixed_results() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    // Create one dead and one pending item
+    push_and_mark_dead(&state, "", "tasks", "dead-1", &[("task", "a")]);
+    state.lock().apply_event(&Event::QueuePushed {
+        queue_name: "tasks".to_string(),
+        item_id: "pending-1".to_string(),
+        data: [("task".to_string(), "b".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[
+            "dead-1".to_string(),
+            "pending-1".to_string(),
+            "nonexistent".to_string(),
+        ],
+        false,
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert_eq!(retried.len(), 1, "only dead-1 should be retried");
+            assert!(retried.contains(&"dead-1".to_string()));
+            assert_eq!(
+                skipped.len(),
+                2,
+                "pending-1 and nonexistent should be skipped"
+            );
+            // Check skip reasons
+            let skip_map: std::collections::HashMap<_, _> = skipped
+                .iter()
+                .map(|(id, reason)| (id.as_str(), reason.as_str()))
+                .collect();
+            assert!(skip_map.get("pending-1").unwrap().contains("Pending"));
+            assert!(skip_map.get("nonexistent").unwrap().contains("not found"));
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+}
+
+#[test]
+fn retry_bulk_prefix_resolution() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    push_and_mark_dead(
+        &state,
+        "",
+        "tasks",
+        "abc12345-0000-0000-0000-000000000000",
+        &[("task", "a")],
+    );
+    push_and_mark_dead(
+        &state,
+        "",
+        "tasks",
+        "def67890-0000-0000-0000-000000000000",
+        &[("task", "b")],
+    );
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &["abc12".to_string(), "def67".to_string()],
+        false,
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert_eq!(retried.len(), 2);
+            assert!(retried.contains(&"abc12345-0000-0000-0000-000000000000".to_string()));
+            assert!(retried.contains(&"def67890-0000-0000-0000-000000000000".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+}
+
+#[test]
+fn retry_bulk_empty_queue_all_dead() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[],
+        true, // all_dead
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueRetriedBulk {
+            ref retried,
+            ref skipped,
+            ..
+        } => {
+            assert!(retried.is_empty(), "no dead items to retry");
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected QueueRetriedBulk, got {:?}", other),
+    }
+
+    let events = drain_events(&wal);
+    assert!(events.is_empty(), "no events should be emitted");
+}
+
+#[test]
+fn retry_bulk_invalid_status_filter() {
+    let project = project_with_queue_only();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &[],
+        false,
+        Some("invalid"),
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("invalid status filter")),
+        "expected error about invalid status filter, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn retry_bulk_wakes_workers() {
+    let project = project_with_queue_and_worker();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a running worker and dead items
+    let mut initial_state = MaterializedState::default();
+    initial_state.workers.insert(
+        "processor".to_string(),
+        oj_storage::WorkerRecord {
+            name: "processor".to_string(),
+            project_root: project.path().to_path_buf(),
+            runbook_hash: "fake-hash".to_string(),
+            status: "running".to_string(),
+            active_job_ids: vec![],
+            queue_name: "tasks".to_string(),
+            concurrency: 1,
+            namespace: String::new(),
+        },
+    );
+    push_and_mark_dead(
+        &Arc::new(Mutex::new(MaterializedState::default())),
+        "",
+        "tasks",
+        "dead-1",
+        &[("task", "a")],
+    );
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "tasks".to_string(),
+        item_id: "dead-1".to_string(),
+        data: [("task".to_string(), "a".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    initial_state.apply_event(&Event::QueueItemDead {
+        queue_name: "tasks".to_string(),
+        item_id: "dead-1".to_string(),
+        namespace: String::new(),
+    });
+    let state = Arc::new(Mutex::new(initial_state));
+
+    let result = handle_queue_retry_bulk(
+        project.path(),
+        "",
+        "tasks",
+        &["dead-1".to_string()],
+        false,
+        None,
+        &event_bus,
+        &state,
+    )
+    .unwrap();
+
+    assert!(matches!(result, Response::QueueRetriedBulk { .. }));
+
+    let events = drain_events(&wal);
+    // Should have QueueItemRetry and WorkerWake events
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::QueueItemRetry { .. })),
+        "should have QueueItemRetry event"
+    );
+    assert!(
+        events.iter().any(
+            |e| matches!(e, Event::WorkerWake { worker_name, .. } if worker_name == "processor")
+        ),
+        "should wake the worker after bulk retry"
+    );
+}

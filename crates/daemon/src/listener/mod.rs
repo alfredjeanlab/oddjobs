@@ -444,6 +444,24 @@ async fn handle_request(
             state,
         ),
 
+        Request::QueueRetryBulk {
+            project_root,
+            namespace,
+            queue_name,
+            item_ids,
+            all_dead,
+            status_filter,
+        } => queues::handle_queue_retry_bulk(
+            &project_root,
+            &namespace,
+            &queue_name,
+            &item_ids,
+            all_dead,
+            status_filter.as_deref(),
+            event_bus,
+            state,
+        ),
+
         Request::QueueDrain {
             project_root,
             namespace,

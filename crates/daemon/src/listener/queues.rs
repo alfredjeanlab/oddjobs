@@ -462,6 +462,196 @@ pub(super) fn handle_queue_retry(
     })
 }
 
+/// Handle a QueueRetryBulk request.
+///
+/// Retries multiple dead or failed queue items. Supports:
+/// - Specific item IDs (with prefix resolution)
+/// - `all_dead` flag to retry all dead items
+/// - `status_filter` to retry items by status (e.g., "dead", "failed")
+// TODO(refactor): consider grouping filter options (item_ids, all_dead, status_filter) into a struct
+#[allow(clippy::too_many_arguments)]
+pub(super) fn handle_queue_retry_bulk(
+    project_root: &Path,
+    namespace: &str,
+    queue_name: &str,
+    item_ids: &[String],
+    all_dead: bool,
+    status_filter: Option<&str>,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    // Load runbook containing the queue.
+    let (runbook, effective_root) = match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        state,
+        |root| load_runbook_for_queue(root, queue_name),
+        || suggest_for_queue(project_root, queue_name, namespace, "oj queue retry", state),
+    ) {
+        Ok(result) => result,
+        Err(resp) => return Ok(resp),
+    };
+    let project_root = &effective_root;
+
+    // Validate queue exists
+    let queue_def = match runbook.get_queue(queue_name) {
+        Some(def) => def,
+        None => {
+            return Ok(Response::Error {
+                message: format!("unknown queue: {}", queue_name),
+            })
+        }
+    };
+
+    // Validate queue is persisted
+    if queue_def.queue_type != QueueType::Persisted {
+        return Ok(Response::Error {
+            message: format!("queue '{}' is not a persisted queue", queue_name),
+        });
+    }
+
+    // Collect items to retry based on mode
+    let items_to_retry: Vec<(String, Option<QueueItemStatus>)> = {
+        let st = state.lock();
+        let key = scoped_name(namespace, queue_name);
+        let items = st.queue_items.get(&key);
+
+        if all_dead {
+            // Retry all dead items
+            items
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|i| i.status == QueueItemStatus::Dead)
+                        .map(|i| (i.id.clone(), Some(i.status.clone())))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else if let Some(status) = status_filter {
+            // Filter by status
+            let target_status = match status.to_lowercase().as_str() {
+                "dead" => Some(QueueItemStatus::Dead),
+                "failed" => Some(QueueItemStatus::Failed),
+                _ => None,
+            };
+            if let Some(target) = target_status {
+                items
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter(|i| i.status == target)
+                            .map(|i| (i.id.clone(), Some(i.status.clone())))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                return Ok(Response::Error {
+                    message: format!(
+                        "invalid status filter '{}': must be 'dead' or 'failed'",
+                        status
+                    ),
+                });
+            }
+        } else {
+            // Resolve specific item IDs
+            let mut resolved = Vec::new();
+            for id in item_ids {
+                // Try exact match first
+                if let Some(item) = items.and_then(|items| items.iter().find(|i| i.id == *id)) {
+                    resolved.push((item.id.clone(), Some(item.status.clone())));
+                    continue;
+                }
+
+                // Try prefix match
+                let matches: Vec<_> = items
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter(|i| i.id.starts_with(id))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                match matches.len() {
+                    1 => resolved.push((matches[0].id.clone(), Some(matches[0].status.clone()))),
+                    0 => resolved.push((id.clone(), None)), // Not found
+                    _ => resolved.push((id.clone(), None)), // Ambiguous - will be skipped
+                }
+            }
+            resolved
+        }
+    };
+
+    // Process each item
+    let mut retried = Vec::new();
+    let mut skipped = Vec::new();
+
+    for (item_id, status) in items_to_retry {
+        match status {
+            None => {
+                // Item not found or ambiguous
+                let st = state.lock();
+                let key = scoped_name(namespace, queue_name);
+                let matches: Vec<_> = st
+                    .queue_items
+                    .get(&key)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter(|i| i.id.starts_with(&item_id))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                if matches.is_empty() {
+                    skipped.push((item_id, "not found".to_string()));
+                } else {
+                    skipped.push((item_id, format!("ambiguous: {} matches", matches.len())));
+                }
+            }
+            Some(QueueItemStatus::Dead) | Some(QueueItemStatus::Failed) => {
+                // Valid for retry - emit event
+                let event = Event::QueueItemRetry {
+                    queue_name: queue_name.to_string(),
+                    item_id: item_id.clone(),
+                    namespace: namespace.to_string(),
+                };
+                event_bus
+                    .send(event)
+                    .map_err(|_| ConnectionError::WalError)?;
+                retried.push(item_id);
+            }
+            Some(status) => {
+                // Not in a retryable status
+                skipped.push((
+                    item_id,
+                    format!(
+                        "status is {:?}, only dead or failed items can be retried",
+                        status
+                    ),
+                ));
+            }
+        }
+    }
+
+    // Wake workers attached to this queue (if any items were retried)
+    if !retried.is_empty() {
+        wake_attached_workers(
+            project_root,
+            namespace,
+            queue_name,
+            &runbook,
+            event_bus,
+            state,
+        )?;
+    }
+
+    Ok(Response::QueueRetriedBulk {
+        queue_name: queue_name.to_string(),
+        retried,
+        skipped,
+    })
+}
+
 /// Handle a QueueDrain request.
 ///
 /// Removes all pending items from a persisted queue and returns them.

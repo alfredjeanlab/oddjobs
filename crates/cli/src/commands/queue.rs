@@ -59,12 +59,19 @@ pub enum QueueCommand {
         #[arg(short = 'n', long, default_value = "50")]
         limit: usize,
     },
-    /// Retry a dead or failed queue item
+    /// Retry dead or failed queue items
     Retry {
         /// Queue name
         queue: String,
-        /// Item ID (or prefix)
-        item_id: String,
+        /// Item ID(s) or prefix(es)
+        #[arg(required_unless_present_any = ["all_dead", "status"])]
+        item_ids: Vec<String>,
+        /// Retry all dead items in the queue
+        #[arg(long)]
+        all_dead: bool,
+        /// Retry all items with the specified status (dead, failed)
+        #[arg(long)]
+        status: Option<String>,
     },
     /// Mark an active queue item as failed
     Fail {
@@ -212,26 +219,88 @@ pub async fn handle(
                 }
             }
         }
-        QueueCommand::Retry { queue, item_id } => {
-            let request = Request::QueueRetry {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                item_id: item_id.clone(),
-            };
+        QueueCommand::Retry {
+            queue,
+            item_ids,
+            all_dead,
+            status,
+        } => {
+            // Use single-item API for single item without flags (backward compatible)
+            if item_ids.len() == 1 && !all_dead && status.is_none() {
+                let request = Request::QueueRetry {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                    queue_name: queue.clone(),
+                    item_id: item_ids[0].clone(),
+                };
 
-            match client.send(&request).await? {
-                Response::QueueRetried {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
+                match client.send(&request).await? {
+                    Response::QueueRetried {
+                        queue_name,
+                        item_id,
+                    } => {
+                        println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
+            } else {
+                // Use bulk API for multiple items or flags
+                let request = Request::QueueRetryBulk {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                    queue_name: queue.clone(),
+                    item_ids: item_ids.clone(),
+                    all_dead,
+                    status_filter: status.clone(),
+                };
+
+                match client.send(&request).await? {
+                    Response::QueueRetriedBulk {
+                        queue_name,
+                        retried,
+                        skipped,
+                    } => {
+                        if retried.is_empty() && skipped.is_empty() {
+                            println!("No items to retry in queue '{}'", queue_name);
+                        } else {
+                            if !retried.is_empty() {
+                                println!(
+                                    "Retrying {} item{} in queue '{}':",
+                                    retried.len(),
+                                    if retried.len() == 1 { "" } else { "s" },
+                                    queue_name
+                                );
+                                for id in &retried {
+                                    println!("  {}", id.short(8));
+                                }
+                            }
+                            if !skipped.is_empty() {
+                                println!(
+                                    "Skipped {} item{}:",
+                                    skipped.len(),
+                                    if skipped.len() == 1 { "" } else { "s" }
+                                );
+                                for (id, reason) in &skipped {
+                                    println!(
+                                        "  {} {}",
+                                        color::muted(id.short(8)),
+                                        color::muted(&format!("({})", reason))
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
             }
         }

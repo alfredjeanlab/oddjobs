@@ -376,20 +376,30 @@ pub async fn handle(
                                             println!("      {}", line);
                                         }
                                     } else {
-                                        println!("    {} {}", color::context(&format!("{}:", k)), v);
+                                        println!(
+                                            "    {} {}",
+                                            color::context(&format!("{}:", k)),
+                                            v
+                                        );
                                     }
                                 }
                             } else {
                                 for (k, v) in &p.vars {
-                                    println!("    {} {}", color::context(&format!("{}:", k)), format_var_value(v, 80));
+                                    println!(
+                                        "    {} {}",
+                                        color::context(&format!("{}:", k)),
+                                        format_var_value(v, 80)
+                                    );
                                 }
                                 let any_truncated =
                                     p.vars.values().any(|v| is_var_truncated(v, 80));
                                 if any_truncated {
-                                    println!("");
+                                    println!();
                                     println!(
                                         "  {}",
-                                        color::context("hint: use --verbose to show full variables")
+                                        color::context(
+                                            "hint: use --verbose to show full variables"
+                                        )
                                     );
                                 }
                             }
