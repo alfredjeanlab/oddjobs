@@ -8,16 +8,16 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
-use oj_core::{Event, Pipeline, StepOutcome, StepRecord, StepStatus};
+use oj_core::{Event, Pipeline, StepOutcome, StepRecord, StepStatus, WorkspaceStatus};
 use oj_engine::breadcrumb::Breadcrumb;
-use oj_storage::{MaterializedState, Wal};
+use oj_storage::{MaterializedState, Wal, Workspace, WorkspaceType};
 
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::{
     handle_agent_prune, handle_agent_send, handle_pipeline_cancel, handle_pipeline_prune,
-    handle_pipeline_resume, handle_session_kill, PruneFlags,
+    handle_pipeline_resume, handle_session_kill, workspace_prune_inner, PruneFlags,
 };
 
 fn test_event_bus(dir: &std::path::Path) -> EventBus {
@@ -1341,5 +1341,235 @@ fn pipeline_prune_skips_non_terminal_steps() {
             assert_eq!(skipped, 2, "should skip both non-terminal pipelines");
         }
         other => panic!("expected PipelinesPruned, got: {:?}", other),
+    }
+}
+
+// --- handle_workspace_prune tests ---
+
+fn make_workspace(id: &str, path: std::path::PathBuf, owner: Option<&str>) -> Workspace {
+    Workspace {
+        id: id.to_string(),
+        path,
+        branch: None,
+        owner: owner.map(String::from),
+        status: WorkspaceStatus::Ready,
+        workspace_type: WorkspaceType::default(),
+        created_at_ms: 0,
+    }
+}
+
+#[tokio::test]
+async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let workspaces_dir = dir.path().join("workspaces");
+    std::fs::create_dir_all(&workspaces_dir).unwrap();
+
+    // Create workspace directories on the filesystem
+    let ws1_path = workspaces_dir.join("ws-test-1");
+    let ws2_path = workspaces_dir.join("ws-test-2");
+    std::fs::create_dir_all(&ws1_path).unwrap();
+    std::fs::create_dir_all(&ws2_path).unwrap();
+
+    // Add workspace entries to daemon state
+    {
+        let mut s = state.lock();
+        s.workspaces.insert(
+            "ws-test-1".to_string(),
+            make_workspace("ws-test-1", ws1_path.clone(), None),
+        );
+        s.workspaces.insert(
+            "ws-test-2".to_string(),
+            make_workspace("ws-test-2", ws2_path.clone(), None),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = workspace_prune_inner(&state, &event_bus, &flags, &workspaces_dir).await;
+
+    match result {
+        Ok(Response::WorkspacesPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 2, "should prune both workspaces");
+            assert_eq!(skipped, 0);
+            let ids: Vec<&str> = pruned.iter().map(|ws| ws.id.as_str()).collect();
+            assert!(ids.contains(&"ws-test-1"));
+            assert!(ids.contains(&"ws-test-2"));
+        }
+        other => panic!("expected WorkspacesPruned, got: {:?}", other),
+    }
+
+    // Directories should be removed
+    assert!(!ws1_path.exists(), "ws-test-1 directory should be removed");
+    assert!(!ws2_path.exists(), "ws-test-2 directory should be removed");
+
+    // Verify WorkspaceDeleted events were emitted by applying them to state
+    {
+        let mut s = state.lock();
+        s.apply_event(&Event::WorkspaceDeleted {
+            id: oj_core::WorkspaceId::new("ws-test-1"),
+        });
+        s.apply_event(&Event::WorkspaceDeleted {
+            id: oj_core::WorkspaceId::new("ws-test-2"),
+        });
+        assert!(!s.workspaces.contains_key("ws-test-1"));
+        assert!(!s.workspaces.contains_key("ws-test-2"));
+    }
+}
+
+#[tokio::test]
+async fn workspace_prune_removes_orphaned_state_entries() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let workspaces_dir = dir.path().join("workspaces");
+    std::fs::create_dir_all(&workspaces_dir).unwrap();
+
+    // Add workspace entries to state that have NO corresponding filesystem directory
+    {
+        let mut s = state.lock();
+        s.workspaces.insert(
+            "ws-orphan-1".to_string(),
+            make_workspace("ws-orphan-1", workspaces_dir.join("ws-orphan-1"), None),
+        );
+        s.workspaces.insert(
+            "ws-orphan-2".to_string(),
+            make_workspace("ws-orphan-2", workspaces_dir.join("ws-orphan-2"), None),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = workspace_prune_inner(&state, &event_bus, &flags, &workspaces_dir).await;
+
+    match result {
+        Ok(Response::WorkspacesPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 2, "should prune orphaned state entries");
+            assert_eq!(skipped, 0);
+            let ids: Vec<&str> = pruned.iter().map(|ws| ws.id.as_str()).collect();
+            assert!(ids.contains(&"ws-orphan-1"));
+            assert!(ids.contains(&"ws-orphan-2"));
+        }
+        other => panic!("expected WorkspacesPruned, got: {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn workspace_prune_dry_run_does_not_delete() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let workspaces_dir = dir.path().join("workspaces");
+    std::fs::create_dir_all(&workspaces_dir).unwrap();
+
+    let ws_path = workspaces_dir.join("ws-keep");
+    std::fs::create_dir_all(&ws_path).unwrap();
+
+    {
+        let mut s = state.lock();
+        s.workspaces.insert(
+            "ws-keep".to_string(),
+            make_workspace("ws-keep", ws_path.clone(), None),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: true,
+        namespace: None,
+    };
+    let result = workspace_prune_inner(&state, &event_bus, &flags, &workspaces_dir).await;
+
+    match result {
+        Ok(Response::WorkspacesPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 1, "should report 1 workspace");
+            assert_eq!(skipped, 0);
+        }
+        other => panic!("expected WorkspacesPruned, got: {:?}", other),
+    }
+
+    // Directory should still exist after dry run
+    assert!(
+        ws_path.exists(),
+        "workspace dir should remain after dry run"
+    );
+
+    // State should be unchanged after dry run
+    let s = state.lock();
+    assert!(
+        s.workspaces.contains_key("ws-keep"),
+        "workspace should remain in state after dry run"
+    );
+}
+
+#[tokio::test]
+async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
+    let dir = tempdir().unwrap();
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    let workspaces_dir = dir.path().join("workspaces");
+    std::fs::create_dir_all(&workspaces_dir).unwrap();
+
+    // Workspace with an owner whose pipeline no longer exists in state
+    // (owner is unresolvable → should be included in namespace-filtered prune)
+    {
+        let mut s = state.lock();
+        s.workspaces.insert(
+            "ws-orphan-owner".to_string(),
+            make_workspace(
+                "ws-orphan-owner",
+                workspaces_dir.join("ws-orphan-owner"),
+                Some("deleted-pipeline-id"),
+            ),
+        );
+        // Workspace with a matching namespace pipeline
+        s.pipelines.insert(
+            "live-pipeline".to_string(),
+            make_pipeline_ns("live-pipeline", "done", "myproject"),
+        );
+        s.workspaces.insert(
+            "ws-with-owner".to_string(),
+            make_workspace(
+                "ws-with-owner",
+                workspaces_dir.join("ws-with-owner"),
+                Some("live-pipeline"),
+            ),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: Some("myproject"),
+    };
+    let result = workspace_prune_inner(&state, &event_bus, &flags, &workspaces_dir).await;
+
+    match result {
+        Ok(Response::WorkspacesPruned { pruned, .. }) => {
+            let ids: Vec<&str> = pruned.iter().map(|ws| ws.id.as_str()).collect();
+            // Both should be pruned: orphaned owner is included, matching namespace is included
+            assert!(
+                ids.contains(&"ws-orphan-owner"),
+                "orphaned owner workspace should be pruned, got: {:?}",
+                ids
+            );
+            assert!(
+                ids.contains(&"ws-with-owner"),
+                "matching namespace workspace should be pruned, got: {:?}",
+                ids
+            );
+        }
+        other => panic!("expected WorkspacesPruned, got: {:?}", other),
     }
 }

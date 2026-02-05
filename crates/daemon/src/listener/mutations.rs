@@ -721,40 +721,59 @@ pub(super) fn handle_agent_prune(
 
 /// Handle workspace prune requests.
 ///
-/// Iterates `$OJ_STATE_DIR/workspaces/` children on the filesystem.
-/// For each directory: if it has a `.git` file (indicating a git worktree),
-/// best-effort `git worktree remove`; then `rm -rf` regardless.
+/// Two-phase prune:
+/// 1. Iterates `$OJ_STATE_DIR/workspaces/` children on the filesystem.
+///    For each directory: if it has a `.git` file (indicating a git worktree),
+///    best-effort `git worktree remove`; then `rm -rf` regardless.
+/// 2. Scans daemon state for orphaned workspace entries whose directories
+///    no longer exist on the filesystem, and removes those from state.
+///
+/// Emits `WorkspaceDeleted` events to keep daemon state in sync.
 pub(super) async fn handle_workspace_prune(
     state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let state_dir = crate::env::state_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let workspaces_dir = state_dir.join("workspaces");
+    workspace_prune_inner(state, event_bus, flags, &workspaces_dir).await
+}
 
+/// Inner implementation of workspace prune, parameterized by workspaces directory
+/// for testability.
+async fn workspace_prune_inner(
+    state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
+    flags: &PruneFlags<'_>,
+    workspaces_dir: &std::path::Path,
+) -> Result<Response, ConnectionError> {
     // When filtering by namespace, build a set of workspace IDs that match.
     // Namespace is derived from the workspace's owner (pipeline or worker).
+    // Workspaces with no determinable namespace (no owner, or owner not in state)
+    // are included when the owner is missing (truly orphaned).
     let namespace_filter: Option<std::collections::HashSet<String>> = flags.namespace.map(|ns| {
         let state_guard = state.lock();
         state_guard
             .workspaces
             .iter()
             .filter(|(_, w)| {
-                w.owner
-                    .as_deref()
-                    .and_then(|owner| {
-                        state_guard
-                            .pipelines
-                            .get(owner)
-                            .map(|p| p.namespace.as_str())
-                            .or_else(|| {
-                                state_guard
-                                    .workers
-                                    .get(owner)
-                                    .map(|wr| wr.namespace.as_str())
-                            })
-                    })
-                    .unwrap_or_default()
-                    == ns
+                let workspace_ns = w.owner.as_deref().and_then(|owner| {
+                    state_guard
+                        .pipelines
+                        .get(owner)
+                        .map(|p| p.namespace.as_str())
+                        .or_else(|| {
+                            state_guard
+                                .workers
+                                .get(owner)
+                                .map(|wr| wr.namespace.as_str())
+                        })
+                });
+                // Include if namespace matches OR if owner is not resolvable (orphaned)
+                match workspace_ns {
+                    Some(workspace_ns) => workspace_ns == ns,
+                    None => true,
+                }
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -815,29 +834,72 @@ pub(super) async fn handle_workspace_prune(
         });
     }
 
+    // Phase 2: Find orphaned state entries (in daemon state but directory missing)
+    let orphaned: Vec<WorkspaceEntry> = {
+        let state_guard = state.lock();
+        let fs_pruned_ids: std::collections::HashSet<&str> =
+            to_prune.iter().map(|ws| ws.id.as_str()).collect();
+
+        state_guard
+            .workspaces
+            .iter()
+            .filter(|(id, ws)| {
+                // Skip if already in the filesystem prune list
+                if fs_pruned_ids.contains(id.as_str()) {
+                    return false;
+                }
+                // Apply namespace filter
+                if let Some(ref allowed_ids) = namespace_filter {
+                    if !allowed_ids.contains(id.as_str()) {
+                        return false;
+                    }
+                }
+                // Include if the directory no longer exists
+                !ws.path.is_dir()
+            })
+            .map(|(id, ws)| WorkspaceEntry {
+                id: id.clone(),
+                path: ws.path.clone(),
+                branch: ws.branch.clone(),
+            })
+            .collect()
+    };
+    to_prune.extend(orphaned);
+
     if !flags.dry_run {
         for ws in &to_prune {
-            // If the directory has a .git file (not directory), it's a git worktree
-            let dot_git = ws.path.join(".git");
-            if tokio::fs::symlink_metadata(&dot_git)
-                .await
-                .map(|m| m.is_file())
-                .unwrap_or(false)
-            {
-                // Best-effort git worktree remove (ignore failures).
-                // Run from within the worktree so git can locate the parent repo.
-                let _ = tokio::process::Command::new("git")
-                    .arg("worktree")
-                    .arg("remove")
-                    .arg("--force")
-                    .arg(&ws.path)
-                    .current_dir(&ws.path)
-                    .output()
-                    .await;
+            // If the directory exists, clean it up
+            if ws.path.is_dir() {
+                // If the directory has a .git file (not directory), it's a git worktree
+                let dot_git = ws.path.join(".git");
+                if tokio::fs::symlink_metadata(&dot_git)
+                    .await
+                    .map(|m| m.is_file())
+                    .unwrap_or(false)
+                {
+                    // Best-effort git worktree remove (ignore failures).
+                    // Run from within the worktree so git can locate the parent repo.
+                    let _ = tokio::process::Command::new("git")
+                        .arg("worktree")
+                        .arg("remove")
+                        .arg("--force")
+                        .arg(&ws.path)
+                        .current_dir(&ws.path)
+                        .output()
+                        .await;
+                }
+
+                // Remove directory regardless
+                let _ = tokio::fs::remove_dir_all(&ws.path).await;
             }
 
-            // Remove directory regardless
-            let _ = tokio::fs::remove_dir_all(&ws.path).await;
+            // Emit WorkspaceDeleted to remove from daemon state
+            let event = Event::WorkspaceDeleted {
+                id: WorkspaceId::new(&ws.id),
+            };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
         }
     }
 
