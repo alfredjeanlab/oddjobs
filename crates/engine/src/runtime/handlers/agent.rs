@@ -145,7 +145,11 @@ where
                 }
 
                 // Record session log size and set grace timer
-                let log_size = self.executor.get_session_log_size(agent_id).unwrap_or(0);
+                let log_size = self
+                    .executor
+                    .get_session_log_size(agent_id)
+                    .await
+                    .unwrap_or(0);
                 let ar_id = AgentRunId::new(&agent_run.id);
                 self.lock_state_mut(|state| {
                     if let Some(ar) = state.agent_runs.get_mut(ar_id.as_str()) {
@@ -209,7 +213,11 @@ where
         }
 
         // Record session log size and set grace timer
-        let log_size = self.executor.get_session_log_size(agent_id).unwrap_or(0);
+        let log_size = self
+            .executor
+            .get_session_log_size(agent_id)
+            .await
+            .unwrap_or(0);
         let pid = PipelineId::new(&pipeline.id);
         self.lock_state_mut(|state| {
             if let Some(p) = state.pipelines.get_mut(pid.as_str()) {

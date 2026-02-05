@@ -695,8 +695,8 @@ where
     }
 
     /// Get the current size of an agent's session log file in bytes.
-    pub fn get_session_log_size(&self, agent_id: &oj_core::AgentId) -> Option<u64> {
-        self.agents.session_log_size(agent_id)
+    pub async fn get_session_log_size(&self, agent_id: &oj_core::AgentId) -> Option<u64> {
+        self.agents.session_log_size(agent_id).await
     }
 }
 

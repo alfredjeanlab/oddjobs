@@ -259,8 +259,8 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         result
     }
 
-    fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
-        self.inner.session_log_size(agent_id)
+    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
+        self.inner.session_log_size(agent_id).await
     }
 }
 

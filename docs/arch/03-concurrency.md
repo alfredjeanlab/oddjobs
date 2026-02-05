@@ -216,7 +216,7 @@ tokio worker threads:
 | Location | Operation |
 |----------|-----------|
 | `agent/claude.rs` `prepare_workspace()` | `fs::create_dir_all`, `fs::copy` |
-| `agent/claude.rs` `session_log_size()` | `fs::metadata` |
+| `agent/claude.rs` `session_log_size()` | `tokio::fs::metadata` (async) |
 | `agent/watcher.rs` `parse_session_log()` | `File::open`, `BufReader::lines` |
 | `listener/query.rs` (multiple handlers) | `fs::read_to_string` for logs |
 | `storage/snapshot.rs` `save()` | `File::create`, `serde_json::to_writer`, `sync_all` |
