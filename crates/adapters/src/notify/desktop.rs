@@ -35,9 +35,9 @@ impl NotifyAdapter for DesktopNotifyAdapter {
         let title = title.to_string();
         let message = message.to_string();
         // notify_rust::Notification::show() is synchronous on macOS.
-        // Fire-and-forget in a background thread to avoid blocking the
-        // async runtime.
-        std::thread::spawn(move || {
+        // Fire-and-forget on tokio's bounded blocking thread pool to avoid
+        // blocking the async runtime while capping OS thread count.
+        tokio::task::spawn_blocking(move || {
             tracing::info!(%title, %message, "sending desktop notification");
             match notify_rust::Notification::new()
                 .summary(&title)
