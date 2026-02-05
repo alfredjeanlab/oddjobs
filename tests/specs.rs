@@ -49,6 +49,8 @@ mod daemon_stop_hook;
 mod daemon_timers;
 
 // job/
+#[path = "specs/job/escalation.rs"]
+mod job_escalation;
 #[path = "specs/job/execution.rs"]
 mod job_execution;
 #[path = "specs/job/show.rs"]
