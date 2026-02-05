@@ -9,6 +9,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+/// Parse a runbook file, resolving imports for HCL files.
+fn parse_file_content(content: &str, format: Format) -> Result<Runbook, crate::ParseError> {
+    if format == Format::Hcl {
+        let (runbook, warnings) = crate::import::parse_with_imports(content, format)?;
+        for w in &warnings {
+            tracing::warn!("{}", w);
+        }
+        Ok(runbook)
+    } else {
+        parse_runbook_with_format(content, format)
+    }
+}
+
 /// Leading comment block extracted from a runbook file.
 pub struct FileComment {
     /// Text up to the first blank comment line (short description).
@@ -144,7 +157,7 @@ pub fn find_command_with_comment(
             Ok(c) => c,
             Err(_) => continue,
         };
-        let runbook = match parse_runbook_with_format(&content, format) {
+        let runbook = match parse_file_content(&content, format) {
             Ok(rb) => rb,
             Err(_) => continue,
         };
@@ -229,7 +242,7 @@ fn collect_all<T>(
                 continue;
             }
         };
-        let runbook = match parse_runbook_with_format(&content, format) {
+        let runbook = match parse_file_content(&content, format) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
@@ -339,7 +352,7 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
                 continue;
             }
         };
-        let runbook = match parse_runbook_with_format(&content, format) {
+        let runbook = match parse_file_content(&content, format) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
@@ -403,7 +416,7 @@ pub fn runbook_parse_warnings(runbook_dir: &Path) -> Vec<String> {
                 continue;
             }
         };
-        if let Err(e) = parse_runbook_with_format(&content, format) {
+        if let Err(e) = parse_file_content(&content, format) {
             warnings.push(format!("{}: {e}", path.display()));
         }
     }
@@ -430,7 +443,7 @@ fn find_runbook(
                 continue;
             }
         };
-        let runbook = match parse_runbook_with_format(&content, format) {
+        let runbook = match parse_file_content(&content, format) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");

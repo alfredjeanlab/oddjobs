@@ -13,6 +13,7 @@ mod command;
 mod cron;
 mod find;
 mod help;
+mod import;
 mod job;
 mod parser;
 mod queue;
@@ -37,6 +38,7 @@ pub use find::{
     find_runbook_by_command, find_runbook_by_cron, find_runbook_by_queue, find_runbook_by_worker,
     runbook_parse_warnings, validate_runbook_dir, FileComment, FindError,
 };
+pub use import::{parse_with_imports, ConstDef, ImportDef, ImportWarning};
 pub use job::{
     GitWorkspaceMode, JobDef, NotifyConfig, StepDef, StepTransition, WorkspaceBlock,
     WorkspaceConfig, WorkspaceType,
