@@ -173,6 +173,16 @@ where
             .ok_or_else(|| RuntimeError::JobNotFound(id.to_string()))
     }
 
+    /// Get a job by ID, returning None if not found or if the job is terminal.
+    ///
+    /// This consolidates the common pattern of:
+    /// 1. Look up job by ID
+    /// 2. Return early if not found
+    /// 3. Return early if job is terminal (done/failed/cancelled)
+    pub(crate) fn get_active_job(&self, id: &str) -> Option<Job> {
+        self.get_job(id).filter(|job| !job.is_terminal())
+    }
+
     pub(crate) fn execution_dir(&self, job: &Job) -> PathBuf {
         // Use workspace_path if in workspace mode, otherwise use cwd
         job.workspace_path
