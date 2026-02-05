@@ -7,6 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
+use crate::color;
 use crate::output::{display_log, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
@@ -77,7 +78,11 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::WorkerStarted { worker_name } => {
-                    println!("Worker '{}' started ({})", worker_name, namespace);
+                    println!(
+                        "Worker '{}' started ({})",
+                        color::header(&worker_name),
+                        color::muted(namespace)
+                    );
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -95,7 +100,11 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::Ok => {
-                    println!("Worker '{}' stopped ({})", name, namespace);
+                    println!(
+                        "Worker '{}' stopped ({})",
+                        color::header(&name),
+                        color::muted(namespace)
+                    );
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
@@ -113,7 +122,7 @@ pub async fn handle(
             };
             match client.send(&request).await? {
                 Response::WorkerStarted { worker_name } => {
-                    println!("Worker '{}' restarted", worker_name);
+                    println!("Worker '{}' restarted", color::header(&worker_name));
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);
