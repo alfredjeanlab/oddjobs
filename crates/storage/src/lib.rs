@@ -8,11 +8,13 @@
 
 //! Storage layer for Odd Jobs
 
+mod migration;
 mod snapshot;
 mod state;
 mod wal;
 
-pub use snapshot::{Snapshot, SnapshotError};
+pub use migration::MigrationError;
+pub use snapshot::{Snapshot, SnapshotError, CURRENT_SNAPSHOT_VERSION};
 pub use state::{
     CronRecord, MaterializedState, QueueItem, QueueItemStatus, Session, WorkerRecord, Workspace,
     WorkspaceType,

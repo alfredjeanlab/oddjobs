@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use crate::MaterializedState;
+use crate::{MaterializedState, CURRENT_SNAPSHOT_VERSION};
 use oj_core::{Pipeline, PipelineConfig, SystemClock};
 use std::collections::HashMap;
 use std::io::Write;
@@ -188,4 +188,19 @@ fn test_snapshot_round_trip_with_action_attempts() {
     assert_eq!(p.get_action_attempt("on_idle", 0), 2);
     assert_eq!(p.get_action_attempt("on_fail", 1), 1);
     assert_eq!(p.get_action_attempt("unknown", 0), 0);
+}
+
+#[test]
+fn test_snapshot_version_is_set() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("snapshot.json");
+
+    let state = create_test_state();
+    let snapshot = Snapshot::new(1, state);
+
+    assert_eq!(snapshot.version, CURRENT_SNAPSHOT_VERSION);
+
+    snapshot.save(&path).unwrap();
+    let loaded = Snapshot::load(&path).unwrap().unwrap();
+    assert_eq!(loaded.version, CURRENT_SNAPSHOT_VERSION);
 }

@@ -7,14 +7,19 @@
 //! identified by the WAL sequence number. Recovery loads the snapshot
 //! and replays WAL entries after that sequence.
 
+use crate::migration::{MigrationError, MigrationRegistry};
 use crate::MaterializedState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use tracing::warn;
+
+/// Current snapshot schema version
+pub const CURRENT_SNAPSHOT_VERSION: u32 = 1;
 
 /// Errors that can occur in snapshot operations
 #[derive(Debug, Error)]
@@ -23,11 +28,16 @@ pub enum SnapshotError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("migration error: {0}")]
+    Migration(#[from] MigrationError),
 }
 
 /// A snapshot of the materialized state at a point in time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Snapshot {
+    /// Schema version for migrations
+    #[serde(rename = "v")]
+    pub version: u32,
     /// WAL sequence number at the time of snapshot
     pub seq: u64,
     /// The complete materialized state
@@ -40,6 +50,7 @@ impl Snapshot {
     /// Create a new snapshot.
     pub fn new(seq: u64, state: MaterializedState) -> Self {
         Self {
+            version: CURRENT_SNAPSHOT_VERSION,
             seq,
             state,
             created_at: Utc::now(),
@@ -77,15 +88,16 @@ impl Snapshot {
     /// Returns `Ok(None)` if the file doesn't exist or is corrupt.
     /// Corrupt snapshots are moved to a `.bak` file so the daemon can
     /// recover via WAL replay.
+    ///
+    /// Snapshots are migrated to the current version if needed.
     pub fn load(path: &Path) -> Result<Option<Self>, SnapshotError> {
         if !path.exists() {
             return Ok(None);
         }
 
         let file = File::open(path)?;
-        let reader = BufReader::new(file);
-        match serde_json::from_reader(reader) {
-            Ok(snapshot) => Ok(Some(snapshot)),
+        let value: Value = match serde_json::from_reader(BufReader::new(file)) {
+            Ok(v) => v,
             Err(e) => {
                 let bak_path = rotate_bak_path(path);
                 warn!(
@@ -93,6 +105,27 @@ impl Snapshot {
                     path = %path.display(),
                     bak = %bak_path.display(),
                     "Corrupt snapshot, moving to .bak and starting fresh",
+                );
+                fs::rename(path, &bak_path)?;
+                return Ok(None);
+            }
+        };
+
+        // Migrate if needed
+        let registry = MigrationRegistry::new();
+        let migrated = registry.migrate_to(value, CURRENT_SNAPSHOT_VERSION)?;
+
+        // Deserialize to typed struct
+        match serde_json::from_value(migrated) {
+            Ok(snapshot) => Ok(Some(snapshot)),
+            Err(e) => {
+                // Post-migration deser failure = bug in migration or schema mismatch
+                let bak_path = rotate_bak_path(path);
+                warn!(
+                    error = %e,
+                    path = %path.display(),
+                    bak = %bak_path.display(),
+                    "Post-migration deserialize failed, moving to .bak",
                 );
                 fs::rename(path, &bak_path)?;
                 Ok(None)
