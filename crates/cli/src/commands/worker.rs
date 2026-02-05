@@ -23,8 +23,11 @@ pub struct WorkerArgs {
 pub enum WorkerCommand {
     /// Start a worker (idempotent: wakes it if already running)
     Start {
-        /// Worker name from runbook
-        name: String,
+        /// Worker name from runbook (required unless --all is set)
+        name: Option<String>,
+        /// Start all workers defined in runbooks
+        #[arg(long)]
+        all: bool,
     },
     /// Stop a worker (active jobs continue, no new items dispatched)
     Stop {
@@ -70,25 +73,70 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        WorkerCommand::Start { name } => {
-            let request = Request::WorkerStart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                worker_name: name.clone(),
-            };
-            match client.send(&request).await? {
-                Response::WorkerStarted { worker_name } => {
-                    println!(
-                        "Worker '{}' started ({})",
-                        color::header(&worker_name),
-                        color::muted(namespace)
-                    );
+        WorkerCommand::Start { name, all } => {
+            if all {
+                let request = Request::WorkerStartAll {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                };
+                match client.send(&request).await? {
+                    Response::WorkersStarted { started, errors } => {
+                        if started.is_empty() && errors.is_empty() {
+                            println!("No workers defined in runbooks");
+                        } else {
+                            for worker_name in &started {
+                                println!(
+                                    "Worker '{}' started ({})",
+                                    color::header(worker_name),
+                                    color::muted(namespace)
+                                );
+                            }
+                            for (worker_name, error) in &errors {
+                                eprintln!(
+                                    "Worker '{}' failed: {}",
+                                    color::header(worker_name),
+                                    error
+                                );
+                            }
+                            if !errors.is_empty() {
+                                anyhow::bail!(
+                                    "{} worker(s) started, {} failed",
+                                    started.len(),
+                                    errors.len()
+                                );
+                            }
+                        }
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
+            } else {
+                let name = name.ok_or_else(|| {
+                    anyhow::anyhow!("worker name required (or use --all to start all workers)")
+                })?;
+                let request = Request::WorkerStart {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                    worker_name: name.clone(),
+                };
+                match client.send(&request).await? {
+                    Response::WorkerStarted { worker_name } => {
+                        println!(
+                            "Worker '{}' started ({})",
+                            color::header(&worker_name),
+                            color::muted(namespace)
+                        );
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
             }
         }

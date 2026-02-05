@@ -115,6 +115,46 @@ pub(super) fn handle_worker_start(
     })
 }
 
+/// Handle a WorkerStartAll request — start all workers defined in runbooks.
+pub(super) fn handle_worker_start_all(
+    project_root: &Path,
+    namespace: &str,
+    event_bus: &EventBus,
+    state: &Arc<Mutex<MaterializedState>>,
+) -> Result<Response, ConnectionError> {
+    let runbook_dir = project_root.join(".oj/runbooks");
+    let all_workers = match oj_runbook::collect_all_workers(&runbook_dir) {
+        Ok(workers) => workers,
+        Err(e) => {
+            return Ok(Response::Error {
+                message: format!("failed to scan runbooks: {}", e),
+            })
+        }
+    };
+
+    let mut started = Vec::new();
+    let mut errors = Vec::new();
+
+    for (worker_name, _) in all_workers {
+        match handle_worker_start(project_root, namespace, &worker_name, event_bus, state) {
+            Ok(Response::WorkerStarted { worker_name }) => {
+                started.push(worker_name);
+            }
+            Ok(Response::Error { message }) => {
+                errors.push((worker_name, message));
+            }
+            Ok(_) => {
+                errors.push((worker_name, "unexpected response".to_string()));
+            }
+            Err(e) => {
+                errors.push((worker_name, e.to_string()));
+            }
+        }
+    }
+
+    Ok(Response::WorkersStarted { started, errors })
+}
+
 /// Handle a WorkerStop request.
 pub(super) fn handle_worker_stop(
     worker_name: &str,
