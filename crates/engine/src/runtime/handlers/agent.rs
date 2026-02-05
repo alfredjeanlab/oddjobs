@@ -8,8 +8,8 @@ use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, JobId, PromptType,
-    QuestionData, SessionId, TimerId,
+    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, JobId,
+    PromptType, QuestionData, SessionId, TimerId,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -24,6 +24,16 @@ pub(crate) fn idle_grace_period() -> Duration {
     }
 }
 
+/// Result of validating a standalone agent run.
+enum StandaloneValidation {
+    /// Agent run found and valid for processing
+    Valid(Box<AgentRun>),
+    /// Agent run exists but should be skipped (terminal or stale)
+    Skip,
+    /// No standalone agent run for this agent_id, fall through to job handling
+    NotStandalone,
+}
+
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
     S: SessionAdapter,
@@ -31,28 +41,51 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
+    /// Look up and validate a standalone agent run by agent_id.
+    ///
+    /// Checks that:
+    /// 1. An agent run is registered for this agent_id
+    /// 2. The agent run is not in a terminal state
+    /// 3. The agent_id matches (not a stale event from a previous run)
+    fn validate_standalone_agent_run(&self, agent_id: &AgentId) -> StandaloneValidation {
+        // Look up agent_run_id from tracking map
+        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
+        let Some(agent_run_id) = maybe_run_id else {
+            return StandaloneValidation::NotStandalone;
+        };
+
+        // Get the actual agent run from state
+        let Some(agent_run) = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
+        else {
+            return StandaloneValidation::NotStandalone;
+        };
+
+        // Skip if terminal
+        if agent_run.status.is_terminal() {
+            return StandaloneValidation::Skip;
+        }
+
+        // Verify agent_id matches
+        if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
+            tracing::debug!(
+                agent_id = %agent_id,
+                agent_run_id = %agent_run.id,
+                "dropping stale standalone agent event (agent_id mismatch)"
+            );
+            return StandaloneValidation::Skip;
+        }
+
+        StandaloneValidation::Valid(Box::new(agent_run))
+    }
+
     pub(crate) async fn handle_agent_state_changed(
         &self,
         agent_id: &oj_core::AgentId,
         state: &oj_core::AgentState,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Check standalone agent runs first
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        if let Some(agent_run_id) = maybe_run_id {
-            let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
-            if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal() {
-                    return Ok(vec![]);
-                }
-                // Verify the agent_id matches
-                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
-                    tracing::debug!(
-                        agent_id = %agent_id,
-                        agent_run_id = %agent_run.id,
-                        "dropping stale standalone agent event (agent_id mismatch)"
-                    );
-                    return Ok(vec![]);
-                }
+        match self.validate_standalone_agent_run(agent_id) {
+            StandaloneValidation::Valid(agent_run) => {
                 let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
                 let agent_def = runbook
                     .get_agent(&agent_run.agent_name)
@@ -66,6 +99,8 @@ where
                     )
                     .await;
             }
+            StandaloneValidation::Skip => return Ok(vec![]),
+            StandaloneValidation::NotStandalone => {}
         }
 
         // Look up job ID for this agent
@@ -118,18 +153,13 @@ where
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Check standalone agent runs first
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        if let Some(agent_run_id) = maybe_run_id {
-            let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
-            if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal()
-                    || agent_run.action_tracker.agent_signal.is_some()
+        match self.validate_standalone_agent_run(agent_id) {
+            StandaloneValidation::Valid(agent_run) => {
+                // Additional skip checks for idle handling
+                if agent_run.action_tracker.agent_signal.is_some()
                     || agent_run.status == AgentRunStatus::Waiting
                     || agent_run.status == AgentRunStatus::Escalated
                 {
-                    return Ok(vec![]);
-                }
-                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
                     return Ok(vec![]);
                 }
 
@@ -169,6 +199,8 @@ where
 
                 return Ok(vec![]);
             }
+            StandaloneValidation::Skip => return Ok(vec![]),
+            StandaloneValidation::NotStandalone => {}
         }
 
         let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
@@ -245,18 +277,13 @@ where
         question_data: Option<&QuestionData>,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Check standalone agent runs first
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        if let Some(agent_run_id) = maybe_run_id {
-            let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
-            if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal()
-                    || agent_run.action_tracker.agent_signal.is_some()
+        match self.validate_standalone_agent_run(agent_id) {
+            StandaloneValidation::Valid(agent_run) => {
+                // Additional skip checks for prompt handling
+                if agent_run.action_tracker.agent_signal.is_some()
                     || agent_run.status == AgentRunStatus::Waiting
                     || agent_run.status == AgentRunStatus::Escalated
                 {
-                    return Ok(vec![]);
-                }
-                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
                     return Ok(vec![]);
                 }
                 let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
@@ -275,6 +302,8 @@ where
                     )
                     .await;
             }
+            StandaloneValidation::Skip => return Ok(vec![]),
+            StandaloneValidation::NotStandalone => {}
         }
 
         let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
@@ -328,15 +357,10 @@ where
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Check standalone agent runs first
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        if let Some(agent_run_id) = maybe_run_id {
-            let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
-            if let Some(agent_run) = agent_run {
-                if agent_run.status.is_terminal() || agent_run.status == AgentRunStatus::Escalated {
-                    return Ok(vec![]);
-                }
-                // Verify agent_id matches
-                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
+        match self.validate_standalone_agent_run(agent_id) {
+            StandaloneValidation::Valid(agent_run) => {
+                // Additional skip check: already escalated
+                if agent_run.status == AgentRunStatus::Escalated {
                     return Ok(vec![]);
                 }
                 // Fire standalone escalation
@@ -355,6 +379,8 @@ where
                 ];
                 return Ok(self.executor.execute_all(effects).await?);
             }
+            StandaloneValidation::Skip => return Ok(vec![]),
+            StandaloneValidation::NotStandalone => {}
         }
 
         // Job agent
