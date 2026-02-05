@@ -415,6 +415,14 @@ pub enum Event {
         namespace: String,
     },
 
+    #[serde(rename = "worker:resized")]
+    WorkerResized {
+        worker_name: String,
+        #[serde(default)]
+        namespace: String,
+        concurrency: u32,
+    },
+
     #[serde(rename = "worker:deleted")]
     WorkerDeleted {
         worker_name: String,
@@ -632,6 +640,7 @@ impl Event {
             Event::WorkerTakeComplete { .. } => "worker:take_complete",
             Event::WorkerItemDispatched { .. } => "worker:item_dispatched",
             Event::WorkerStopped { .. } => "worker:stopped",
+            Event::WorkerResized { .. } => "worker:resized",
             Event::WorkerDeleted { .. } => "worker:deleted",
             Event::QueuePushed { .. } => "queue:pushed",
             Event::QueueTaken { .. } => "queue:taken",
@@ -808,6 +817,11 @@ impl Event {
                 ..
             } => format!("{t} worker={worker_name} item={item_id} job={job_id}"),
             Event::WorkerStopped { worker_name, .. } => format!("{t} worker={worker_name}"),
+            Event::WorkerResized {
+                worker_name,
+                concurrency,
+                ..
+            } => format!("{t} worker={worker_name} concurrency={concurrency}"),
             Event::WorkerDeleted {
                 worker_name,
                 namespace,

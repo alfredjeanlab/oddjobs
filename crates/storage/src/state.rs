@@ -669,6 +669,17 @@ impl MaterializedState {
                 }
             }
 
+            Event::WorkerResized {
+                worker_name,
+                namespace,
+                concurrency,
+            } => {
+                let key = scoped_name(namespace, worker_name);
+                if let Some(record) = self.workers.get_mut(&key) {
+                    record.concurrency = *concurrency;
+                }
+            }
+
             Event::WorkerDeleted {
                 worker_name,
                 namespace,
