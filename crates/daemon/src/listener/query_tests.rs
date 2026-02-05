@@ -349,6 +349,87 @@ fn status_overview_includes_workers_and_queues() {
     }
 }
 
+/// Test that jobs and workers in different namespaces both appear in status.
+/// This reproduces the bug where a job was running but didn't show up in status
+/// because the job was in a different namespace than the workers.
+#[test]
+fn status_overview_shows_job_in_separate_namespace() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    {
+        let mut s = state.lock();
+        // Job running in "oddjobs" namespace
+        s.jobs.insert(
+            "job-1".to_string(),
+            make_job(
+                "job-1",
+                "conflicts-feat-add-runtime-job-1",
+                "oddjobs", // Different namespace than workers
+                "resolve",
+                StepStatus::Running,
+                StepOutcome::Running,
+                Some("agent-1"),
+                1000,
+            ),
+        );
+
+        // Worker in "wok" namespace (different from job)
+        s.workers.insert(
+            "wok/merge-conflicts".to_string(),
+            make_worker("merge-conflicts", "wok", "merge-conflicts", 0),
+        );
+
+        // Queue in "wok" namespace with active item
+        s.queue_items.insert(
+            "wok/merge-conflicts".to_string(),
+            vec![
+                make_queue_item("q1", QueueItemStatus::Pending),
+                make_queue_item("q2", QueueItemStatus::Active),
+            ],
+        );
+    }
+
+    let response = handle_query(
+        Query::StatusOverview,
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::StatusOverview { namespaces, .. } => {
+            // Both namespaces should appear
+            assert_eq!(
+                namespaces.len(),
+                2,
+                "expected both oddjobs and wok namespaces"
+            );
+
+            // Sorted alphabetically: oddjobs before wok
+            assert_eq!(namespaces[0].namespace, "oddjobs");
+            assert_eq!(namespaces[1].namespace, "wok");
+
+            // oddjobs should have the active job
+            assert_eq!(namespaces[0].active_jobs.len(), 1);
+            assert_eq!(namespaces[0].active_jobs[0].id, "job-1");
+            assert_eq!(namespaces[0].active_jobs[0].step_status, "running");
+            assert!(namespaces[0].workers.is_empty());
+            assert!(namespaces[0].queues.is_empty());
+
+            // wok should have worker and queue but no jobs
+            assert!(namespaces[1].active_jobs.is_empty());
+            assert_eq!(namespaces[1].workers.len(), 1);
+            assert_eq!(namespaces[1].workers[0].name, "merge-conflicts");
+            assert_eq!(namespaces[1].workers[0].active, 0);
+            assert_eq!(namespaces[1].queues.len(), 1);
+            assert_eq!(namespaces[1].queues[0].active, 1);
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}
+
 #[test]
 fn status_overview_includes_active_agents() {
     let state = empty_state();
