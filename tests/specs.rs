@@ -71,6 +71,8 @@ mod agent_logs;
 mod agent_questions;
 #[path = "specs/agent/spawn.rs"]
 mod agent_spawn;
+#[path = "specs/agent/state_detection.rs"]
+mod agent_state_detection;
 
 // shell/
 #[path = "specs/shell/invalid_syntax.rs"]

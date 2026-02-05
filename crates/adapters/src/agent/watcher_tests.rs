@@ -455,3 +455,194 @@ fn incremental_parser_handles_multiple_appends() {
 
     assert_eq!(parser.parse(&log_path), AgentState::WaitingForInput);
 }
+
+// --- Incomplete JSON / Edge Case Tests ---
+
+#[test]
+fn parse_incomplete_json_line_does_not_crash() {
+    // Incomplete JSON at EOF should not cause a crash - treated as working
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write a complete line followed by an incomplete line (no closing brace)
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"hello"}}
+{"type":"assistant","message":{"content":[{"type":"text"#,
+    )
+    .unwrap();
+
+    // Should not panic, should return Working (last complete line was user message)
+    let state = parse_session_log(&log_path);
+    assert_eq!(state, AgentState::Working);
+}
+
+#[test]
+fn parse_malformed_json_line_does_not_crash() {
+    // Invalid JSON should not crash - treated as working
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    std::fs::write(&log_path, "this is not valid json\n").unwrap();
+
+    let state = parse_session_log(&log_path);
+    assert_eq!(state, AgentState::Working);
+}
+
+#[test]
+fn parse_empty_json_object_does_not_crash() {
+    // Empty JSON object should not crash
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    std::fs::write(&log_path, "{}\n").unwrap();
+
+    let state = parse_session_log(&log_path);
+    assert_eq!(state, AgentState::Working);
+}
+
+#[test]
+fn incremental_parser_handles_incomplete_final_line() {
+    // Parser should not advance offset past incomplete lines
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write complete line with newline
+    std::fs::write(
+        &log_path,
+        r#"{"type":"user","message":{"content":"hello"}}
+"#,
+    )
+    .unwrap();
+
+    let mut parser = SessionLogParser::new();
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::Working);
+    let offset_after_complete = parser.last_offset;
+
+    // Append incomplete line (no trailing newline)
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&log_path)
+        .unwrap();
+    write!(
+        file,
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"partial"#
+    )
+    .unwrap();
+
+    // Parser should still work and not advance offset past incomplete line
+    let state = parser.parse(&log_path);
+    // The incomplete line is parsed but offset not advanced
+    assert_eq!(parser.last_offset, offset_after_complete);
+    // State should reflect the user message (last complete line) or working
+    assert_eq!(state, AgentState::Working);
+
+    // Now complete the line - use write_all to avoid format string escaping issues
+    // Complete JSON: {"type":"assistant","message":{"content":[{"type":"text","text":"partial"}]}}
+    file.write_all(b"\"}]}}\n").unwrap();
+
+    // Now parser should see the complete line
+    let state = parser.parse(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
+    assert!(
+        parser.last_offset > offset_after_complete,
+        "offset should advance after line is complete"
+    );
+}
+
+#[test]
+fn rapid_state_changes_all_detected() {
+    // Simulate rapid appends and verify each state is parseable
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    std::fs::write(&log_path, "").unwrap();
+
+    let mut parser = SessionLogParser::new();
+
+    // Initial empty = working
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // User message = working
+    append_line(
+        &log_path,
+        r#"{"type":"user","message":{"content":"hello"}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Assistant with tool_use = working
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{}}]}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // User (tool result) = working
+    append_line(
+        &log_path,
+        r#"{"type":"user","message":{"content":"tool result"}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Assistant with text only = idle
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Done!"}]}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::WaitingForInput);
+
+    // User message again = back to working
+    append_line(
+        &log_path,
+        r#"{"type":"user","message":{"content":"continue"}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Assistant with thinking = working (not idle)
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me think..."}]}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::Working);
+
+    // Finally text only = idle again
+    append_line(
+        &log_path,
+        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"All done"}]}}"#,
+    );
+    assert_eq!(parser.parse(&log_path), AgentState::WaitingForInput);
+}
+
+#[test]
+fn parse_binary_garbage_does_not_crash() {
+    // Binary data should not crash the parser
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Write some binary garbage
+    std::fs::write(&log_path, &[0x00, 0x01, 0x02, 0xFF, 0xFE, 0x0A]).unwrap();
+
+    let state = parse_session_log(&log_path);
+    assert_eq!(state, AgentState::Working);
+}
+
+#[test]
+fn parse_very_long_line_does_not_crash() {
+    // Very long line should be handled without crash
+    let dir = TempDir::new().unwrap();
+    let log_path = dir.path().join("session.jsonl");
+
+    // Create a very long but valid JSON line
+    let long_text = "x".repeat(100_000);
+    let content = format!(
+        r#"{{"type":"assistant","message":{{"content":[{{"type":"text","text":"{}"}}]}}}}
+"#,
+        long_text
+    );
+    std::fs::write(&log_path, content).unwrap();
+
+    let state = parse_session_log(&log_path);
+    assert_eq!(state, AgentState::WaitingForInput);
+}
