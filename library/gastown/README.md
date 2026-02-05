@@ -28,7 +28,7 @@ that state.
 Gas Town defines a hierarchy of roles. Each role has a scope (town or rig)
 and a specific function:
 
-```
+```diagram
 Town scope (GT_SCOPE=town)
 ├── Mayor       Coordinator — dispatches convoys, high-level decisions
 ├── Deacon      Town-level orchestrator — patrols, health, convoy tracking
@@ -45,7 +45,7 @@ Rig scope (GT_SCOPE=rig)
 
 The system has a multi-tier health monitoring chain:
 
-```
+```diagram
 Daemon (oj daemon)
   │  periodic heartbeat
   │
@@ -65,7 +65,7 @@ without constant AI cost.
 
 ## Directory Layout
 
-```
+```diagram
 gastown/
 ├── README.md               This file
 ├── infra.hcl               Shared queues, workers
@@ -201,7 +201,7 @@ Steps are discovered via `bd ready --parent=<mol-id>` and closed via
 
 ### Single Issue: sling → polecat → refinery → merge
 
-```
+```diagram
 Human: oj run gt-sling auth-fix "Fix the auth bug"
   │
   ├─ 1. Create task bead (or use existing bead ID)
@@ -220,7 +220,7 @@ Human: oj run gt-sling auth-fix "Fix the auth bug"
 
 ### Batch Work: convoy → sling (x N) → track completion
 
-```
+```diagram
 Human: oj run gt-convoy "Auth overhaul" issue-1 issue-2 issue-3
   │
   ├─ 1. Create convoy bead, link issues via bd dep add --type=tracks
@@ -235,7 +235,7 @@ Human: oj run gt-convoy "Auth overhaul" issue-1 issue-2 issue-3
 
 ### Health Monitoring: boot → deacon → witness
 
-```
+```diagram
 Daemon heartbeat (periodic):
   │
   └─ oj run gt-triage
@@ -263,7 +263,7 @@ Witness patrol (periodic, per-rig):
 
 ### Shutdown Dance: warrant → interrogate → pardon/execute
 
-```
+```diagram
 oj run gt-shutdown-dance <target> "unresponsive"
   │
   ├─ Record warrant bead
