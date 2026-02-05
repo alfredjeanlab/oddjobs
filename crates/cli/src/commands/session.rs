@@ -51,6 +51,15 @@ pub enum SessionCommand {
         /// Session ID
         id: String,
     },
+    /// Prune orphaned sessions (from terminal or missing jobs)
+    Prune {
+        /// Prune all orphaned sessions regardless of age (default: 12h)
+        #[arg(long)]
+        all: bool,
+        /// Preview only -- don't actually delete
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Attach to a tmux session
@@ -142,6 +151,37 @@ pub async fn handle(
         }
         SessionCommand::Attach { id } => {
             attach(&id)?;
+        }
+        SessionCommand::Prune { all, dry_run } => {
+            let result = client
+                .session_prune(all, dry_run, project_filter.map(|s| s.to_string()))
+                .await?;
+
+            match format {
+                OutputFormat::Text => {
+                    if result.pruned.is_empty() {
+                        println!("No sessions to prune");
+                    } else {
+                        let action = if dry_run { "Would prune" } else { "Pruned" };
+                        for entry in &result.pruned {
+                            println!("{} session {} (job: {})", action, entry.id, entry.job_id);
+                        }
+                        println!(
+                            "{} {} session(s), skipped {}",
+                            action,
+                            result.pruned.len(),
+                            result.skipped
+                        );
+                    }
+                }
+                OutputFormat::Json => {
+                    let json = serde_json::json!({
+                        "pruned": result.pruned,
+                        "skipped": result.skipped
+                    });
+                    println!("{}", serde_json::to_string_pretty(&json)?);
+                }
+            }
         }
     }
 

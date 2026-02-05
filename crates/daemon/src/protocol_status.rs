@@ -130,6 +130,14 @@ pub struct CronEntry {
     pub namespace: String,
 }
 
+/// Session entry for prune responses
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SessionEntry {
+    pub id: String,
+    pub job_id: String,
+    pub namespace: String,
+}
+
 /// Queue item entry for prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct QueueItemEntry {

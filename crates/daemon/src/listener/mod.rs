@@ -498,6 +498,19 @@ async fn handle_request(
             kill,
             all,
         } => mutations::handle_agent_resume(state, event_bus, agent_id, kill, all).await,
+
+        Request::SessionPrune {
+            all,
+            dry_run,
+            namespace,
+        } => {
+            let flags = mutations::PruneFlags {
+                all,
+                dry_run,
+                namespace: namespace.as_deref(),
+            };
+            mutations::handle_session_prune(state, event_bus, &flags).await
+        }
     }
 }
 

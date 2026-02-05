@@ -501,6 +501,20 @@ impl MaterializedState {
 
             Event::SessionDeleted { id } => {
                 self.sessions.remove(id.as_str());
+
+                // Clear job.session_id if it references the deleted session
+                for job in self.jobs.values_mut() {
+                    if job.session_id.as_deref() == Some(id.as_str()) {
+                        job.session_id = None;
+                    }
+                }
+
+                // Clear agent_run.session_id if it references the deleted session
+                for agent_run in self.agent_runs.values_mut() {
+                    if agent_run.session_id.as_deref() == Some(id.as_str()) {
+                        agent_run.session_id = None;
+                    }
+                }
             }
 
             Event::WorkspaceCreated {

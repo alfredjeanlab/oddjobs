@@ -17,7 +17,7 @@ mod status;
 pub use status::{
     AgentEntry, AgentStatusEntry, CronEntry, CronSummary, JobEntry, JobStatusEntry,
     NamespaceStatus, OrphanAgent, OrphanSummary, ProjectSummary, QueueItemEntry, QueueStatus,
-    WorkerEntry,
+    SessionEntry, WorkerEntry,
 };
 
 /// Request from CLI to daemon
@@ -308,6 +308,17 @@ pub enum Request {
         /// Resume all dead agents
         #[serde(default)]
         all: bool,
+    },
+
+    /// Prune orphaned sessions from daemon state
+    SessionPrune {
+        /// Prune all orphaned sessions regardless of age
+        all: bool,
+        /// Preview only -- don't actually delete
+        dry_run: bool,
+        /// Filter by project namespace
+        #[serde(default)]
+        namespace: Option<String>,
     },
 }
 
@@ -668,6 +679,12 @@ pub enum Response {
         resumed: Vec<String>,
         /// Agents that were skipped with reasons
         skipped: Vec<(String, String)>,
+    },
+
+    /// Session prune result
+    SessionsPruned {
+        pruned: Vec<SessionEntry>,
+        skipped: usize,
     },
 }
 

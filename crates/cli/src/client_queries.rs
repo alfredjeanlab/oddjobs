@@ -593,4 +593,30 @@ impl DaemonClient {
             other => Self::reject(other),
         }
     }
+
+    /// Prune orphaned sessions (from terminal or missing jobs)
+    pub async fn session_prune(
+        &self,
+        all: bool,
+        dry_run: bool,
+        namespace: Option<String>,
+    ) -> Result<SessionPruneResult, ClientError> {
+        let request = Request::SessionPrune {
+            all,
+            dry_run,
+            namespace,
+        };
+        match self.send(&request).await? {
+            Response::SessionsPruned { pruned, skipped } => {
+                Ok(SessionPruneResult { pruned, skipped })
+            }
+            other => Self::reject(other),
+        }
+    }
+}
+
+/// Result from session prune operation
+pub struct SessionPruneResult {
+    pub pruned: Vec<oj_daemon::SessionEntry>,
+    pub skipped: usize,
 }

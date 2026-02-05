@@ -15,7 +15,7 @@ use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, SessionAdapter, TmuxAdapter, TracedAgent,
     TracedSession,
 };
-use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, SystemClock};
+use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, SessionId, SystemClock};
 use oj_engine::breadcrumb::{self, Breadcrumb};
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps};
 use oj_storage::{load_snapshot, Checkpointer, MaterializedState, Wal};
@@ -555,6 +555,66 @@ fn cleanup_on_failure(config: &Config) {
     }
 }
 
+/// Reconcile sessions with actual tmux state after daemon restart.
+///
+/// Cleans up orphaned sessions whose jobs are terminal or missing from state.
+/// This prevents stale sessions from accumulating across daemon restarts.
+async fn reconcile_sessions(
+    state: &MaterializedState,
+    _sessions: &TracedSession<TmuxAdapter>,
+    event_tx: &mpsc::Sender<Event>,
+) {
+    let sessions_to_check: Vec<_> = state
+        .sessions
+        .values()
+        .map(|s| (s.id.clone(), s.job_id.clone()))
+        .collect();
+
+    if sessions_to_check.is_empty() {
+        return;
+    }
+
+    let mut orphaned = 0;
+    for (session_id, job_id) in sessions_to_check {
+        // Check if the associated job is terminal or missing
+        let should_prune = match state.jobs.get(&job_id) {
+            Some(job) => job.is_terminal(),
+            None => {
+                // Job doesn't exist - check if it's a standalone agent run
+                // Sessions can also be associated with agent_runs
+                let has_agent_run = state.agent_runs.values().any(|ar| {
+                    ar.session_id.as_deref() == Some(session_id.as_str()) && !ar.is_terminal()
+                });
+                !has_agent_run
+            }
+        };
+
+        if should_prune {
+            orphaned += 1;
+
+            // Kill the tmux session (best effort)
+            let _ = tokio::process::Command::new("tmux")
+                .args(["kill-session", "-t", &session_id])
+                .output()
+                .await;
+
+            // Emit SessionDeleted to clean up state
+            let _ = event_tx
+                .send(Event::SessionDeleted {
+                    id: SessionId::new(&session_id),
+                })
+                .await;
+        }
+    }
+
+    if orphaned > 0 {
+        info!(
+            "Reconciled {} orphaned session(s) from terminal/missing jobs",
+            orphaned
+        );
+    }
+}
+
 /// Reconcile persisted state with actual world state after daemon restart.
 ///
 /// For each non-terminal job, checks whether its tmux session and agent
@@ -566,6 +626,9 @@ pub(crate) async fn reconcile_state(
     sessions: &TracedSession<TmuxAdapter>,
     event_tx: &mpsc::Sender<Event>,
 ) {
+    // Reconcile sessions: clean up orphaned sessions whose jobs are terminal or missing
+    reconcile_sessions(state, sessions, event_tx).await;
+
     // Resume workers that were running before the daemon restarted.
     // Re-emitting WorkerStarted recreates the in-memory WorkerState and
     // triggers an initial queue poll so the worker picks up where it left off.

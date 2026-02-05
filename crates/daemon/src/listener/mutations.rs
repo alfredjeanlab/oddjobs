@@ -13,7 +13,9 @@ use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
-use crate::protocol::{AgentEntry, CronEntry, JobEntry, Response, WorkerEntry, WorkspaceEntry};
+use crate::protocol::{
+    AgentEntry, CronEntry, JobEntry, Response, SessionEntry, WorkerEntry, WorkspaceEntry,
+};
 
 use super::ConnectionError;
 
@@ -1041,6 +1043,109 @@ pub(super) fn handle_cron_prune(
     }
 
     Ok(Response::CronsPruned {
+        pruned: to_prune,
+        skipped,
+    })
+}
+
+/// Handle session prune requests.
+///
+/// Removes sessions whose associated job is terminal (done/failed/cancelled)
+/// or missing from state. By default only prunes sessions older than 12 hours;
+/// use `--all` to prune all orphaned sessions.
+pub(super) async fn handle_session_prune(
+    state: &Arc<Mutex<MaterializedState>>,
+    event_bus: &EventBus,
+    flags: &PruneFlags<'_>,
+) -> Result<Response, ConnectionError> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let age_threshold_ms = 12 * 60 * 60 * 1000; // 12 hours in ms
+
+    let mut to_prune = Vec::new();
+    let mut skipped = 0usize;
+
+    {
+        let state_guard = state.lock();
+        for session in state_guard.sessions.values() {
+            // Get the namespace from the associated job
+            let (namespace, job_is_terminal, job_created_at_ms) =
+                match state_guard.jobs.get(&session.job_id) {
+                    Some(job) => {
+                        let created_at_ms = job
+                            .step_history
+                            .first()
+                            .map(|r| r.started_at_ms)
+                            .unwrap_or(0);
+                        (job.namespace.clone(), job.is_terminal(), created_at_ms)
+                    }
+                    None => {
+                        // Job missing from state - check if it's a standalone agent run
+                        let agent_run = state_guard
+                            .agent_runs
+                            .values()
+                            .find(|ar| ar.session_id.as_deref() == Some(session.id.as_str()));
+                        match agent_run {
+                            Some(ar) => (ar.namespace.clone(), ar.is_terminal(), ar.created_at_ms),
+                            None => {
+                                // Completely orphaned - no job or agent run
+                                (String::new(), true, 0)
+                            }
+                        }
+                    }
+                };
+
+            // Filter by namespace when --project is specified
+            if let Some(ns) = flags.namespace {
+                if namespace != ns {
+                    continue;
+                }
+            }
+
+            // Only prune sessions for terminal or missing jobs
+            if !job_is_terminal {
+                skipped += 1;
+                continue;
+            }
+
+            // Check age unless --all is specified
+            if !flags.all
+                && job_created_at_ms > 0
+                && now_ms.saturating_sub(job_created_at_ms) < age_threshold_ms
+            {
+                skipped += 1;
+                continue;
+            }
+
+            to_prune.push(SessionEntry {
+                id: session.id.clone(),
+                job_id: session.job_id.clone(),
+                namespace,
+            });
+        }
+    }
+
+    if !flags.dry_run {
+        for entry in &to_prune {
+            // Kill the tmux session (best effort)
+            let _ = tokio::process::Command::new("tmux")
+                .args(["kill-session", "-t", &entry.id])
+                .output()
+                .await;
+
+            // Emit SessionDeleted to clean up state
+            emit(
+                event_bus,
+                Event::SessionDeleted {
+                    id: SessionId::new(&entry.id),
+                },
+            )?;
+        }
+    }
+
+    Ok(Response::SessionsPruned {
         pruned: to_prune,
         skipped,
     })
