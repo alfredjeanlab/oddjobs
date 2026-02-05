@@ -156,7 +156,6 @@ pub enum Event {
         name: String,
         runbook_hash: String,
         cwd: PathBuf,
-        #[serde(alias = "input")]
         vars: HashMap<String, String>,
         initial_step: String,
         #[serde(default)]
@@ -173,7 +172,6 @@ pub enum Event {
     #[serde(rename = "job:updated")]
     JobUpdated {
         id: JobId,
-        #[serde(alias = "input")]
         vars: HashMap<String, String>,
     },
 
@@ -182,7 +180,7 @@ pub enum Event {
         id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-        #[serde(default, skip_serializing_if = "is_empty_map", alias = "input")]
+        #[serde(default, skip_serializing_if = "is_empty_map")]
         vars: HashMap<String, String>,
     },
 
@@ -285,8 +283,8 @@ pub enum Event {
         path: PathBuf,
         branch: Option<String>,
         owner: Option<String>,
-        /// "folder" or "worktree" (replaces old "mode" field)
-        #[serde(default, alias = "mode")]
+        /// "folder" or "worktree"
+        #[serde(default)]
         workspace_type: Option<String>,
     },
 
@@ -309,11 +307,7 @@ pub enum Event {
         project_root: PathBuf,
         runbook_hash: String,
         interval: String,
-        /// Deprecated: use run_target. Kept for WAL backward compat.
-        #[serde(default)]
-        job_name: String,
         /// What this cron runs: "job:name" or "agent:name"
-        #[serde(default)]
         run_target: String,
         #[serde(default)]
         namespace: String,

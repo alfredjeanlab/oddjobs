@@ -24,11 +24,7 @@ crate::define_id! {
 }
 
 /// Status of the current step.
-///
-/// Custom Deserialize impl handles backward compat: old snapshots serialize
-/// `Waiting` as a unit variant (`"Waiting"`), new format uses `{"Waiting": null}`
-/// or `{"Waiting": "decision-id"}`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StepStatus {
     /// Waiting to start
     Pending,
@@ -58,75 +54,6 @@ impl fmt::Display for StepStatus {
             StepStatus::Completed => write!(f, "completed"),
             StepStatus::Failed => write!(f, "failed"),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for StepStatus {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de;
-
-        struct StepStatusVisitor;
-
-        impl<'de> de::Visitor<'de> for StepStatusVisitor {
-            type Value = StepStatus;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a StepStatus variant")
-            }
-
-            // Handle unit variant strings: "Pending", "Running", "Waiting", "Completed", "Failed"
-            fn visit_str<E: de::Error>(self, v: &str) -> Result<StepStatus, E> {
-                match v {
-                    "Pending" => Ok(StepStatus::Pending),
-                    "Running" => Ok(StepStatus::Running),
-                    "Waiting" => Ok(StepStatus::Waiting(None)),
-                    "Completed" => Ok(StepStatus::Completed),
-                    "Failed" => Ok(StepStatus::Failed),
-                    _ => Err(de::Error::unknown_variant(
-                        v,
-                        &["Pending", "Running", "Waiting", "Completed", "Failed"],
-                    )),
-                }
-            }
-
-            // Handle map variants: {"Waiting": null}, {"Waiting": "id"}
-            fn visit_map<A: de::MapAccess<'de>>(self, mut map: A) -> Result<StepStatus, A::Error> {
-                let key: String = map
-                    .next_key()?
-                    .ok_or_else(|| de::Error::custom("expected variant name"))?;
-                match key.as_str() {
-                    "Pending" => {
-                        map.next_value::<serde::de::IgnoredAny>()?;
-                        Ok(StepStatus::Pending)
-                    }
-                    "Running" => {
-                        map.next_value::<serde::de::IgnoredAny>()?;
-                        Ok(StepStatus::Running)
-                    }
-                    "Waiting" => {
-                        let decision_id: Option<String> = map.next_value()?;
-                        Ok(StepStatus::Waiting(decision_id))
-                    }
-                    "Completed" => {
-                        map.next_value::<serde::de::IgnoredAny>()?;
-                        Ok(StepStatus::Completed)
-                    }
-                    "Failed" => {
-                        map.next_value::<serde::de::IgnoredAny>()?;
-                        Ok(StepStatus::Failed)
-                    }
-                    _ => Err(de::Error::unknown_variant(
-                        &key,
-                        &["Pending", "Running", "Waiting", "Completed", "Failed"],
-                    )),
-                }
-            }
-        }
-
-        deserializer.deserialize_any(StepStatusVisitor)
     }
 }
 
@@ -190,7 +117,6 @@ pub struct Job {
     pub step_started_at: Instant,
     #[serde(default)]
     pub step_history: Vec<StepRecord>,
-    #[serde(alias = "input")]
     pub vars: HashMap<String, String>,
     /// Content hash of the stored runbook (for cache lookup)
     pub runbook_hash: String,

@@ -26,6 +26,7 @@ serial_test.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 tempfile.workspace = true
+zstd.workspace = true
 
 [[test]]
 name = "specs"
@@ -51,6 +52,7 @@ dirs = "5"
 serial_test = "3"
 similar-asserts = "1"
 tempfile = "3"
+zstd = "0.13"
 
 [workspace.package]
 version = "0.1.0"

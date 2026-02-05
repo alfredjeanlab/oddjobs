@@ -1164,7 +1164,7 @@ agent "decompose" {
 agent "epic-builder" {
   run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
   on_idle  = { action = "gate", run = "root_id=$(cat .epic-root-id) && ! wok tree \"$root_id\" | grep -qE '(todo|doing)'", attempts = "forever" }
-  on_dead  = { action = "recover", append = true, message = "Continue working on the epic." }
+  on_dead  = { action = "resume", append = true, message = "Continue working on the epic." }
 
   prime = [
     "wok prime $(cat .epic-root-id)",

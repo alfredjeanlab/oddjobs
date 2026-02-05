@@ -88,8 +88,7 @@ pub(crate) struct CronStartedParams<'a> {
     pub project_root: &'a Path,
     pub runbook_hash: &'a str,
     pub interval: &'a str,
-    pub job_name: &'a str,
-    pub run_target_str: &'a str,
+    pub run_target: &'a str,
     pub namespace: &'a str,
 }
 
@@ -123,20 +122,14 @@ where
             project_root,
             runbook_hash,
             interval,
-            job_name,
-            run_target_str,
+            run_target: run_target_str,
             namespace,
         } = params;
         let duration = crate::monitor::parse_duration(interval).map_err(|e| {
             RuntimeError::InvalidFormat(format!("invalid cron interval '{}': {}", interval, e))
         })?;
 
-        // Resolve run target from run_target string, falling back to job_name
-        let run_target = if run_target_str.is_empty() {
-            CronRunTarget::Job(job_name.to_string())
-        } else {
-            CronRunTarget::from_run_target_str(run_target_str)
-        };
+        let run_target = CronRunTarget::from_run_target_str(run_target_str);
 
         // Read concurrency from the cron definition in the runbook
         let concurrency = self

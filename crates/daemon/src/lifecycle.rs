@@ -620,7 +620,6 @@ pub(crate) async fn reconcile_state(
                 project_root: cron.project_root.clone(),
                 runbook_hash: cron.runbook_hash.clone(),
                 interval: cron.interval.clone(),
-                job_name: cron.job_name.clone(),
                 run_target: cron.run_target.clone(),
                 namespace: cron.namespace.clone(),
             })

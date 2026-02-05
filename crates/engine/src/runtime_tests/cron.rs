@@ -109,7 +109,6 @@ async fn cron_start_sets_timer() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -166,7 +165,6 @@ async fn cron_stop_cancels_timer() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -225,7 +223,6 @@ async fn cron_timer_fired_creates_job() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -272,7 +269,6 @@ async fn cron_timer_fired_reloads_runbook() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -401,7 +397,6 @@ async fn cron_timer_fired_reschedules_timer() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -442,7 +437,6 @@ async fn cron_timer_fired_when_stopped_is_noop() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: String::new(),
         })
@@ -497,7 +491,6 @@ async fn cron_start_with_namespace() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: "cleanup".to_string(),
             run_target: "job:cleanup".to_string(),
             namespace: "myproject".to_string(),
         })
@@ -631,7 +624,6 @@ async fn cron_start_agent_sets_timer() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: String::new(),
             run_target: "agent:doctor".to_string(),
             namespace: String::new(),
         })
@@ -671,7 +663,6 @@ async fn cron_timer_fires_agent() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: String::new(),
             run_target: "agent:doctor".to_string(),
             namespace: String::new(),
         })
@@ -754,7 +745,6 @@ async fn cron_agent_concurrency_skip() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: String::new(),
             run_target: "agent:doctor".to_string(),
             namespace: String::new(),
         })
@@ -849,7 +839,6 @@ async fn cron_agent_concurrency_respawns_after_complete() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "30m".to_string(),
-            job_name: String::new(),
             run_target: "agent:doctor".to_string(),
             namespace: String::new(),
         })
@@ -1117,7 +1106,6 @@ async fn cron_job_concurrency_skip() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "10m".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             namespace: String::new(),
         })
@@ -1210,7 +1198,6 @@ async fn cron_job_concurrency_respawns_after_complete() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "10m".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             namespace: String::new(),
         })
@@ -1276,7 +1263,6 @@ async fn cron_job_concurrency_default_singleton() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "10m".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             namespace: String::new(),
         })
@@ -1338,7 +1324,6 @@ async fn cron_job_concurrency_allows_multiple() {
             project_root: ctx.project_root.clone(),
             runbook_hash: runbook_hash.clone(),
             interval: "10m".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             namespace: String::new(),
         })

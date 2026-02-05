@@ -32,28 +32,6 @@ on_idle = "resume"
 }
 
 #[test]
-fn on_idle_rejects_recover_alias() {
-    // "recover" alias should also be rejected for on_idle
-    let toml = r#"
-[agent.test]
-run = "claude"
-on_idle = "recover"
-"#;
-    let err = parse_runbook(toml).unwrap_err();
-    let msg = err.to_string();
-    assert!(
-        msg.contains("on_idle"),
-        "error should mention 'on_idle': {}",
-        msg
-    );
-    assert!(
-        msg.contains("still running"),
-        "error should mention 'still running': {}",
-        msg
-    );
-}
-
-#[test]
 fn on_dead_rejects_nudge() {
     let toml = r#"
 [agent.test]
@@ -115,20 +93,6 @@ on_error = "resume"
 }
 
 #[test]
-fn on_error_accepts_recover_alias() {
-    // "recover" alias should also be accepted for on_error (maps to Resume)
-    let toml = r#"
-[agent.test]
-run = "claude"
-on_error = "recover"
-"#;
-    assert!(
-        parse_runbook(toml).is_ok(),
-        "on_error should accept 'recover' alias"
-    );
-}
-
-#[test]
 fn on_error_rejects_done() {
     let toml = r#"
 [agent.test]
@@ -166,7 +130,7 @@ on_idle = "{}"
 
 #[test]
 fn valid_on_dead_actions() {
-    for action in ["done", "resume", "recover", "escalate", "fail", "gate"] {
+    for action in ["done", "resume", "escalate", "fail", "gate"] {
         let toml = format!(
             r#"
 [agent.test]

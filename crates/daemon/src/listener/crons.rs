@@ -62,14 +62,14 @@ pub(super) fn handle_cron_start(
     };
 
     // Validate run is a job or agent reference
-    let (job_name, run_target) = match &cron_def.run {
+    let run_target = match &cron_def.run {
         oj_runbook::RunDirective::Job { job } => {
             if runbook.get_job(job).is_none() {
                 return Ok(Response::Error {
                     message: format!("cron '{}' references unknown job '{}'", cron_name, job),
                 });
             }
-            (job.clone(), format!("job:{}", job))
+            format!("job:{}", job)
         }
         oj_runbook::RunDirective::Agent { agent, .. } => {
             if runbook.get_agent(agent).is_none() {
@@ -77,7 +77,7 @@ pub(super) fn handle_cron_start(
                     message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
                 });
             }
-            (String::new(), format!("agent:{}", agent))
+            format!("agent:{}", agent)
         }
         _ => {
             return Ok(Response::Error {
@@ -108,7 +108,6 @@ pub(super) fn handle_cron_start(
         project_root: project_root.to_path_buf(),
         runbook_hash,
         interval: cron_def.interval.clone(),
-        job_name,
         run_target,
         namespace: namespace.to_string(),
     };
@@ -210,7 +209,7 @@ pub(super) async fn handle_cron_once(
     };
 
     // Validate run is a job or agent reference and build event
-    let (job_name, run_target) = match &cron_def.run {
+    let (job_kind, run_target) = match &cron_def.run {
         oj_runbook::RunDirective::Job { job } => {
             if runbook.get_job(job).is_none() {
                 return Ok(Response::Error {
@@ -280,14 +279,14 @@ pub(super) async fn handle_cron_once(
     } else {
         // Generate job ID
         let job_id = JobId::new(UuidIdGen.next());
-        let job_display_name = oj_runbook::job_display_name(&job_name, job_id.short(8), namespace);
+        let job_display_name = oj_runbook::job_display_name(&job_kind, job_id.short(8), namespace);
 
         // Emit CronOnce event to create job via the cron code path
         let event = Event::CronOnce {
             cron_name: cron_name.to_string(),
             job_id: job_id.clone(),
             job_name: job_display_name.clone(),
-            job_kind: job_name.clone(),
+            job_kind: job_kind.clone(),
             agent_run_id: None,
             agent_name: None,
             project_root: project_root.to_path_buf(),

@@ -463,7 +463,7 @@ fn parses_action_with_append() {
     }
 
     let toml = r#"
-        on_dead = { action = "recover", message = "Previous attempt exited.", append = true }
+        on_dead = { action = "resume", message = "Previous attempt exited.", append = true }
     "#;
     let config: TestConfig = toml::from_str(toml).unwrap();
     assert_eq!(config.on_dead.action(), &AgentAction::Resume);
@@ -482,7 +482,7 @@ fn parses_per_error_actions() {
     let toml = r#"
         [[on_error]]
         match = "no_internet"
-        action = "recover"
+        action = "resume"
         message = "Network restored"
 
         [[on_error]]
@@ -529,7 +529,7 @@ fn error_action_config_default_when_no_match() {
     let toml = r#"
         [[on_error]]
         match = "rate_limited"
-        action = "recover"
+        action = "resume"
     "#;
     let config: TestConfig = toml::from_str(toml).unwrap();
 

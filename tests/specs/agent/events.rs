@@ -185,7 +185,7 @@ prompt = "Do the task."
 
 [[agent.worker.on_error]]
 match = "rate_limited"
-action = "recover"
+action = "resume"
 message = "Rate limit cleared, try again."
 
 [[agent.worker.on_error]]

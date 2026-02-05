@@ -537,10 +537,13 @@ fn sessions_survive_normal_shutdown() {
 /// should fail to start with a clear error message that propagates to the CLI.
 #[test]
 fn daemon_start_shows_migration_error_for_too_new_snapshot() {
+    use std::io::Write;
+
     let temp = Project::empty();
 
     // Write a snapshot with a version that's too new (v99)
     // The daemon only supports up to CURRENT_SNAPSHOT_VERSION (currently 1)
+    // The snapshot must be zstd-compressed (uncompressed fallback was removed)
     let snapshot_json = r#"{
         "v": 99,
         "seq": 1,
@@ -559,7 +562,12 @@ fn daemon_start_shows_migration_error_for_too_new_snapshot() {
     }"#;
     let snapshot_path = temp.state_path().join("snapshot.json");
     std::fs::create_dir_all(temp.state_path()).unwrap();
-    std::fs::write(&snapshot_path, snapshot_json).unwrap();
+
+    // Write zstd-compressed snapshot
+    let file = std::fs::File::create(&snapshot_path).unwrap();
+    let mut encoder = zstd::stream::Encoder::new(file, 3).unwrap();
+    encoder.write_all(snapshot_json.as_bytes()).unwrap();
+    encoder.finish().unwrap();
 
     // Daemon start should fail with a migration error
     temp.oj()

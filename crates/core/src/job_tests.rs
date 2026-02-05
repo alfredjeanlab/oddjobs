@@ -336,24 +336,37 @@ fn step_status_waiting_is_waiting() {
 }
 
 #[test]
-fn step_status_serde_backward_compat() {
-    // Old format: unit variant string
-    let old_json = r#""Waiting""#;
-    let parsed: StepStatus = serde_json::from_str(old_json).unwrap();
+fn step_status_serde_roundtrip() {
+    // Waiting with None
+    let json = r#"{"Waiting":null}"#;
+    let parsed: StepStatus = serde_json::from_str(json).unwrap();
     assert_eq!(parsed, StepStatus::Waiting(None));
 
-    // New format: map with null
-    let new_json = r#"{"Waiting":null}"#;
-    let parsed: StepStatus = serde_json::from_str(new_json).unwrap();
-    assert_eq!(parsed, StepStatus::Waiting(None));
-
-    // New format: map with decision_id
-    let new_json_id = r#"{"Waiting":"dec-abc123"}"#;
-    let parsed: StepStatus = serde_json::from_str(new_json_id).unwrap();
+    // Waiting with decision_id
+    let json_id = r#"{"Waiting":"dec-abc123"}"#;
+    let parsed: StepStatus = serde_json::from_str(json_id).unwrap();
     assert_eq!(parsed, StepStatus::Waiting(Some("dec-abc123".to_string())));
 
-    // Serialization produces the new format
+    // Roundtrip serialization
     let serialized = serde_json::to_string(&StepStatus::Waiting(None)).unwrap();
     let reparsed: StepStatus = serde_json::from_str(&serialized).unwrap();
     assert_eq!(reparsed, StepStatus::Waiting(None));
+
+    // Unit variants
+    assert_eq!(
+        serde_json::to_string(&StepStatus::Pending).unwrap(),
+        r#""Pending""#
+    );
+    assert_eq!(
+        serde_json::to_string(&StepStatus::Running).unwrap(),
+        r#""Running""#
+    );
+    assert_eq!(
+        serde_json::to_string(&StepStatus::Completed).unwrap(),
+        r#""Completed""#
+    );
+    assert_eq!(
+        serde_json::to_string(&StepStatus::Failed).unwrap(),
+        r#""Failed""#
+    );
 }

@@ -352,14 +352,13 @@ pub enum ActionTrigger {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentAction {
-    Nudge, // Send message prompting to continue
-    Done,  // Treat as success, advance job
-    Fail,  // Mark job as failed
-    #[serde(alias = "recover")]
+    Nudge,  // Send message prompting to continue
+    Done,   // Treat as success, advance job
+    Fail,   // Mark job as failed
     Resume, // Re-spawn with --resume, preserving conversation history
     #[default]
     Escalate, // Notify human
-    Gate,  // Run a shell command; advance if it passes, escalate if it fails
+    Gate,   // Run a shell command; advance if it passes, escalate if it fails
 }
 
 impl AgentAction {

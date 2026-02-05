@@ -30,7 +30,7 @@ fn make_cron_record(
     namespace: &str,
     status: &str,
     interval: &str,
-    job_name: &str,
+    job_kind: &str,
 ) -> oj_storage::CronRecord {
     oj_storage::CronRecord {
         name: name.to_string(),
@@ -39,8 +39,7 @@ fn make_cron_record(
         runbook_hash: "fake-hash".to_string(),
         status: status.to_string(),
         interval: interval.to_string(),
-        job_name: job_name.to_string(),
-        run_target: format!("job:{}", job_name),
+        run_target: format!("job:{}", job_kind),
         started_at_ms: clock.epoch_ms(),
         last_fired_at_ms: None,
     }
@@ -100,7 +99,7 @@ fn start_applies_state_before_responding() {
     assert_eq!(cron.name, "nightly");
     assert_eq!(cron.status, "running");
     assert_eq!(cron.interval, "24h");
-    assert_eq!(cron.job_name, "deploy");
+    assert_eq!(cron.run_target, "job:deploy");
     assert!(cron.started_at_ms > 0, "started_at_ms should be set");
 }
 
@@ -165,7 +164,7 @@ fn start_idempotent_overwrites_existing() {
     assert_eq!(cron.status, "running");
     // Interval updated from runbook (24h, not the old 12h)
     assert_eq!(cron.interval, "24h");
-    assert_eq!(cron.job_name, "deploy");
+    assert_eq!(cron.run_target, "job:deploy");
     // started_at_ms refreshed (real wall clock, so just verify it's set)
     assert!(cron.started_at_ms > 0);
 }
@@ -316,7 +315,6 @@ fn restart_stops_existing_then_starts() {
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "1h".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             started_at_ms: 0,
             last_fired_at_ms: None,
@@ -360,7 +358,6 @@ fn restart_with_valid_runbook_returns_started() {
             runbook_hash: "old-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            job_name: "deploy".to_string(),
             run_target: "job:deploy".to_string(),
             started_at_ms: 0,
             last_fired_at_ms: None,
@@ -397,7 +394,6 @@ async fn once_with_wrong_project_root_falls_back_to_namespace() {
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            job_name: "deploy".to_string(),
             run_target: String::new(),
             started_at_ms: 1_000,
             last_fired_at_ms: None,

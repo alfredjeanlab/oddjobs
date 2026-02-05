@@ -19,7 +19,6 @@ fn make_cron_record(
         runbook_hash: String::new(),
         status: status.to_string(),
         interval: interval.to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         started_at_ms,
         last_fired_at_ms,

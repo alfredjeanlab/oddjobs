@@ -156,7 +156,6 @@ where
                 project_root,
                 runbook_hash,
                 interval,
-                job_name,
                 run_target,
                 namespace,
             } => {
@@ -166,8 +165,7 @@ where
                         project_root,
                         runbook_hash,
                         interval,
-                        job_name,
-                        run_target_str: run_target,
+                        run_target,
                         namespace,
                     })
                     .await?,

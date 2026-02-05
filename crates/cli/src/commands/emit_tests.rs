@@ -25,8 +25,8 @@ fn parse_signal_payload_plain_with_whitespace() {
 }
 
 #[test]
-fn parse_signal_payload_json_action_complete() {
-    let result = parse_signal_payload(r#"{"action": "complete"}"#).unwrap();
+fn parse_signal_payload_json_kind_complete() {
+    let result = parse_signal_payload(r#"{"kind": "complete"}"#).unwrap();
     assert_eq!(result.kind, AgentSignalKind::Complete);
     assert_eq!(result.message, None);
 }

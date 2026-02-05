@@ -753,17 +753,11 @@ pub(super) fn handle_query(
                 .values()
                 .map(|c| {
                     let time = query_crons::cron_time_display(c, now_ms);
-                    // Use run_target if available, fall back to job_name
-                    let target = if !c.run_target.is_empty() {
-                        c.run_target.clone()
-                    } else {
-                        c.job_name.clone()
-                    };
                     CronSummary {
                         name: c.name.clone(),
                         namespace: c.namespace.clone(),
                         interval: c.interval.clone(),
-                        job: target,
+                        job: c.run_target.clone(),
                         status: c.status.clone(),
                         time,
                     }

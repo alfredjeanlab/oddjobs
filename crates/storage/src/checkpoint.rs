@@ -36,7 +36,7 @@ use crate::{MaterializedState, Snapshot, SnapshotError, CURRENT_SNAPSHOT_VERSION
 use chrono::Utc;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{BufReader, Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
@@ -281,44 +281,23 @@ fn checkpoint_blocking<W: CheckpointWriter>(
     Ok(CheckpointResult { seq, size_bytes })
 }
 
-/// Load a snapshot, automatically detecting compression.
-///
-/// Supports both compressed (zstd) and uncompressed (JSON) formats for
-/// backward compatibility.
+/// Load a zstd-compressed snapshot.
 pub fn load_snapshot(path: &Path) -> Result<Option<Snapshot>, SnapshotError> {
     if !path.exists() {
         return Ok(None);
     }
 
+    // Decompress and parse
     let file = File::open(path)?;
-    let mut reader = BufReader::new(file);
+    let decoder = zstd::stream::read::Decoder::new(file)
+        .map_err(|e| SnapshotError::Io(std::io::Error::other(e.to_string())))?;
+    let value: Value = serde_json::from_reader(decoder)?;
 
-    // Read magic bytes to detect format
-    let mut magic = [0u8; 4];
-    if reader.read_exact(&mut magic).is_err() {
-        // File too small, try as JSON
-        return Snapshot::load(path);
-    }
-
-    // zstd magic number: 0x28 0xB5 0x2F 0xFD
-    let is_zstd = magic == [0x28, 0xB5, 0x2F, 0xFD];
-
-    if is_zstd {
-        // Reopen and decompress to Value for migration support
-        let file = File::open(path)?;
-        let decoder = zstd::stream::read::Decoder::new(file)
-            .map_err(|e| SnapshotError::Io(std::io::Error::other(e.to_string())))?;
-        let value: Value = serde_json::from_reader(decoder)?;
-
-        // Run through migration (same as JSON path)
-        let registry = MigrationRegistry::new();
-        let migrated = registry.migrate_to(value, CURRENT_SNAPSHOT_VERSION)?;
-        let snapshot: Snapshot = serde_json::from_value(migrated)?;
-        Ok(Some(snapshot))
-    } else {
-        // Fall back to uncompressed JSON (backward compat)
-        Snapshot::load(path)
-    }
+    // Run through migration
+    let registry = MigrationRegistry::new();
+    let migrated = registry.migrate_to(value, CURRENT_SNAPSHOT_VERSION)?;
+    let snapshot: Snapshot = serde_json::from_value(migrated)?;
+    Ok(Some(snapshot))
 }
 
 #[cfg(test)]

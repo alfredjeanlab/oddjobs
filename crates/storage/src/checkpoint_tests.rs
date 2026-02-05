@@ -68,12 +68,6 @@ impl FakeCheckpointWriter {
         self.fail_fsync_dir.store(fail, Ordering::SeqCst);
     }
 
-    // NOTE(compat): keep for future checkpoint tests
-    #[allow(dead_code)]
-    pub fn set_fail_rename(&self, fail: bool) {
-        self.fail_rename.store(fail, Ordering::SeqCst);
-    }
-
     pub fn log(&self) -> IoLog {
         self.log.lock().unwrap().clone()
     }
@@ -374,22 +368,6 @@ fn test_load_snapshot_detects_compression() {
     let loaded = load_snapshot(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 42);
     assert_eq!(loaded.state.jobs.len(), 3);
-}
-
-#[test]
-fn test_load_snapshot_backward_compat_uncompressed() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("snapshot.json");
-
-    // Write uncompressed JSON directly (old format)
-    let state = create_test_state(2);
-    let snapshot = Snapshot::new(10, state);
-    snapshot.save(&path).unwrap();
-
-    // load_snapshot should handle uncompressed format
-    let loaded = load_snapshot(&path).unwrap().unwrap();
-    assert_eq!(loaded.seq, 10);
-    assert_eq!(loaded.state.jobs.len(), 2);
 }
 
 #[test]

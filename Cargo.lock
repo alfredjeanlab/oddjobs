@@ -1249,6 +1249,7 @@ dependencies = [
  "serial_test",
  "similar-asserts",
  "tempfile",
+ "zstd",
 ]
 
 [[package]]

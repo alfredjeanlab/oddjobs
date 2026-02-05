@@ -216,60 +216,6 @@ fn workspace_type_legacy_persistent_maps_to_folder() {
 }
 
 #[test]
-fn workspace_backward_compat_mode_alias_deserializes() {
-    // Simulate an old WAL event with "mode" instead of "workspace_type"
-    let json = r#"{
-        "type": "workspace:created",
-        "id": "ws-old",
-        "path": "/tmp/old",
-        "branch": null,
-        "owner": null,
-        "mode": "ephemeral"
-    }"#;
-
-    let event: Event = serde_json::from_str(json).unwrap();
-    let mut state = MaterializedState::default();
-    state.apply_event(&event);
-
-    assert!(state.workspaces.contains_key("ws-old"));
-    assert_eq!(
-        state.workspaces["ws-old"].workspace_type,
-        WorkspaceType::Folder
-    );
-}
-
-#[test]
-fn workspace_snapshot_backward_compat_mode_field() {
-    // Simulate an old snapshot with "mode" field on workspace records
-    let json = r#"{
-        "jobs": {},
-        "sessions": {},
-        "workspaces": {
-            "ws-old": {
-                "id": "ws-old",
-                "path": "/tmp/old",
-                "branch": null,
-                "owner": null,
-                "status": "Ready",
-                "mode": "ephemeral"
-            }
-        },
-        "workers": {},
-        "runbooks": {}
-    }"#;
-
-    let state: MaterializedState = serde_json::from_str(json).unwrap();
-    assert!(state.workspaces.contains_key("ws-old"));
-    // "mode" alias on Workspace struct maps to workspace_type,
-    // but the value "ephemeral" doesn't match the WorkspaceType enum's
-    // rename_all = "lowercase" for Folder/Worktree, so it falls back to default (Folder)
-    assert_eq!(
-        state.workspaces["ws-old"].workspace_type,
-        WorkspaceType::Folder
-    );
-}
-
-#[test]
 fn get_job_exact_match() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("pipe-abc123", "build", "test", "init"));
@@ -570,7 +516,7 @@ fn step_history_backward_compat_empty_on_old_snapshot() {
                 "kind": "build",
                 "step": "init",
                 "step_status": "Running",
-                "input": {},
+                "vars": {},
                 "runbook_hash": "abc",
                 "cwd": "/tmp",
                 "workspace_id": null,

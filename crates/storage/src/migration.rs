@@ -38,8 +38,6 @@ impl MigrationRegistry {
         Self {
             migrations: Vec::new(),
         }
-        // Future: register migrations here
-        // registry.migrations.push(Box::new(V1ToV2));
     }
 
     /// Migrate a snapshot to the target version.

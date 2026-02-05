@@ -144,7 +144,7 @@ run = {{ agent = "worker" }}
 [agent.worker]
 run = "claudeless --scenario {} -p"
 prompt = "Run a slow task."
-on_dead = {{ action = "recover", attempts = 3 }}
+on_dead = {{ action = "resume", attempts = 3 }}
 "#,
         scenario_path.display()
     )

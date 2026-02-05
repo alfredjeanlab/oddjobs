@@ -12,7 +12,6 @@ fn cron_started_creates_record() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
@@ -24,7 +23,7 @@ fn cron_started_creates_record() {
     assert_eq!(record.namespace, "myns");
     assert_eq!(record.status, "running");
     assert_eq!(record.interval, "30m");
-    assert_eq!(record.job_name, "cleanup");
+    assert_eq!(record.run_target, "job:cleanup");
 }
 
 #[test]
@@ -35,7 +34,6 @@ fn cron_stopped_updates_status() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -60,7 +58,6 @@ fn cron_started_is_idempotent() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -71,7 +68,6 @@ fn cron_started_is_idempotent() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "def456".to_string(),
         interval: "1h".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -89,7 +85,6 @@ fn cron_deleted_removes_record() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: "myns".to_string(),
     });
@@ -117,7 +112,6 @@ fn cron_deleted_empty_namespace() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -162,7 +156,6 @@ fn cron_fired_updates_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -187,7 +180,6 @@ fn cron_started_sets_started_at_ms() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -203,7 +195,6 @@ fn cron_restart_preserves_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
@@ -224,7 +215,6 @@ fn cron_restart_preserves_last_fired_at() {
         project_root: PathBuf::from("/test/project"),
         runbook_hash: "abc123".to_string(),
         interval: "30m".to_string(),
-        job_name: "cleanup".to_string(),
         run_target: "job:cleanup".to_string(),
         namespace: String::new(),
     });
