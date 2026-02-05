@@ -12,7 +12,7 @@
 
 use super::*;
 use oj_adapters::SessionCall;
-use oj_core::{AgentRunId, AgentRunStatus, AgentSignalKind, TimerId};
+use oj_core::{AgentRunId, AgentRunStatus, AgentSignalKind, OwnerId, TimerId};
 
 // =============================================================================
 // Runbook definitions for standalone agent tests
@@ -917,7 +917,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
 // =============================================================================
 
 #[tokio::test]
-async fn register_agent_run_adds_mapping() {
+async fn register_agent_adds_mapping() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     let agent_id = AgentId::new("test-agent");
@@ -925,11 +925,11 @@ async fn register_agent_run_adds_mapping() {
 
     // Register mapping
     ctx.runtime
-        .register_agent_run(agent_id.clone(), agent_run_id.clone());
+        .register_agent(agent_id.clone(), OwnerId::agent_run(agent_run_id.clone()));
 
     // Verify mapping exists
-    let mapped_run_id = ctx.runtime.agent_runs.lock().get(&agent_id).cloned();
-    assert_eq!(mapped_run_id, Some(agent_run_id));
+    let mapped_owner = ctx.runtime.agent_owners.lock().get(&agent_id).cloned();
+    assert_eq!(mapped_owner, Some(OwnerId::agent_run(agent_run_id)));
 }
 
 // =============================================================================

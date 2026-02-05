@@ -12,7 +12,7 @@ use oj_adapters::subprocess::{run_with_timeout, GATE_TIMEOUT};
 use oj_adapters::AgentReconnectConfig;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, PromptType, QuestionData,
+    AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, OwnerId, PromptType, QuestionData,
     SessionId, TimerId,
 };
 use std::collections::HashMap;
@@ -49,9 +49,8 @@ where
         let workspace_path = self.execution_dir(job);
 
         // Register agent -> job mapping
-        self.agent_jobs
-            .lock()
-            .insert(agent_id.clone(), job.id.clone());
+        let job_id = JobId::new(&job.id);
+        self.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
 
         // Extract process_name from the runbook's agent definition
         let process_name = self
@@ -83,14 +82,6 @@ where
             .await?;
 
         Ok(())
-    }
-
-    /// Register an agent→job mapping without reconnecting.
-    ///
-    /// Used during recovery for dead sessions where we only need to route
-    /// the AgentStateChanged event back to the correct job.
-    pub fn register_agent_job(&self, agent_id: AgentId, job_id: JobId) {
-        self.agent_jobs.lock().insert(agent_id, job_id.to_string());
     }
 
     pub(crate) async fn spawn_agent(
@@ -149,9 +140,7 @@ where
 
         // Register agent -> job mapping for AgentStateChanged handling
         if let Some(ref aid) = agent_id {
-            self.agent_jobs
-                .lock()
-                .insert(aid.clone(), job_id.to_string());
+            self.register_agent(aid.clone(), OwnerId::job(job_id.clone()));
 
             // Persist agent_id to WAL via StepStarted event (for daemon crash recovery)
             effects.push(Effect::Emit {
@@ -715,45 +704,59 @@ where
         kind: AgentSignalKind,
         message: Option<String>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Check standalone agent runs first
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        if let Some(agent_run_id) = maybe_run_id {
-            let agent_run = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
-            if let Some(agent_run) = agent_run {
-                return self
-                    .handle_standalone_agent_done(agent_id, &agent_run, kind, message)
-                    .await;
-            }
-        }
-
-        let Some(job_id_str) = self.agent_jobs.lock().get(agent_id).cloned() else {
+        let Some(owner) = self.get_agent_owner(agent_id) else {
             tracing::warn!(agent_id = %agent_id, "agent:signal for unknown agent");
             return Ok(vec![]);
         };
-        let job = self.require_job(&job_id_str)?;
-        if job.is_terminal() {
-            return Ok(vec![]);
+
+        match owner {
+            OwnerId::AgentRun(agent_run_id) => {
+                let agent_run =
+                    self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
+                if let Some(agent_run) = agent_run {
+                    return self
+                        .handle_standalone_agent_done(agent_id, &agent_run, kind, message)
+                        .await;
+                }
+                Ok(vec![])
+            }
+            OwnerId::Job(job_id) => {
+                let job = self.require_job(job_id.as_str())?;
+                if job.is_terminal() {
+                    return Ok(vec![]);
+                }
+
+                // Verify this signal is for the current step's agent, not a stale signal
+                // from a previous step's agent.
+                let current_agent_id = job
+                    .step_history
+                    .iter()
+                    .rfind(|r| r.name == job.step)
+                    .and_then(|r| r.agent_id.as_deref());
+                if current_agent_id != Some(agent_id.as_str()) {
+                    tracing::debug!(
+                        agent_id = %agent_id,
+                        job_id = %job.id,
+                        step = %job.step,
+                        "dropping stale agent signal (agent_id mismatch)"
+                    );
+                    return Ok(vec![]);
+                }
+
+                self.handle_job_agent_done(&job, &job_id, kind, message)
+                    .await
+            }
         }
+    }
 
-        // Verify this signal is for the current step's agent, not a stale signal
-        // from a previous step's agent.
-        let current_agent_id = job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_deref());
-        if current_agent_id != Some(agent_id.as_str()) {
-            tracing::debug!(
-                agent_id = %agent_id,
-                job_id = %job.id,
-                step = %job.step,
-                "dropping stale agent signal (agent_id mismatch)"
-            );
-            return Ok(vec![]);
-        }
-
-        let job_id = JobId::new(&job.id);
-
+    /// Handle agent:signal for job-owned agents
+    async fn handle_job_agent_done(
+        &self,
+        job: &Job,
+        job_id: &JobId,
+        kind: AgentSignalKind,
+        message: Option<String>,
+    ) -> Result<Vec<Event>, RuntimeError> {
         match kind {
             AgentSignalKind::Complete => {
                 // Agent explicitly signaled completion — always advance the job.
@@ -766,9 +769,9 @@ where
 
                 // Emit agent on_done notification
                 if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
-                    if let Ok(agent_def) = crate::monitor::get_agent_def(&runbook, &job) {
+                    if let Ok(agent_def) = crate::monitor::get_agent_def(&runbook, job) {
                         if let Some(effect) = monitor::build_agent_notify_effect(
-                            &job,
+                            job,
                             agent_def,
                             agent_def.notify.on_done.as_ref(),
                         ) {
@@ -777,7 +780,7 @@ where
                     }
                 }
 
-                self.advance_job(&job).await
+                self.advance_job(job).await
             }
             AgentSignalKind::Continue => {
                 tracing::info!(job_id = %job.id, "agent:signal continue");
@@ -805,7 +808,7 @@ where
                     },
                     // Cancel exit-deferred timer (agent is still alive; liveness continues)
                     Effect::CancelTimer {
-                        id: TimerId::exit_deferred(&job_id),
+                        id: TimerId::exit_deferred(job_id),
                     },
                 ];
                 Ok(self.executor.execute_all(effects).await?)

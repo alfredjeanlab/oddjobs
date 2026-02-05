@@ -20,7 +20,7 @@ use handlers::worker::WorkerState;
 #[cfg(test)]
 use handlers::worker::WorkerStatus;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentRunId, Clock, Job, ShortId};
+use oj_core::{AgentId, Clock, Job, OwnerId, ShortId};
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 use std::collections::HashMap;
@@ -58,8 +58,7 @@ pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) worker_logger: WorkerLogger,
     pub(crate) queue_logger: QueueLogger,
     pub(crate) breadcrumb: BreadcrumbWriter,
-    pub(crate) agent_jobs: Mutex<HashMap<AgentId, String>>,
-    pub(crate) agent_runs: Mutex<HashMap<AgentId, AgentRunId>>,
+    pub(crate) agent_owners: Mutex<HashMap<AgentId, OwnerId>>,
     pub(crate) runbook_cache: Mutex<HashMap<String, Runbook>>,
     pub(crate) worker_states: Mutex<HashMap<String, WorkerState>>,
     pub(crate) cron_states: Mutex<HashMap<String, CronState>>,
@@ -91,8 +90,7 @@ where
             worker_logger: WorkerLogger::new(config.log_dir.clone()),
             queue_logger: QueueLogger::new(config.log_dir.clone()),
             breadcrumb: BreadcrumbWriter::new(config.log_dir),
-            agent_jobs: Mutex::new(HashMap::new()),
-            agent_runs: Mutex::new(HashMap::new()),
+            agent_owners: Mutex::new(HashMap::new()),
             runbook_cache: Mutex::new(HashMap::new()),
             worker_states: Mutex::new(HashMap::new()),
             cron_states: Mutex::new(HashMap::new()),
@@ -191,6 +189,21 @@ where
         job.workspace_path
             .clone()
             .unwrap_or_else(|| job.cwd.clone())
+    }
+
+    /// Look up the owner of an agent.
+    pub(crate) fn get_agent_owner(&self, agent_id: &AgentId) -> Option<OwnerId> {
+        self.agent_owners.lock().get(agent_id).cloned()
+    }
+
+    /// Register an agent with its owner.
+    pub fn register_agent(&self, agent_id: AgentId, owner: OwnerId) {
+        self.agent_owners.lock().insert(agent_id, owner);
+    }
+
+    /// Deregister an agent (returns the previous owner if any).
+    pub(crate) fn deregister_agent(&self, agent_id: &AgentId) -> Option<OwnerId> {
+        self.agent_owners.lock().remove(agent_id)
     }
 
     /// Load a runbook containing the given command name.

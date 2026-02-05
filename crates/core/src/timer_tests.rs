@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use crate::agent_run::AgentRunId;
 use crate::job::JobId;
+use crate::owner::OwnerId;
 
 #[test]
 fn timer_id_display() {
@@ -194,4 +196,115 @@ fn is_queue_poll() {
 
     let id = TimerId::new("cron:janitor");
     assert!(!id.is_queue_poll());
+}
+
+// =============================================================================
+// OwnerId-based constructor tests
+// =============================================================================
+
+#[test]
+fn owner_liveness_job() {
+    let job_id = JobId::new("job-123");
+    let owner = OwnerId::job(job_id.clone());
+    let id = TimerId::owner_liveness(&owner);
+    assert_eq!(id.as_str(), "liveness:job-123");
+}
+
+#[test]
+fn owner_liveness_agent_run() {
+    let ar_id = AgentRunId::new("ar-456");
+    let owner = OwnerId::agent_run(ar_id.clone());
+    let id = TimerId::owner_liveness(&owner);
+    assert_eq!(id.as_str(), "liveness:ar:ar-456");
+}
+
+#[test]
+fn owner_exit_deferred_job() {
+    let job_id = JobId::new("job-123");
+    let owner = OwnerId::job(job_id.clone());
+    let id = TimerId::owner_exit_deferred(&owner);
+    assert_eq!(id.as_str(), "exit-deferred:job-123");
+}
+
+#[test]
+fn owner_exit_deferred_agent_run() {
+    let ar_id = AgentRunId::new("ar-456");
+    let owner = OwnerId::agent_run(ar_id.clone());
+    let id = TimerId::owner_exit_deferred(&owner);
+    assert_eq!(id.as_str(), "exit-deferred:ar:ar-456");
+}
+
+#[test]
+fn owner_cooldown_job() {
+    let job_id = JobId::new("job-123");
+    let owner = OwnerId::job(job_id.clone());
+    let id = TimerId::owner_cooldown(&owner, "idle", 1);
+    assert_eq!(id.as_str(), "cooldown:job-123:idle:1");
+}
+
+#[test]
+fn owner_cooldown_agent_run() {
+    let ar_id = AgentRunId::new("ar-456");
+    let owner = OwnerId::agent_run(ar_id.clone());
+    let id = TimerId::owner_cooldown(&owner, "exit", 2);
+    assert_eq!(id.as_str(), "cooldown:ar:ar-456:exit:2");
+}
+
+#[test]
+fn owner_idle_grace_job() {
+    let job_id = JobId::new("job-123");
+    let owner = OwnerId::job(job_id.clone());
+    let id = TimerId::owner_idle_grace(&owner);
+    assert_eq!(id.as_str(), "idle-grace:job-123");
+}
+
+#[test]
+fn owner_idle_grace_agent_run() {
+    let ar_id = AgentRunId::new("ar-456");
+    let owner = OwnerId::agent_run(ar_id.clone());
+    let id = TimerId::owner_idle_grace(&owner);
+    assert_eq!(id.as_str(), "idle-grace:ar:ar-456");
+}
+
+#[test]
+fn owner_id_extracts_job() {
+    let id = TimerId::liveness(&JobId::new("job-123"));
+    let owner = id.owner_id();
+    assert_eq!(owner, Some(OwnerId::job(JobId::new("job-123"))));
+}
+
+#[test]
+fn owner_id_extracts_agent_run() {
+    let id = TimerId::liveness_agent_run(&AgentRunId::new("ar-456"));
+    let owner = id.owner_id();
+    assert_eq!(owner, Some(OwnerId::agent_run(AgentRunId::new("ar-456"))));
+}
+
+#[test]
+fn owner_id_returns_none_for_unrelated() {
+    let id = TimerId::cron("janitor", "");
+    assert_eq!(id.owner_id(), None);
+}
+
+// =============================================================================
+// job_id_str exclusion tests
+// =============================================================================
+
+#[test]
+fn job_id_str_excludes_agent_run_liveness() {
+    // Agent run timer: should NOT return a job_id
+    let id = TimerId::liveness_agent_run(&AgentRunId::new("ar-123"));
+    assert_eq!(id.job_id_str(), None);
+}
+
+#[test]
+fn job_id_str_excludes_agent_run_cooldown() {
+    let id = TimerId::cooldown_agent_run(&AgentRunId::new("ar-123"), "idle", 0);
+    assert_eq!(id.job_id_str(), None);
+}
+
+#[test]
+fn job_id_str_excludes_agent_run_idle_grace() {
+    let id = TimerId::idle_grace_agent_run(&AgentRunId::new("ar-123"));
+    assert_eq!(id.job_id_str(), None);
 }

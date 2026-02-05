@@ -275,7 +275,7 @@ where
 
         // 3. Deregister agent→job mappings (prevents stale watcher events)
         for agent_id in &agent_ids {
-            self.agent_jobs.lock().remove(agent_id);
+            self.deregister_agent(agent_id);
         }
 
         // 4. Kill agents (this also stops their watchers)

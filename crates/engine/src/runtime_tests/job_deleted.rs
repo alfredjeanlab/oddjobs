@@ -146,9 +146,9 @@ async fn job_deleted_deregisters_agent_mapping() {
 
     // Verify agent→job mapping exists
     {
-        let agent_jobs = ctx.runtime.agent_jobs.lock();
+        let agent_owners = ctx.runtime.agent_owners.lock();
         assert!(
-            agent_jobs.contains_key(&agent_id),
+            agent_owners.contains_key(&agent_id),
             "agent mapping should exist before delete"
         );
     }
@@ -163,9 +163,9 @@ async fn job_deleted_deregisters_agent_mapping() {
 
     // Agent→job mapping should be removed
     {
-        let agent_jobs = ctx.runtime.agent_jobs.lock();
+        let agent_owners = ctx.runtime.agent_owners.lock();
         assert!(
-            !agent_jobs.contains_key(&agent_id),
+            !agent_owners.contains_key(&agent_id),
             "agent mapping should be removed after delete"
         );
     }
@@ -314,6 +314,7 @@ async fn job_deleted_handles_terminal_job() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();

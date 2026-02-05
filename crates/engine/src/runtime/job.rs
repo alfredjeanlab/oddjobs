@@ -184,9 +184,7 @@ where
                 .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_jobs
-                    .lock()
-                    .remove(&oj_core::AgentId::new(agent_id));
+                self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
 
             // Kill the agent's tmux session before moving to the next step
@@ -330,9 +328,7 @@ where
                 .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_jobs
-                    .lock()
-                    .remove(&oj_core::AgentId::new(agent_id));
+                self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
 
             // Kill the agent's tmux session before moving to the failure step
@@ -539,9 +535,7 @@ where
                 .rfind(|r| r.name == job.step)
                 .and_then(|r| r.agent_id.as_ref())
             {
-                self.agent_jobs
-                    .lock()
-                    .remove(&oj_core::AgentId::new(agent_id));
+                self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
 
             if let Some(session_id) = &job.session_id {

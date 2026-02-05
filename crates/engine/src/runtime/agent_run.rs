@@ -10,7 +10,7 @@ use oj_adapters::agent::find_session_log;
 use oj_adapters::subprocess::{run_with_timeout, GATE_TIMEOUT};
 use oj_adapters::{AgentAdapter, AgentReconnectConfig, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event, JobId,
+    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event, OwnerId,
     QuestionData, SessionId, TimerId,
 };
 use oj_runbook::AgentDef;
@@ -54,13 +54,7 @@ where
         } = params;
 
         // Build a SpawnContext for standalone agent
-        let sentinel_job_id = JobId::new("");
-        let ctx = crate::spawn::SpawnContext {
-            job_id: &sentinel_job_id,
-            agent_run_id: Some(agent_run_id),
-            name: agent_name,
-            namespace,
-        };
+        let ctx = crate::spawn::SpawnContext::for_agent_run(agent_run_id, agent_name, namespace);
 
         let effects = crate::spawn::build_spawn_effects(
             agent_def,
@@ -80,9 +74,7 @@ where
 
         // Register agent → agent_run mapping
         if let Some(ref aid) = agent_id {
-            self.agent_runs
-                .lock()
-                .insert(aid.clone(), agent_run_id.clone());
+            self.register_agent(aid.clone(), OwnerId::agent_run(agent_run_id.clone()));
         }
 
         // Execute spawn effects, handling spawn failures gracefully
@@ -642,7 +634,7 @@ where
         // Deregister agent → agent_run mapping so stale watcher events
         // from the dying session are dropped as unknown.
         if let Some(ref aid) = agent_run.agent_id {
-            self.agent_runs.lock().remove(&AgentId::new(aid));
+            self.deregister_agent(&AgentId::new(aid));
         }
 
         // Kill the tmux session and emit SessionDeleted
@@ -776,9 +768,7 @@ where
         })?;
 
         // Register agent → agent_run mapping
-        self.agent_runs
-            .lock()
-            .insert(agent_id.clone(), agent_run_id.clone());
+        self.register_agent(agent_id.clone(), OwnerId::agent_run(agent_run_id.clone()));
 
         // Extract process_name
         let process_name = self
@@ -807,10 +797,5 @@ where
             .await?;
 
         Ok(())
-    }
-
-    /// Register an agent→agent_run mapping without reconnecting.
-    pub fn register_agent_run(&self, agent_id: AgentId, agent_run_id: AgentRunId) {
-        self.agent_runs.lock().insert(agent_id, agent_run_id);
     }
 }

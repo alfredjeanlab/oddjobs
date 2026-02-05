@@ -61,7 +61,7 @@ where
             | Event::AgentExited { .. }
             | Event::AgentGone { .. } => {
                 // Note: owner is used for WAL replay routing in state.rs, not here.
-                // The runtime routes by agent_id through its agent_jobs/agent_runs maps.
+                // The runtime routes by agent_id through its agent_owners map.
                 if let Some((agent_id, state, _owner)) = event.as_agent_state() {
                     result_events.extend(self.handle_agent_state_changed(agent_id, &state).await?);
                 }

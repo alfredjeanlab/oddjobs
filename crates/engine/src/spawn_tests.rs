@@ -558,14 +558,8 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
         .into_iter()
         .collect();
 
-    let empty_job_id = JobId::new("");
     let agent_run_id = oj_core::AgentRunId::new("ar-test-1");
-    let ctx = SpawnContext {
-        job_id: &empty_job_id,
-        agent_run_id: Some(&agent_run_id),
-        name: "fixer",
-        namespace: "",
-    };
+    let ctx = SpawnContext::for_agent_run(&agent_run_id, "fixer", "");
     let effects = build_spawn_effects(
         &agent,
         &ctx,

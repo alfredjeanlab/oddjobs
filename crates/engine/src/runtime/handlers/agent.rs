@@ -8,8 +8,8 @@ use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, JobId,
-    PromptType, QuestionData, SessionId, TimerId,
+    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, Job, JobId,
+    OwnerId, PromptType, QuestionData, SessionId, TimerId,
 };
 use std::collections::HashMap;
 use std::time::Duration;
@@ -24,14 +24,19 @@ pub(crate) fn idle_grace_period() -> Duration {
     }
 }
 
-/// Result of validating a standalone agent run.
-enum StandaloneValidation {
-    /// Agent run found and valid for processing
-    Valid(Box<AgentRun>),
-    /// Agent run exists but should be skipped (terminal or stale)
+/// Result of looking up an agent's owner context.
+enum OwnerContext {
+    /// Agent is owned by a job
+    Job { job: Box<Job>, job_id: JobId },
+    /// Agent is owned by a standalone agent run
+    AgentRun {
+        agent_run: Box<AgentRun>,
+        agent_run_id: AgentRunId,
+    },
+    /// Owner found but should be skipped (terminal or stale)
     Skip,
-    /// No standalone agent run for this agent_id, fall through to job handling
-    NotStandalone,
+    /// No owner registered for this agent_id
+    Unknown,
 }
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -41,41 +46,79 @@ where
     N: NotifyAdapter,
     C: Clock,
 {
-    /// Look up and validate a standalone agent run by agent_id.
+    /// Look up and validate an agent's owner context by agent_id.
     ///
-    /// Checks that:
-    /// 1. An agent run is registered for this agent_id
-    /// 2. The agent run is not in a terminal state
-    /// 3. The agent_id matches (not a stale event from a previous run)
-    fn validate_standalone_agent_run(&self, agent_id: &AgentId) -> StandaloneValidation {
-        // Look up agent_run_id from tracking map
-        let maybe_run_id = { self.agent_runs.lock().get(agent_id).cloned() };
-        let Some(agent_run_id) = maybe_run_id else {
-            return StandaloneValidation::NotStandalone;
+    /// Returns the owner (Job or AgentRun) if found and valid for processing,
+    /// Skip if the owner is terminal or the agent_id is stale, or Unknown if
+    /// no owner is registered.
+    fn get_owner_context(&self, agent_id: &AgentId) -> OwnerContext {
+        let Some(owner) = self.get_agent_owner(agent_id) else {
+            return OwnerContext::Unknown;
         };
 
-        // Get the actual agent run from state
-        let Some(agent_run) = self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
-        else {
-            return StandaloneValidation::NotStandalone;
-        };
+        match owner {
+            OwnerId::Job(job_id) => {
+                // Get the job from state
+                let Some(job) = self.get_job(job_id.as_str()) else {
+                    return OwnerContext::Unknown;
+                };
 
-        // Skip if terminal
-        if agent_run.status.is_terminal() {
-            return StandaloneValidation::Skip;
+                // Skip if terminal
+                if job.is_terminal() {
+                    return OwnerContext::Skip;
+                }
+
+                // Verify this event is for the current step's agent, not a stale event
+                let current_agent_id = job
+                    .step_history
+                    .iter()
+                    .rfind(|r| r.name == job.step)
+                    .and_then(|r| r.agent_id.as_deref());
+                if current_agent_id != Some(agent_id.as_str()) {
+                    tracing::debug!(
+                        agent_id = %agent_id,
+                        job_id = %job.id,
+                        step = %job.step,
+                        current_agent = ?current_agent_id,
+                        "dropping stale agent event (agent_id mismatch)"
+                    );
+                    return OwnerContext::Skip;
+                }
+
+                OwnerContext::Job {
+                    job: Box::new(job),
+                    job_id,
+                }
+            }
+            OwnerId::AgentRun(agent_run_id) => {
+                // Get the agent run from state
+                let Some(agent_run) =
+                    self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
+                else {
+                    return OwnerContext::Unknown;
+                };
+
+                // Skip if terminal
+                if agent_run.status.is_terminal() {
+                    return OwnerContext::Skip;
+                }
+
+                // Verify agent_id matches
+                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
+                    tracing::debug!(
+                        agent_id = %agent_id,
+                        agent_run_id = %agent_run.id,
+                        "dropping stale standalone agent event (agent_id mismatch)"
+                    );
+                    return OwnerContext::Skip;
+                }
+
+                OwnerContext::AgentRun {
+                    agent_run: Box::new(agent_run),
+                    agent_run_id,
+                }
+            }
         }
-
-        // Verify agent_id matches
-        if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
-            tracing::debug!(
-                agent_id = %agent_id,
-                agent_run_id = %agent_run.id,
-                "dropping stale standalone agent event (agent_id mismatch)"
-            );
-            return StandaloneValidation::Skip;
-        }
-
-        StandaloneValidation::Valid(Box::new(agent_run))
     }
 
     pub(crate) async fn handle_agent_state_changed(
@@ -83,64 +126,38 @@ where
         agent_id: &oj_core::AgentId,
         state: &oj_core::AgentState,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Check standalone agent runs first
-        match self.validate_standalone_agent_run(agent_id) {
-            StandaloneValidation::Valid(agent_run) => {
+        match self.get_owner_context(agent_id) {
+            OwnerContext::Job { job, .. } => {
+                let runbook = self.cached_runbook(&job.runbook_hash)?;
+                let agent_def = match monitor::get_agent_def(&runbook, &job) {
+                    Ok(def) => def.clone(),
+                    Err(_) => {
+                        // Job already advanced past the agent step
+                        return Ok(vec![]);
+                    }
+                };
+                self.handle_monitor_state(&job, &agent_def, MonitorState::from_agent_state(state))
+                    .await
+            }
+            OwnerContext::AgentRun { agent_run, .. } => {
                 let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
                 let agent_def = runbook
                     .get_agent(&agent_run.agent_name)
                     .ok_or_else(|| RuntimeError::AgentNotFound(agent_run.agent_name.clone()))?
                     .clone();
-                return self
-                    .handle_standalone_monitor_state(
-                        &agent_run,
-                        &agent_def,
-                        MonitorState::from_agent_state(state),
-                    )
-                    .await;
+                self.handle_standalone_monitor_state(
+                    &agent_run,
+                    &agent_def,
+                    MonitorState::from_agent_state(state),
+                )
+                .await
             }
-            StandaloneValidation::Skip => return Ok(vec![]),
-            StandaloneValidation::NotStandalone => {}
-        }
-
-        // Look up job ID for this agent
-        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
-            tracing::warn!(agent_id = %agent_id, "received AgentStateChanged for unknown agent");
-            return Ok(vec![]);
-        };
-
-        let Some(job) = self.get_active_job(&job_id) else {
-            return Ok(vec![]);
-        };
-
-        // Verify this event is for the current step's agent, not a stale event
-        // from a previous step's agent that hasn't been cleaned up yet.
-        let current_agent_id = job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_deref());
-        if current_agent_id != Some(agent_id.as_str()) {
-            tracing::debug!(
-                agent_id = %agent_id,
-                job_id = %job.id,
-                step = %job.step,
-                current_agent = ?current_agent_id,
-                "dropping stale agent event (agent_id mismatch)"
-            );
-            return Ok(vec![]);
-        }
-
-        let runbook = self.cached_runbook(&job.runbook_hash)?;
-        let agent_def = match monitor::get_agent_def(&runbook, &job) {
-            Ok(def) => def.clone(),
-            Err(_) => {
-                // Job already advanced past the agent step
-                return Ok(vec![]);
+            OwnerContext::Skip => Ok(vec![]),
+            OwnerContext::Unknown => {
+                tracing::warn!(agent_id = %agent_id, "received AgentStateChanged for unknown agent");
+                Ok(vec![])
             }
-        };
-        self.handle_monitor_state(&job, &agent_def, MonitorState::from_agent_state(state))
-            .await
+        }
     }
 
     /// Handle agent:idle from Notification hook
@@ -152,9 +169,52 @@ where
         &self,
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Check standalone agent runs first
-        match self.validate_standalone_agent_run(agent_id) {
-            StandaloneValidation::Valid(agent_run) => {
+        match self.get_owner_context(agent_id) {
+            OwnerContext::Job { job, job_id } => {
+                // If job has a signal or is already waiting for a decision, ignore
+                if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
+                    return Ok(vec![]);
+                }
+
+                // Deduplicate: if grace timer already pending, skip
+                if job.idle_grace_log_size.is_some() {
+                    tracing::debug!(
+                        job_id = %job.id,
+                        "idle grace timer already pending, deduplicating"
+                    );
+                    return Ok(vec![]);
+                }
+
+                // Record session log size and set grace timer
+                let log_size = self
+                    .executor
+                    .get_session_log_size(agent_id)
+                    .await
+                    .unwrap_or(0);
+                self.lock_state_mut(|state| {
+                    if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
+                        p.idle_grace_log_size = Some(log_size);
+                    }
+                });
+
+                tracing::debug!(
+                    job_id = %job.id,
+                    log_size,
+                    "setting idle grace timer"
+                );
+                self.executor
+                    .execute(Effect::SetTimer {
+                        id: TimerId::idle_grace(&job_id),
+                        duration: idle_grace_period(),
+                    })
+                    .await?;
+
+                Ok(vec![])
+            }
+            OwnerContext::AgentRun {
+                agent_run,
+                agent_run_id,
+            } => {
                 // Additional skip checks for idle handling
                 if agent_run.action_tracker.agent_signal.is_some()
                     || agent_run.status == AgentRunStatus::Waiting
@@ -178,9 +238,8 @@ where
                     .get_session_log_size(agent_id)
                     .await
                     .unwrap_or(0);
-                let ar_id = AgentRunId::new(&agent_run.id);
                 self.lock_state_mut(|state| {
-                    if let Some(ar) = state.agent_runs.get_mut(ar_id.as_str()) {
+                    if let Some(ar) = state.agent_runs.get_mut(agent_run_id.as_str()) {
                         ar.idle_grace_log_size = Some(log_size);
                     }
                 });
@@ -192,81 +251,19 @@ where
                 );
                 self.executor
                     .execute(Effect::SetTimer {
-                        id: TimerId::idle_grace_agent_run(&ar_id),
+                        id: TimerId::idle_grace_agent_run(&agent_run_id),
                         duration: idle_grace_period(),
                     })
                     .await?;
 
-                return Ok(vec![]);
+                Ok(vec![])
             }
-            StandaloneValidation::Skip => return Ok(vec![]),
-            StandaloneValidation::NotStandalone => {}
-        }
-
-        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
-            tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
-            return Ok(vec![]);
-        };
-
-        let Some(job) = self.get_active_job(&job_id) else {
-            return Ok(vec![]);
-        };
-
-        // If job has a signal or is already waiting for a decision, ignore
-        if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
-            return Ok(vec![]);
-        }
-
-        // Stale agent check
-        let current_agent_id = job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_deref());
-        if current_agent_id != Some(agent_id.as_str()) {
-            tracing::debug!(
-                agent_id = %agent_id,
-                job_id = %job.id,
-                "dropping stale agent:idle (agent_id mismatch)"
-            );
-            return Ok(vec![]);
-        }
-
-        // Deduplicate: if grace timer already pending, skip
-        if job.idle_grace_log_size.is_some() {
-            tracing::debug!(
-                job_id = %job.id,
-                "idle grace timer already pending, deduplicating"
-            );
-            return Ok(vec![]);
-        }
-
-        // Record session log size and set grace timer
-        let log_size = self
-            .executor
-            .get_session_log_size(agent_id)
-            .await
-            .unwrap_or(0);
-        let pid = JobId::new(&job.id);
-        self.lock_state_mut(|state| {
-            if let Some(p) = state.jobs.get_mut(pid.as_str()) {
-                p.idle_grace_log_size = Some(log_size);
+            OwnerContext::Skip => Ok(vec![]),
+            OwnerContext::Unknown => {
+                tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
+                Ok(vec![])
             }
-        });
-
-        tracing::debug!(
-            job_id = %job.id,
-            log_size,
-            "setting idle grace timer"
-        );
-        self.executor
-            .execute(Effect::SetTimer {
-                id: TimerId::idle_grace(&pid),
-                duration: idle_grace_period(),
-            })
-            .await?;
-
-        Ok(vec![])
+        }
     }
 
     /// Handle agent:prompt from Notification hook
@@ -276,9 +273,26 @@ where
         prompt_type: &PromptType,
         question_data: Option<&QuestionData>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Check standalone agent runs first
-        match self.validate_standalone_agent_run(agent_id) {
-            StandaloneValidation::Valid(agent_run) => {
+        match self.get_owner_context(agent_id) {
+            OwnerContext::Job { job, .. } => {
+                // If job has a signal or is already waiting for a decision, ignore
+                if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
+                    return Ok(vec![]);
+                }
+
+                let runbook = self.cached_runbook(&job.runbook_hash)?;
+                let agent_def = monitor::get_agent_def(&runbook, &job)?.clone();
+                self.handle_monitor_state(
+                    &job,
+                    &agent_def,
+                    MonitorState::Prompting {
+                        prompt_type: prompt_type.clone(),
+                        question_data: question_data.cloned(),
+                    },
+                )
+                .await
+            }
+            OwnerContext::AgentRun { agent_run, .. } => {
                 // Additional skip checks for prompt handling
                 if agent_run.action_tracker.agent_signal.is_some()
                     || agent_run.status == AgentRunStatus::Waiting
@@ -291,61 +305,22 @@ where
                     .get_agent(&agent_run.agent_name)
                     .ok_or_else(|| RuntimeError::AgentNotFound(agent_run.agent_name.clone()))?
                     .clone();
-                return self
-                    .handle_standalone_monitor_state(
-                        &agent_run,
-                        &agent_def,
-                        MonitorState::Prompting {
-                            prompt_type: prompt_type.clone(),
-                            question_data: question_data.cloned(),
-                        },
-                    )
-                    .await;
+                self.handle_standalone_monitor_state(
+                    &agent_run,
+                    &agent_def,
+                    MonitorState::Prompting {
+                        prompt_type: prompt_type.clone(),
+                        question_data: question_data.cloned(),
+                    },
+                )
+                .await
             }
-            StandaloneValidation::Skip => return Ok(vec![]),
-            StandaloneValidation::NotStandalone => {}
+            OwnerContext::Skip => Ok(vec![]),
+            OwnerContext::Unknown => {
+                tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
+                Ok(vec![])
+            }
         }
-
-        let Some(job_id) = self.agent_jobs.lock().get(agent_id).cloned() else {
-            tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
-            return Ok(vec![]);
-        };
-
-        let Some(job) = self.get_active_job(&job_id) else {
-            return Ok(vec![]);
-        };
-
-        // If job has a signal or is already waiting for a decision, ignore
-        if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
-            return Ok(vec![]);
-        }
-
-        // Stale agent check
-        let current_agent_id = job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_deref());
-        if current_agent_id != Some(agent_id.as_str()) {
-            tracing::debug!(
-                agent_id = %agent_id,
-                job_id = %job.id,
-                "dropping stale agent:prompt (agent_id mismatch)"
-            );
-            return Ok(vec![]);
-        }
-
-        let runbook = self.cached_runbook(&job.runbook_hash)?;
-        let agent_def = monitor::get_agent_def(&runbook, &job)?.clone();
-        self.handle_monitor_state(
-            &job,
-            &agent_def,
-            MonitorState::Prompting {
-                prompt_type: prompt_type.clone(),
-                question_data: question_data.cloned(),
-            },
-        )
-        .await
     }
 
     /// Handle agent:stop — fired when on_stop=escalate and agent tries to exit.
@@ -356,9 +331,35 @@ where
         &self,
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Check standalone agent runs first
-        match self.validate_standalone_agent_run(agent_id) {
-            StandaloneValidation::Valid(agent_run) => {
+        match self.get_owner_context(agent_id) {
+            OwnerContext::Job { job, job_id } => {
+                if job.step_status.is_waiting() {
+                    return Ok(vec![]); // Already escalated — no-op
+                }
+
+                let effects = vec![
+                    Effect::Notify {
+                        title: format!("Job needs attention: {}", job.name),
+                        message: "Agent tried to stop without signaling completion".to_string(),
+                    },
+                    Effect::Emit {
+                        event: Event::StepWaiting {
+                            job_id: job_id.clone(),
+                            step: job.step.clone(),
+                            reason: Some("on_stop: escalate".to_string()),
+                            decision_id: None,
+                        },
+                    },
+                    Effect::CancelTimer {
+                        id: TimerId::exit_deferred(&job_id),
+                    },
+                ];
+                Ok(self.executor.execute_all(effects).await?)
+            }
+            OwnerContext::AgentRun {
+                agent_run,
+                agent_run_id,
+            } => {
                 // Additional skip check: already escalated
                 if agent_run.status == AgentRunStatus::Escalated {
                     return Ok(vec![]);
@@ -371,58 +372,16 @@ where
                     },
                     Effect::Emit {
                         event: Event::AgentRunStatusChanged {
-                            id: AgentRunId::new(&agent_run.id),
+                            id: agent_run_id,
                             status: AgentRunStatus::Escalated,
                             reason: Some("on_stop: escalate".to_string()),
                         },
                     },
                 ];
-                return Ok(self.executor.execute_all(effects).await?);
+                Ok(self.executor.execute_all(effects).await?)
             }
-            StandaloneValidation::Skip => return Ok(vec![]),
-            StandaloneValidation::NotStandalone => {}
+            OwnerContext::Skip | OwnerContext::Unknown => Ok(vec![]),
         }
-
-        // Job agent
-        let Some(job_id_str) = self.agent_jobs.lock().get(agent_id).cloned() else {
-            return Ok(vec![]);
-        };
-        let Some(job) = self.get_active_job(&job_id_str) else {
-            return Ok(vec![]); // Terminal — no-op
-        };
-        if job.step_status.is_waiting() {
-            return Ok(vec![]); // Already escalated — no-op
-        }
-
-        // Stale agent check
-        let current_agent_id = job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_deref());
-        if current_agent_id != Some(agent_id.as_str()) {
-            return Ok(vec![]);
-        }
-
-        let job_id = JobId::new(&job.id);
-        let effects = vec![
-            Effect::Notify {
-                title: format!("Job needs attention: {}", job.name),
-                message: "Agent tried to stop without signaling completion".to_string(),
-            },
-            Effect::Emit {
-                event: Event::StepWaiting {
-                    job_id: job_id.clone(),
-                    step: job.step.clone(),
-                    reason: Some("on_stop: escalate".to_string()),
-                    decision_id: None,
-                },
-            },
-            Effect::CancelTimer {
-                id: TimerId::exit_deferred(&job_id),
-            },
-        ];
-        Ok(self.executor.execute_all(effects).await?)
     }
 
     /// Handle resume for agent step: nudge if alive, recover if dead

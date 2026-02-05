@@ -769,7 +769,7 @@ pub(crate) async fn reconcile_state(
                 );
                 let agent_id = AgentId::new(agent_id_str);
                 let agent_run_id = AgentRunId::new(&agent_run.id);
-                runtime.register_agent_run(agent_id.clone(), agent_run_id.clone());
+                runtime.register_agent(agent_id.clone(), OwnerId::agent_run(agent_run_id.clone()));
                 let _ = event_tx
                     .send(Event::AgentExited {
                         agent_id,
@@ -786,7 +786,7 @@ pub(crate) async fn reconcile_state(
             );
             let agent_id = AgentId::new(agent_id_str);
             let agent_run_id = AgentRunId::new(&agent_run.id);
-            runtime.register_agent_run(agent_id.clone(), agent_run_id.clone());
+            runtime.register_agent(agent_id.clone(), OwnerId::agent_run(agent_run_id.clone()));
             let _ = event_tx
                 .send(Event::AgentGone {
                     agent_id,
@@ -883,7 +883,7 @@ pub(crate) async fn reconcile_state(
                 let agent_id = AgentId::new(aid);
                 let job_id = JobId::new(job.id.to_string());
                 // Register mapping so handle_agent_state_changed can find it
-                runtime.register_agent_job(agent_id.clone(), job_id.clone());
+                runtime.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
                 let _ = event_tx
                     .send(Event::AgentExited {
                         agent_id,
@@ -908,7 +908,7 @@ pub(crate) async fn reconcile_state(
             );
             let agent_id = AgentId::new(aid);
             let job_id = JobId::new(job.id.clone());
-            runtime.register_agent_job(agent_id.clone(), job_id.clone());
+            runtime.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
             let _ = event_tx
                 .send(Event::AgentGone {
                     agent_id,

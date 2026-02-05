@@ -9,6 +9,7 @@
 use crate::agent_run::AgentRunId;
 use crate::job::JobId;
 use crate::namespace::scoped_name;
+use crate::owner::OwnerId;
 
 crate::define_id! {
     /// Unique identifier for a timer instance.
@@ -115,6 +116,55 @@ impl TimerId {
         self.0.starts_with("idle-grace:")
     }
 
+    // -------------------------------------------------------------------------
+    // OwnerId-based constructors (unified across Job/AgentRun owners)
+    // -------------------------------------------------------------------------
+
+    /// Timer ID for liveness monitoring, dispatching to the appropriate owner type.
+    pub fn owner_liveness(owner: &OwnerId) -> Self {
+        match owner {
+            OwnerId::Job(job_id) => Self::liveness(job_id),
+            OwnerId::AgentRun(ar_id) => Self::liveness_agent_run(ar_id),
+        }
+    }
+
+    /// Timer ID for deferred exit handling, dispatching to the appropriate owner type.
+    pub fn owner_exit_deferred(owner: &OwnerId) -> Self {
+        match owner {
+            OwnerId::Job(job_id) => Self::exit_deferred(job_id),
+            OwnerId::AgentRun(ar_id) => Self::exit_deferred_agent_run(ar_id),
+        }
+    }
+
+    /// Timer ID for cooldown between action attempts, dispatching to the appropriate owner type.
+    pub fn owner_cooldown(owner: &OwnerId, trigger: &str, chain_pos: usize) -> Self {
+        match owner {
+            OwnerId::Job(job_id) => Self::cooldown(job_id, trigger, chain_pos),
+            OwnerId::AgentRun(ar_id) => Self::cooldown_agent_run(ar_id, trigger, chain_pos),
+        }
+    }
+
+    /// Timer ID for idle grace period, dispatching to the appropriate owner type.
+    pub fn owner_idle_grace(owner: &OwnerId) -> Self {
+        match owner {
+            OwnerId::Job(job_id) => Self::idle_grace(job_id),
+            OwnerId::AgentRun(ar_id) => Self::idle_grace_agent_run(ar_id),
+        }
+    }
+
+    /// Extract the OwnerId if this timer is associated with an owner.
+    pub fn owner_id(&self) -> Option<OwnerId> {
+        // Check for agent_run timers first (they have :ar: marker)
+        if let Some(ar_id_str) = self.agent_run_id_str() {
+            return Some(OwnerId::AgentRun(AgentRunId::new(ar_id_str)));
+        }
+        // Then check for job timers
+        if let Some(job_id_str) = self.job_id_str() {
+            return Some(OwnerId::Job(JobId::new(job_id_str)));
+        }
+        None
+    }
+
     /// Returns the AgentRunId portion if this is an agent-run-related timer.
     pub fn agent_run_id_str(&self) -> Option<&str> {
         if let Some(rest) = self.0.strip_prefix("liveness:ar:") {
@@ -140,7 +190,14 @@ impl TimerId {
     ///
     /// Returns `Some(&str)` for liveness, exit-deferred, cooldown, and idle-grace timers.
     /// For cooldown timers, extracts the job_id from "cooldown:job_id:trigger:pos".
+    ///
+    /// NOTE: Returns `None` for agent_run timers (which have `:ar:` marker).
     pub fn job_id_str(&self) -> Option<&str> {
+        // Agent-run timers have `:ar:` marker — exclude them
+        if self.is_agent_run_timer() {
+            return None;
+        }
+
         if let Some(rest) = self.0.strip_prefix("liveness:") {
             Some(rest)
         } else if let Some(rest) = self.0.strip_prefix("exit-deferred:") {
