@@ -75,10 +75,15 @@ pub fn build_spawn_effects(
         OwnerId::AgentRun(id) => format!("agent_run:{}", id),
     };
 
-    // Validate resume_session_id: only use if the session file exists.
+    // Validate resume_session_id: only use if the EXACT session file exists.
     // If the previous agent died before writing to JSONL, resuming will fail.
+    // Note: find_session_log has a fallback to return the most recent file,
+    // so we must verify the returned path matches the expected session ID.
     let resume_session_id = resume_session_id.filter(|id| {
-        let exists = find_session_log(workspace_path, id).is_some();
+        let expected_filename = format!("{}.jsonl", id);
+        let exists = find_session_log(workspace_path, id)
+            .map(|p| p.file_name().map(|f| f.to_string_lossy() == expected_filename).unwrap_or(false))
+            .unwrap_or(false);
         if !exists {
             tracing::warn!(
                 session_id = %id,
