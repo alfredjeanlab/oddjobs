@@ -181,6 +181,15 @@ pub enum Request {
         worker_name: String,
     },
 
+    /// Resize a running worker's concurrency
+    WorkerResize {
+        worker_name: String,
+        #[serde(default)]
+        namespace: String,
+        /// New concurrency limit (must be > 0)
+        concurrency: u32,
+    },
+
     /// Start a cron timer
     CronStart {
         project_root: PathBuf,
@@ -580,6 +589,13 @@ pub enum Response {
 
     /// Worker started successfully
     WorkerStarted { worker_name: String },
+
+    /// Worker concurrency was updated
+    WorkerResized {
+        worker_name: String,
+        old_concurrency: u32,
+        new_concurrency: u32,
+    },
 
     /// Cron started successfully
     CronStarted { cron_name: String },

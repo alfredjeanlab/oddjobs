@@ -365,6 +365,19 @@ async fn handle_request(
             state,
         ),
 
+        Request::WorkerResize {
+            worker_name,
+            namespace,
+            concurrency,
+        } => workers::handle_worker_resize(
+            &worker_name,
+            &namespace,
+            concurrency,
+            event_bus,
+            state,
+            None,
+        ),
+
         Request::CronStart {
             project_root,
             namespace,

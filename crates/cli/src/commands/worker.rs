@@ -36,6 +36,13 @@ pub enum WorkerCommand {
         /// Worker name from runbook
         name: String,
     },
+    /// Resize a worker's concurrency limit at runtime
+    Resize {
+        /// Worker name from runbook
+        name: String,
+        /// New concurrency limit (must be > 0)
+        concurrency: u32,
+    },
     /// View worker activity log
     Logs {
         /// Worker name
@@ -123,6 +130,34 @@ pub async fn handle(
             match client.send(&request).await? {
                 Response::WorkerStarted { worker_name } => {
                     println!("Worker '{}' restarted", color::header(&worker_name));
+                }
+                Response::Error { message } => {
+                    anyhow::bail!("{}", message);
+                }
+                _ => {
+                    anyhow::bail!("unexpected response from daemon");
+                }
+            }
+        }
+        WorkerCommand::Resize { name, concurrency } => {
+            let request = Request::WorkerResize {
+                worker_name: name.clone(),
+                namespace: namespace.to_string(),
+                concurrency,
+            };
+            match client.send(&request).await? {
+                Response::WorkerResized {
+                    worker_name,
+                    old_concurrency,
+                    new_concurrency,
+                } => {
+                    println!(
+                        "Worker '{}' resized: {} → {} ({})",
+                        color::header(&worker_name),
+                        old_concurrency,
+                        new_concurrency,
+                        color::muted(namespace)
+                    );
                 }
                 Response::Error { message } => {
                     anyhow::bail!("{}", message);

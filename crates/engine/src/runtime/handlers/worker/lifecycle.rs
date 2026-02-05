@@ -180,6 +180,49 @@ where
         Ok(vec![])
     }
 
+    pub(crate) async fn handle_worker_resized(
+        &self,
+        worker_name: &str,
+        new_concurrency: u32,
+        namespace: &str,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let (old_concurrency, should_poll) = {
+            let mut workers = self.worker_states.lock();
+            match workers.get_mut(worker_name) {
+                Some(state) if state.status == WorkerStatus::Running => {
+                    let old = state.concurrency;
+                    state.concurrency = new_concurrency;
+
+                    // Check if we now have more slots available
+                    let active = state.active_jobs.len() as u32 + state.pending_takes;
+                    let had_capacity = old > active;
+                    let has_capacity = new_concurrency > active;
+                    let should_poll = !had_capacity && has_capacity;
+
+                    (old, should_poll)
+                }
+                _ => return Ok(vec![]),
+            }
+        };
+
+        // Log the resize
+        let scoped = scoped_name(namespace, worker_name);
+        self.worker_logger.append(
+            &scoped,
+            &format!(
+                "resized concurrency {} → {}",
+                old_concurrency, new_concurrency
+            ),
+        );
+
+        // If we went from full to having capacity, trigger re-poll
+        if should_poll {
+            return self.handle_worker_wake(worker_name).await;
+        }
+
+        Ok(vec![])
+    }
+
     /// Reconcile queue items after daemon recovery.
     ///
     /// Handles two cases:
