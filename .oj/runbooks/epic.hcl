@@ -23,7 +23,7 @@ command "epic" {
 #   oj run plan oj-abc123
 #   oj run plan oj-abc123 oj-def456
 command "plan" {
-  args = "<issues>..."
+  args = "<issues>"
   run  = <<-SHELL
     wok label ${args.issues} plan:needed
     wok reopen ${args.issues}
@@ -37,7 +37,7 @@ command "plan" {
 #   oj run build oj-abc123
 #   oj run build oj-abc123 oj-def456
 command "build" {
-  args = "<issues>..."
+  args = "<issues>"
   run  = <<-SHELL
     wok label ${args.issues} build:needed
     wok reopen ${args.issues}

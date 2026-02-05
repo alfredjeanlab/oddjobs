@@ -70,7 +70,8 @@ job "deflake" {
   }
 
   step "build" {
-    run = "cargo build --all"
+    run     = "cargo build --all"
+    on_done = { step = "detect" }
   }
 
   step "detect" {
