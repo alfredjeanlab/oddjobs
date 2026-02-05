@@ -305,7 +305,8 @@ pub enum Event {
         id: WorkspaceId,
         path: PathBuf,
         branch: Option<String>,
-        owner: Option<String>,
+        #[serde(default, deserialize_with = "deserialize_workspace_owner")]
+        owner: Option<OwnerId>,
         /// "folder" or "worktree"
         #[serde(default)]
         workspace_type: Option<String>,
@@ -1003,6 +1004,55 @@ impl Event {
             _ => None,
         }
     }
+}
+
+/// Custom deserializer for workspace owner that handles backward compatibility.
+///
+/// Accepts:
+/// - `null` / missing → `None`
+/// - Plain string `"job-abc"` → `Some(OwnerId::Job(JobId::new("job-abc")))` (legacy WAL)
+/// - Tagged object `{"type": "job", "id": "..."}` → `Some(OwnerId::Job(...))` (new format)
+/// - Tagged object `{"type": "agent_run", "id": "..."}` → `Some(OwnerId::AgentRun(...))` (new)
+fn deserialize_workspace_owner<'de, D>(deserializer: D) -> Result<Option<OwnerId>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de;
+
+    struct WorkspaceOwnerVisitor;
+
+    impl<'de> de::Visitor<'de> for WorkspaceOwnerVisitor {
+        type Value = Option<OwnerId>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("null, a string (legacy job_id), or an OwnerId object")
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
+            // Legacy format: plain string is a job_id
+            Ok(Some(OwnerId::Job(JobId::new(v))))
+        }
+
+        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+            Ok(Some(OwnerId::Job(JobId::new(&v))))
+        }
+
+        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            // Tagged object format: delegate to OwnerId deserialization
+            let owner = OwnerId::deserialize(de::value::MapAccessDeserializer::new(map))?;
+            Ok(Some(owner))
+        }
+    }
+
+    deserializer.deserialize_any(WorkspaceOwnerVisitor)
 }
 
 #[cfg(test)]

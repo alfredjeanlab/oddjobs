@@ -4,7 +4,7 @@
 mod cron;
 
 use super::*;
-use oj_core::{Event, JobId, OwnerId, SessionId, StepOutcome, WorkspaceId};
+use oj_core::{AgentRunId, Event, JobId, OwnerId, SessionId, StepOutcome, WorkspaceId};
 
 fn job_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -> Event {
     Event::JobCreated {
@@ -64,7 +64,7 @@ fn workspace_create_event(
         id: WorkspaceId::new(id),
         path: PathBuf::from(path),
         branch: branch.map(String::from),
-        owner: owner.map(String::from),
+        owner: owner.map(|o| OwnerId::Job(JobId::new(o))),
         workspace_type: None,
     }
 }
@@ -114,7 +114,10 @@ fn apply_event_workspace_lifecycle() {
         state.workspaces["ws-1"].branch,
         Some("feature/test".to_string())
     );
-    assert_eq!(state.workspaces["ws-1"].owner, Some("pipe-1".to_string()));
+    assert_eq!(
+        state.workspaces["ws-1"].owner,
+        Some(OwnerId::Job(JobId::new("pipe-1")))
+    );
     assert_eq!(
         state.workspaces["ws-1"].status,
         oj_core::WorkspaceStatus::Creating
@@ -155,7 +158,7 @@ fn apply_event_workspace_type_worktree() {
         id: WorkspaceId::new("ws-w"),
         path: PathBuf::from("/tmp/worktree-ws"),
         branch: Some("feature/test".to_string()),
-        owner: Some("pipe-1".to_string()),
+        owner: Some(OwnerId::Job(JobId::new("pipe-1"))),
         workspace_type: Some("worktree".to_string()),
     });
 
@@ -1515,4 +1518,249 @@ fn on_fail_multi_step_cycle_preserves_attempts_across_chain() {
         2,
         "action_attempts must accumulate across multi-step on_fail cycles"
     );
+}
+
+// === AgentRecord tests ===
+
+#[test]
+fn agent_record_populated_from_step_started_with_agent() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-abc")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    assert!(state.agents.contains_key("agent-abc"));
+    let record = &state.agents["agent-abc"];
+    assert_eq!(record.agent_id, "agent-abc");
+    assert_eq!(record.agent_name, "worker");
+    assert_eq!(record.owner, OwnerId::Job(JobId::new("pipe-1")));
+    assert_eq!(record.status, oj_core::AgentRecordStatus::Starting);
+}
+
+#[test]
+fn agent_record_not_populated_from_step_started_without_agent() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&step_started_event("pipe-1")); // no agent_id
+
+    assert!(state.agents.is_empty());
+}
+
+#[test]
+fn agent_record_populated_from_agent_run_started() {
+    let mut state = MaterializedState::default();
+    let ar_id = AgentRunId::new("ar-1");
+
+    state.apply_event(&Event::AgentRunCreated {
+        id: ar_id.clone(),
+        agent_name: "fixer".to_string(),
+        command_name: "fix".to_string(),
+        namespace: "myproj".to_string(),
+        cwd: PathBuf::from("/work/dir"),
+        runbook_hash: "abc".to_string(),
+        vars: HashMap::new(),
+        created_at_epoch_ms: 1_000,
+    });
+
+    state.apply_event(&Event::AgentRunStarted {
+        id: ar_id.clone(),
+        agent_id: oj_core::AgentId::new("agent-xyz"),
+    });
+
+    assert!(state.agents.contains_key("agent-xyz"));
+    let record = &state.agents["agent-xyz"];
+    assert_eq!(record.agent_name, "fixer");
+    assert_eq!(record.owner, OwnerId::AgentRun(ar_id));
+    assert_eq!(record.namespace, "myproj");
+    assert_eq!(record.workspace_path, PathBuf::from("/work/dir"));
+    assert_eq!(record.status, oj_core::AgentRecordStatus::Running);
+}
+
+#[test]
+fn agent_record_status_updates_from_lifecycle_events() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    assert_eq!(
+        state.agents["agent-1"].status,
+        oj_core::AgentRecordStatus::Starting
+    );
+
+    state.apply_event(&Event::AgentWorking {
+        agent_id: oj_core::AgentId::new("agent-1"),
+        owner: None,
+    });
+    assert_eq!(
+        state.agents["agent-1"].status,
+        oj_core::AgentRecordStatus::Running
+    );
+
+    state.apply_event(&Event::AgentWaiting {
+        agent_id: oj_core::AgentId::new("agent-1"),
+        owner: None,
+    });
+    assert_eq!(
+        state.agents["agent-1"].status,
+        oj_core::AgentRecordStatus::Idle
+    );
+
+    state.apply_event(&Event::AgentExited {
+        agent_id: oj_core::AgentId::new("agent-1"),
+        exit_code: Some(0),
+        owner: None,
+    });
+    assert_eq!(
+        state.agents["agent-1"].status,
+        oj_core::AgentRecordStatus::Exited
+    );
+}
+
+#[test]
+fn agent_record_gone_status() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    state.apply_event(&Event::AgentGone {
+        agent_id: oj_core::AgentId::new("agent-1"),
+        owner: None,
+    });
+    assert_eq!(
+        state.agents["agent-1"].status,
+        oj_core::AgentRecordStatus::Gone
+    );
+}
+
+#[test]
+fn agent_record_session_id_set_by_session_created() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    assert!(state.agents["agent-1"].session_id.is_none());
+
+    state.apply_event(&Event::SessionCreated {
+        id: SessionId::new("sess-1"),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+    });
+
+    assert_eq!(
+        state.agents["agent-1"].session_id.as_deref(),
+        Some("sess-1")
+    );
+}
+
+#[test]
+fn agent_record_session_id_cleared_by_session_deleted() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    state.apply_event(&Event::SessionCreated {
+        id: SessionId::new("sess-1"),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+    });
+
+    state.apply_event(&Event::SessionDeleted {
+        id: SessionId::new("sess-1"),
+    });
+
+    assert!(state.agents["agent-1"].session_id.is_none());
+}
+
+#[test]
+fn agent_record_removed_on_job_deleted() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    state.apply_event(&Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    });
+
+    assert!(state.agents.contains_key("agent-1"));
+
+    state.apply_event(&job_delete_event("pipe-1"));
+
+    assert!(!state.agents.contains_key("agent-1"));
+}
+
+#[test]
+fn agent_record_removed_on_agent_run_deleted() {
+    let mut state = MaterializedState::default();
+    let ar_id = AgentRunId::new("ar-1");
+
+    state.apply_event(&Event::AgentRunCreated {
+        id: ar_id.clone(),
+        agent_name: "fixer".to_string(),
+        command_name: "fix".to_string(),
+        namespace: "myproj".to_string(),
+        cwd: PathBuf::from("/work"),
+        runbook_hash: "abc".to_string(),
+        vars: HashMap::new(),
+        created_at_epoch_ms: 1_000,
+    });
+
+    state.apply_event(&Event::AgentRunStarted {
+        id: ar_id.clone(),
+        agent_id: oj_core::AgentId::new("agent-1"),
+    });
+
+    assert!(state.agents.contains_key("agent-1"));
+
+    state.apply_event(&Event::AgentRunDeleted { id: ar_id });
+
+    assert!(!state.agents.contains_key("agent-1"));
+}
+
+#[test]
+fn agent_record_idempotent_step_started() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    let step_event = Event::StepStarted {
+        job_id: JobId::new("pipe-1"),
+        step: "init".to_string(),
+        agent_id: Some(oj_core::AgentId::new("agent-1")),
+        agent_name: Some("worker".to_string()),
+    };
+
+    // Apply twice — should not panic or duplicate
+    state.apply_event(&step_event);
+    state.apply_event(&step_event);
+
+    assert_eq!(state.agents.len(), 1);
+    assert!(state.agents.contains_key("agent-1"));
 }

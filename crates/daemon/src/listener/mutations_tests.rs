@@ -1562,7 +1562,7 @@ fn make_workspace(id: &str, path: std::path::PathBuf, owner: Option<&str>) -> Wo
         id: id.to_string(),
         path,
         branch: None,
-        owner: owner.map(String::from),
+        owner: owner.map(|o| oj_core::OwnerId::Job(oj_core::JobId::new(o))),
         status: WorkspaceStatus::Ready,
         workspace_type: WorkspaceType::default(),
         created_at_ms: 0,
