@@ -131,10 +131,7 @@ fn commands_has_resources_section() {
         result.contains("Resources:"),
         "Should have Resources section"
     );
-    assert!(
-        result.contains("  job "),
-        "Resources should contain job"
-    );
+    assert!(result.contains("  job "), "Resources should contain job");
     assert!(
         result.contains("  agent "),
         "Resources should contain agent"

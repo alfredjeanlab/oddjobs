@@ -221,9 +221,7 @@ where
                 step = terminal_step.as_str(),
                 "reconciling terminal job for queue item"
             );
-            let _ = self
-                .check_worker_job_complete(&pid, &terminal_step)
-                .await;
+            let _ = self.check_worker_job_complete(&pid, &terminal_step).await;
         }
 
         // 2. Fail active queue items with no corresponding job

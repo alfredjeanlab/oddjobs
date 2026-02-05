@@ -57,9 +57,7 @@ pub async fn handle(
             let detail = client.get_job(input_id).await?;
             match detail {
                 None => {
-                    return Err(
-                        ExitError::new(3, format!("Job not found: {}", input_id)).into(),
-                    );
+                    return Err(ExitError::new(3, format!("Job not found: {}", input_id)).into());
                 }
                 Some(p) => {
                     canonical_ids
@@ -112,9 +110,7 @@ pub async fn handle(
 
         if let Some(t) = timeout_dur {
             if start.elapsed() >= t {
-                return Err(
-                    ExitError::new(2, "Timeout waiting for job(s)".to_string()).into(),
-                );
+                return Err(ExitError::new(2, "Timeout waiting for job(s)".to_string()).into());
             }
         }
 

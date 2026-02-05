@@ -187,12 +187,7 @@ fn extract_job_id(temp: &Project, name_filter: &str) -> String {
     output
         .lines()
         .find(|l| l.contains(name_filter))
-        .unwrap_or_else(|| {
-            panic!(
-                "no job matching '{}' in output:\n{}",
-                name_filter, output
-            )
-        })
+        .unwrap_or_else(|| panic!("no job matching '{}' in output:\n{}", name_filter, output))
         .split_whitespace()
         .next()
         .expect("should have an ID column")
@@ -233,9 +228,7 @@ fn cancel_agent_step_transitions_job_to_cancelled() {
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should reach cancelled status
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -287,9 +280,7 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // The cleanup step should run and the job should reach a terminal state.
     // With on_cancel routing, the job goes through "cleanup" step before terminal.
@@ -341,9 +332,7 @@ fn step_level_on_cancel_routes_to_cleanup() {
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should route to cleanup step and reach terminal
     let terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
@@ -397,9 +386,7 @@ fn cancel_overrides_on_dead_recover() {
 
     // Cancel the job while agent is running
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should be cancelled, NOT recovering
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -475,14 +462,10 @@ on_dead = "done"
 
     // First cancel
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Immediately re-cancel (should be a no-op due to cancelling guard)
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should still reach terminal state (cleanup completes, not disrupted)
     let terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
@@ -546,9 +529,7 @@ fn cancel_agent_job_frees_queue_slot() {
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Queue item should leave active status
     let transitioned = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -633,9 +614,7 @@ run = "echo done"
 
     // Cancel the already-completed job (should be a no-op)
     let job_id = extract_job_id(&temp, "fast");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should still show completed (not cancelled)
     temp.oj()
@@ -709,9 +688,7 @@ on_dead = "done"
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should reach cancelled status
     let cancelled = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -722,10 +699,7 @@ on_dead = "done"
     if !cancelled {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        cancelled,
-        "job should transition to cancelled after cancel"
-    );
+    assert!(cancelled, "job should transition to cancelled after cancel");
 
     // Workspace directory should be cleaned up
     let ws_cleaned = wait_for(SPEC_WAIT_MAX_MS, || {

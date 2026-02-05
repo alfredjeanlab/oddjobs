@@ -365,8 +365,7 @@ where
         }
 
         let mut result_events = self.executor.execute_all(creation_effects).await?;
-        self.logger
-            .append(job_id.as_str(), "init", "job created");
+        self.logger.append(job_id.as_str(), "init", "job created");
 
         // Write initial breadcrumb after job is persisted
         if let Some(job) = self.get_job(job_id.as_str()) {

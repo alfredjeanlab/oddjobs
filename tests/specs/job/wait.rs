@@ -39,12 +39,7 @@ fn extract_job_id(temp: &Project, name_filter: &str) -> String {
     output
         .lines()
         .find(|l| l.contains(name_filter))
-        .unwrap_or_else(|| {
-            panic!(
-                "no job matching '{}' in output:\n{}",
-                name_filter, output
-            )
-        })
+        .unwrap_or_else(|| panic!("no job matching '{}' in output:\n{}", name_filter, output))
         .split_whitespace()
         .next()
         .expect("should have an ID column")

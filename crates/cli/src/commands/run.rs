@@ -190,10 +190,9 @@ pub async fn handle(
         .await?;
 
     match result {
-        crate::client::RunCommandResult::Job {
-            job_id,
-            job_name,
-        } => dispatch_job(&client, namespace, command, &job_id, &job_name).await,
+        crate::client::RunCommandResult::Job { job_id, job_name } => {
+            dispatch_job(&client, namespace, command, &job_id, &job_name).await
+        }
         crate::client::RunCommandResult::AgentRun {
             agent_run_id,
             agent_name,

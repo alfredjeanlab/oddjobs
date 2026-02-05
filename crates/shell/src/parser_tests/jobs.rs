@@ -488,10 +488,7 @@ fn test_background_separates_sequence() {
 
     // Second is 'b | c' job
     assert!(!result.commands[1].first.background);
-    assert!(matches!(
-        &result.commands[1].first.command,
-        Command::Job(_)
-    ));
+    assert!(matches!(&result.commands[1].first.command, Command::Job(_)));
 }
 
 // ============================================================================

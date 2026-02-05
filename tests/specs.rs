@@ -31,14 +31,14 @@ mod daemon_crons;
 mod daemon_help;
 #[path = "specs/daemon/init_idempotency.rs"]
 mod daemon_init_idempotency;
+#[path = "specs/daemon/job_queue.rs"]
+mod daemon_job_queue;
 #[path = "specs/daemon/lifecycle.rs"]
 mod daemon_lifecycle;
 #[path = "specs/daemon/logs.rs"]
 mod daemon_logs;
 #[path = "specs/daemon/on_stop.rs"]
 mod daemon_on_stop;
-#[path = "specs/daemon/job_queue.rs"]
-mod daemon_job_queue;
 #[path = "specs/daemon/restart_queue.rs"]
 mod daemon_restart_queue;
 #[path = "specs/daemon/step_fallback.rs"]

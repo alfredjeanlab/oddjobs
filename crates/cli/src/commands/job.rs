@@ -403,10 +403,7 @@ pub async fn handle(
         }
         JobCommand::Resume { id, message, var } => {
             let var_map: HashMap<String, String> = var.into_iter().collect();
-            match client
-                .job_resume(&id, message.as_deref(), &var_map)
-                .await
-            {
+            match client.job_resume(&id, message.as_deref(), &var_map).await {
                 Ok(()) => {
                     if !var_map.is_empty() {
                         println!("Updated vars and resumed job {}", id);
@@ -459,8 +456,7 @@ pub async fn handle(
 
             // Try main job session first, then fall back to running agent session
             let session_id = job.session_id.clone().or_else(|| {
-                job
-                    .agents
+                job.agents
                     .iter()
                     .find(|a| a.status == "running")
                     .map(|a| a.agent_id.clone())
@@ -493,15 +489,11 @@ pub async fn handle(
                 }
                 None => {
                     let short_id = job.id.short(8);
-                    let is_terminal = job.step == "done"
-                        || job.step == "failed"
-                        || job.step == "cancelled";
+                    let is_terminal =
+                        job.step == "done" || job.step == "failed" || job.step == "cancelled";
 
                     if is_terminal {
-                        println!(
-                            "Job {} is {}. No active session.",
-                            short_id, job.step
-                        );
+                        println!("Job {} is {}. No active session.", short_id, job.step);
                     } else {
                         println!(
                             "No active session for job {} (step: {}, status: {})",

@@ -19,9 +19,7 @@ use std::path::{Path, PathBuf};
 /// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
 /// * `job_id` - Job identifier
 pub fn job_log_path(logs_dir: &Path, job_id: &str) -> PathBuf {
-    logs_dir
-        .join("job")
-        .join(format!("{}.log", job_id))
+    logs_dir.join("job").join(format!("{}.log", job_id))
 }
 
 /// Build the path to an agent log file.

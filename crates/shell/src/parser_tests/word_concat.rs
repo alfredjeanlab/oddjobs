@@ -307,10 +307,7 @@ fn concatenation_stops_at_pipe() {
             }
         ]
     );
-    assert_eq!(
-        job.commands[1].name.parts,
-        vec![WordPart::literal("bar")]
-    );
+    assert_eq!(job.commands[1].name.parts, vec![WordPart::literal("bar")]);
 }
 
 #[test]

@@ -12,8 +12,8 @@ use std::time::Instant;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
-    AndOrList, BraceGroup, Command, CommandItem, CommandList, LogicalOp, Job, SimpleCommand,
-    Span, Subshell,
+    AndOrList, BraceGroup, Command, CommandItem, CommandList, Job, LogicalOp, SimpleCommand, Span,
+    Subshell,
 };
 
 use super::error::ExecError;

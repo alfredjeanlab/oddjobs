@@ -7,8 +7,8 @@
 //! actions such as timeouts, heartbeats, or periodic checks.
 
 use crate::agent_run::AgentRunId;
-use crate::namespace::scoped_name;
 use crate::job::JobId;
+use crate::namespace::scoped_name;
 
 crate::define_id! {
     /// Unique identifier for a timer instance.
@@ -31,10 +31,7 @@ impl TimerId {
 
     /// Timer ID for cooldown between action attempts.
     pub fn cooldown(job_id: &JobId, trigger: &str, chain_pos: usize) -> Self {
-        Self::new(format!(
-            "cooldown:{}:{}:{}",
-            job_id, trigger, chain_pos
-        ))
+        Self::new(format!("cooldown:{}:{}:{}", job_id, trigger, chain_pos))
     }
 
     /// Returns true if this is a liveness timer.

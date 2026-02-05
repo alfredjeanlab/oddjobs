@@ -9,8 +9,8 @@ use crate::monitor::{self, ActionEffects, MonitorState};
 use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, AgentReconnectConfig, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event,
-    JobId, QuestionData, SessionId, TimerId,
+    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentSignalKind, Clock, Effect, Event, JobId,
+    QuestionData, SessionId, TimerId,
 };
 use oj_runbook::AgentDef;
 use std::collections::HashMap;

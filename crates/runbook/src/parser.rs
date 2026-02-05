@@ -327,12 +327,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
                 message: format!(
                     "references unknown job '{}'; available jobs: {}",
                     worker.handler.job,
-                    runbook
-                        .jobs
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", "),
+                    runbook.jobs.keys().cloned().collect::<Vec<_>>().join(", "),
                 ),
             });
         }
@@ -537,10 +532,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             if let Some(agent_name) = step.run.agent_name() {
                 if !runbook.agents.contains_key(agent_name) {
                     return Err(ParseError::InvalidFormat {
-                        location: format!(
-                            "job.{}.step[{}]({}).run",
-                            job_name, i, step.name
-                        ),
+                        location: format!("job.{}.step[{}]({}).run", job_name, i, step.name),
                         message: format!(
                             "references unknown agent '{}'; available agents: {}",
                             agent_name,
@@ -552,10 +544,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
             if let Some(pl_name) = step.run.job_name() {
                 if !runbook.jobs.contains_key(pl_name) {
                     return Err(ParseError::InvalidFormat {
-                        location: format!(
-                            "job.{}.step[{}]({}).run",
-                            job_name, i, step.name
-                        ),
+                        location: format!("job.{}.step[{}]({}).run", job_name, i, step.name),
                         message: format!(
                             "references unknown job '{}'; available jobs: {}",
                             pl_name,

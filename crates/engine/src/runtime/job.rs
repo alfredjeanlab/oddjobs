@@ -53,20 +53,16 @@ where
 
             // Emit on_fail notification for the terminal failure
             result_events.extend(
-                self.emit_notify(
-                    &job,
-                    &job_def.notify,
-                    job_def.notify.on_fail.as_ref(),
-                )
-                .await?,
+                self.emit_notify(&job, &job_def.notify, job_def.notify.on_fail.as_ref())
+                    .await?,
             );
 
             return Ok(result_events);
         }
 
-        let step_def = job_def.get_step(step_name).ok_or_else(|| {
-            RuntimeError::JobNotFound(format!("step {} not found", step_name))
-        })?;
+        let step_def = job_def
+            .get_step(step_name)
+            .ok_or_else(|| RuntimeError::JobNotFound(format!("step {} not found", step_name)))?;
 
         let mut result_events = Vec::new();
 
@@ -152,10 +148,7 @@ where
         Ok(result_events)
     }
 
-    pub(crate) async fn advance_job(
-        &self,
-        job: &Job,
-    ) -> Result<Vec<Event>, RuntimeError> {
+    pub(crate) async fn advance_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
         // If current step is terminal (done/failed), complete the job
         // This handles the case where a "done" step has a run command that just finished
         if job.is_terminal() {
@@ -164,9 +157,7 @@ where
 
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
-        let current_step_def = job_def
-            .as_ref()
-            .and_then(|p| p.get_step(&job.step));
+        let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
 
         // Cancel session monitor timer when leaving an agent step
         let current_is_agent = current_step_def
@@ -236,11 +227,8 @@ where
         match next_transition {
             Some(transition) => {
                 let next_step = transition.step_name();
-                self.logger.append(
-                    &job.id,
-                    &job.step,
-                    &format!("advancing to {}", next_step),
-                );
+                self.logger
+                    .append(&job.id, &job.step, &format!("advancing to {}", next_step));
                 let effects = steps::step_transition_effects(job, next_step);
                 result_events.extend(self.executor.execute_all(effects).await?);
 
@@ -254,13 +242,8 @@ where
                     result_events.extend(self.complete_job(job).await?);
                 } else {
                     result_events.extend(
-                        self.start_step(
-                            &job_id,
-                            next_step,
-                            &job.vars,
-                            &self.execution_dir(job),
-                        )
-                        .await?,
+                        self.start_step(&job_id, next_step, &job.vars, &self.execution_dir(job))
+                            .await?,
                     );
                 }
             }
@@ -299,10 +282,8 @@ where
                     result_events.extend(self.executor.execute_all(effects).await?);
                     self.breadcrumb.delete(&job.id);
                     // Update queue item status immediately (don't rely on event loop)
-                    result_events.extend(
-                        self.check_worker_job_complete(&job_id, "cancelled")
-                            .await?,
-                    );
+                    result_events
+                        .extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
                 } else {
                     let effects = steps::step_transition_effects(job, "done");
                     result_events.extend(self.executor.execute_all(effects).await?);
@@ -321,9 +302,7 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
-        let current_step_def = job_def
-            .as_ref()
-            .and_then(|p| p.get_step(&job.step));
+        let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_fail = current_step_def.and_then(|p| p.on_fail.as_ref());
 
         // Cancel session monitor timers when leaving an agent step
@@ -372,11 +351,8 @@ where
             }
         }
 
-        self.logger.append(
-            &job.id,
-            &job.step,
-            &format!("job failed: {}", error),
-        );
+        self.logger
+            .append(&job.id, &job.step, &format!("job failed: {}", error));
 
         let mut result_events = Vec::new();
 
@@ -385,17 +361,10 @@ where
             let effects = steps::failure_transition_effects(job, on_fail_step, error);
             result_events.extend(self.executor.execute_all(effects).await?);
             result_events.extend(
-                self.start_step(
-                    &job_id,
-                    on_fail_step,
-                    &job.vars,
-                    &self.execution_dir(job),
-                )
-                .await?,
+                self.start_step(&job_id, on_fail_step, &job.vars, &self.execution_dir(job))
+                    .await?,
             );
-        } else if let Some(ref job_on_fail) =
-            job_def.as_ref().and_then(|p| p.on_fail.clone())
-        {
+        } else if let Some(ref job_on_fail) = job_def.as_ref().and_then(|p| p.on_fail.clone()) {
             let on_fail_step = job_on_fail.step_name();
             if job.step != on_fail_step {
                 // Job-level on_fail: route to that step
@@ -407,13 +376,8 @@ where
                 let effects = steps::failure_transition_effects(job, on_fail_step, error);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
-                    self.start_step(
-                        &job_id,
-                        on_fail_step,
-                        &job.vars,
-                        &self.execution_dir(job),
-                    )
-                    .await?,
+                    self.start_step(&job_id, on_fail_step, &job.vars, &self.execution_dir(job))
+                        .await?,
                 );
             } else {
                 // Already at the job on_fail target; terminal failure
@@ -421,10 +385,7 @@ where
                 result_events.extend(self.executor.execute_all(effects).await?);
                 self.breadcrumb.delete(&job.id);
                 // Update queue item status immediately (don't rely on event loop)
-                result_events.extend(
-                    self.check_worker_job_complete(&job_id, "failed")
-                        .await?,
-                );
+                result_events.extend(self.check_worker_job_complete(&job_id, "failed").await?);
             }
         } else {
             // Terminal failure — no on_fail handler
@@ -433,20 +394,13 @@ where
             self.breadcrumb.delete(&job.id);
 
             // Update queue item status immediately (don't rely on event loop)
-            result_events.extend(
-                self.check_worker_job_complete(&job_id, "failed")
-                    .await?,
-            );
+            result_events.extend(self.check_worker_job_complete(&job_id, "failed").await?);
 
             // Emit on_fail notification only on terminal failure (not on_fail transition)
             if let Some(job_def) = job_def.as_ref() {
                 result_events.extend(
-                    self.emit_notify(
-                        job,
-                        &job_def.notify,
-                        job_def.notify.on_fail.as_ref(),
-                    )
-                    .await?,
+                    self.emit_notify(job, &job_def.notify, job_def.notify.on_fail.as_ref())
+                        .await?,
                 );
             }
         }
@@ -477,12 +431,8 @@ where
         vec![]
     }
 
-    pub(crate) async fn complete_job(
-        &self,
-        job: &Job,
-    ) -> Result<Vec<Event>, RuntimeError> {
-        self.logger
-            .append(&job.id, &job.step, "job completed");
+    pub(crate) async fn complete_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
+        self.logger.append(&job.id, &job.step, "job completed");
         self.breadcrumb.delete(&job.id);
         let mut effects = steps::completion_effects(job);
 
@@ -493,21 +443,14 @@ where
 
         // Update queue item status immediately (don't rely on event loop)
         let job_id = JobId::new(&job.id);
-        result_events.extend(
-            self.check_worker_job_complete(&job_id, "done")
-                .await?,
-        );
+        result_events.extend(self.check_worker_job_complete(&job_id, "done").await?);
 
         // Emit on_done notification if configured
         if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
             if let Some(job_def) = runbook.get_job(&job.kind) {
                 result_events.extend(
-                    self.emit_notify(
-                        job,
-                        &job_def.notify,
-                        job_def.notify.on_done.as_ref(),
-                    )
-                    .await?,
+                    self.emit_notify(job, &job_def.notify, job_def.notify.on_done.as_ref())
+                        .await?,
                 );
             }
         }
@@ -554,10 +497,7 @@ where
     /// If the current step (or job) has `on_cancel` configured, routes to
     /// that cleanup step instead of going straight to terminal. The cleanup step
     /// is non-cancellable — re-cancellation while `cancelling` is true is a no-op.
-    pub(crate) async fn cancel_job(
-        &self,
-        job: &Job,
-    ) -> Result<Vec<Event>, RuntimeError> {
+    pub(crate) async fn cancel_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
         // Already terminal — no-op
         if job.is_terminal() {
             tracing::info!(job_id = %job.id, "cancel: job already terminal");
@@ -572,9 +512,7 @@ where
 
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
-        let current_step_def = job_def
-            .as_ref()
-            .and_then(|p| p.get_step(&job.step));
+        let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_cancel = current_step_def.and_then(|s| s.on_cancel.as_ref());
 
         let job_id = JobId::new(&job.id);
@@ -629,48 +567,32 @@ where
             result_events.extend(
                 self.executor
                     .execute(Effect::Emit {
-                        event: Event::JobCancelling {
-                            id: job_id.clone(),
-                        },
+                        event: Event::JobCancelling { id: job_id.clone() },
                     })
                     .await?,
             );
             let effects = steps::cancellation_transition_effects(job, target);
             result_events.extend(self.executor.execute_all(effects).await?);
             result_events.extend(
-                self.start_step(
-                    &job_id,
-                    target,
-                    &job.vars,
-                    &self.execution_dir(job),
-                )
-                .await?,
+                self.start_step(&job_id, target, &job.vars, &self.execution_dir(job))
+                    .await?,
             );
-        } else if let Some(ref job_on_cancel) =
-            job_def.as_ref().and_then(|p| p.on_cancel.clone())
-        {
+        } else if let Some(ref job_on_cancel) = job_def.as_ref().and_then(|p| p.on_cancel.clone()) {
             // Job-level on_cancel fallback
             let target = job_on_cancel.step_name();
             if job.step != target {
                 result_events.extend(
                     self.executor
                         .execute(Effect::Emit {
-                            event: Event::JobCancelling {
-                                id: job_id.clone(),
-                            },
+                            event: Event::JobCancelling { id: job_id.clone() },
                         })
                         .await?,
                 );
                 let effects = steps::cancellation_transition_effects(job, target);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
-                    self.start_step(
-                        &job_id,
-                        target,
-                        &job.vars,
-                        &self.execution_dir(job),
-                    )
-                    .await?,
+                    self.start_step(&job_id, target, &job.vars, &self.execution_dir(job))
+                        .await?,
                 );
             } else {
                 // Already at the cancel target; go terminal
@@ -679,10 +601,7 @@ where
                 result_events.extend(self.executor.execute_all(effects).await?);
                 self.breadcrumb.delete(&job.id);
                 // Update queue item status immediately (don't rely on event loop)
-                result_events.extend(
-                    self.check_worker_job_complete(&job_id, "cancelled")
-                        .await?,
-                );
+                result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
             }
         } else {
             // No on_cancel configured; terminal cancellation as before
@@ -691,10 +610,7 @@ where
             result_events.extend(self.executor.execute_all(effects).await?);
             self.breadcrumb.delete(&job.id);
             // Update queue item status immediately (don't rely on event loop)
-            result_events.extend(
-                self.check_worker_job_complete(&job_id, "cancelled")
-                    .await?,
-            );
+            result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
         }
 
         tracing::info!(job_id = %job.id, "cancelled job");

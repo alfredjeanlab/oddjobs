@@ -214,10 +214,7 @@ impl Effect {
             ],
             Effect::CancelTimer { id } => vec![("timer_id", id.to_string())],
             Effect::Shell {
-                job_id,
-                step,
-                cwd,
-                ..
+                job_id, step, cwd, ..
             } => vec![
                 ("job_id", job_id.to_string()),
                 ("step", step.clone()),

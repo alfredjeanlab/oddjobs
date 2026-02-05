@@ -112,10 +112,7 @@ fn job_on_fail_used_as_fallback() {
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        done,
-        "job should complete via job-level on_fail fallback"
-    );
+    assert!(done, "job should complete via job-level on_fail fallback");
 
     // Verify cleanup step was reached
     let list_output = temp.oj().args(&["job", "list"]).passes().stdout();

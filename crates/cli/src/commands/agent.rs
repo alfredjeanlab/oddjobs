@@ -279,12 +279,7 @@ pub async fn handle(
                         if a.job_id.is_empty() {
                             println!("  {} standalone", color::context("Source:"));
                         } else {
-                            println!(
-                                "  {} {} ({})",
-                                color::context("Job:"),
-                                a.job_id,
-                                a.job_name
-                            );
+                            println!("  {} {} ({})", color::context("Job:"), a.job_id, a.job_name);
                             println!("  {} {}", color::context("Step:"), a.step_name);
                         }
                         println!(
@@ -597,9 +592,7 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
         let detail = client.get_job(&job_id).await?;
         match detail {
             None => {
-                return Err(
-                    ExitError::new(3, format!("Job {} disappeared", job_id)).into(),
-                );
+                return Err(ExitError::new(3, format!("Job {} disappeared", job_id)).into());
             }
             Some(p) => {
                 // Find our specific agent in the job
@@ -659,14 +652,10 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
                 // Also check job-level terminal states as a fallback
                 if p.step == "failed" {
                     let msg = p.error.as_deref().unwrap_or("unknown error");
-                    return Err(
-                        ExitError::new(1, format!("Job {} failed: {}", p.name, msg)).into(),
-                    );
+                    return Err(ExitError::new(1, format!("Job {} failed: {}", p.name, msg)).into());
                 }
                 if p.step == "cancelled" {
-                    return Err(
-                        ExitError::new(4, format!("Job {} was cancelled", p.name)).into(),
-                    );
+                    return Err(ExitError::new(4, format!("Job {} was cancelled", p.name)).into());
                 }
             }
         }

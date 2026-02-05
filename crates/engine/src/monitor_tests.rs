@@ -207,15 +207,8 @@ fn escalate_emits_decision_created() {
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
-    let result = build_action_effects(
-        &job,
-        &agent,
-        &config,
-        "gate_failed",
-        &HashMap::new(),
-        None,
-    )
-    .unwrap();
+    let result =
+        build_action_effects(&job, &agent, &config, "gate_failed", &HashMap::new(), None).unwrap();
     if let ActionEffects::Escalate { effects } = result {
         let decision_created = effects.iter().find(|e| {
             matches!(

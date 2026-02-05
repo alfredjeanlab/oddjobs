@@ -233,10 +233,7 @@ run = { job = "ghost" }
     let err = parse_runbook(toml).unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     let msg = err.to_string();
-    assert!(
-        msg.contains("references unknown job 'ghost'"),
-        "got: {msg}"
-    );
+    assert!(msg.contains("references unknown job 'ghost'"), "got: {msg}");
     assert!(msg.contains("command.test.run"), "got: {msg}");
 }
 
@@ -255,10 +252,7 @@ job "test" {
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     assert!(runbook.agents.contains_key("planner"));
-    assert_eq!(
-        runbook.jobs["test"].steps[0].agent_name(),
-        Some("planner")
-    );
+    assert_eq!(runbook.jobs["test"].steps[0].agent_name(), Some("planner"));
 }
 
 #[test]

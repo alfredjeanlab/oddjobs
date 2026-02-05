@@ -9,8 +9,7 @@
 use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::RuntimeError;
 use oj_core::{
-    AgentError, AgentState, Effect, Event, Job, JobId, PromptType, QuestionData,
-    SessionId, TimerId,
+    AgentError, AgentState, Effect, Event, Job, JobId, PromptType, QuestionData, SessionId, TimerId,
 };
 use oj_runbook::{ActionConfig, AgentAction, AgentDef, ErrorType, RunDirective, Runbook};
 use std::collections::HashMap;
@@ -103,17 +102,14 @@ pub fn agent_failure_to_error_type(failure: &AgentError) -> Option<ErrorType> {
 }
 
 /// Get the current agent definition for a job step
-pub fn get_agent_def<'a>(
-    runbook: &'a Runbook,
-    job: &Job,
-) -> Result<&'a AgentDef, RuntimeError> {
+pub fn get_agent_def<'a>(runbook: &'a Runbook, job: &Job) -> Result<&'a AgentDef, RuntimeError> {
     let job_def = runbook
         .get_job(&job.kind)
         .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
-    let step_def = job_def.get_step(&job.step).ok_or_else(|| {
-        RuntimeError::JobNotFound(format!("step {} not found", job.step))
-    })?;
+    let step_def = job_def
+        .get_step(&job.step)
+        .ok_or_else(|| RuntimeError::JobNotFound(format!("step {} not found", job.step)))?;
 
     // Extract agent name from run directive
     let agent_name = match &step_def.run {

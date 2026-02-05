@@ -5,8 +5,8 @@
 
 pub(crate) mod agent_run;
 mod handlers;
-mod monitor;
 mod job;
+mod monitor;
 
 use crate::{
     breadcrumb::BreadcrumbWriter, error::RuntimeError, job_logger::JobLogger,
@@ -175,8 +175,7 @@ where
 
     pub(crate) fn execution_dir(&self, job: &Job) -> PathBuf {
         // Use workspace_path if in workspace mode, otherwise use cwd
-        job
-            .workspace_path
+        job.workspace_path
             .clone()
             .unwrap_or_else(|| job.cwd.clone())
     }

@@ -184,6 +184,4 @@ macro_rules! parse_span_tests {
     };
 }
 
-pub(crate) use {
-    parse_error_tests, parse_span_tests, parse_tests, job_tests, simple_cmd_tests,
-};
+pub(crate) use {job_tests, parse_error_tests, parse_span_tests, parse_tests, simple_cmd_tests};

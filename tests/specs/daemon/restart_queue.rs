@@ -352,10 +352,7 @@ fn active_queue_item_completes_after_daemon_crash() {
         let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
         items.contains("active") && jobs.contains("running")
     });
-    assert!(
-        active,
-        "queue item should be active with a running job"
-    );
+    assert!(active, "queue item should be active with a running job");
 
     // Kill the daemon with SIGKILL (simulates crash)
     let killed = temp.daemon_kill();

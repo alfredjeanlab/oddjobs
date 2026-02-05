@@ -132,10 +132,7 @@ fn init_on_fail_routes_to_reinit_step() {
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        done,
-        "job should complete via reinit after init failure"
-    );
+    assert!(done, "job should complete via reinit after init failure");
 }
 
 /// Reinit cleans up stale state left by a failed init step.
@@ -162,10 +159,7 @@ fn reinit_cleans_stale_state_and_recovers() {
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        done,
-        "job should complete after reinit cleans stale state"
-    );
+    assert!(done, "job should complete after reinit cleans stale state");
 }
 
 /// Two concurrent jobs of the same kind get isolated workspaces.

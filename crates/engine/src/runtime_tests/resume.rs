@@ -406,10 +406,7 @@ async fn resume_from_terminal_failure_agent_step() {
     assert_eq!(job.step, "work");
 
     // Fail the job at the agent step (simulating agent terminal failure)
-    ctx.runtime
-        .fail_job(&job, "agent crashed")
-        .await
-        .unwrap();
+    ctx.runtime.fail_job(&job, "agent crashed").await.unwrap();
 
     // Verify job is in terminal "failed" state
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -468,10 +465,7 @@ async fn resume_from_terminal_failure_clears_stale_session() {
     assert!(job.session_id.is_some());
 
     // Fail the job
-    ctx.runtime
-        .fail_job(&job, "agent died")
-        .await
-        .unwrap();
+    ctx.runtime.fail_job(&job, "agent died").await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "failed");
@@ -490,8 +484,7 @@ async fn resume_from_terminal_failure_clears_stale_session() {
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work");
     assert!(
-        job.session_id.is_none()
-            || job.session_id.as_deref() != Some("stale-session-123"),
+        job.session_id.is_none() || job.session_id.as_deref() != Some("stale-session-123"),
         "stale session_id should be cleared on resume, got: {:?}",
         job.session_id
     );

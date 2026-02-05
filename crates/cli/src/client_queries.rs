@@ -35,10 +35,7 @@ impl DaemonClient {
     }
 
     /// Query for a specific job
-    pub async fn get_job(
-        &self,
-        id: &str,
-    ) -> Result<Option<oj_daemon::JobDetail>, ClientError> {
+    pub async fn get_job(&self, id: &str) -> Result<Option<oj_daemon::JobDetail>, ClientError> {
         let request = Request::Query {
             query: Query::GetJob { id: id.to_string() },
         };
@@ -299,13 +296,9 @@ impl DaemonClient {
             named_args: named_args.clone(),
         };
         match self.send(&request).await? {
-            Response::CommandStarted {
-                job_id,
-                job_name,
-            } => Ok(RunCommandResult::Job {
-                job_id,
-                job_name,
-            }),
+            Response::CommandStarted { job_id, job_name } => {
+                Ok(RunCommandResult::Job { job_id, job_name })
+            }
             Response::AgentRunStarted {
                 agent_run_id,
                 agent_name,

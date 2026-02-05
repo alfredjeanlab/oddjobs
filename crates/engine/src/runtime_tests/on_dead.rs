@@ -475,10 +475,7 @@ async fn gate_dead_result_events_advance_past_shell_step() {
 
     // Job is at plan-check after advance, but ShellExited hasn't
     // been re-processed yet (it arrives via the event channel).
-    assert_eq!(
-        ctx.runtime.get_job(&job_id).unwrap().step,
-        "plan-check"
-    );
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "plan-check");
 
     // ShellExited arrives via the event channel (async shell execution).
     // Re-process it to advance past the shell step to implement.
@@ -519,10 +516,7 @@ async fn agent_exited_ignores_non_agent_step() {
         .await
         .unwrap();
 
-    assert_eq!(
-        ctx.runtime.get_job(&job_id).unwrap().step,
-        "plan-check"
-    );
+    assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "plan-check");
 
     // AgentExited for old agent while job is at a shell step
     // should be a no-op (job already advanced past the agent step).

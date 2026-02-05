@@ -46,10 +46,7 @@ async fn agent_error_fails_job() {
 
     // Simulate agent failure via fail_job (orchestrator-driven)
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    ctx.runtime
-        .fail_job(&job, "timeout")
-        .await
-        .unwrap();
+    ctx.runtime.fail_job(&job, "timeout").await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "failed");
@@ -498,8 +495,7 @@ async fn advance_job_cancels_exit_deferred_timer() {
         .collect();
 
     assert!(
-        !timer_ids
-            .contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
+        !timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
         "advance_job must cancel exit-deferred timer"
     );
 }
@@ -539,10 +535,7 @@ async fn fail_job_cancels_exit_deferred_timer() {
     }
 
     // Fail the job from the agent step
-    ctx.runtime
-        .fail_job(&job, "test failure")
-        .await
-        .unwrap();
+    ctx.runtime.fail_job(&job, "test failure").await.unwrap();
 
     // Verify both timers are cancelled
     let scheduler = ctx.runtime.executor.scheduler();
@@ -558,8 +551,7 @@ async fn fail_job_cancels_exit_deferred_timer() {
         .collect();
 
     assert!(
-        !timer_ids
-            .contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
+        !timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
         "fail_job must cancel exit-deferred timer"
     );
     assert!(
@@ -937,11 +929,7 @@ async fn locals_interpolate_workspace_variables() {
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
 
-    let branch = job
-        .vars
-        .get("local.branch")
-        .cloned()
-        .unwrap_or_default();
+    let branch = job.vars.get("local.branch").cloned().unwrap_or_default();
     assert!(
         branch.starts_with("feature/auth-"),
         "local.branch should start with 'feature/auth-', got: {branch}"
@@ -1279,8 +1267,7 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
             );
             assert_eq!(job.step, "failed");
             assert!(
-                job
-                    .error
+                job.error
                     .as_deref()
                     .unwrap_or("")
                     .contains("circuit breaker"),

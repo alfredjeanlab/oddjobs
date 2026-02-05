@@ -155,8 +155,7 @@ async fn create_job(ctx: &TestContext) -> String {
 /// Get the agent_id for a job's current step from step history.
 fn get_agent_id(ctx: &TestContext, job_id: &str) -> Option<AgentId> {
     let job = ctx.runtime.get_job(job_id)?;
-    job
-        .step_history
+    job.step_history
         .iter()
         .rfind(|r| r.name == job.step)
         .and_then(|r| r.agent_id.clone())

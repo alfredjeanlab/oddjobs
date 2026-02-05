@@ -390,10 +390,7 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
                 "command",
                 runbook.commands.keys().cloned().collect::<Vec<_>>(),
             ),
-            (
-                "job",
-                runbook.jobs.keys().cloned().collect::<Vec<_>>(),
-            ),
+            ("job", runbook.jobs.keys().cloned().collect::<Vec<_>>()),
             ("agent", runbook.agents.keys().cloned().collect::<Vec<_>>()),
             ("queue", runbook.queues.keys().cloned().collect::<Vec<_>>()),
             (

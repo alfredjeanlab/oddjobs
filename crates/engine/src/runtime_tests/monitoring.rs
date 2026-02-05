@@ -107,9 +107,7 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
             _ => None,
         })
         .collect();
-    assert!(
-        timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str())
-    );
+    assert!(timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()));
 }
 
 // =============================================================================

@@ -417,11 +417,8 @@ where
 
                 // Generate job ID
                 let job_id = JobId::new(UuidIdGen.next());
-                let display_name = oj_runbook::job_display_name(
-                    job_name,
-                    job_id.short(8),
-                    &namespace,
-                );
+                let display_name =
+                    oj_runbook::job_display_name(job_name, job_id.short(8), &namespace);
 
                 // Set invoke.dir to project root so runbooks can reference ${invoke.dir}
                 let mut vars = HashMap::new();
@@ -447,11 +444,7 @@ where
                     self.logger.log_dir(),
                     cron_name,
                     &namespace,
-                    &format!(
-                        "tick: triggered job {} ({})",
-                        job_name,
-                        job_id.short(8)
-                    ),
+                    &format!("tick: triggered job {} ({})", job_name, job_id.short(8)),
                 );
 
                 // Emit CronFired tracking event

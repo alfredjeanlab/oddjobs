@@ -117,8 +117,7 @@ where
                 .shell_command()
                 .ok_or_else(|| RuntimeError::InvalidRequest("no shell command in step".into()))?;
 
-            self.handle_shell_resume(&job, &resume_step, command)
-                .await
+            self.handle_shell_resume(&job, &resume_step, command).await
         } else {
             Err(RuntimeError::InvalidRequest(format!(
                 "resume not supported for step type in step: {}",

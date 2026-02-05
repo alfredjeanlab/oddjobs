@@ -13,8 +13,8 @@ mod command;
 mod cron;
 mod find;
 mod help;
-mod parser;
 mod job;
+mod parser;
 mod queue;
 mod slug;
 mod template;
@@ -37,11 +37,11 @@ pub use find::{
     find_runbook_by_command, find_runbook_by_cron, find_runbook_by_queue, find_runbook_by_worker,
     runbook_parse_warnings, validate_runbook_dir, FileComment, FindError,
 };
-pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
 pub use job::{
-    GitWorkspaceMode, NotifyConfig, JobDef, StepDef, StepTransition, WorkspaceBlock,
+    GitWorkspaceMode, JobDef, NotifyConfig, StepDef, StepTransition, WorkspaceBlock,
     WorkspaceConfig, WorkspaceType,
 };
+pub use parser::{parse_runbook, parse_runbook_with_format, Format, ParseError, Runbook};
 pub use queue::{QueueDef, QueueType};
 pub use slug::{job_display_name, slugify};
 pub use template::{escape_for_shell, interpolate, interpolate_shell};

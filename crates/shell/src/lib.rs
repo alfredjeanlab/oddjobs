@@ -80,7 +80,7 @@ pub use validation::ValidationError;
 // AST types
 pub use ast::{
     AndOrList, AstVisitor, BraceGroup, CliArg, Command, CommandItem, CommandList, EnvAssignment,
-    LogicalOp, Job, QuoteStyle, Redirection, SimpleCommand, Subshell, SubstitutionBody, Word,
+    Job, LogicalOp, QuoteStyle, Redirection, SimpleCommand, Subshell, SubstitutionBody, Word,
     WordPart,
 };
 

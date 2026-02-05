@@ -252,10 +252,7 @@ where
 
     /// Deferred exit handler (5s after liveness detected death).
     /// Reads final session log to determine exit reason.
-    async fn handle_exit_deferred_timer(
-        &self,
-        job_id: &str,
-    ) -> Result<Vec<Event>, RuntimeError> {
+    async fn handle_exit_deferred_timer(&self, job_id: &str) -> Result<Vec<Event>, RuntimeError> {
         let job = match self.get_job(job_id) {
             Some(p) => p,
             None => return Ok(vec![]),

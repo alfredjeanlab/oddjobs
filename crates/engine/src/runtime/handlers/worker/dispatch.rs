@@ -327,9 +327,7 @@ where
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_name) {
                 state.active_jobs.insert(job_id.clone());
-                state
-                    .item_job_map
-                    .insert(job_id.clone(), item_id.clone());
+                state.item_job_map.insert(job_id.clone(), item_id.clone());
             }
         }
 

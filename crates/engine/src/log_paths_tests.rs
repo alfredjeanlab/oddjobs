@@ -6,10 +6,7 @@ use super::*;
 #[test]
 fn job_log_path_builds_expected_path() {
     let result = job_log_path(Path::new("/state/logs"), "job-001");
-    assert_eq!(
-        result,
-        PathBuf::from("/state/logs/job/job-001.log")
-    );
+    assert_eq!(result, PathBuf::from("/state/logs/job/job-001.log"));
 }
 
 #[test]

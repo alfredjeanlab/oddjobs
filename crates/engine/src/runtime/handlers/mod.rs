@@ -6,8 +6,8 @@
 mod agent;
 mod command;
 pub(crate) mod cron;
-mod lifecycle;
 mod job_create;
+mod lifecycle;
 mod timer;
 pub(crate) mod worker;
 
@@ -139,10 +139,7 @@ where
             }
 
             Event::JobResume { id, message, vars } => {
-                result_events.extend(
-                    self.handle_job_resume(id, message.as_deref(), vars)
-                        .await?,
-                );
+                result_events.extend(self.handle_job_resume(id, message.as_deref(), vars).await?);
             }
 
             Event::JobCancel { id } => {

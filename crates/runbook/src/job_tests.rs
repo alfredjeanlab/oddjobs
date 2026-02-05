@@ -115,10 +115,7 @@ run = "echo cleanup"
         job.on_done.as_ref().map(|t| t.step_name()),
         Some("teardown")
     );
-    assert_eq!(
-        job.on_fail.as_ref().map(|t| t.step_name()),
-        Some("cleanup")
-    );
+    assert_eq!(job.on_fail.as_ref().map(|t| t.step_name()), Some("cleanup"));
 }
 
 #[test]
@@ -148,10 +145,7 @@ job "deploy" {
         job.on_done.as_ref().map(|t| t.step_name()),
         Some("teardown")
     );
-    assert_eq!(
-        job.on_fail.as_ref().map(|t| t.step_name()),
-        Some("cleanup")
-    );
+    assert_eq!(job.on_fail.as_ref().map(|t| t.step_name()), Some("cleanup"));
 }
 
 #[test]
@@ -380,10 +374,7 @@ run  = "echo init"
         job.locals.get("repo").unwrap(),
         "$(git rev-parse --show-toplevel)"
     );
-    assert_eq!(
-        job.locals.get("branch").unwrap(),
-        "feature/${var.name}"
-    );
+    assert_eq!(job.locals.get("branch").unwrap(), "feature/${var.name}");
 }
 
 #[test]

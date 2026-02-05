@@ -139,10 +139,7 @@ impl EscalationDecisionBuilder {
                 exit_code,
                 stderr,
             } => {
-                parts.push(format!(
-                    "Gate command failed in job \"{}\".",
-                    self.job_name
-                ));
+                parts.push(format!("Gate command failed in job \"{}\".", self.job_name));
                 parts.push(format!("Command: {}", command));
                 parts.push(format!("Exit code: {}", exit_code));
                 if !stderr.is_empty() {

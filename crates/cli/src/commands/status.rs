@@ -216,10 +216,7 @@ fn format_text(
     // Header line with uptime and global counts
     let uptime = format_duration(uptime_secs);
     let total_active: usize = namespaces.iter().map(|ns| ns.active_jobs.len()).sum();
-    let total_escalated: usize = namespaces
-        .iter()
-        .map(|ns| ns.escalated_jobs.len())
-        .sum();
+    let total_escalated: usize = namespaces.iter().map(|ns| ns.escalated_jobs.len()).sum();
 
     let _ = write!(
         out,
@@ -242,10 +239,7 @@ fn format_text(
     if total_escalated > 0 {
         let _ = write!(out, " | {} {}", total_escalated, color::status("escalated"));
     }
-    let total_orphaned: usize = namespaces
-        .iter()
-        .map(|ns| ns.orphaned_jobs.len())
-        .sum();
+    let total_orphaned: usize = namespaces.iter().map(|ns| ns.orphaned_jobs.len()).sum();
     if total_orphaned > 0 {
         let _ = write!(out, " | {} {}", total_orphaned, color::status("orphaned"));
     }
@@ -302,16 +296,14 @@ fn format_text(
         out.push('\n');
 
         // Sort jobs by most recent activity (descending) and workers alphabetically
-        let mut active_jobs: Vec<&oj_daemon::JobStatusEntry> =
-            ns.active_jobs.iter().collect();
+        let mut active_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.active_jobs.iter().collect();
         active_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
         let mut escalated_jobs: Vec<&oj_daemon::JobStatusEntry> =
             ns.escalated_jobs.iter().collect();
         escalated_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
-        let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> =
-            ns.orphaned_jobs.iter().collect();
+        let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.orphaned_jobs.iter().collect();
         orphaned_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
         let mut workers: Vec<&oj_daemon::WorkerSummary> = ns.workers.iter().collect();

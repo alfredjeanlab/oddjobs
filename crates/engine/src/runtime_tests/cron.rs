@@ -709,10 +709,7 @@ async fn cron_timer_fires_agent() {
 
     // No jobs should be created
     let jobs = ctx.runtime.jobs();
-    assert!(
-        jobs.is_empty(),
-        "no jobs should be created for agent cron"
-    );
+    assert!(jobs.is_empty(), "no jobs should be created for agent cron");
 }
 
 // ---- Test 13: cron_agent_concurrency_skip ----
@@ -1137,13 +1134,10 @@ async fn cron_job_concurrency_skip() {
         .unwrap();
 
     // No JobCreated should be emitted (spawn was skipped)
-    let has_new_job = events.iter().any(
-        |e| matches!(e, Event::JobCreated { id, .. } if id.as_str() != "existing-pipe-1"),
-    );
-    assert!(
-        !has_new_job,
-        "should NOT spawn job when at max concurrency"
-    );
+    let has_new_job = events
+        .iter()
+        .any(|e| matches!(e, Event::JobCreated { id, .. } if id.as_str() != "existing-pipe-1"));
+    assert!(!has_new_job, "should NOT spawn job when at max concurrency");
 
     // No CronFired should be emitted (spawn was skipped)
     let has_cron_fired = events.iter().any(|e| matches!(e, Event::CronFired { .. }));
@@ -1233,13 +1227,8 @@ async fn cron_job_concurrency_respawns_after_complete() {
         .unwrap();
 
     // JobCreated should be emitted (spawn succeeded)
-    let has_job = events
-        .iter()
-        .any(|e| matches!(e, Event::JobCreated { .. }));
-    assert!(
-        has_job,
-        "should spawn job when previous run is completed"
-    );
+    let has_job = events.iter().any(|e| matches!(e, Event::JobCreated { .. }));
+    assert!(has_job, "should spawn job when previous run is completed");
 
     // CronFired should be emitted
     let has_cron_fired = events

@@ -151,10 +151,7 @@ fn display_name_normal() {
 
 #[test]
 fn display_name_empty_slug() {
-    assert_eq!(
-        job_display_name("the a an", "a1b2c3d4", ""),
-        "a1b2c3d4"
-    );
+    assert_eq!(job_display_name("the a an", "a1b2c3d4", ""), "a1b2c3d4");
 }
 
 #[test]

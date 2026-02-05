@@ -89,9 +89,7 @@ where
     /// Used during recovery for dead sessions where we only need to route
     /// the AgentStateChanged event back to the correct job.
     pub fn register_agent_job(&self, agent_id: AgentId, job_id: JobId) {
-        self.agent_jobs
-            .lock()
-            .insert(agent_id, job_id.to_string());
+        self.agent_jobs.lock().insert(agent_id, job_id.to_string());
     }
 
     pub(crate) async fn spawn_agent(
@@ -172,11 +170,9 @@ where
         let mut result_events = self.executor.execute_all(effects).await?;
 
         // Emit agent on_start notification if configured
-        if let Some(effect) = monitor::build_agent_notify_effect(
-            &job,
-            agent_def,
-            agent_def.notify.on_start.as_ref(),
-        ) {
+        if let Some(effect) =
+            monitor::build_agent_notify_effect(&job, agent_def, agent_def.notify.on_start.as_ref())
+        {
             if let Some(event) = self.executor.execute(effect).await? {
                 result_events.push(event);
             }
@@ -255,8 +251,7 @@ where
             }
             MonitorState::WaitingForInput => {
                 tracing::info!(job_id = %job.id, step = %job.step, "agent idle (on_idle)");
-                self.logger
-                    .append(&job.id, &job.step, "agent idle");
+                self.logger.append(&job.id, &job.step, "agent idle");
                 (&agent_def.on_idle, "idle", None)
             }
             MonitorState::Prompting {
@@ -285,11 +280,8 @@ where
                 ref error_type,
             } => {
                 tracing::warn!(job_id = %job.id, error = %message, "agent error");
-                self.logger.append(
-                    &job.id,
-                    &job.step,
-                    &format!("agent error: {}", message),
-                );
+                self.logger
+                    .append(&job.id, &job.step, &format!("agent error: {}", message));
                 // Write error to agent log so it's visible in `oj logs <agent>`
                 if let Some(agent_id) = job
                     .step_history
@@ -301,20 +293,12 @@ where
                 }
                 let error_action = agent_def.on_error.action_for(error_type.as_ref());
                 return self
-                    .execute_action_with_attempts(
-                        job,
-                        agent_def,
-                        &error_action,
-                        message,
-                        0,
-                        None,
-                    )
+                    .execute_action_with_attempts(job, agent_def, &error_action, message, 0, None)
                     .await;
             }
             MonitorState::Exited => {
                 tracing::info!(job_id = %job.id, "agent process exited");
-                self.logger
-                    .append(&job.id, &job.step, "agent exited");
+                self.logger.append(&job.id, &job.step, "agent exited");
                 self.copy_agent_session_log(job);
                 (&agent_def.on_dead, "exit", None)
             }
@@ -330,15 +314,8 @@ where
             }
         };
 
-        self.execute_action_with_attempts(
-            job,
-            agent_def,
-            action_config,
-            trigger,
-            0,
-            qd.as_ref(),
-        )
-        .await
+        self.execute_action_with_attempts(job, agent_def, action_config, trigger, 0, qd.as_ref())
+            .await
     }
 
     /// Execute an action with attempt tracking and cooldown support
@@ -532,8 +509,7 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         match effects {
             ActionEffects::Nudge { effects } => {
-                self.logger
-                    .append(&job.id, &job.step, "nudge sent");
+                self.logger.append(&job.id, &job.step, "nudge sent");
 
                 // Record nudge timestamp to suppress auto-resume from our own nudge text
                 let job_id = JobId::new(&job.id);
@@ -615,10 +591,7 @@ where
                     &job.step,
                     &format!("gate (cwd: {}): {}", execution_dir.display(), command),
                 );
-                match self
-                    .run_gate_command(job, &command, &execution_dir)
-                    .await
-                {
+                match self.run_gate_command(job, &command, &execution_dir).await {
                     Ok(()) => {
                         self.logger
                             .append(&job.id, &job.step, "gate passed, advancing");
@@ -817,11 +790,8 @@ where
             AgentSignalKind::Escalate => {
                 let msg = message.as_deref().unwrap_or("Agent requested escalation");
                 tracing::info!(job_id = %job.id, message = msg, "agent:signal escalate");
-                self.logger.append(
-                    &job.id,
-                    &job.step,
-                    &format!("agent:signal: {}", msg),
-                );
+                self.logger
+                    .append(&job.id, &job.step, &format!("agent:signal: {}", msg));
                 let effects = vec![
                     Effect::Notify {
                         title: job.name.clone(),

@@ -135,10 +135,7 @@ pub async fn handle(
                 cron_name: name,
             };
             match client.send(&request).await? {
-                Response::CommandStarted {
-                    job_id,
-                    job_name,
-                } => {
+                Response::CommandStarted { job_id, job_name } => {
                     println!("Job '{}' started ({})", job_name, job_id);
                 }
                 Response::Error { message } => {

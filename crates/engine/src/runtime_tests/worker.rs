@@ -604,10 +604,7 @@ async fn worker_stop_leaves_active_jobs_running() {
         .iter()
         .filter(|e| matches!(e, Event::JobAdvanced { step, .. } if step == "cancelled"))
         .count();
-    assert_eq!(
-        cancelled_count, 0,
-        "stop should not cancel active jobs"
-    );
+    assert_eq!(cancelled_count, 0, "stop should not cancel active jobs");
 
     // Worker should be stopped but still tracking active jobs
     let workers = ctx.runtime.worker_states.lock();
@@ -943,9 +940,7 @@ async fn queue_item_failed_on_job_cancel() {
 
     // Cancel the job
     ctx.runtime
-        .handle_event(Event::JobCancel {
-            id: job_id.clone(),
-        })
+        .handle_event(Event::JobCancel { id: job_id.clone() })
         .await
         .unwrap();
 

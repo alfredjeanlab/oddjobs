@@ -260,10 +260,7 @@ pub enum Event {
 
     /// Step completed successfully
     #[serde(rename = "step:completed")]
-    StepCompleted {
-        job_id: JobId,
-        step: String,
-    },
+    StepCompleted { job_id: JobId, step: String },
 
     /// Step failed
     #[serde(rename = "step:failed")]
@@ -748,18 +745,12 @@ impl Event {
                 exit_code,
                 ..
             } => format!("{t} job={job_id} step={step} exit={exit_code}"),
-            Event::StepStarted {
-                job_id, step, ..
-            } => format!("{t} job={job_id} step={step}"),
-            Event::StepWaiting {
-                job_id, step, ..
-            } => format!("{t} job={job_id} step={step}"),
+            Event::StepStarted { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
+            Event::StepWaiting { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
             Event::StepCompleted { job_id, step } => {
                 format!("{t} job={job_id} step={step}")
             }
-            Event::StepFailed {
-                job_id, step, ..
-            } => format!("{t} job={job_id} step={step}"),
+            Event::StepFailed { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
             Event::Shutdown | Event::Custom => t.to_string(),
             Event::TimerStart { id } => format!("{t} id={id}"),
             Event::WorkspaceCreated { id, .. } => format!("{t} id={id}"),
@@ -869,10 +860,7 @@ impl Event {
                 ..
             } => format!("{t} queue={queue_name} item={item_id}"),
             Event::DecisionCreated {
-                id,
-                job_id,
-                source,
-                ..
+                id, job_id, source, ..
             } => format!("{t} id={id} job={job_id} source={source:?}"),
             Event::DecisionResolved { id, chosen, .. } => {
                 if let Some(c) = chosen {
@@ -925,9 +913,7 @@ impl Event {
             | Event::JobDeleted { id, .. } => Some(id),
             Event::WorkerItemDispatched { job_id, .. } => Some(job_id),
             Event::CronOnce {
-                job_id,
-                agent_name,
-                ..
+                job_id, agent_name, ..
             } => {
                 if agent_name.is_some() {
                     None

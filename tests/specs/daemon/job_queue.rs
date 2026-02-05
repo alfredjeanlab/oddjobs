@@ -53,12 +53,7 @@ fn extract_job_id(temp: &Project, name_filter: &str) -> String {
     output
         .lines()
         .find(|l| l.contains(name_filter))
-        .unwrap_or_else(|| {
-            panic!(
-                "no job matching '{}' in output:\n{}",
-                name_filter, output
-            )
-        })
+        .unwrap_or_else(|| panic!("no job matching '{}' in output:\n{}", name_filter, output))
         .split_whitespace()
         .next()
         .expect("should have an ID column")
@@ -100,9 +95,7 @@ fn cancel_job_transitions_queue_item_from_active() {
 
     // Get job ID and cancel it
     let job_id = extract_job_id(&temp, "process");
-    temp.oj()
-        .args(&["job", "cancel", &job_id])
-        .passes();
+    temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Wait for queue item to reach a terminal status (dead or failed)
     let transitioned = wait_for(SPEC_WAIT_MAX_MS, || {
