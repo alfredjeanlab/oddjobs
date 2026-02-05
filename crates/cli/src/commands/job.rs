@@ -368,28 +368,39 @@ pub async fn handle(
                         if !p.vars.is_empty() {
                             println!();
                             println!("  {}", color::header("Variables:"));
+                            let sorted = sorted_vars(&p.vars);
                             if verbose {
-                                for (k, v) in &p.vars {
+                                for (k, v) in &sorted {
                                     if v.contains('\n') {
                                         println!("    {}", color::context(&format!("{}:", k)));
                                         for line in v.lines() {
                                             println!("      {}", line);
                                         }
                                     } else {
-                                        println!("    {} {}", color::context(&format!("{}:", k)), v);
+                                        println!(
+                                            "    {} {}",
+                                            color::context(&format!("{}:", k)),
+                                            v
+                                        );
                                     }
                                 }
                             } else {
-                                for (k, v) in &p.vars {
-                                    println!("    {} {}", color::context(&format!("{}:", k)), format_var_value(v, 80));
+                                for (k, v) in &sorted {
+                                    println!(
+                                        "    {} {}",
+                                        color::context(&format!("{}:", k)),
+                                        format_var_value(v, 80)
+                                    );
                                 }
                                 let any_truncated =
                                     p.vars.values().any(|v| is_var_truncated(v, 80));
                                 if any_truncated {
-                                    println!("");
+                                    println!();
                                     println!(
                                         "  {}",
-                                        color::context("hint: use --verbose to show full variables")
+                                        color::context(
+                                            "hint: use --verbose to show full variables"
+                                        )
                                     );
                                 }
                             }
@@ -614,6 +625,33 @@ fn format_var_value(value: &str, max_len: usize) -> String {
         let truncated: String = escaped.chars().take(max_len).collect();
         format!("{}...", truncated)
     }
+}
+
+/// Returns the sort priority for a variable namespace.
+/// Lower values sort first: invoke (0) → workspace (1) → local (2) → var (3) → other (4)
+fn var_namespace_priority(name: &str) -> u8 {
+    if name.starts_with("invoke.") {
+        0
+    } else if name.starts_with("workspace.") {
+        1
+    } else if name.starts_with("local.") {
+        2
+    } else if name.starts_with("var.") {
+        3
+    } else {
+        4
+    }
+}
+
+/// Sort variables by namespace priority, then alphabetically within each group.
+fn sorted_vars(vars: &HashMap<String, String>) -> Vec<(&String, &String)> {
+    let mut sorted: Vec<_> = vars.iter().collect();
+    sorted.sort_by(|(a, _), (b, _)| {
+        let pri_a = var_namespace_priority(a);
+        let pri_b = var_namespace_priority(b);
+        pri_a.cmp(&pri_b).then_with(|| a.cmp(b))
+    });
+    sorted
 }
 
 fn is_var_truncated(value: &str, max_len: usize) -> bool {
