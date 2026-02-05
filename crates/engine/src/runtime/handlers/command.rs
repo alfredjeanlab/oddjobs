@@ -104,6 +104,16 @@ where
                 .await
             }
             RunDirective::Shell(cmd) => {
+                // Idempotency guard: if job already exists (e.g., from crash recovery
+                // where the CommandRun event is re-processed), skip creation.
+                if self.get_job(job_id.as_str()).is_some() {
+                    tracing::debug!(
+                        job_id = %job_id,
+                        "job already exists, skipping duplicate shell command creation"
+                    );
+                    return Ok(vec![]);
+                }
+
                 let cmd = cmd.clone();
                 let name = args
                     .get("name")
@@ -202,6 +212,19 @@ where
                 Ok(result_events)
             }
             RunDirective::Agent { agent, .. } => {
+                // Idempotency guard: if agent run already exists (e.g., from crash recovery
+                // where the CommandRun event is re-processed), skip creation.
+                // Use job_id since it's used as the agent_run_id.
+                let agent_run_exists =
+                    self.lock_state(|s| s.agent_runs.contains_key(job_id.as_str()));
+                if agent_run_exists {
+                    tracing::debug!(
+                        job_id = %job_id,
+                        "agent run already exists, skipping duplicate creation"
+                    );
+                    return Ok(vec![]);
+                }
+
                 let agent_name = agent.clone();
                 let agent_def = runbook
                     .get_agent(&agent_name)

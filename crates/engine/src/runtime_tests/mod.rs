@@ -6,6 +6,7 @@
 mod cron;
 mod directives;
 mod errors;
+mod idempotency;
 mod monitoring;
 mod notify;
 mod on_dead;

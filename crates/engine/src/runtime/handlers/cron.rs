@@ -239,6 +239,18 @@ where
             let ar_id =
                 oj_core::AgentRunId::new(agent_run_id.as_deref().unwrap_or(&UuidIdGen.next()));
 
+            // Idempotency guard: if agent run already exists (e.g., from crash recovery
+            // where the CronOnce event is re-processed), skip creation.
+            let agent_run_exists = self.lock_state(|s| s.agent_runs.contains_key(ar_id.as_str()));
+            if agent_run_exists {
+                tracing::debug!(
+                    agent_run_id = %ar_id,
+                    cron_name,
+                    "agent run already exists, skipping duplicate cron agent creation"
+                );
+                return Ok(vec![]);
+            }
+
             // Emit AgentRunCreated
             let creation_effects = vec![Effect::Emit {
                 event: Event::AgentRunCreated {

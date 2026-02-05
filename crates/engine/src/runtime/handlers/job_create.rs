@@ -47,6 +47,17 @@ where
             cron_name,
         } = params;
 
+        // Idempotency guard: if job already exists (e.g., from crash recovery
+        // where the triggering event is re-processed), skip creation.
+        // This prevents workspace creation from failing on the second attempt.
+        if self.get_job(job_id.as_str()).is_some() {
+            tracing::debug!(
+                job_id = %job_id,
+                "job already exists, skipping duplicate creation"
+            );
+            return Ok(vec![]);
+        }
+
         // Look up job definition
         let job_def = runbook
             .get_job(&job_kind)
