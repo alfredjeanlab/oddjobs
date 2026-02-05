@@ -57,16 +57,12 @@ impl Snapshot {
 
         let tmp_path = path.with_extension("tmp");
 
-        // Write to temp file
+        // Write to temp file and sync
         {
             let file = File::create(&tmp_path)?;
-            let writer = BufWriter::new(file);
-            serde_json::to_writer(writer, self)?;
-        }
-
-        // Sync the temp file to ensure data is on disk before rename
-        {
-            let file = File::open(&tmp_path)?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, self)?;
+            let file = writer.into_inner().map_err(|e| e.into_error())?;
             file.sync_all()?;
         }
 

@@ -65,6 +65,8 @@ pub struct WalEntry {
 /// processed sequence (highest seq the engine has processed).
 pub struct Wal {
     file: File,
+    /// Persistent read handle (cloned once at open) for next_unprocessed
+    read_file: File,
     path: PathBuf,
     /// Next sequence number to assign
     write_seq: u64,
@@ -138,8 +140,11 @@ impl Wal {
             read_offset = scan.1;
         }
 
+        let read_file = file.try_clone()?;
+
         Ok(Self {
             file,
+            read_file,
             path: path.to_owned(),
             write_seq,
             processed_seq,
@@ -271,9 +276,9 @@ impl Wal {
             return Ok(());
         }
 
-        for json_bytes in self.write_buffer.drain(..) {
+        for mut json_bytes in self.write_buffer.drain(..) {
+            json_bytes.push(b'\n');
             self.file.write_all(&json_bytes)?;
-            self.file.write_all(b"\n")?;
         }
 
         self.file.sync_all()?;
@@ -288,7 +293,7 @@ impl Wal {
         // First flush any pending writes so they're readable
         self.flush()?;
 
-        let mut reader = BufReader::new(self.file.try_clone()?);
+        let mut reader = BufReader::new(&self.read_file);
         reader.seek(SeekFrom::Start(self.read_offset))?;
 
         let mut line = String::new();
@@ -358,7 +363,7 @@ impl Wal {
         let mut reader = BufReader::new(self.file.try_clone()?);
         reader.seek(SeekFrom::Start(0))?;
 
-        let mut kept_lines: Vec<String> = Vec::new();
+        let mut kept_lines: Vec<(u64, String)> = Vec::new();
         let mut line = String::new();
 
         loop {
@@ -383,17 +388,35 @@ impl Wal {
 
             if record.seq >= seq {
                 // Keep this line as raw bytes (no re-serialize)
-                kept_lines.push(trimmed.to_string());
+                kept_lines.push((record.seq, trimmed.to_string()));
             }
         }
 
-        // Write to temp file
+        // Write to temp file, computing read_offset during the write pass
+        let new_read_offset;
         {
             let mut tmp_file = File::create(&tmp_path)?;
-            for kept_line in &kept_lines {
+            let mut current_offset = 0u64;
+            let mut found_unprocessed = false;
+            let mut first_unprocessed_offset = 0u64;
+
+            for (entry_seq, kept_line) in &kept_lines {
+                if *entry_seq > self.processed_seq && !found_unprocessed {
+                    first_unprocessed_offset = current_offset;
+                    found_unprocessed = true;
+                }
                 tmp_file.write_all(kept_line.as_bytes())?;
                 tmp_file.write_all(b"\n")?;
+                current_offset += kept_line.len() as u64 + 1;
             }
+
+            // If no unprocessed entries found, read_offset is at end of file
+            new_read_offset = if found_unprocessed {
+                first_unprocessed_offset
+            } else {
+                current_offset
+            };
+
             tmp_file.sync_all()?;
         }
 
@@ -406,12 +429,8 @@ impl Wal {
             .read(true)
             .append(true)
             .open(&self.path)?;
-
-        // Re-scan to find the correct read_offset for our current processed_seq.
-        // Blindly resetting to 0 would cause next_unprocessed to re-return the
-        // entry at seq == processed_seq (already processed).
-        let (_, read_offset, _) = Self::scan_wal(&self.file, self.processed_seq)?;
-        self.read_offset = read_offset;
+        self.read_file = self.file.try_clone()?;
+        self.read_offset = new_read_offset;
 
         Ok(())
     }
