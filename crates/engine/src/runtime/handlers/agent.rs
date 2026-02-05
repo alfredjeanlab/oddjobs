@@ -448,18 +448,15 @@ where
             None => None,
         };
 
-        match agent_state {
-            Some(AgentState::Working) | Some(AgentState::WaitingForInput) => {
-                // Agent alive: nudge
-                let session_id = job
-                    .session_id
-                    .as_ref()
-                    .ok_or_else(|| RuntimeError::InvalidRequest("no session for nudge".into()))?;
-
+        // Match on (agent_state, agent_id) to satisfy clippy - agent_state is only Some when agent_id is Some
+        match (agent_state, &agent_id) {
+            (Some(AgentState::Working), Some(id))
+            | (Some(AgentState::WaitingForInput), Some(id)) => {
+                // Agent alive: nudge via SendToAgent (uses ClaudeAdapter::send with escape sequences)
                 self.executor
-                    .execute(Effect::SendToSession {
-                        session_id: SessionId::new(session_id),
-                        input: format!("{}\n", message),
+                    .execute(Effect::SendToAgent {
+                        agent_id: id.clone(),
+                        input: message.to_string(),
                     })
                     .await?;
 
