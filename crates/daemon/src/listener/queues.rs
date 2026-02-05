@@ -1087,7 +1087,7 @@ pub(super) fn handle_queue_prune(
 }
 
 #[cfg(test)]
-#[path = "queues_tests.rs"]
+#[path = "queues_tests/mod.rs"]
 mod tests;
 
 /// Load a runbook that contains the given queue name.
