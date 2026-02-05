@@ -15,7 +15,7 @@ use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, SessionAdapter, TmuxAdapter, TracedAgent,
     TracedSession,
 };
-use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, SessionId, SystemClock};
+use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, OwnerId, SessionId, SystemClock};
 use oj_engine::breadcrumb::{self, Breadcrumb};
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps};
 use oj_storage::{load_snapshot, Checkpointer, MaterializedState, Wal};
@@ -768,11 +768,13 @@ pub(crate) async fn reconcile_state(
                     "recovering: standalone agent exited while daemon was down"
                 );
                 let agent_id = AgentId::new(agent_id_str);
-                runtime.register_agent_run(agent_id.clone(), AgentRunId::new(&agent_run.id));
+                let agent_run_id = AgentRunId::new(&agent_run.id);
+                runtime.register_agent_run(agent_id.clone(), agent_run_id.clone());
                 let _ = event_tx
                     .send(Event::AgentExited {
                         agent_id,
                         exit_code: None,
+                        owner: Some(OwnerId::agent_run(agent_run_id)),
                     })
                     .await;
             }
@@ -783,8 +785,14 @@ pub(crate) async fn reconcile_state(
                 "recovering: standalone agent session died while daemon was down"
             );
             let agent_id = AgentId::new(agent_id_str);
-            runtime.register_agent_run(agent_id.clone(), AgentRunId::new(&agent_run.id));
-            let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+            let agent_run_id = AgentRunId::new(&agent_run.id);
+            runtime.register_agent_run(agent_id.clone(), agent_run_id.clone());
+            let _ = event_tx
+                .send(Event::AgentGone {
+                    agent_id,
+                    owner: Some(OwnerId::agent_run(agent_run_id)),
+                })
+                .await;
         }
     }
 
@@ -850,7 +858,13 @@ pub(crate) async fn reconcile_state(
                         .clone()
                         .unwrap_or_else(|| format!("{}-{}", job.id, job.step));
                     let agent_id = AgentId::new(aid);
-                    let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+                    let job_id = JobId::new(job.id.clone());
+                    let _ = event_tx
+                        .send(Event::AgentGone {
+                            agent_id,
+                            owner: Some(OwnerId::job(job_id)),
+                        })
+                        .await;
                 }
             } else {
                 // Case 2: tmux alive, agent dead → trigger on_dead
@@ -867,12 +881,14 @@ pub(crate) async fn reconcile_state(
                     "recovering: agent exited while daemon was down"
                 );
                 let agent_id = AgentId::new(aid);
+                let job_id = JobId::new(job.id.to_string());
                 // Register mapping so handle_agent_state_changed can find it
-                runtime.register_agent_job(agent_id.clone(), JobId::new(job.id.to_string()));
+                runtime.register_agent_job(agent_id.clone(), job_id.clone());
                 let _ = event_tx
                     .send(Event::AgentExited {
                         agent_id,
                         exit_code: None,
+                        owner: Some(OwnerId::job(job_id)),
                     })
                     .await;
             }
@@ -891,8 +907,14 @@ pub(crate) async fn reconcile_state(
                 "recovering: tmux session died while daemon was down"
             );
             let agent_id = AgentId::new(aid);
-            runtime.register_agent_job(agent_id.clone(), JobId::new(job.id.clone()));
-            let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+            let job_id = JobId::new(job.id.clone());
+            runtime.register_agent_job(agent_id.clone(), job_id.clone());
+            let _ = event_tx
+                .send(Event::AgentGone {
+                    agent_id,
+                    owner: Some(OwnerId::job(job_id)),
+                })
+                .await;
         }
     }
 }

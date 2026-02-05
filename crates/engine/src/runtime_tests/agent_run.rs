@@ -157,6 +157,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -170,6 +171,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -183,6 +185,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -234,6 +237,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -242,6 +246,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -306,6 +311,7 @@ async fn standalone_on_dead_fail_fails_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
+            owner: None,
         })
         .await
         .unwrap();
@@ -365,6 +371,7 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
+            owner: None,
         })
         .await
         .unwrap();
@@ -415,6 +422,7 @@ async fn standalone_on_dead_gate_fail_escalates_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
+            owner: None,
         })
         .await
         .unwrap();
@@ -485,6 +493,7 @@ on_idle = { action = "gate", run = "true" }
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -545,6 +554,7 @@ async fn standalone_on_error_fail_fails_agent_run() {
         .handle_event(Event::AgentFailed {
             agent_id: agent_id.clone(),
             error: oj_core::AgentError::Other("API error".to_string()),
+            owner: None,
         })
         .await
         .unwrap();
@@ -658,6 +668,7 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
+            owner: None,
         })
         .await
         .unwrap();
@@ -734,6 +745,7 @@ async fn standalone_nudge_records_timestamp() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -785,6 +797,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -807,6 +820,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -860,6 +874,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -881,6 +896,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();
@@ -1037,6 +1053,7 @@ async fn standalone_working_clears_idle_grace() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
+            owner: None,
         })
         .await
         .unwrap();

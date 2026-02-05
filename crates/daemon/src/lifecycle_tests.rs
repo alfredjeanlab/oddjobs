@@ -918,7 +918,7 @@ async fn reconcile_job_dead_session_uses_step_history_agent_id() {
     );
 
     match &gone_events[0] {
-        Event::AgentGone { agent_id } => {
+        Event::AgentGone { agent_id, .. } => {
             assert_eq!(
                 agent_id.as_str(),
                 agent_uuid,
@@ -1018,7 +1018,7 @@ async fn reconcile_agent_run_dead_session_emits_gone_with_correct_id() {
         "should emit exactly one AgentGone event"
     );
     match &gone_events[0] {
-        Event::AgentGone { agent_id } => {
+        Event::AgentGone { agent_id, .. } => {
             assert_eq!(agent_id.as_str(), agent_uuid);
         }
         _ => unreachable!(),

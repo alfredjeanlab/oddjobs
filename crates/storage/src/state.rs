@@ -5,7 +5,7 @@
 
 use oj_core::{
     job::AgentSignal, scoped_name, AgentRun, AgentRunStatus, AgentSignalKind, Decision, DecisionId,
-    Event, Job, JobConfig, StepOutcome, StepStatus, WorkspaceStatus,
+    Event, Job, JobConfig, OwnerId, StepOutcome, StepStatus, WorkspaceStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -251,42 +251,55 @@ impl MaterializedState {
     /// - Use `finalize_current_step` which is internally guarded by `finished_at_ms`
     pub fn apply_event(&mut self, event: &Event) {
         match event {
-            Event::AgentWorking { agent_id } => {
-                let job_id = agent_id.as_str().to_string();
-                if let Some(job) = self.jobs.get_mut(&job_id) {
-                    job.step_status = StepStatus::Running;
+            Event::AgentWorking { owner, .. } => {
+                // Route by owner when present; standalone agent status is
+                // handled via AgentRunStatusChanged events.
+                if let Some(OwnerId::Job(job_id)) = owner {
+                    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                        job.step_status = StepStatus::Running;
+                    }
                 }
+                // OwnerId::AgentRun or None: no action needed here
+                // (standalone agents use AgentRunStatusChanged events)
             }
             Event::AgentWaiting { .. } => {
                 // Agent is idle, but still running - no state change needed
             }
             Event::AgentExited {
-                agent_id,
-                exit_code,
+                exit_code, owner, ..
             } => {
-                let job_id = agent_id.as_str().to_string();
-                if let Some(job) = self.jobs.get_mut(&job_id) {
-                    if *exit_code == Some(0) {
-                        job.step_status = StepStatus::Completed;
-                    } else {
-                        job.step_status = StepStatus::Failed;
-                        job.error = Some(format!("exit code: {:?}", exit_code));
+                // Route by owner when present
+                if let Some(OwnerId::Job(job_id)) = owner {
+                    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                        if *exit_code == Some(0) {
+                            job.step_status = StepStatus::Completed;
+                        } else {
+                            job.step_status = StepStatus::Failed;
+                            job.error = Some(format!("exit code: {:?}", exit_code));
+                        }
                     }
                 }
+                // OwnerId::AgentRun or None: no action needed here
             }
-            Event::AgentFailed { agent_id, error } => {
-                let job_id = agent_id.as_str().to_string();
-                if let Some(job) = self.jobs.get_mut(&job_id) {
-                    job.step_status = StepStatus::Failed;
-                    job.error = Some(error.to_string());
+            Event::AgentFailed { error, owner, .. } => {
+                // Route by owner when present
+                if let Some(OwnerId::Job(job_id)) = owner {
+                    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                        job.step_status = StepStatus::Failed;
+                        job.error = Some(error.to_string());
+                    }
                 }
+                // OwnerId::AgentRun or None: no action needed here
             }
-            Event::AgentGone { agent_id } => {
-                let job_id = agent_id.as_str().to_string();
-                if let Some(job) = self.jobs.get_mut(&job_id) {
-                    job.step_status = StepStatus::Failed;
-                    job.error = Some("session terminated unexpectedly".to_string());
+            Event::AgentGone { owner, .. } => {
+                // Route by owner when present
+                if let Some(OwnerId::Job(job_id)) = owner {
+                    if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
+                        job.step_status = StepStatus::Failed;
+                        job.error = Some("session terminated unexpectedly".to_string());
+                    }
                 }
+                // OwnerId::AgentRun or None: no action needed here
             }
 
             Event::ShellExited {

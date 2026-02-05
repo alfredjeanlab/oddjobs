@@ -8,6 +8,7 @@ use crate::agent_run::{AgentRunId, AgentRunStatus};
 use crate::decision::{DecisionOption, DecisionSource};
 use crate::id::ShortId;
 use crate::job::JobId;
+use crate::owner::OwnerId;
 use crate::session::SessionId;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
@@ -79,25 +80,46 @@ fn is_empty_map<K, V>(map: &HashMap<K, V>) -> bool {
 pub enum Event {
     // -- agent --
     #[serde(rename = "agent:working")]
-    AgentWorking { agent_id: AgentId },
+    AgentWorking {
+        agent_id: AgentId,
+        /// Owner of this agent (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
+    },
 
     #[serde(rename = "agent:waiting")]
-    AgentWaiting { agent_id: AgentId },
+    AgentWaiting {
+        agent_id: AgentId,
+        /// Owner of this agent (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
+    },
 
     #[serde(rename = "agent:failed")]
     AgentFailed {
         agent_id: AgentId,
         error: AgentError,
+        /// Owner of this agent (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
     },
 
     #[serde(rename = "agent:exited")]
     AgentExited {
         agent_id: AgentId,
         exit_code: Option<i32>,
+        /// Owner of this agent (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
     },
 
     #[serde(rename = "agent:gone")]
-    AgentGone { agent_id: AgentId },
+    AgentGone {
+        agent_id: AgentId,
+        /// Owner of this agent (job or agent_run). None for legacy events.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<OwnerId>,
+    },
 
     /// User-initiated input to an agent
     #[serde(rename = "agent:input")]
@@ -549,38 +571,53 @@ pub enum Event {
 }
 
 impl Event {
-    /// Create an agent event from an AgentState
-    pub fn from_agent_state(agent_id: AgentId, state: AgentState) -> Self {
+    /// Create an agent event from an AgentState with optional owner.
+    pub fn from_agent_state(agent_id: AgentId, state: AgentState, owner: Option<OwnerId>) -> Self {
         match state {
-            AgentState::Working => Event::AgentWorking { agent_id },
-            AgentState::WaitingForInput => Event::AgentWaiting { agent_id },
-            AgentState::Failed(error) => Event::AgentFailed { agent_id, error },
+            AgentState::Working => Event::AgentWorking { agent_id, owner },
+            AgentState::WaitingForInput => Event::AgentWaiting { agent_id, owner },
+            AgentState::Failed(error) => Event::AgentFailed {
+                agent_id,
+                error,
+                owner,
+            },
             AgentState::Exited { exit_code } => Event::AgentExited {
                 agent_id,
                 exit_code,
+                owner,
             },
-            AgentState::SessionGone => Event::AgentGone { agent_id },
+            AgentState::SessionGone => Event::AgentGone { agent_id, owner },
         }
     }
 
-    /// Extract agent_id and state if this is an agent event
-    pub fn as_agent_state(&self) -> Option<(&AgentId, AgentState)> {
+    /// Extract agent_id, state, and owner if this is an agent event.
+    pub fn as_agent_state(&self) -> Option<(&AgentId, AgentState, Option<&OwnerId>)> {
         match self {
-            Event::AgentWorking { agent_id } => Some((agent_id, AgentState::Working)),
-            Event::AgentWaiting { agent_id } => Some((agent_id, AgentState::WaitingForInput)),
-            Event::AgentFailed { agent_id, error } => {
-                Some((agent_id, AgentState::Failed(error.clone())))
+            Event::AgentWorking { agent_id, owner } => {
+                Some((agent_id, AgentState::Working, owner.as_ref()))
             }
+            Event::AgentWaiting { agent_id, owner } => {
+                Some((agent_id, AgentState::WaitingForInput, owner.as_ref()))
+            }
+            Event::AgentFailed {
+                agent_id,
+                error,
+                owner,
+            } => Some((agent_id, AgentState::Failed(error.clone()), owner.as_ref())),
             Event::AgentExited {
                 agent_id,
                 exit_code,
+                owner,
             } => Some((
                 agent_id,
                 AgentState::Exited {
                     exit_code: *exit_code,
                 },
+                owner.as_ref(),
             )),
-            Event::AgentGone { agent_id } => Some((agent_id, AgentState::SessionGone)),
+            Event::AgentGone { agent_id, owner } => {
+                Some((agent_id, AgentState::SessionGone, owner.as_ref()))
+            }
             _ => None,
         }
     }
@@ -653,11 +690,11 @@ impl Event {
     pub fn log_summary(&self) -> String {
         let t = self.name();
         match self {
-            Event::AgentWorking { agent_id }
-            | Event::AgentWaiting { agent_id }
+            Event::AgentWorking { agent_id, .. }
+            | Event::AgentWaiting { agent_id, .. }
             | Event::AgentFailed { agent_id, .. }
             | Event::AgentExited { agent_id, .. }
-            | Event::AgentGone { agent_id } => format!("{t} agent={agent_id}"),
+            | Event::AgentGone { agent_id, .. } => format!("{t} agent={agent_id}"),
             Event::AgentInput { agent_id, .. } => format!("{t} agent={agent_id}"),
             Event::AgentSignal { agent_id, kind, .. } => {
                 format!("{t} id={agent_id} kind={kind:?}")

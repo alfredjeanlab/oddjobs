@@ -109,7 +109,12 @@ async fn watch_agent<S: SessionAdapter>(
                 log_session_id,
                 "session ended while waiting for log"
             );
-            let _ = event_tx.send(Event::AgentGone { agent_id }).await;
+            let _ = event_tx
+                .send(Event::AgentGone {
+                    agent_id,
+                    owner: None,
+                })
+                .await;
             return;
         }
         SessionLogWait::Timeout => {
@@ -229,7 +234,11 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
             "initial state is non-working, emitting immediately"
         );
         let _ = event_tx
-            .send(Event::from_agent_state(agent_id.clone(), initial_state))
+            .send(Event::from_agent_state(
+                agent_id.clone(),
+                initial_state,
+                None,
+            ))
             .await;
     }
 
@@ -253,7 +262,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
                             .await;
                     } else {
                         let _ = event_tx
-                            .send(Event::from_agent_state(agent_id.clone(), new_state))
+                            .send(Event::from_agent_state(agent_id.clone(), new_state, None))
                             .await;
                     }
                 }
@@ -271,7 +280,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
             // Periodic check for process death
             _ = tokio::time::sleep(watcher_poll_interval()) => {
                 if let Some(state) = check_liveness(&sessions, &tmux_session_id, &process_name, &agent_id).await {
-                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state)).await;
+                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, None)).await;
                     break;
                 }
             }
@@ -299,7 +308,7 @@ async fn poll_process_only<S: SessionAdapter>(
         tokio::select! {
             _ = tokio::time::sleep(watcher_poll_interval()) => {
                 if let Some(state) = check_liveness(&sessions, &session_id, &process_name, &agent_id).await {
-                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state)).await;
+                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, None)).await;
                     break;
                 }
                 poll_count += 1;

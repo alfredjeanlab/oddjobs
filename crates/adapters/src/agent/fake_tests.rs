@@ -75,6 +75,7 @@ async fn state_changes() {
         Event::AgentExited {
             agent_id,
             exit_code,
+            ..
         } => {
             assert_eq!(agent_id, AgentId::new("agent-1"));
             assert_eq!(exit_code, Some(0));
