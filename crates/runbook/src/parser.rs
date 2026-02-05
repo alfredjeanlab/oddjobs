@@ -65,6 +65,7 @@ pub enum ParseError {
 
 /// A parsed runbook
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Runbook {
     #[serde(default, alias = "command")]
     pub commands: HashMap<String, CommandDef>,

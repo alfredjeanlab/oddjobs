@@ -81,66 +81,6 @@ git push origin HEAD:${branch}
         .passes();
 }
 
-/// Test guard conditions are valid shell
-#[test]
-fn guard_conditions_are_valid() {
-    let temp = Project::empty();
-    temp.git_init();
-    temp.file(
-        ".oj/runbooks/guarded.toml",
-        r#"
-[command.guarded]
-args = "<name>"
-run = { pipeline = "guarded" }
-
-[pipeline.guarded]
-vars  = ["name"]
-
-[[pipeline.guarded.step]]
-name = "run"
-pre = ["file_exists"]
-run = "cat data.txt"
-
-[guard.file_exists]
-condition = "test -f data.txt"
-"#,
-    );
-    temp.oj().args(&["daemon", "start"]).passes();
-    // Pipeline starts (guard will block, but syntax is valid)
-    temp.oj().args(&["run", "guarded", "test"]).passes();
-}
-
-/// Test complex guard with pipes and grep
-#[test]
-fn complex_guard_condition_is_valid() {
-    let temp = Project::empty();
-    temp.git_init();
-    temp.file(
-        ".oj/runbooks/complex.toml",
-        r#"
-[command.complex]
-args = "<name> <after>"
-run = { pipeline = "complex" }
-
-[pipeline.complex]
-vars  = ["name", "after"]
-
-[pipeline.complex.defaults]
-after = ""
-
-[[pipeline.complex.step]]
-name = "blocked"
-pre = ["blocker_merged"]
-run = "echo 'unblocked'"
-
-[guard.blocker_merged]
-condition = "test -z '${after}' || oj pipeline show ${after} --step | grep -q done"
-"#,
-    );
-    temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj().args(&["run", "complex", "test", ""]).passes();
-}
-
 /// Test multi-line done step with delete and wok
 #[test]
 fn multiline_done_step_is_valid() {
