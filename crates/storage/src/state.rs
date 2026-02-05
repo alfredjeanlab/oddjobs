@@ -167,6 +167,12 @@ pub struct MaterializedState {
     pub decisions: HashMap<String, Decision>,
     #[serde(default)]
     pub agent_runs: HashMap<String, AgentRun>,
+    /// Durable namespace → project root mapping.
+    ///
+    /// Populated from WorkerStarted, CronStarted, and CommandRun events.
+    /// Never cleared by deletion events, so the mapping survives worker/cron pruning.
+    #[serde(default)]
+    pub project_roots: HashMap<String, PathBuf>,
 }
 
 impl MaterializedState {
@@ -216,10 +222,14 @@ impl MaterializedState {
         }
     }
 
-    /// Look up the known project root for a namespace from workers and crons.
+    /// Look up the known project root for a namespace.
     ///
-    /// Returns None if no entity with this namespace has been registered yet.
+    /// Checks the durable project_roots map first (survives worker/cron pruning),
+    /// then falls back to scanning active workers and crons.
     pub fn project_root_for_namespace(&self, namespace: &str) -> Option<std::path::PathBuf> {
+        if let Some(root) = self.project_roots.get(namespace) {
+            return Some(root.clone());
+        }
         for w in self.workers.values() {
             if w.namespace == namespace {
                 return Some(w.project_root.clone());
@@ -648,6 +658,10 @@ impl MaterializedState {
                     .map(|w| w.active_job_ids.clone())
                     .unwrap_or_default();
 
+                if !namespace.is_empty() {
+                    self.project_roots
+                        .insert(namespace.clone(), project_root.clone());
+                }
                 self.workers.insert(
                     key,
                     WorkerRecord {
@@ -826,6 +840,10 @@ impl MaterializedState {
                 run_target,
                 namespace,
             } => {
+                if !namespace.is_empty() {
+                    self.project_roots
+                        .insert(namespace.clone(), project_root.clone());
+                }
                 let key = scoped_name(namespace, cron_name);
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1017,10 +1035,21 @@ impl MaterializedState {
                 self.agent_runs.remove(id.as_str());
             }
 
+            // CommandRun: only persist the namespace → project_root mapping
+            Event::CommandRun {
+                namespace,
+                project_root,
+                ..
+            } => {
+                if !namespace.is_empty() {
+                    self.project_roots
+                        .insert(namespace.clone(), project_root.clone());
+                }
+            }
+
             // Events that don't affect persisted state
             // (These are action/signal events handled by the runtime)
             Event::Custom
-            | Event::CommandRun { .. }
             | Event::TimerStart { .. }
             | Event::SessionInput { .. }
             | Event::AgentInput { .. }
