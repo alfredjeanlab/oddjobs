@@ -22,7 +22,8 @@ job "specs" {
   }
 
   step "build" {
-    run = "cargo build --all"
+    run     = "cargo build --all"
+    on_done = { step = "run" }
   }
 
   step "run" {

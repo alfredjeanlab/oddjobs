@@ -47,7 +47,7 @@ command "build" {
 
 queue "plans" {
   type = "external"
-  list = "wok ready -t epic,feature -l plan:needed -p oj -o json"
+  list = "wok ready -t epic,feature -l plan:needed -p oj -o json | jq .issues"
   take = "wok start ${item.id}"
 }
 
@@ -92,7 +92,7 @@ job "plan" {
 # Implementation queue: picks up planned issues ready to build
 queue "epics" {
   type = "external"
-  list = "wok ready -t epic,feature -l build:needed -l plan:ready -p oj -o json"
+  list = "wok ready -t epic,feature -l build:needed -l plan:ready -p oj -o json | jq .issues"
   take = "wok start ${item.id}"
 }
 
