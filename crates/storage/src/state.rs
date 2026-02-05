@@ -956,6 +956,8 @@ impl MaterializedState {
             | Event::WorkspaceDrop { .. }
             | Event::WorkerWake { .. }
             | Event::WorkerPollComplete { .. }
+            | Event::WorkerTakeComplete { .. }
+            | Event::WorkerTakeFailed { .. }
             | Event::AgentIdle { .. }
             | Event::AgentPrompt { .. }
             | Event::AgentStop { .. }

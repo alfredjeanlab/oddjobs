@@ -548,58 +548,81 @@ where
                 worker_name,
                 take_command,
                 cwd,
+                item,
             } => {
-                tracing::info!(
-                    %worker_name,
-                    %take_command,
-                    cwd = %cwd.display(),
-                    "taking queue item"
-                );
+                let event_tx = self.event_tx.clone();
 
-                let wrapped = format!("set -euo pipefail\n{take_command}");
-                let result = tokio::process::Command::new("bash")
-                    .arg("-c")
-                    .arg(&wrapped)
-                    .current_dir(&cwd)
-                    .output()
-                    .await;
+                tokio::spawn(async move {
+                    tracing::info!(
+                        %worker_name,
+                        %take_command,
+                        cwd = %cwd.display(),
+                        "taking queue item"
+                    );
 
-                match result {
-                    Ok(output) if output.status.success() => {
-                        if !output.stdout.is_empty() {
-                            tracing::info!(
-                                %worker_name,
-                                stdout = %String::from_utf8_lossy(&output.stdout),
-                                "take command stdout"
-                            );
+                    let wrapped = format!("set -euo pipefail\n{take_command}");
+                    let result = tokio::process::Command::new("bash")
+                        .arg("-c")
+                        .arg(&wrapped)
+                        .current_dir(&cwd)
+                        .output()
+                        .await;
+
+                    let event = match result {
+                        Ok(output) if output.status.success() => {
+                            if !output.stdout.is_empty() {
+                                tracing::info!(
+                                    %worker_name,
+                                    stdout = %String::from_utf8_lossy(&output.stdout),
+                                    "take command stdout"
+                                );
+                            }
+                            Event::WorkerTakeComplete { worker_name, item }
                         }
-                        Ok(None)
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            tracing::warn!(
+                                %worker_name,
+                                exit_code = output.status.code().unwrap_or(-1),
+                                stderr = %stderr,
+                                "take command failed"
+                            );
+                            let item_id = item
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            Event::WorkerTakeFailed {
+                                worker_name,
+                                item_id,
+                                error: format!("take command failed: {}", stderr.trim()),
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                %worker_name,
+                                error = %e,
+                                "take command execution failed"
+                            );
+                            let item_id = item
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown")
+                                .to_string();
+                            Event::WorkerTakeFailed {
+                                worker_name,
+                                item_id,
+                                error: format!("take command execution failed: {}", e),
+                            }
+                        }
+                    };
+
+                    if let Err(e) = event_tx.send(event).await {
+                        tracing::error!("failed to send worker take event: {}", e);
                     }
-                    Ok(output) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        tracing::warn!(
-                            %worker_name,
-                            exit_code = output.status.code().unwrap_or(-1),
-                            stderr = %stderr,
-                            "take command failed"
-                        );
-                        Err(ExecuteError::Shell(format!(
-                            "take command failed: {}",
-                            stderr
-                        )))
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            %worker_name,
-                            error = %e,
-                            "take command execution failed"
-                        );
-                        Err(ExecuteError::Shell(format!(
-                            "take command execution failed: {}",
-                            e
-                        )))
-                    }
-                }
+                });
+
+                Ok(None)
             }
 
             // === Notification effects ===

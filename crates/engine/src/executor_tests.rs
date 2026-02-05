@@ -348,6 +348,81 @@ async fn shell_pipefail_propagates() {
 }
 
 #[tokio::test]
+async fn take_queue_item_runs_command_async() {
+    let mut harness = setup().await;
+
+    let item = serde_json::json!({"id": "item-1", "title": "test bug"});
+
+    // execute() returns None immediately (spawned)
+    let event = harness
+        .executor
+        .execute(Effect::TakeQueueItem {
+            worker_name: "fixer".to_string(),
+            take_command: "echo taken".to_string(),
+            cwd: std::path::PathBuf::from("/tmp"),
+            item: item.clone(),
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        event.is_none(),
+        "take_queue_item should return None (async)"
+    );
+
+    // WorkerTakeComplete arrives via event_tx
+    let completed = harness.event_rx.recv().await.unwrap();
+    match completed {
+        Event::WorkerTakeComplete {
+            worker_name,
+            item: recv_item,
+        } => {
+            assert_eq!(worker_name, "fixer");
+            assert_eq!(recv_item, item);
+        }
+        other => panic!("expected WorkerTakeComplete, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn take_queue_item_failure_sends_event() {
+    let mut harness = setup().await;
+
+    let item = serde_json::json!({"id": "item-1", "title": "test bug"});
+
+    let event = harness
+        .executor
+        .execute(Effect::TakeQueueItem {
+            worker_name: "fixer".to_string(),
+            take_command: "exit 1".to_string(),
+            cwd: std::path::PathBuf::from("/tmp"),
+            item,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        event.is_none(),
+        "take_queue_item should return None (async)"
+    );
+
+    // WorkerTakeFailed arrives via event_tx
+    let failed = harness.event_rx.recv().await.unwrap();
+    match failed {
+        Event::WorkerTakeFailed {
+            worker_name,
+            item_id,
+            error,
+        } => {
+            assert_eq!(worker_name, "fixer");
+            assert_eq!(item_id, "item-1");
+            assert!(!error.is_empty());
+        }
+        other => panic!("expected WorkerTakeFailed, got {:?}", other),
+    }
+}
+
+#[tokio::test]
 async fn delete_workspace_removes_plain_directory() {
     let harness = setup().await;
     let tmp = std::env::temp_dir().join("oj_test_delete_ws_plain");

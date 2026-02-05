@@ -122,6 +122,9 @@ pub enum Effect {
         worker_name: String,
         take_command: String,
         cwd: PathBuf,
+        /// The original queue item JSON, carried through to the result event
+        /// so the handler can create a pipeline on success.
+        item: serde_json::Value,
     },
 
     // === Notification effects ===

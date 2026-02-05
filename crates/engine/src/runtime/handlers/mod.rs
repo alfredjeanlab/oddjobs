@@ -237,6 +237,23 @@ where
                 result_events.extend(self.handle_worker_poll_complete(worker_name, items).await?);
             }
 
+            Event::WorkerTakeComplete {
+                worker_name, item, ..
+            } => {
+                result_events.extend(self.handle_worker_take_complete(worker_name, item).await?);
+            }
+
+            Event::WorkerTakeFailed {
+                worker_name,
+                item_id,
+                error,
+            } => {
+                result_events.extend(
+                    self.handle_worker_take_failed(worker_name, item_id, error)
+                        .await?,
+                );
+            }
+
             Event::WorkerStopped { worker_name, .. } => {
                 result_events.extend(self.handle_worker_stopped(worker_name).await?);
             }

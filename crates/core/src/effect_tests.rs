@@ -65,6 +65,17 @@ fn effect_serialization_roundtrip() {
                 .into_iter()
                 .collect(),
         },
+        Effect::PollQueue {
+            worker_name: "fixer".to_string(),
+            list_command: "echo '[]'".to_string(),
+            cwd: PathBuf::from("/work"),
+        },
+        Effect::TakeQueueItem {
+            worker_name: "fixer".to_string(),
+            take_command: "echo taken".to_string(),
+            cwd: PathBuf::from("/work"),
+            item: serde_json::json!({"id": "item-1", "title": "test"}),
+        },
         Effect::Notify {
             title: "Build complete".to_string(),
             message: "Success!".to_string(),
@@ -168,6 +179,23 @@ fn traced_effect_names() {
                 env: HashMap::new(),
             },
             "shell",
+        ),
+        (
+            Effect::PollQueue {
+                worker_name: "w".to_string(),
+                list_command: "cmd".to_string(),
+                cwd: PathBuf::from("/"),
+            },
+            "poll_queue",
+        ),
+        (
+            Effect::TakeQueueItem {
+                worker_name: "w".to_string(),
+                take_command: "cmd".to_string(),
+                cwd: PathBuf::from("/"),
+                item: serde_json::json!({}),
+            },
+            "take_queue_item",
         ),
         (
             Effect::Notify {
@@ -309,6 +337,37 @@ fn traced_effect_fields() {
             ("pipeline_id", "pipe-1".to_string()),
             ("step", "build".to_string()),
             ("cwd", "/src".to_string())
+        ]
+    );
+
+    // Test PollQueue fields
+    let effect = Effect::PollQueue {
+        worker_name: "fixer".to_string(),
+        list_command: "echo '[]'".to_string(),
+        cwd: PathBuf::from("/work"),
+    };
+    let fields = effect.fields();
+    assert_eq!(
+        fields,
+        vec![
+            ("worker_name", "fixer".to_string()),
+            ("cwd", "/work".to_string())
+        ]
+    );
+
+    // Test TakeQueueItem fields
+    let effect = Effect::TakeQueueItem {
+        worker_name: "fixer".to_string(),
+        take_command: "echo taken".to_string(),
+        cwd: PathBuf::from("/work"),
+        item: serde_json::json!({"id": "item-1"}),
+    };
+    let fields = effect.fields();
+    assert_eq!(
+        fields,
+        vec![
+            ("worker_name", "fixer".to_string()),
+            ("cwd", "/work".to_string())
         ]
     );
 

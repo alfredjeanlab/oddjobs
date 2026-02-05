@@ -565,6 +565,64 @@ fn event_queue_item_dead_roundtrip() {
 }
 
 // =============================================================================
+// WorkerTakeComplete / WorkerTakeFailed Event Tests
+// =============================================================================
+
+#[test]
+fn event_worker_take_complete_roundtrip() {
+    let event = Event::WorkerTakeComplete {
+        worker_name: "fixer".to_string(),
+        item: serde_json::json!({"id": "item-1", "title": "Fix bug"}),
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "worker:take_complete");
+    assert_eq!(json["worker_name"], "fixer");
+    assert_eq!(json["item"]["id"], "item-1");
+
+    let json_str = serde_json::to_string(&event).unwrap();
+    let parsed: Event = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(event, parsed);
+}
+
+#[test]
+fn event_worker_take_failed_roundtrip() {
+    let event = Event::WorkerTakeFailed {
+        worker_name: "fixer".to_string(),
+        item_id: "item-1".to_string(),
+        error: "take command failed: exit code 1".to_string(),
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "worker:take_failed");
+    assert_eq!(json["worker_name"], "fixer");
+    assert_eq!(json["item_id"], "item-1");
+
+    let json_str = serde_json::to_string(&event).unwrap();
+    let parsed: Event = serde_json::from_str(&json_str).unwrap();
+    assert_eq!(event, parsed);
+}
+
+#[test]
+fn event_worker_take_name() {
+    assert_eq!(
+        Event::WorkerTakeComplete {
+            worker_name: "w".to_string(),
+            item: serde_json::json!({}),
+        }
+        .name(),
+        "worker:take_complete"
+    );
+    assert_eq!(
+        Event::WorkerTakeFailed {
+            worker_name: "w".to_string(),
+            item_id: "i".to_string(),
+            error: "e".to_string(),
+        }
+        .name(),
+        "worker:take_failed"
+    );
+}
+
+// =============================================================================
 // AgentIdle / AgentPrompt Event Tests
 // =============================================================================
 
