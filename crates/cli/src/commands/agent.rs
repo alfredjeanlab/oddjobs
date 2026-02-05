@@ -418,11 +418,19 @@ pub async fn handle(
                 "agent",
                 "pipeline(s) skipped",
                 |entry| {
-                    let short_pid = entry.pipeline_id.short(8);
-                    format!(
-                        "agent {} ({}, {})",
-                        entry.agent_id, short_pid, entry.step_name
-                    )
+                    if entry.pipeline_id.is_empty() {
+                        // Standalone agent run
+                        format!("agent {} ({})", entry.agent_id.short(8), entry.step_name)
+                    } else {
+                        // Pipeline-embedded agent
+                        let short_pid = entry.pipeline_id.short(8);
+                        format!(
+                            "agent {} ({}, {})",
+                            entry.agent_id.short(8),
+                            short_pid,
+                            entry.step_name
+                        )
+                    }
                 },
             )?;
         }

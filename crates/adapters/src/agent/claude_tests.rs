@@ -4,6 +4,7 @@
 use super::*;
 use crate::session::{FakeSessionAdapter, SessionCall};
 use oj_core::AgentId;
+use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::sync::mpsc;

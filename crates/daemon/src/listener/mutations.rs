@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{AgentId, Event, PipelineId, SessionId, ShortId, WorkspaceId};
+use oj_core::{AgentId, AgentRunId, Event, PipelineId, SessionId, ShortId, WorkspaceId};
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
@@ -642,8 +642,8 @@ pub(super) fn handle_pipeline_prune(
 /// Handle agent prune requests.
 ///
 /// Removes agent log files for agents belonging to terminal pipelines
-/// (failed/cancelled/done). By default only prunes agents from pipelines
-/// older than 24 hours; use `--all` to prune all.
+/// (failed/cancelled/done) and standalone agent runs in terminal state.
+/// By default only prunes agents older than 24 hours; use `--all` to prune all.
 pub(super) fn handle_agent_prune(
     state: &Arc<Mutex<MaterializedState>>,
     event_bus: &EventBus,
@@ -658,10 +658,13 @@ pub(super) fn handle_agent_prune(
 
     let mut to_prune = Vec::new();
     let mut pipeline_ids_to_delete = Vec::new();
+    let mut agent_run_ids_to_delete = Vec::new();
     let mut skipped = 0usize;
 
     {
         let state_guard = state.lock();
+
+        // (1) Collect agents from terminal pipelines
         for pipeline in state_guard.pipelines.values() {
             if !pipeline.is_terminal() {
                 skipped += 1;
@@ -694,6 +697,37 @@ pub(super) fn handle_agent_prune(
 
             pipeline_ids_to_delete.push(pipeline.id.clone());
         }
+
+        // (2) Collect standalone agent runs in terminal state
+        for agent_run in state_guard.agent_runs.values() {
+            if !agent_run.is_terminal() {
+                skipped += 1;
+                continue;
+            }
+
+            // Check age
+            if !flags.all
+                && agent_run.created_at_ms > 0
+                && now_ms.saturating_sub(agent_run.created_at_ms) < age_threshold_ms
+            {
+                skipped += 1;
+                continue;
+            }
+
+            // Use agent_id if set, otherwise fall back to agent_run.id
+            let agent_id = agent_run
+                .agent_id
+                .clone()
+                .unwrap_or_else(|| agent_run.id.clone());
+
+            to_prune.push(AgentEntry {
+                agent_id,
+                pipeline_id: String::new(), // Empty for standalone agents
+                step_name: agent_run.agent_name.clone(),
+            });
+
+            agent_run_ids_to_delete.push(agent_run.id.clone());
+        }
     }
 
     if !flags.dry_run {
@@ -706,6 +740,16 @@ pub(super) fn handle_agent_prune(
                 .send(event)
                 .map_err(|_| ConnectionError::WalError)?;
             cleanup_pipeline_files(logs_path, pipeline_id);
+        }
+
+        // Delete standalone agent runs from state
+        for agent_run_id in &agent_run_ids_to_delete {
+            let event = Event::AgentRunDeleted {
+                id: AgentRunId::new(agent_run_id),
+            };
+            event_bus
+                .send(event)
+                .map_err(|_| ConnectionError::WalError)?;
         }
 
         for entry in &to_prune {

@@ -8,7 +8,9 @@ use std::time::Instant;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
-use oj_core::{Event, Pipeline, StepOutcome, StepRecord, StepStatus, WorkspaceStatus};
+use oj_core::{
+    AgentRun, AgentRunStatus, Event, Pipeline, StepOutcome, StepRecord, StepStatus, WorkspaceStatus,
+};
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_storage::{MaterializedState, Wal, Workspace, WorkspaceType};
 
@@ -483,6 +485,216 @@ fn agent_prune_skips_non_terminal_pipelines() {
         s.pipelines.contains_key("pipe-active"),
         "active pipeline should remain"
     );
+}
+
+fn make_agent_run(id: &str, status: AgentRunStatus) -> AgentRun {
+    AgentRun {
+        id: id.to_string(),
+        agent_name: "test-agent".to_string(),
+        command_name: "test-cmd".to_string(),
+        namespace: "proj".to_string(),
+        cwd: std::path::PathBuf::from("/tmp/project"),
+        runbook_hash: "hash123".to_string(),
+        status,
+        agent_id: Some(format!("{}-agent-uuid", id)),
+        session_id: Some(format!("oj-{}", id)),
+        error: None,
+        created_at_ms: 1000,
+        updated_at_ms: 2000,
+        action_tracker: Default::default(),
+        vars: HashMap::new(),
+        idle_grace_log_size: None,
+        last_nudge_at: None,
+    }
+}
+
+#[test]
+fn agent_prune_all_removes_terminal_standalone_agent_runs() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    // Insert terminal and non-terminal standalone agent runs
+    {
+        let mut s = state.lock();
+        s.agent_runs.insert(
+            "ar-completed".to_string(),
+            make_agent_run("ar-completed", AgentRunStatus::Completed),
+        );
+        s.agent_runs.insert(
+            "ar-failed".to_string(),
+            make_agent_run("ar-failed", AgentRunStatus::Failed),
+        );
+        s.agent_runs.insert(
+            "ar-running".to_string(),
+            make_agent_run("ar-running", AgentRunStatus::Running),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 2, "should prune 2 terminal agent runs");
+            assert_eq!(skipped, 1, "should skip 1 running agent run");
+
+            // Verify pruned entries have empty pipeline_id (standalone)
+            for entry in &pruned {
+                assert!(
+                    entry.pipeline_id.is_empty(),
+                    "standalone agents have empty pipeline_id"
+                );
+            }
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    // Apply the AgentRunDeleted events to state and verify
+    {
+        let mut s = state.lock();
+        s.apply_event(&Event::AgentRunDeleted {
+            id: oj_core::AgentRunId::new("ar-completed"),
+        });
+        s.apply_event(&Event::AgentRunDeleted {
+            id: oj_core::AgentRunId::new("ar-failed"),
+        });
+
+        assert!(
+            !s.agent_runs.contains_key("ar-completed"),
+            "completed should be pruned"
+        );
+        assert!(
+            !s.agent_runs.contains_key("ar-failed"),
+            "failed should be pruned"
+        );
+        assert!(
+            s.agent_runs.contains_key("ar-running"),
+            "running should remain"
+        );
+    }
+}
+
+#[test]
+fn agent_prune_dry_run_does_not_delete_standalone_agent_runs() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        s.agent_runs.insert(
+            "ar-done".to_string(),
+            make_agent_run("ar-done", AgentRunStatus::Completed),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: true,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(pruned.len(), 1, "should report 1 agent");
+            assert_eq!(skipped, 0);
+            // Verify it's a standalone agent entry
+            assert!(
+                pruned[0].pipeline_id.is_empty(),
+                "standalone agent has empty pipeline_id"
+            );
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    // Verify agent run was NOT deleted (dry run - no events emitted)
+    let s = state.lock();
+    assert!(
+        s.agent_runs.contains_key("ar-done"),
+        "dry run should not delete"
+    );
+}
+
+#[test]
+fn agent_prune_all_handles_mixed_pipeline_and_standalone_agents() {
+    let dir = tempdir().unwrap();
+    let logs_path = dir.path().join("logs");
+    std::fs::create_dir_all(logs_path.join("agent")).unwrap();
+
+    let event_bus = test_event_bus(dir.path());
+    let state = empty_state();
+
+    {
+        let mut s = state.lock();
+        // Terminal pipeline with agent
+        s.pipelines.insert(
+            "pipe-done".to_string(),
+            make_pipeline_with_agent("pipe-done", "done", "agent-from-pipeline"),
+        );
+        // Terminal standalone agent run
+        s.agent_runs.insert(
+            "ar-done".to_string(),
+            make_agent_run("ar-done", AgentRunStatus::Completed),
+        );
+    }
+
+    let flags = PruneFlags {
+        all: true,
+        dry_run: false,
+        namespace: None,
+    };
+    let result = handle_agent_prune(&state, &event_bus, &logs_path, &flags);
+
+    match result {
+        Ok(Response::AgentsPruned { pruned, skipped }) => {
+            assert_eq!(
+                pruned.len(),
+                2,
+                "should prune both pipeline agent and standalone"
+            );
+            assert_eq!(skipped, 0);
+
+            // Find the entries
+            let pipeline_agent = pruned.iter().find(|e| !e.pipeline_id.is_empty());
+            let standalone_agent = pruned.iter().find(|e| e.pipeline_id.is_empty());
+
+            assert!(pipeline_agent.is_some(), "should have pipeline agent");
+            assert!(standalone_agent.is_some(), "should have standalone agent");
+        }
+        other => panic!("expected AgentsPruned, got: {:?}", other),
+    }
+
+    // Apply the emitted events and verify state
+    {
+        let mut s = state.lock();
+        s.apply_event(&Event::PipelineDeleted {
+            id: oj_core::PipelineId::new("pipe-done".to_string()),
+        });
+        s.apply_event(&Event::AgentRunDeleted {
+            id: oj_core::AgentRunId::new("ar-done"),
+        });
+
+        assert!(
+            !s.pipelines.contains_key("pipe-done"),
+            "pipeline should be pruned"
+        );
+        assert!(
+            !s.agent_runs.contains_key("ar-done"),
+            "agent run should be pruned"
+        );
+    }
 }
 
 // --- cleanup helper tests ---

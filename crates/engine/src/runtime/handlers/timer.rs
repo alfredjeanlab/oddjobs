@@ -213,21 +213,20 @@ where
 
         // Check both session AND process — tmux sessions can outlive their
         // child process, so session-only checks miss dead agents.
-        let is_running = self.executor.check_session_alive(&session_id).await
-            && {
-                let process_name = self
-                    .cached_runbook(&pipeline.runbook_hash)
-                    .ok()
-                    .and_then(|rb| {
-                        crate::monitor::get_agent_def(&rb, &pipeline)
-                            .ok()
-                            .map(|def| oj_adapters::extract_process_name(&def.run))
-                    })
-                    .unwrap_or_else(|| "claude".to_string());
-                self.executor
-                    .check_process_running(&session_id, &process_name)
-                    .await
-            };
+        let is_running = self.executor.check_session_alive(&session_id).await && {
+            let process_name = self
+                .cached_runbook(&pipeline.runbook_hash)
+                .ok()
+                .and_then(|rb| {
+                    crate::monitor::get_agent_def(&rb, &pipeline)
+                        .ok()
+                        .map(|def| oj_adapters::extract_process_name(&def.run))
+                })
+                .unwrap_or_else(|| "claude".to_string());
+            self.executor
+                .check_process_running(&session_id, &process_name)
+                .await
+        };
 
         let pid = PipelineId::new(pipeline_id);
         if is_running {
@@ -331,20 +330,19 @@ where
             None => return Ok(vec![]),
         };
 
-        let is_running = self.executor.check_session_alive(&session_id).await
-            && {
-                let process_name = self
-                    .cached_runbook(&agent_run.runbook_hash)
-                    .ok()
-                    .and_then(|rb| {
-                        rb.get_agent(&agent_run.agent_name)
-                            .map(|def| oj_adapters::extract_process_name(&def.run))
-                    })
-                    .unwrap_or_else(|| "claude".to_string());
-                self.executor
-                    .check_process_running(&session_id, &process_name)
-                    .await
-            };
+        let is_running = self.executor.check_session_alive(&session_id).await && {
+            let process_name = self
+                .cached_runbook(&agent_run.runbook_hash)
+                .ok()
+                .and_then(|rb| {
+                    rb.get_agent(&agent_run.agent_name)
+                        .map(|def| oj_adapters::extract_process_name(&def.run))
+                })
+                .unwrap_or_else(|| "claude".to_string());
+            self.executor
+                .check_process_running(&session_id, &process_name)
+                .await
+        };
 
         let ar_id = oj_core::AgentRunId::new(agent_run_id);
         if is_running {
