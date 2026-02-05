@@ -225,10 +225,12 @@ where
 
     /// Reconcile queue items after daemon recovery.
     ///
-    /// Handles two cases:
+    /// Handles three cases:
     /// 1. Active jobs that already reached terminal state — calls
     ///    `check_worker_job_complete` to emit the missing queue events.
-    /// 2. Active queue items with no corresponding job (pruned/lost) —
+    /// 2. Active queue items with a running job not tracked by worker —
+    ///    adds the job to worker's active list.
+    /// 3. Active queue items with no corresponding job (pruned/lost) —
     ///    fails them with retry-or-dead logic.
     async fn reconcile_queue_items(
         &self,
@@ -267,7 +269,7 @@ where
             let _ = self.check_worker_job_complete(&pid, &terminal_step).await;
         }
 
-        // 2. Fail active queue items with no corresponding job
+        // 2. Find and track active queue items with running jobs not in worker's active list
         let queue_name = {
             let workers = self.worker_states.lock();
             workers
@@ -276,6 +278,80 @@ where
                 .unwrap_or_default()
         };
         let scoped_queue = scoped_name(namespace, &queue_name);
+        let mapped_item_ids: HashSet<String> = {
+            let workers = self.worker_states.lock();
+            workers
+                .get(worker_name)
+                .map(|s| s.item_job_map.values().cloned().collect())
+                .unwrap_or_default()
+        };
+
+        // Find Active queue items assigned to this worker but not in item_job_map,
+        // then check if a corresponding job exists (by searching for item.id var match)
+        let untracked_items: Vec<(String, JobId)> = self.lock_state(|state| {
+            let active_items: Vec<String> = state
+                .queue_items
+                .get(&scoped_queue)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|i| {
+                            i.status == QueueItemStatus::Active
+                                && i.worker_name.as_deref() == Some(worker_name)
+                                && !mapped_item_ids.contains(&i.id)
+                        })
+                        .map(|i| i.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // For each active item, look for a job with matching item.id
+            active_items
+                .into_iter()
+                .filter_map(|item_id| {
+                    state
+                        .jobs
+                        .iter()
+                        .find(|(_, job)| {
+                            job.vars.get("item.id") == Some(&item_id) && !job.is_terminal()
+                        })
+                        .map(|(job_id, _)| (item_id, JobId::new(job_id.clone())))
+                })
+                .collect()
+        });
+
+        // Add untracked jobs to worker's active list
+        for (item_id, job_id) in untracked_items {
+            tracing::info!(
+                worker = worker_name,
+                item_id = item_id.as_str(),
+                job_id = job_id.as_str(),
+                "reconciling untracked job for active queue item"
+            );
+            {
+                let mut workers = self.worker_states.lock();
+                if let Some(state) = workers.get_mut(worker_name) {
+                    if !state.active_jobs.contains(&job_id) {
+                        state.active_jobs.insert(job_id.clone());
+                    }
+                    state.item_job_map.insert(job_id.clone(), item_id.clone());
+                }
+            }
+            // Emit WorkerItemDispatched to persist the tracking
+            self.executor
+                .execute_all(vec![Effect::Emit {
+                    event: Event::WorkerItemDispatched {
+                        worker_name: worker_name.to_string(),
+                        item_id,
+                        job_id,
+                        namespace: namespace.to_string(),
+                    },
+                }])
+                .await?;
+        }
+
+        // 3. Fail active queue items with no corresponding job
+        // Re-fetch mapped_item_ids after adding untracked jobs
         let mapped_item_ids: HashSet<String> = {
             let workers = self.worker_states.lock();
             workers
