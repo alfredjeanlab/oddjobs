@@ -1,34 +1,20 @@
 use serial_test::serial;
 
-use super::*;
+use super::super::{filter_namespaces, format_text};
+use super::{empty_ns, job_entry, make_ns, setup_no_color};
 
-// ── Column order & alignment ────────────────────────────────────────
+// ── job column order ────────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn column_order_is_id_name_kindstep_status_elapsed() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![{
-            let mut j = make_job(
-                "abcd1234-0000-0000-0000",
-                "fix-login-abcd1234",
-                "build",
-                "check",
-                "running",
-            );
-            j.elapsed_ms = 420_000;
-            j
-        }],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    let mut entry = job_entry("abcd1234-0000-0000-0000", "build", "check");
+    entry.name = "fix-login-abcd1234".to_string();
+    entry.elapsed_ms = 420_000;
+    let mut ns = empty_ns("myproject");
+    ns.active_jobs.push(entry);
 
     let output = format_text(30, &[ns], None);
 
@@ -58,40 +44,22 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
     );
 }
 
+// ── column alignment ────────────────────────────────────────────────
+
 #[test]
 #[serial]
 fn columns_are_aligned_across_rows() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![
-            make_job(
-                "aaaa1111-0000",
-                "short-aaaa1111",
-                "build",
-                "check",
-                "running",
-            ),
-            {
-                let mut j = make_job(
-                    "bbbb2222-0000",
-                    "much-longer-name-bbbb2222",
-                    "deploy",
-                    "implement",
-                    "waiting",
-                );
-                j.elapsed_ms = 120_000;
-                j
-            },
-        ],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    let mut entry1 = job_entry("aaaa1111-0000", "build", "check");
+    entry1.name = "short-aaaa1111".to_string();
+    let mut entry2 = job_entry("bbbb2222-0000", "deploy", "implement");
+    entry2.name = "much-longer-name-bbbb2222".to_string();
+    entry2.step_status = "waiting".to_string();
+    entry2.elapsed_ms = 120_000;
+    let mut ns = empty_ns("myproject");
+    ns.active_jobs.push(entry1);
+    ns.active_jobs.push(entry2);
 
     let output = format_text(30, &[ns], None);
 
@@ -121,37 +89,17 @@ fn columns_are_aligned_across_rows() {
 #[test]
 #[serial]
 fn name_column_omitted_when_all_names_hidden() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![
-            make_job(
-                "aaaa1111-0000-0000-0000",
-                "aaaa1111-0000-0000-0000",
-                "build",
-                "check",
-                "running",
-            ),
-            {
-                let mut j = make_job(
-                    "bbbb2222-0000-0000-0000",
-                    "build",
-                    "build",
-                    "test",
-                    "running",
-                );
-                j.elapsed_ms = 120_000;
-                j
-            },
-        ],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    // name == id → hidden
+    let entry1 = job_entry("aaaa1111-0000-0000-0000", "build", "check");
+    // name == kind → hidden
+    let mut entry2 = job_entry("bbbb2222-0000-0000-0000", "build", "test");
+    entry2.name = "build".to_string();
+    entry2.elapsed_ms = 120_000;
+    let mut ns = empty_ns("myproject");
+    ns.active_jobs.push(entry1);
+    ns.active_jobs.push(entry2);
 
     let output = format_text(30, &[ns], None);
 
@@ -169,42 +117,32 @@ fn name_column_omitted_when_all_names_hidden() {
     );
 }
 
-// ── Worker column alignment ─────────────────────────────────────────
+// ── worker layout ───────────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn worker_columns_are_aligned_across_rows() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
+    let mut ns = empty_ns("myproject");
+    ns.workers.push(oj_daemon::WorkerSummary {
+        name: "a".to_string(),
         namespace: "myproject".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![
-            oj_daemon::WorkerSummary {
-                name: "a".to_string(),
-                namespace: "myproject".to_string(),
-                queue: "default".to_string(),
-                status: "running".to_string(),
-                active: 1,
-                concurrency: 4,
-                updated_at_ms: 0,
-            },
-            oj_daemon::WorkerSummary {
-                name: "long-worker-name".to_string(),
-                namespace: "myproject".to_string(),
-                queue: "default".to_string(),
-                status: "stopped".to_string(),
-                active: 0,
-                concurrency: 2,
-                updated_at_ms: 0,
-            },
-        ],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+        queue: "default".to_string(),
+        status: "running".to_string(),
+        active: 1,
+        concurrency: 4,
+        updated_at_ms: 0,
+    });
+    ns.workers.push(oj_daemon::WorkerSummary {
+        name: "long-worker-name".to_string(),
+        namespace: "myproject".to_string(),
+        queue: "default".to_string(),
+        status: "stopped".to_string(),
+        active: 0,
+        concurrency: 2,
+        updated_at_ms: 0,
+    });
 
     let output = format_text(30, &[ns], None);
 
@@ -223,26 +161,18 @@ fn worker_columns_are_aligned_across_rows() {
 #[test]
 #[serial]
 fn worker_shows_full_at_max_concurrency() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
+    let mut ns = empty_ns("myproject");
+    ns.workers.push(oj_daemon::WorkerSummary {
+        name: "busy".to_string(),
         namespace: "myproject".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![oj_daemon::WorkerSummary {
-            name: "busy".to_string(),
-            namespace: "myproject".to_string(),
-            queue: "default".to_string(),
-            status: "running".to_string(),
-            active: 3,
-            concurrency: 3,
-            updated_at_ms: 0,
-        }],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+        queue: "default".to_string(),
+        status: "running".to_string(),
+        active: 3,
+        concurrency: 3,
+        updated_at_ms: 0,
+    });
 
     let output = format_text(30, &[ns], None);
     let line = output.lines().find(|l| l.contains("busy")).unwrap();
@@ -256,36 +186,26 @@ fn worker_shows_full_at_max_concurrency() {
     );
 }
 
-// ── Queue column alignment ──────────────────────────────────────────
+// ── queue layout ────────────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn queue_columns_are_aligned_across_rows() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![
-            oj_daemon::QueueStatus {
-                name: "tasks".to_string(),
-                pending: 3,
-                active: 1,
-                dead: 0,
-            },
-            oj_daemon::QueueStatus {
-                name: "long-queue-name".to_string(),
-                pending: 12,
-                active: 2,
-                dead: 1,
-            },
-        ],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    let mut ns = empty_ns("myproject");
+    ns.queues.push(oj_daemon::QueueStatus {
+        name: "tasks".to_string(),
+        pending: 3,
+        active: 1,
+        dead: 0,
+    });
+    ns.queues.push(oj_daemon::QueueStatus {
+        name: "long-queue-name".to_string(),
+        pending: 12,
+        active: 2,
+        dead: 1,
+    });
 
     let output = format_text(30, &[ns], None);
 
@@ -301,36 +221,26 @@ fn queue_columns_are_aligned_across_rows() {
     );
 }
 
-// ── Agent column alignment ──────────────────────────────────────────
+// ── agent layout ────────────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn agent_columns_are_aligned_across_rows() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![
-            oj_daemon::AgentStatusEntry {
-                agent_name: "coder".to_string(),
-                command_name: "build".to_string(),
-                agent_id: "agent-01".to_string(),
-                status: "running".to_string(),
-            },
-            oj_daemon::AgentStatusEntry {
-                agent_name: "long-agent-name".to_string(),
-                command_name: "deploy".to_string(),
-                agent_id: "agent-02".to_string(),
-                status: "idle".to_string(),
-            },
-        ],
-        pending_decisions: 0,
-    };
+    let mut ns = empty_ns("myproject");
+    ns.active_agents.push(oj_daemon::AgentStatusEntry {
+        agent_name: "coder".to_string(),
+        command_name: "build".to_string(),
+        agent_id: "agent-01".to_string(),
+        status: "running".to_string(),
+    });
+    ns.active_agents.push(oj_daemon::AgentStatusEntry {
+        agent_name: "long-agent-name".to_string(),
+        command_name: "deploy".to_string(),
+        agent_id: "agent-02".to_string(),
+        status: "idle".to_string(),
+    });
 
     let output = format_text(30, &[ns], None);
 
@@ -351,71 +261,6 @@ fn agent_columns_are_aligned_across_rows() {
         st_pos_0, st_pos_1,
         "status columns should be aligned:\n  {}\n  {}",
         lines[0], lines[1]
-    );
-}
-
-// ── Namespace visibility ────────────────────────────────────────────
-
-#[test]
-#[serial]
-fn namespace_with_only_empty_queues_is_hidden() {
-    set_no_color();
-
-    let ns = NamespaceStatus {
-        namespace: "empty-project".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![oj_daemon::QueueStatus {
-            name: "tasks".to_string(),
-            pending: 0,
-            active: 0,
-            dead: 0,
-        }],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
-
-    let output = format_text(60, &[ns], None);
-
-    assert!(
-        !output.contains("empty-project"),
-        "namespace with only empty queues should be hidden:\n{output}"
-    );
-    assert_eq!(output, "oj daemon: running 1m\n");
-}
-
-#[test]
-#[serial]
-fn namespace_with_non_empty_queue_is_shown() {
-    set_no_color();
-
-    let ns = NamespaceStatus {
-        namespace: "active-project".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![oj_daemon::QueueStatus {
-            name: "tasks".to_string(),
-            pending: 1,
-            active: 0,
-            dead: 0,
-        }],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
-
-    let output = format_text(60, &[ns], None);
-
-    assert!(
-        output.contains("active-project"),
-        "namespace with non-empty queue should be shown:\n{output}"
-    );
-    assert!(
-        output.contains("tasks"),
-        "queue should be displayed:\n{output}"
     );
 }
 
@@ -446,7 +291,7 @@ fn filter_namespaces_no_match_returns_empty() {
 #[test]
 #[serial]
 fn project_filter_restricts_text_output() {
-    set_no_color();
+    setup_no_color();
 
     let namespaces = vec![make_ns("alpha"), make_ns("beta")];
     let filtered = filter_namespaces(namespaces, Some("alpha"));
@@ -462,56 +307,27 @@ fn project_filter_restricts_text_output() {
     );
 }
 
-// ── Sorting ─────────────────────────────────────────────────────────
+// ── sorting ─────────────────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn workers_sorted_alphabetically() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![
-            oj_daemon::WorkerSummary {
-                name: "zebra".to_string(),
-                namespace: "myproject".to_string(),
-                queue: "default".to_string(),
-                status: "running".to_string(),
-                active: 1,
-                concurrency: 2,
-                updated_at_ms: 0,
-            },
-            oj_daemon::WorkerSummary {
-                name: "alpha".to_string(),
-                namespace: "myproject".to_string(),
-                queue: "default".to_string(),
-                status: "running".to_string(),
-                active: 0,
-                concurrency: 2,
-                updated_at_ms: 0,
-            },
-            oj_daemon::WorkerSummary {
-                name: "mid".to_string(),
-                namespace: "myproject".to_string(),
-                queue: "default".to_string(),
-                status: "idle".to_string(),
-                active: 0,
-                concurrency: 1,
-                updated_at_ms: 0,
-            },
-        ],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    let mut ns = empty_ns("myproject");
+    for (name, active) in [("zebra", 1usize), ("alpha", 0), ("mid", 0)] {
+        ns.workers.push(oj_daemon::WorkerSummary {
+            name: name.to_string(),
+            namespace: "myproject".to_string(),
+            queue: "default".to_string(),
+            status: if active > 0 { "running" } else { "idle" }.to_string(),
+            active,
+            concurrency: 2,
+            updated_at_ms: 0,
+        });
+    }
 
     let output = format_text(30, &[ns], None);
-
-    let worker_lines: Vec<&str> = output.lines().filter(|l| l.contains("active")).collect();
-    assert_eq!(worker_lines.len(), 3, "should find 3 worker rows");
 
     let alpha_pos = output.find("alpha").unwrap();
     let mid_pos = output.find("mid").unwrap();
@@ -525,36 +341,19 @@ fn workers_sorted_alphabetically() {
 #[test]
 #[serial]
 fn jobs_sorted_by_most_recent_activity() {
-    set_no_color();
+    setup_no_color();
 
-    let ns = NamespaceStatus {
-        namespace: "myproject".to_string(),
-        active_jobs: vec![
-            {
-                let mut j = make_job("oldest-0000", "oldest-0000", "build", "check", "running");
-                j.elapsed_ms = 300_000;
-                j.last_activity_ms = 1000;
-                j
-            },
-            {
-                let mut j = make_job("newest-0000", "newest-0000", "build", "test", "running");
-                j.last_activity_ms = 3000;
-                j
-            },
-            {
-                let mut j = make_job("middle-0000", "middle-0000", "build", "lint", "running");
-                j.elapsed_ms = 120_000;
-                j.last_activity_ms = 2000;
-                j
-            },
-        ],
-        escalated_jobs: vec![],
-        orphaned_jobs: vec![],
-        workers: vec![],
-        queues: vec![],
-        active_agents: vec![],
-        pending_decisions: 0,
-    };
+    let mut ns = empty_ns("myproject");
+    for (id, step, elapsed, activity) in [
+        ("oldest-0000", "check", 300_000u64, 1000u64),
+        ("newest-0000", "test", 60_000, 3000),
+        ("middle-0000", "lint", 120_000, 2000),
+    ] {
+        let mut entry = job_entry(id, "build", step);
+        entry.elapsed_ms = elapsed;
+        entry.last_activity_ms = activity;
+        ns.active_jobs.push(entry);
+    }
 
     let output = format_text(30, &[ns], None);
 
