@@ -419,7 +419,9 @@ where
 
         // If agent is alive and not killing, nudge it
         if is_alive && !kill {
-            let id = agent_id.as_ref().unwrap(); // Safe: is_alive implies agent_id is Some
+            let Some(id) = agent_id.as_ref() else {
+                unreachable!("is_alive implies agent_id is Some");
+            };
             self.executor
                 .execute(Effect::SendToAgent {
                     agent_id: id.clone(),

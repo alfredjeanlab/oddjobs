@@ -146,8 +146,10 @@ where
                 vars,
                 kill,
             } => {
-                result_events
-                    .extend(self.handle_job_resume(id, message.as_deref(), vars, *kill).await?);
+                result_events.extend(
+                    self.handle_job_resume(id, message.as_deref(), vars, *kill)
+                        .await?,
+                );
             }
 
             Event::JobCancel { id } => {

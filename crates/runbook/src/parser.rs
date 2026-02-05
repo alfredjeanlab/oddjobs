@@ -130,6 +130,26 @@ pub fn parse_runbook(content: &str) -> Result<Runbook, ParseError> {
 
 /// Parse a runbook from the given content in the specified format
 pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runbook, ParseError> {
+    parse_runbook_inner(content, format, true)
+}
+
+/// Parse a runbook without cross-reference validation.
+///
+/// Used by the import system: individual files are parsed without cross-refs,
+/// then imports are resolved and merged, and cross-refs are validated on the
+/// merged result.
+pub(crate) fn parse_runbook_no_xref(content: &str, format: Format) -> Result<Runbook, ParseError> {
+    // Same as parse_runbook_with_format but stops before cross-ref validation.
+    // We call the main function's logic up to step 11, then skip step 12.
+    parse_runbook_inner(content, format, false)
+}
+
+/// Inner parse function with optional cross-ref validation.
+fn parse_runbook_inner(
+    content: &str,
+    format: Format,
+    validate_refs: bool,
+) -> Result<Runbook, ParseError> {
     // 1. Serde does the heavy lifting
     let mut runbook: Runbook = match format {
         Format::Toml => toml::from_str(content)?,
@@ -304,76 +324,13 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    // 6. Validate worker cross-references
-    for (name, worker) in &runbook.workers {
-        if !runbook.queues.contains_key(&worker.source.queue) {
-            return Err(ParseError::InvalidFormat {
-                location: format!("worker.{}.source.queue", name),
-                message: format!(
-                    "references unknown queue '{}'; available queues: {}",
-                    worker.source.queue,
-                    runbook
-                        .queues
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                ),
-            });
-        }
-        if !runbook.jobs.contains_key(&worker.handler.job) {
-            return Err(ParseError::InvalidFormat {
-                location: format!("worker.{}.handler.job", name),
-                message: format!(
-                    "references unknown job '{}'; available jobs: {}",
-                    worker.handler.job,
-                    runbook.jobs.keys().cloned().collect::<Vec<_>>().join(", "),
-                ),
-            });
-        }
-    }
-
-    // 6.5. Validate cron cross-references
+    // 6.5. Validate cron interval syntax
     for (name, cron) in &runbook.crons {
-        // Validate interval
         if let Err(e) = validate_duration_str(&cron.interval) {
             return Err(ParseError::InvalidFormat {
                 location: format!("cron.{}.interval", name),
                 message: e,
             });
-        }
-        // Validate run is a job or agent reference
-        match &cron.run {
-            RunDirective::Job { job } => {
-                if !runbook.jobs.contains_key(job.as_str()) {
-                    return Err(ParseError::InvalidFormat {
-                        location: format!("cron.{}.run", name),
-                        message: format!(
-                            "references unknown job '{}'; available jobs: {}",
-                            job,
-                            sorted_keys(&runbook.jobs),
-                        ),
-                    });
-                }
-            }
-            RunDirective::Agent { agent, .. } => {
-                if !runbook.agents.contains_key(agent.as_str()) {
-                    return Err(ParseError::InvalidFormat {
-                        location: format!("cron.{}.run", name),
-                        message: format!(
-                            "references unknown agent '{}'; available agents: {}",
-                            agent,
-                            sorted_keys(&runbook.agents),
-                        ),
-                    });
-                }
-            }
-            RunDirective::Shell(_) => {
-                return Err(ParseError::InvalidFormat {
-                    location: format!("cron.{}.run", name),
-                    message: "cron run must reference a job or agent".to_string(),
-                });
-            }
         }
     }
 
@@ -526,7 +483,122 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    // 10. Validate agent and job references in steps and commands
+    // 11. Warn on unreachable steps
+    let mut sorted_jobs: Vec<_> = runbook.jobs.iter().collect();
+    sorted_jobs.sort_by_key(|(name, _)| *name);
+    for (job_name, job) in sorted_jobs {
+        if job.steps.len() <= 1 {
+            continue;
+        }
+        let mut referenced: HashSet<&str> = HashSet::new();
+        for t in [&job.on_done, &job.on_fail, &job.on_cancel]
+            .into_iter()
+            .flatten()
+        {
+            referenced.insert(t.step_name());
+        }
+        for step in &job.steps {
+            for t in [&step.on_done, &step.on_fail, &step.on_cancel]
+                .into_iter()
+                .flatten()
+            {
+                referenced.insert(t.step_name());
+            }
+        }
+        for step in job.steps.iter().skip(1) {
+            if !referenced.contains(step.name.as_str()) {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("job.{}.step.{}", job_name, step.name),
+                    message: format!(
+                        "step '{}' is unreachable \
+                         (not referenced by any on_done/on_fail/on_cancel)",
+                        step.name
+                    ),
+                });
+            }
+        }
+    }
+
+    if validate_refs {
+        validate_cross_refs(&runbook)?;
+    }
+
+    Ok(runbook)
+}
+
+/// Validate cross-references between entities in a runbook.
+///
+/// Checks that:
+/// - Workers reference existing queues and jobs
+/// - Crons reference existing jobs or agents
+/// - Steps and commands reference existing agents and jobs
+pub(crate) fn validate_cross_refs(runbook: &Runbook) -> Result<(), ParseError> {
+    // Worker cross-references
+    for (name, worker) in &runbook.workers {
+        if !runbook.queues.contains_key(&worker.source.queue) {
+            return Err(ParseError::InvalidFormat {
+                location: format!("worker.{}.source.queue", name),
+                message: format!(
+                    "references unknown queue '{}'; available queues: {}",
+                    worker.source.queue,
+                    runbook
+                        .queues
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+            });
+        }
+        if !runbook.jobs.contains_key(&worker.handler.job) {
+            return Err(ParseError::InvalidFormat {
+                location: format!("worker.{}.handler.job", name),
+                message: format!(
+                    "references unknown job '{}'; available jobs: {}",
+                    worker.handler.job,
+                    runbook.jobs.keys().cloned().collect::<Vec<_>>().join(", "),
+                ),
+            });
+        }
+    }
+
+    // Cron cross-references
+    for (name, cron) in &runbook.crons {
+        match &cron.run {
+            RunDirective::Job { job } => {
+                if !runbook.jobs.contains_key(job.as_str()) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("cron.{}.run", name),
+                        message: format!(
+                            "references unknown job '{}'; available jobs: {}",
+                            job,
+                            sorted_keys(&runbook.jobs),
+                        ),
+                    });
+                }
+            }
+            RunDirective::Agent { agent, .. } => {
+                if !runbook.agents.contains_key(agent.as_str()) {
+                    return Err(ParseError::InvalidFormat {
+                        location: format!("cron.{}.run", name),
+                        message: format!(
+                            "references unknown agent '{}'; available agents: {}",
+                            agent,
+                            sorted_keys(&runbook.agents),
+                        ),
+                    });
+                }
+            }
+            RunDirective::Shell(_) => {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("cron.{}.run", name),
+                    message: "cron run must reference a job or agent".to_string(),
+                });
+            }
+        }
+    }
+
+    // Step and command cross-references
     for (job_name, job) in &runbook.jobs {
         for (i, step) in job.steps.iter().enumerate() {
             if let Some(agent_name) = step.run.agent_name() {
@@ -583,46 +655,7 @@ pub fn parse_runbook_with_format(content: &str, format: Format) -> Result<Runboo
         }
     }
 
-    // 11. Warn on unreachable steps
-    let mut sorted_jobs: Vec<_> = runbook.jobs.iter().collect();
-    sorted_jobs.sort_by_key(|(name, _)| *name);
-    for (job_name, job) in sorted_jobs {
-        if job.steps.len() <= 1 {
-            continue;
-        }
-        let mut referenced: HashSet<&str> = HashSet::new();
-        // Collect from job-level transitions
-        for t in [&job.on_done, &job.on_fail, &job.on_cancel]
-            .into_iter()
-            .flatten()
-        {
-            referenced.insert(t.step_name());
-        }
-        // Collect from step-level transitions
-        for step in &job.steps {
-            for t in [&step.on_done, &step.on_fail, &step.on_cancel]
-                .into_iter()
-                .flatten()
-            {
-                referenced.insert(t.step_name());
-            }
-        }
-        // Reject unreachable steps (skip first step)
-        for step in job.steps.iter().skip(1) {
-            if !referenced.contains(step.name.as_str()) {
-                return Err(ParseError::InvalidFormat {
-                    location: format!("job.{}.step.{}", job_name, step.name),
-                    message: format!(
-                        "step '{}' is unreachable \
-                         (not referenced by any on_done/on_fail/on_cancel)",
-                        step.name
-                    ),
-                });
-            }
-        }
-    }
-
-    Ok(runbook)
+    Ok(())
 }
 
 #[cfg(test)]
