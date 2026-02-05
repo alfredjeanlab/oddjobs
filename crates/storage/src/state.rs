@@ -49,9 +49,12 @@ impl<'de> serde::Deserialize<'de> for WorkspaceType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
+            "folder" => Ok(WorkspaceType::Folder),
             "worktree" => Ok(WorkspaceType::Worktree),
-            // "folder" + legacy values ("ephemeral", "persistent") all map to Folder
-            _ => Ok(WorkspaceType::Folder),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["folder", "worktree"],
+            )),
         }
     }
 }
@@ -545,7 +548,6 @@ impl MaterializedState {
                     .as_deref()
                     .map(|s| match s {
                         "worktree" => WorkspaceType::Worktree,
-                        // Map legacy values to Folder
                         _ => WorkspaceType::Folder,
                     })
                     .unwrap_or_default();

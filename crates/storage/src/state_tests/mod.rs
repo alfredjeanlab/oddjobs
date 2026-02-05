@@ -181,40 +181,6 @@ fn apply_event_workspace_type_none_defaults_to_folder() {
 }
 
 #[test]
-fn workspace_type_legacy_ephemeral_maps_to_folder() {
-    let mut state = MaterializedState::default();
-    state.apply_event(&Event::WorkspaceCreated {
-        id: WorkspaceId::new("ws-legacy"),
-        path: PathBuf::from("/tmp/legacy"),
-        branch: None,
-        owner: None,
-        workspace_type: Some("ephemeral".to_string()),
-    });
-
-    assert_eq!(
-        state.workspaces["ws-legacy"].workspace_type,
-        WorkspaceType::Folder
-    );
-}
-
-#[test]
-fn workspace_type_legacy_persistent_maps_to_folder() {
-    let mut state = MaterializedState::default();
-    state.apply_event(&Event::WorkspaceCreated {
-        id: WorkspaceId::new("ws-legacy-p"),
-        path: PathBuf::from("/tmp/legacy-p"),
-        branch: None,
-        owner: None,
-        workspace_type: Some("persistent".to_string()),
-    });
-
-    assert_eq!(
-        state.workspaces["ws-legacy-p"].workspace_type,
-        WorkspaceType::Folder
-    );
-}
-
-#[test]
 fn get_job_exact_match() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("pipe-abc123", "build", "test", "init"));

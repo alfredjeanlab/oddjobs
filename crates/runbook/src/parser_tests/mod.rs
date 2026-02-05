@@ -1098,7 +1098,7 @@ command "epic" {
 job "epic" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "blocked-by"]
-  workspace = "ephemeral"
+  workspace = "folder"
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"

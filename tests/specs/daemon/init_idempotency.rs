@@ -20,7 +20,7 @@ run = { job = "test" }
 
 [job.test]
 vars = ["name"]
-workspace = "ephemeral"
+workspace = "folder"
 
 [[job.test.step]]
 name = "init"
@@ -47,7 +47,7 @@ run = { job = "test" }
 
 [job.test]
 vars = ["name"]
-workspace = "ephemeral"
+workspace = "folder"
 
 [[job.test.step]]
 name = "init"
@@ -73,7 +73,7 @@ run = { job = "test" }
 
 [job.test]
 vars = ["name"]
-workspace = "ephemeral"
+workspace = "folder"
 
 [[job.test.step]]
 name = "init"
@@ -94,7 +94,7 @@ run = { job = "test" }
 
 [job.test]
 vars = ["name"]
-workspace = "ephemeral"
+workspace = "folder"
 
 [[job.test.step]]
 name = "init"
@@ -225,7 +225,7 @@ fn init_reinit_cycle_triggers_circuit_breaker() {
 ///
 /// Each job gets a unique workspace ID (based on the job's
 /// nonce), so a second run after the first completes should succeed
-/// even though both use workspace = "ephemeral".
+/// even though both use workspace = "folder".
 #[test]
 fn sequential_runs_complete_without_workspace_collision() {
     let temp = Project::empty();

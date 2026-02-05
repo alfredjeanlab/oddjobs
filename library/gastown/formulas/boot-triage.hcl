@@ -27,7 +27,7 @@ command "gt-triage" {
 
 job "boot-triage" {
   name      = "boot-triage"
-  workspace = "ephemeral"
+  workspace = "folder"
 
   notify {
     on_fail = "Boot triage failed"

@@ -31,7 +31,7 @@ command "gt-witness-patrol" {
 job "witness-patrol" {
   name      = "witness-${var.rig}"
   vars      = ["rig"]
-  workspace = "ephemeral"
+  workspace = "folder"
 
   notify {
     on_done = "Witness patrol done: ${var.rig}"

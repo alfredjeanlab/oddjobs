@@ -178,7 +178,7 @@ Snapshots use zstd compression (level 3) for ~70-80% size reduction:
 | 100 jobs | ~1MB | ~200KB |
 | 1000 jobs | ~10MB | ~2MB |
 
-Loading auto-detects format via magic bytes, providing backward compatibility with uncompressed snapshots.
+Snapshots are always zstd-compressed; the loader expects compressed format.
 
 ### Testability
 

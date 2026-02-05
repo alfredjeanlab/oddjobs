@@ -29,7 +29,7 @@ command "gt-sling" {
 job "sling" {
   name      = "${var.issue}"
   vars      = ["issue", "instructions", "base", "rig"]
-  workspace = "ephemeral"
+  workspace = "folder"
   on_cancel = { step = "cleanup" }
   on_fail   = { step = "reopen" }
 

@@ -578,26 +578,6 @@ job "test" {
 }
 
 #[test]
-fn parse_hcl_workspace_ephemeral_compat() {
-    let hcl = r#"
-job "test" {
-    vars = ["name"]
-    workspace = "ephemeral"
-
-    step "init" {
-        run = "echo init"
-    }
-}
-"#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let job = runbook.get_job("test").unwrap();
-    assert_eq!(
-        job.workspace,
-        Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
-    );
-}
-
-#[test]
 fn parse_toml_workspace_folder() {
     let toml = r#"
 [job.test]

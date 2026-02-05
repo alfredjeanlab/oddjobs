@@ -105,29 +105,16 @@ impl NotifyConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WorkspaceConfig {
-    /// Short form: `workspace = "folder"` (or legacy `workspace = "ephemeral"`)
+    /// Short form: `workspace = "folder"`
     Simple(WorkspaceType),
     /// Block form: `workspace { git = "worktree" }`
     Block(WorkspaceBlock),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum WorkspaceType {
     Folder,
-}
-
-/// Custom deserializer that maps legacy "ephemeral" to Folder
-impl<'de> Deserialize<'de> for WorkspaceType {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(d)?;
-        match s.as_str() {
-            "folder" => Ok(WorkspaceType::Folder),
-            // Backward compat: treat legacy values as Folder
-            "ephemeral" | "persistent" => Ok(WorkspaceType::Folder),
-            other => Err(de::Error::unknown_variant(other, &["folder"])),
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

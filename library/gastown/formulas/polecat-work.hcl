@@ -15,7 +15,7 @@
 job "polecat-work" {
   name      = "${var.bug.id}"
   vars      = ["bug"]
-  workspace = "ephemeral"
+  workspace = "folder"
   on_cancel = { step = "cancel" }
   on_fail   = { step = "reopen" }
 
