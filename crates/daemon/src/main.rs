@@ -78,6 +78,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration (user-level daemon, no project root)
     let config = Config::load()?;
 
+    // Rotate log file if it has grown too large
+    rotate_log_if_needed(&config.log_path);
+
     // Write startup marker to log (before tracing setup, so CLI can find it)
     write_startup_marker(&config)?;
 
@@ -375,6 +378,40 @@ fn spawn_checkpoint(
     });
 }
 
+/// Maximum log file size before rotation (10 MB).
+const MAX_LOG_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Number of rotated log files to keep (daemon.log.1, .2, .3).
+const MAX_ROTATED_LOGS: u32 = 3;
+
+/// Rotate the daemon log file if it exceeds [`MAX_LOG_SIZE`].
+///
+/// Shifts `daemon.log` → `daemon.log.1` → `daemon.log.2` → `daemon.log.3`,
+/// deleting the oldest. Best-effort: rotation failures are silently ignored
+/// so the daemon still starts.
+fn rotate_log_if_needed(log_path: &std::path::Path) {
+    let size = match std::fs::metadata(log_path) {
+        Ok(m) => m.len(),
+        Err(_) => return,
+    };
+
+    if size < MAX_LOG_SIZE {
+        return;
+    }
+
+    let log_str = log_path.display().to_string();
+
+    // Shift older rotations: .3 is deleted, .2→.3, .1→.2
+    for i in (1..MAX_ROTATED_LOGS).rev() {
+        let from = format!("{log_str}.{i}");
+        let to = format!("{log_str}.{}", i + 1);
+        let _ = std::fs::rename(&from, &to);
+    }
+
+    // Rotate current log → .1
+    let _ = std::fs::rename(log_path, format!("{log_str}.1"));
+}
+
 /// Startup marker prefix written to log before anything else.
 /// CLI uses this to find where the current startup attempt begins.
 /// Full format: "--- ojd: starting (pid: 12345) ---"
@@ -435,7 +472,7 @@ fn setup_logging(
         std::fs::create_dir_all(parent)?;
     }
 
-    // Set up file appender
+    // Set up file appender (rotation happens at startup via rotate_log_if_needed)
     let file_appender = tracing_appender::rolling::never(
         config.log_path.parent().ok_or(LifecycleError::NoStateDir)?,
         config

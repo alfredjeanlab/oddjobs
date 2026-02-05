@@ -171,11 +171,26 @@ pub fn force_kill_daemon(pid: u32) -> bool {
 const STARTUP_MARKER_PREFIX: &str = "--- ojd: starting (pid: ";
 
 /// Read daemon log from startup marker, looking for errors.
+///
+/// Only reads the last 100KB of the file — the startup marker is always
+/// within the last few KB of the current log.
 pub fn read_startup_error() -> Option<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
     let dir = daemon_dir().ok()?;
     let log_path = dir.join("daemon.log");
 
-    let content = std::fs::read_to_string(&log_path).ok()?;
+    let mut file = std::fs::File::open(&log_path).ok()?;
+    let file_size = file.metadata().ok()?.len();
+
+    // Seek to the last 100KB; the startup marker is always near the end.
+    const TAIL_SIZE: u64 = 100 * 1024;
+    if file_size > TAIL_SIZE {
+        file.seek(SeekFrom::End(-(TAIL_SIZE as i64))).ok()?;
+    }
+
+    let mut content = String::new();
+    file.read_to_string(&mut content).ok()?;
     parse_startup_error(&content)
 }
 
