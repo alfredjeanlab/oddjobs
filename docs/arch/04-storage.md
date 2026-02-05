@@ -83,6 +83,31 @@ Agent signal and lifecycle events also update job status during replay:
 | `queue:item_retry` | QueueItemRetry | queue_name, item_id, namespace | Reset item to Pending, clear failure_count |
 | `queue:item_dead` | QueueItemDead | queue_name, item_id, namespace | Set queue item status to Dead (terminal) |
 
+### Cron lifecycle
+
+| Type Tag | Variant | Fields | Effect |
+|---|---|---|---|
+| `cron:started` | CronStarted | cron_name, project_root, runbook_hash, interval, job_name, run_target, namespace | Insert or update cron record |
+| `cron:stopped` | CronStopped | cron_name, namespace | Set cron status to stopped |
+| `cron:fired` | CronFired | cron_name, namespace, job_id? | Update last_fired_at_ms |
+| `cron:deleted` | CronDeleted | cron_name, namespace | Remove cron record |
+
+### Decision lifecycle
+
+| Type Tag | Variant | Fields | Effect |
+|---|---|---|---|
+| `decision:created` | DecisionCreated | id, job_id, agent_id?, source, context, options, created_at_ms, namespace | Insert decision, set job to Waiting |
+| `decision:resolved` | DecisionResolved | id, chosen?, message?, resolved_at_ms | Update decision resolution |
+
+### Standalone agent runs
+
+| Type Tag | Variant | Fields | Effect |
+|---|---|---|---|
+| `agent_run:created` | AgentRunCreated | id, agent_name, command_name, namespace, cwd, runbook_hash, vars, created_at_epoch_ms | Insert agent run |
+| `agent_run:started` | AgentRunStarted | id, agent_id | Set status to Running, link agent_id |
+| `agent_run:status_changed` | AgentRunStatusChanged | id, status, reason? | Update status |
+| `agent_run:deleted` | AgentRunDeleted | id | Remove agent run |
+
 Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `JobResume`, `JobCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake` and `WorkerPollComplete` are also signals that do not mutate state.
 
 ## Materialized State
@@ -97,6 +122,9 @@ pub struct MaterializedState {
     pub runbooks: HashMap<String, StoredRunbook>,
     pub workers: HashMap<String, WorkerRecord>,
     pub queue_items: HashMap<String, Vec<QueueItem>>,
+    pub crons: HashMap<String, CronRecord>,
+    pub decisions: HashMap<String, Decision>,
+    pub agent_runs: HashMap<String, AgentRun>,
 }
 ```
 

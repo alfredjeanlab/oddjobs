@@ -26,9 +26,9 @@ Adapters wrap **external tools and abstractions** with predictable behavior:
 
 | Trait | Wraps | Key Methods |
 |-------|-------|-------------|
-| `SessionAdapter` | tmux | spawn, send, kill, is_alive, capture_output, is_process_running, get_exit_code |
-| `AgentAdapter` | Claude Code | spawn, reconnect, send, get_state, kill |
-| `NotifyAdapter` | channels | send |
+| `SessionAdapter` | tmux | spawn, send, send_literal, send_enter, kill, is_alive, capture_output, is_process_running, get_exit_code, configure |
+| `AgentAdapter` | Claude Code | spawn, reconnect, send, get_state, kill, session_log_size |
+| `NotifyAdapter` | desktop | notify |
 
 ## AgentAdapter
 
@@ -62,6 +62,10 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
 
     /// Get current agent state from session log (point-in-time check)
     async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError>;
+
+    /// Get the current size of the agent's session log file in bytes.
+    /// Used by the idle grace timer to detect activity during the grace period.
+    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64>;
 }
 
 pub enum AgentState {
@@ -119,6 +123,8 @@ pub trait SessionAdapter: Clone + Send + Sync + 'static {
         env: &[(String, String)],
     ) -> Result<String, SessionError>;
     async fn send(&self, id: &str, input: &str) -> Result<(), SessionError>;
+    async fn send_literal(&self, id: &str, text: &str) -> Result<(), SessionError>;
+    async fn send_enter(&self, id: &str) -> Result<(), SessionError>;
     async fn kill(&self, id: &str) -> Result<(), SessionError>;
     async fn is_alive(&self, id: &str) -> Result<bool, SessionError>;
     async fn capture_output(&self, id: &str, lines: u32) -> Result<String, SessionError>;
@@ -126,6 +132,8 @@ pub trait SessionAdapter: Clone + Send + Sync + 'static {
     /// Get the exit code of the pane's process (if available).
     /// Returns `None` if the pane is still running or the exit code is unavailable.
     async fn get_exit_code(&self, id: &str) -> Result<Option<i32>, SessionError>;
+    /// Apply configuration to an existing session (styling, status bar, etc.)
+    async fn configure(&self, id: &str, config: &serde_json::Value) -> Result<(), SessionError>;
 }
 ```
 
@@ -135,16 +143,17 @@ pub trait SessionAdapter: Clone + Send + Sync + 'static {
 
 ## NotifyAdapter
 
-Sends notifications to external channels.
+Sends desktop notifications.
 
 ```rust
 #[async_trait]
 pub trait NotifyAdapter: Clone + Send + Sync + 'static {
-    async fn send(&self, channel: &str, message: &str) -> Result<(), NotifyError>;
+    /// Send a notification with a title and message body
+    async fn notify(&self, title: &str, message: &str) -> Result<(), NotifyError>;
 }
 ```
 
-**Production** (`NoOpNotifyAdapter`): Silently discards all notifications. Used when notifications are disabled or not yet configured.
+**Production** (`DesktopNotifyAdapter`): Sends native desktop notifications via notify-rust.
 
 **Fake** (`FakeNotifyAdapter`): Records notifications for test assertions.
 

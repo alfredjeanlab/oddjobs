@@ -237,6 +237,21 @@ impl MaterializedState {
     ///
     /// This is the event-sourcing approach where state is derived from events.
     /// Events are facts about what happened; state is derived from those facts.
+    ///
+    /// # Idempotency Requirement
+    ///
+    /// **All event handlers MUST be idempotent.** Applying the same event twice
+    /// must produce the same state as applying it once. This is critical because
+    /// events may be applied multiple times:
+    ///
+    /// 1. In `executor.execute_inner()` for immediate visibility
+    /// 2. In `daemon.process_event()` after WAL replay
+    ///
+    /// Guidelines for idempotent handlers:
+    /// - Use assignment (`=`) instead of mutation (`+=`, `-=`)
+    /// - Guard inserts with existence checks (`if !map.contains_key(...)`)
+    /// - Guard increments with status checks (only increment on state transition)
+    /// - Use `finalize_current_step` which is internally guarded by `finished_at_ms`
     pub fn apply_event(&mut self, event: &Event) {
         match event {
             Event::AgentWorking { agent_id } => {
@@ -712,8 +727,12 @@ impl MaterializedState {
                 let key = scoped_name(namespace, queue_name);
                 if let Some(items) = self.queue_items.get_mut(&key) {
                     if let Some(item) = items.iter_mut().find(|i| i.id == *item_id) {
+                        // Idempotency: only increment failure_count on state transition
+                        // (prevents double-increment when event is applied twice)
+                        if item.status != QueueItemStatus::Failed {
+                            item.failure_count += 1;
+                        }
                         item.status = QueueItemStatus::Failed;
-                        item.failure_count += 1;
                     }
                 }
             }

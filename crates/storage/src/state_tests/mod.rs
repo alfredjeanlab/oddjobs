@@ -831,6 +831,32 @@ fn apply_event_queue_pushed_idempotent() {
     assert_eq!(state.queue_items["bugs"].len(), 1);
 }
 
+#[test]
+fn apply_event_queue_failed_idempotent() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&queue_pushed_event("bugs", "item-1"));
+    state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
+
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Active);
+
+    // First apply — should increment failure_count
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
+    assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
+
+    // Second apply of same event — should NOT increment again (idempotent)
+    // This simulates the double-application that occurs in the daemon:
+    // 1. executor.execute_inner() applies for immediate visibility
+    // 2. daemon.process_event() applies after WAL round-trip
+    state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
+    assert_eq!(
+        state.queue_items["bugs"][0].failure_count, 1,
+        "failure_count must not double-increment on idempotent re-apply"
+    );
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
+}
+
 // === Queue event tests ===
 
 fn queue_pushed_event(queue_name: &str, item_id: &str) -> Event {
