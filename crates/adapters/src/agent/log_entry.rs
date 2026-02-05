@@ -112,6 +112,25 @@ fn format_tokens(tokens: u64) -> String {
     }
 }
 
+// --- JSON Extraction Helpers ---
+
+/// Extract a string value from a JSON object by key.
+fn get_str<'a>(obj: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    obj.get(key).and_then(|v| v.as_str())
+}
+
+/// Extract a string value from a JSON object, returning a default if missing.
+fn get_str_or<'a>(obj: &'a serde_json::Value, key: &str, default: &'a str) -> &'a str {
+    get_str(obj, key).unwrap_or(default)
+}
+
+// --- Entry Construction Helper ---
+
+/// Push a new log entry with the given timestamp and kind.
+fn push_entry(entries: &mut Vec<AgentLogEntry>, timestamp: String, kind: EntryKind) {
+    entries.push(AgentLogEntry { timestamp, kind });
+}
+
 /// Parse new log entries from a JSONL session log starting at the given byte offset.
 ///
 /// Returns the extracted entries and the new byte offset. The caller should
@@ -169,7 +188,7 @@ fn extract_entries(
     entries: &mut Vec<AgentLogEntry>,
     last_user_timestamp: &mut Option<String>,
 ) {
-    let record_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    let record_type = get_str_or(json, "type", "");
 
     // Track user message timestamps for turn duration calculation
     if record_type == "user" {
@@ -182,10 +201,7 @@ fn extract_entries(
     // Check for error indicators
     if let Some(error_msg) = extract_error(json) {
         let timestamp = extract_timestamp(json).unwrap_or_default();
-        entries.push(AgentLogEntry {
-            timestamp,
-            kind: EntryKind::Error { message: error_msg },
-        });
+        push_entry(entries, timestamp, EntryKind::Error { message: error_msg });
         return;
     }
 
@@ -198,11 +214,11 @@ fn extract_entries(
         // Extract tool_use blocks from content
         if let Some(content) = message.get("content").and_then(|c| c.as_array()) {
             for block in content {
-                if block.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+                if get_str(block, "type") != Some("tool_use") {
                     continue;
                 }
 
-                let tool_name = match block.get("name").and_then(|n| n.as_str()) {
+                let tool_name = match get_str(block, "name") {
                     Some(name) => name,
                     None => continue,
                 };
@@ -215,59 +231,57 @@ fn extract_entries(
 
                 match tool_name {
                     "Read" => {
-                        if let Some(path) = input.get("file_path").and_then(|p| p.as_str()) {
-                            entries.push(AgentLogEntry {
+                        if let Some(path) = get_str(&input, "file_path") {
+                            push_entry(
+                                entries,
                                 timestamp,
-                                kind: EntryKind::FileRead {
+                                EntryKind::FileRead {
                                     path: path.to_string(),
                                 },
-                            });
+                            );
                         }
                     }
                     "Write" => {
-                        if let Some(path) = input.get("file_path").and_then(|p| p.as_str()) {
-                            let content_str =
-                                input.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            let lines = content_str.lines().count();
-                            entries.push(AgentLogEntry {
+                        if let Some(path) = get_str(&input, "file_path") {
+                            let lines = get_str_or(&input, "content", "").lines().count();
+                            push_entry(
+                                entries,
                                 timestamp,
-                                kind: EntryKind::FileWrite {
+                                EntryKind::FileWrite {
                                     path: path.to_string(),
                                     new: true, // We can't know from tool_use alone; mark as new
                                     lines,
                                 },
-                            });
+                            );
                         }
                     }
                     "Edit" => {
-                        if let Some(path) = input.get("file_path").and_then(|p| p.as_str()) {
-                            entries.push(AgentLogEntry {
+                        if let Some(path) = get_str(&input, "file_path") {
+                            push_entry(
+                                entries,
                                 timestamp,
-                                kind: EntryKind::FileEdit {
+                                EntryKind::FileEdit {
                                     path: path.to_string(),
                                 },
-                            });
+                            );
                         }
                     }
                     "NotebookEdit" => {
-                        if let Some(path) = input.get("notebook_path").and_then(|p| p.as_str()) {
-                            entries.push(AgentLogEntry {
+                        if let Some(path) = get_str(&input, "notebook_path") {
+                            push_entry(
+                                entries,
                                 timestamp,
-                                kind: EntryKind::NotebookEdit {
+                                EntryKind::NotebookEdit {
                                     path: path.to_string(),
                                 },
-                            });
+                            );
                         }
                     }
                     "Bash" => {
-                        let command = input
-                            .get("command")
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("")
-                            .to_string();
+                        let command = get_str_or(&input, "command", "").to_string();
+                        let trimmed_cmd = command.trim();
 
                         // Check if this is an oj CLI call
-                        let trimmed_cmd = command.trim();
                         if trimmed_cmd == "oj"
                             || trimmed_cmd.starts_with("oj ")
                             || trimmed_cmd.starts_with("./oj ")
@@ -280,10 +294,7 @@ fn extract_entries(
                                 } else {
                                     Vec::new()
                                 };
-                            entries.push(AgentLogEntry {
-                                timestamp,
-                                kind: EntryKind::OjCall { args },
-                            });
+                            push_entry(entries, timestamp, EntryKind::OjCall { args });
                         } else {
                             // Truncate long commands for display
                             let display_cmd = if command.len() > 80 {
@@ -291,13 +302,14 @@ fn extract_entries(
                             } else {
                                 command
                             };
-                            entries.push(AgentLogEntry {
+                            push_entry(
+                                entries,
                                 timestamp,
-                                kind: EntryKind::BashCommand {
+                                EntryKind::BashCommand {
                                     command: display_cmd,
                                     exit_code: None,
                                 },
-                            });
+                            );
                         }
                     }
                     _ => {} // Skip unknown tools
@@ -306,12 +318,7 @@ fn extract_entries(
         }
 
         // Check for turn completion (end_turn stop reason)
-        let stop_reason = message
-            .get("stop_reason")
-            .and_then(|s| s.as_str())
-            .unwrap_or("");
-
-        if stop_reason == "end_turn" {
+        if get_str_or(message, "stop_reason", "") == "end_turn" {
             let timestamp = extract_timestamp(json).unwrap_or_default();
             let tokens = message
                 .get("usage")
@@ -322,19 +329,20 @@ fn extract_entries(
             let duration_secs =
                 compute_duration_secs(last_user_timestamp.as_deref(), timestamp.as_str());
 
-            entries.push(AgentLogEntry {
+            push_entry(
+                entries,
                 timestamp,
-                kind: EntryKind::TurnComplete {
+                EntryKind::TurnComplete {
                     duration_secs,
                     tokens,
                 },
-            });
+            );
         }
     }
 
     // Handle tool results — attach exit codes to BashCommand entries
     if record_type == "result" {
-        if let Some(content) = json.get("content").and_then(|c| c.as_str()) {
+        if let Some(content) = get_str(json, "content") {
             // Look for exit code patterns in result content
             if let Some(exit_code) = extract_exit_code(content) {
                 // Try to update the most recent BashCommand entry
@@ -360,21 +368,19 @@ fn extract_entries(
 /// Looks for `timestamp` or `message.created_at` fields.
 fn extract_timestamp(json: &serde_json::Value) -> Option<String> {
     // Direct timestamp field
-    if let Some(ts) = json.get("timestamp").and_then(|v| v.as_str()) {
+    if let Some(ts) = get_str(json, "timestamp") {
         return Some(ts.to_string());
     }
 
     // Message-level timestamp (ISO 8601 from Claude API)
-    if let Some(ts) = json
-        .get("message")
-        .and_then(|m| m.get("created_at"))
-        .and_then(|v| v.as_str())
-    {
-        return Some(ts.to_string());
+    if let Some(message) = json.get("message") {
+        if let Some(ts) = get_str(message, "created_at") {
+            return Some(ts.to_string());
+        }
     }
 
     // Epoch-based timestamp (Claude Code uses costMicros or similar)
-    if let Some(ts) = json.get("isoTimestamp").and_then(|v| v.as_str()) {
+    if let Some(ts) = get_str(json, "isoTimestamp") {
         return Some(ts.to_string());
     }
 
@@ -384,17 +390,15 @@ fn extract_timestamp(json: &serde_json::Value) -> Option<String> {
 /// Extract error message from a JSONL record.
 fn extract_error(json: &serde_json::Value) -> Option<String> {
     // Direct error field
-    if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
+    if let Some(err) = get_str(json, "error") {
         return Some(err.to_string());
     }
 
     // Nested in message
-    if let Some(err) = json
-        .get("message")
-        .and_then(|m| m.get("error"))
-        .and_then(|v| v.as_str())
-    {
-        return Some(err.to_string());
+    if let Some(message) = json.get("message") {
+        if let Some(err) = get_str(message, "error") {
+            return Some(err.to_string());
+        }
     }
 
     None
