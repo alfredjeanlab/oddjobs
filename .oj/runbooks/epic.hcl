@@ -1,52 +1,119 @@
-# Decompose work into issues and build them all.
+# Plan and implement a large feature using two-phase worker queues.
 #
-# Creates a feature issue with blocking tasks, then implements each task
-# sequentially until the epic is complete.
+# Creates an epic issue, then workers handle planning and implementation:
+# 1. Plan worker explores codebase and writes plan to issue notes
+# 2. Epic worker implements the plan and submits to merge queue
 #
 # Examples:
-#   oj run epic auth "Add user authentication with JWT tokens"
-#   oj run epic dark-mode "Implement dark mode" --blocked-by 42,43
+#   oj run epic "Implement user authentication with OAuth"
+#   oj run epic "Refactor storage layer for multi-tenancy"
 
 command "epic" {
-  args = "<name> <instructions> [--blocked-by <ids>]"
-  run  = { job = "epic" }
+  args = "<description>"
+  run  = <<-SHELL
+    wok new epic "${args.description}" -l plan:needed -l build:needed
+    oj worker start plan
+    oj worker start epic
+  SHELL
+}
 
-  defaults = {
-    blocked-by = ""
+# Queue an existing issue for planning.
+#
+# Examples:
+#   oj run plan oj-abc123
+command "plan" {
+  args = "<issue>"
+  run  = <<-SHELL
+    wok label ${args.issue} plan:needed
+    wok reopen ${args.issue}
+    oj worker start plan
+  SHELL
+}
+
+# Queue an existing issue for implementation (skip planning).
+#
+# Examples:
+#   oj run build oj-abc123
+command "build" {
+  args = "<issue>"
+  run  = <<-SHELL
+    wok label ${args.issue} build:needed plan:ready
+    wok reopen ${args.issue}
+    oj worker start epic
+  SHELL
+}
+
+queue "plans" {
+  type = "external"
+  list = "wok list -t epic -s todo --unassigned -l plan:needed -p oj -o json"
+  take = "wok start ${item.id}"
+}
+
+worker "plan" {
+  source      = { queue = "plans" }
+  handler     = { job = "plan" }
+  concurrency = 3
+}
+
+job "plan" {
+  name      = "Plan: ${var.epic.title}"
+  vars      = ["epic"]
+  on_fail   = { step = "reopen" }
+  on_cancel = { step = "cancel" }
+
+  step "plan" {
+    run     = { agent = "plan" }
+    on_done = { step = "mark-ready" }
+  }
+
+  step "mark-ready" {
+    run = <<-SHELL
+      wok unlabel ${var.epic.id} plan:needed
+      wok label ${var.epic.id} plan:ready
+      wok reopen ${var.epic.id}
+    SHELL
+  }
+
+  step "reopen" {
+    run = "wok reopen ${var.epic.id} --reason 'Planning failed'"
+  }
+
+  step "cancel" {
+    run = "wok close ${var.epic.id} --reason 'Planning cancelled'"
   }
 }
 
+# Implementation queue: picks up issues ready to build (build:needed AND plan:ready)
+queue "epics" {
+  type = "external"
+  list = "wok list -t epic -s todo --unassigned -l build:needed -l plan:ready -p oj -o json"
+  take = "wok start ${item.id}"
+}
+
+worker "epic" {
+  source      = { queue = "epics" }
+  handler     = { job = "epic" }
+  concurrency = 2
+}
+
 job "epic" {
-  name      = "${var.name}"
-  vars      = ["name", "instructions", "blocked-by"]
+  name      = "${var.epic.title}"
+  vars      = ["epic"]
+  on_fail   = { step = "reopen" }
+  on_cancel = { step = "cancel" }
 
   workspace {
     git    = "worktree"
-    branch = "feature/${var.name}-${workspace.nonce}"
+    branch = "epic/${var.epic.id}-${workspace.nonce}"
   }
 
   locals {
-    title  = "$(printf 'feat(${var.name}): %.72s' \"${var.instructions}\")"
+    base  = "main"
+    title = "$(printf 'feat: %.76s' \"${var.epic.title}\")"
   }
 
-  notify {
-    on_start = "Epic started: ${var.name}"
-    on_done  = "Epic landed: ${var.name}"
-    on_fail  = "Epic failed: ${var.name}"
-  }
-
-  step "init" {
-    run     = "true"
-    on_done = { step = "decompose" }
-  }
-
-  step "decompose" {
-    run     = { agent = "decompose" }
-    on_done = { step = "build" }
-  }
-
-  step "build" {
-    run     = { agent = "epic-builder" }
+  step "implement" {
+    run     = { agent = "implement" }
     on_done = { step = "submit" }
   }
 
@@ -54,10 +121,23 @@ job "epic" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
-      test "$(git rev-list --count HEAD ^origin/main)" -gt 0 || { echo "No changes to submit" >&2; exit 1; }
-      git push origin "${workspace.branch}"
-      oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
+      if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
+        git push origin "${workspace.branch}"
+        wok done ${var.epic.id}
+        oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
+      else
+        echo "No changes" >&2
+        exit 1
+      fi
     SHELL
+  }
+
+  step "reopen" {
+    run = "wok reopen ${var.epic.id} --reason 'Epic failed'"
+  }
+
+  step "cancel" {
+    run = "wok close ${var.epic.id} --reason 'Epic cancelled'"
   }
 }
 
@@ -65,103 +145,42 @@ job "epic" {
 # Agents
 # ------------------------------------------------------------------------------
 
-agent "decompose" {
-  run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
-  on_idle  = { action = "gate", run = "test -s .epic-root-id" }
-  on_dead  = "fail"
+agent "plan" {
+  run = <<-CMD
+    claude --model opus \
+      --dangerously-skip-permissions \
+      --disallowed-tools EnterPlanMode,ExitPlanMode,Write,Edit,NotebookEdit,TodoWrite,TodoRead
+  CMD
 
-  prime = [
-    "wok prime",
-    "echo '## Ready Issues'",
-    "wok ready",
-    "echo '## Project Instructions'",
-    "cat CLAUDE.md 2>/dev/null || true",
-  ]
+  on_dead = { action = "gate", run = "wok show ${var.epic.id} -o json | jq -e '.notes | length > 0'" }
+
+  prime = ["wok show ${var.epic.id}"]
 
   prompt = <<-PROMPT
-    You are decomposing a feature epic into concrete, implementable tasks.
+    Create an implementation plan for: ${var.epic.id} - ${var.epic.title}
 
-    ## Epic
-
-    **Name:** ${var.name}
-    **Instructions:** ${var.instructions}
-
-    ## Process
-
-    1. **Explore the codebase thoroughly** — launch 3-5 Explore subagents to understand
-       different aspects: architecture, existing patterns, relevant modules, test patterns,
-       and dependencies related to this work.
-
-    2. **Clarify requirements** — if the instructions are ambiguous or you need to make
-       significant design decisions, use AskUserQuestion to ask the user before proceeding.
-
-    3. **Create the root feature issue:**
-       ```
-       wok new feature '${var.name}'
-       ```
-       Note the returned issue ID (the root ID).
-
-    4. **Create blocking task issues** (aim for 3-8 tasks):
-       ```
-       wok new task '<clear description with acceptance criteria>' --blocks <root-id>
-       ```
-       Each task should be independently implementable and testable.
-
-    5. **Write the root issue ID** to `.epic-root-id`:
-       ```
-       echo <root-id> > .epic-root-id
-       ```
-
-    6. **Handle dependencies** — if blocked-by IDs were provided ("${var.blocked-by}"),
-       run `wok dep <root-id> <id>` for each ID in the comma-separated list.
-
-    ## Task Decomposition Guidelines
-
-    - Each task should be a single, focused unit of work
-    - Include clear acceptance criteria in the task description
-    - Order tasks so dependencies flow naturally (earlier tasks set up what later ones need)
-    - Typical epic has 3-8 tasks — enough granularity for progress tracking without
-      over-decomposition
-    - Consider: data model changes first, then core logic, then integration, then tests/polish
-
-    When done, say "I'm done" and wait.
+    1. Spawn 3-5 Explore agents in parallel (depending on complexity)
+    2. Spawn a Plan agent to synthesize findings
+    3. Add the plan: `wok note ${var.epic.id} "the plan"`
   PROMPT
 }
 
-agent "epic-builder" {
-  run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
-  on_idle  = { action = "gate", run = "root_id=$(cat .epic-root-id) && ! wok tree \"$root_id\" | grep -qE '(todo|doing)'", attempts = "forever" }
-  on_dead  = { action = "recover", append = true, message = "Continue working on the epic. Check `wok tree $(cat .epic-root-id)` for remaining tasks." }
+agent "implement" {
+  run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
+  on_idle = { action = "nudge", message = "Follow the plan, implement, test, commit." }
+  on_dead = { action = "gate", run = "make check" }
 
-  prime = [
-    "wok prime $(cat .epic-root-id)",
-    "echo '## Epic Tree'",
-    "wok tree $(cat .epic-root-id)",
-    "echo '## Root Issue'",
-    "wok show $(cat .epic-root-id)",
-  ]
+  prime = ["wok show ${var.epic.id} --notes"]
 
   prompt = <<-PROMPT
-    You are working through an epic, implementing each task until all are complete.
+    Implement: ${var.epic.id} - ${var.epic.title}
 
-    ## Workflow
+    The plan is in the issue notes above.
 
-    1. Check the current state: `wok tree $(cat .epic-root-id)`
-    2. Pick the next unblocked task with status "todo"
-    3. Start it: `wok start <task-id>`
-    4. Implement the task — write code, write/update tests
-    5. Verify: `make check`
-    6. Commit changes: `git add -A && git commit -m 'feat(${var.name}): <brief description>'`
-    7. Mark done: `wok done <task-id>`
-    8. Repeat from step 1 until all tasks are complete
-
-    ## Guidelines
-
-    - **Commit after each task** — not just at the end
-    - **Run `make check` before marking done** — ensure nothing is broken
-    - **Skip blocked tasks** — if a task depends on another that isn't done, work on a different one
-    - **Use conventional commits** — `feat(${var.name}): <description>` for features, `test(${var.name}): ...` for test-only changes
-    - **Check progress regularly** — `wok tree $(cat .epic-root-id)` shows the full status
-    - When all tasks show as done, say "I'm done"
+    1. Follow the plan
+    2. Implement
+    3. Run `make check`
+    4. Commit
+    5. Run: `wok done ${var.epic.id}`
   PROMPT
 }
