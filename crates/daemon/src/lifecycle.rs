@@ -924,5 +924,5 @@ fn state_dir() -> Result<PathBuf, LifecycleError> {
 }
 
 #[cfg(test)]
-#[path = "lifecycle_tests.rs"]
+#[path = "lifecycle_tests/mod.rs"]
 mod tests;
