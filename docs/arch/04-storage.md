@@ -110,15 +110,39 @@ Periodic snapshots compress history:
 
 ```rust
 pub struct Snapshot {
+    pub version: u32,                // Schema version for migrations
     pub seq: u64,                    // WAL sequence at snapshot time
     pub state: MaterializedState,
     pub created_at: DateTime<Utc>,
 }
 ```
 
-Recovery: Load snapshot, replay only entries after `snapshot.seq`.
+Recovery: Load snapshot, migrate if needed, replay only entries after `snapshot.seq`.
 
 Snapshots are saved atomically (write to temp file, fsync, rename). Checkpoints run every 60 seconds: save a snapshot, then truncate the WAL to only entries at or after the snapshot sequence.
+
+### Versioning and Migrations
+
+Snapshots include a schema version (`v` field in JSON). On load:
+
+1. Parse JSON into `serde_json::Value`
+2. Check version field
+3. Apply migrations sequentially until current version
+4. Deserialize to typed `Snapshot` struct
+
+```
+v1 → v2 → ... → current
+```
+
+Migrations transform JSON in place, allowing schema evolution without maintaining legacy Rust types. Each migration is a function `fn(&mut Value) -> Result<(), MigrationError>`.
+
+**Why migrations are required**: WAL is truncated after checkpoint, so "discard snapshot and replay WAL" would lose all state before the snapshot. Migrations must succeed or the daemon fails to start.
+
+| Scenario | Behavior |
+|----------|----------|
+| Old snapshot, new daemon | Migrate forward, load normally |
+| New snapshot, old daemon | Fail with `MigrationError::TooNew` |
+| Migration failure | Daemon startup fails (no silent data loss) |
 
 ## Compaction
 
