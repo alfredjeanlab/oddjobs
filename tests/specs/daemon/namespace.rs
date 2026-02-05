@@ -245,6 +245,28 @@ vars = ["msg"]
         .args(&["queue", "push", "tasks", r#"{"msg": "item-beta"}"#])
         .passes();
 
+    // Wait for all items to be visible (events may still be processing under load)
+    let items_visible = wait_for(SPEC_WAIT_MAX_MS, || {
+        let queue_a = pair
+            .oj_a()
+            .args(&["queue", "show", "tasks"])
+            .passes()
+            .stdout();
+        let queue_b = pair
+            .oj_b()
+            .args(&["queue", "show", "tasks"])
+            .passes()
+            .stdout();
+        queue_a.contains("item-one")
+            && queue_a.contains("item-two")
+            && queue_b.contains("item-beta")
+    });
+
+    if !items_visible {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", pair.daemon_log());
+    }
+    assert!(items_visible, "all pushed items should be visible");
+
     // Verify queue scoping - each project sees only its own items
     let queue_a = pair
         .oj_a()
