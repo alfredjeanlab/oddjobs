@@ -63,7 +63,7 @@ pub enum Effect {
     CreateWorkspace {
         workspace_id: WorkspaceId,
         path: PathBuf,
-        owner: Option<String>,
+        owner: Option<OwnerId>,
         /// "folder" or "worktree" (replaces old "mode" field)
         #[serde(default, alias = "mode")]
         workspace_type: Option<String>,

@@ -394,11 +394,12 @@ where
     /// Build workspace cleanup effects for a job (if it has a workspace).
     fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
         // Try job.workspace_id first; fall back to scanning workspaces by owner
+        let job_owner = oj_core::OwnerId::Job(JobId::new(&job.id));
         let ws_id = job.workspace_id.clone().or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
-                    .find(|ws| ws.owner.as_deref() == Some(&job.id))
+                    .find(|ws| ws.owner.as_ref() == Some(&job_owner))
                     .map(|ws| oj_core::WorkspaceId::new(&ws.id))
             })
         });

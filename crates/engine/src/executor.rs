@@ -206,7 +206,7 @@ where
                     id: workspace_id.clone(),
                     path: path.clone(),
                     branch: branch.clone(),
-                    owner,
+                    owner: owner.clone(),
                     workspace_type,
                 };
                 {

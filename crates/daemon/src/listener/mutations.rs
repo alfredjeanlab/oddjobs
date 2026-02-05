@@ -861,17 +861,15 @@ async fn workspace_prune_inner(
             .workspaces
             .iter()
             .filter(|(_, w)| {
-                let workspace_ns = w.owner.as_deref().and_then(|owner| {
-                    state_guard
+                let workspace_ns = w.owner.as_ref().and_then(|owner| match owner {
+                    oj_core::OwnerId::Job(job_id) => state_guard
                         .jobs
-                        .get(owner)
-                        .map(|p| p.namespace.as_str())
-                        .or_else(|| {
-                            state_guard
-                                .workers
-                                .get(owner)
-                                .map(|wr| wr.namespace.as_str())
-                        })
+                        .get(job_id.as_str())
+                        .map(|p| p.namespace.as_str()),
+                    oj_core::OwnerId::AgentRun(ar_id) => state_guard
+                        .agent_runs
+                        .get(ar_id.as_str())
+                        .map(|ar| ar.namespace.as_str()),
                 });
                 // Include if namespace matches OR if owner is not resolvable (orphaned)
                 match workspace_ns {

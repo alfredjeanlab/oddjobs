@@ -6,7 +6,7 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, JobId, WorkspaceId};
+use oj_core::{Clock, Effect, Event, JobId, OwnerId, WorkspaceId};
 use oj_runbook::{NotifyConfig, Runbook};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -321,7 +321,7 @@ where
             vec![Effect::CreateWorkspace {
                 workspace_id: WorkspaceId::new(workspace_id_str),
                 path: execution_path.clone(),
-                owner: Some(job_id.to_string()),
+                owner: Some(OwnerId::Job(job_id.clone())),
                 workspace_type: workspace_type_str,
                 repo_root,
                 branch,
