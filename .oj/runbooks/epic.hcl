@@ -78,7 +78,7 @@ job "plan" {
     on_done = { step = "mark-ready" }
   }
 
-  step "mark-ready" {
+  step "planned" {
     run = <<-SHELL
       wok unlabel ${var.epic.id} plan:needed
       wok label ${var.epic.id} plan:ready
