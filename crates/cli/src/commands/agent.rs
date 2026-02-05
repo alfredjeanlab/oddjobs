@@ -793,7 +793,7 @@ async fn handle_stop_hook(agent_id: &str, client: &DaemonClient) -> Result<()> {
             };
             let _ = client.emit_event(event).await;
             block_exit(
-                "Stop hook: on_idle handler invoked. Continue working or signal completion.",
+                "Stop hook: on_idle handler invoked. Waiting for further instructions.",
             );
         }
         "escalate" => {
@@ -802,7 +802,7 @@ async fn handle_stop_hook(agent_id: &str, client: &DaemonClient) -> Result<()> {
                 agent_id: AgentId::new(agent_id),
             };
             let _ = client.emit_event(event).await;
-            block_exit("A human has been notified. Wait for instructions or signal completion.");
+            block_exit("A human has been notified. Wait for instructions.");
         }
         _ => {
             // "signal" (default) — current behavior
