@@ -23,6 +23,10 @@ const CURSOR_HOME: &str = "\x1B[H";
 /// Removes leftover lines from a previous (longer) render.
 const CLEAR_TO_END: &str = "\x1B[J";
 
+/// ANSI sequence: clear from cursor position to end of line.
+/// Removes leftover characters from a previous (wider) render on the same line.
+const CLEAR_TO_EOL: &str = "\x1B[K";
+
 #[derive(clap::Args)]
 pub struct StatusArgs {
     /// Re-run status display in a loop (Ctrl+C to exit)
@@ -115,11 +119,14 @@ async fn handle_watch_frame(
 ///
 /// When `is_tty` is true the frame is wrapped with ANSI cursor-home
 /// before and clear-to-end after, so the terminal redraws in place
-/// without polluting scrollback.  When false the content is returned
-/// as-is (suitable for piped / redirected output).
+/// without polluting scrollback.  Each line also gets a clear-to-EOL
+/// sequence so that a shorter line does not leave remnants from the
+/// previous (wider) frame.  When false the content is returned as-is
+/// (suitable for piped / redirected output).
 fn render_frame(content: &str, is_tty: bool) -> String {
     if is_tty {
-        format!("{CURSOR_HOME}{content}{CLEAR_TO_END}")
+        let cleared = content.replace('\n', &format!("{CLEAR_TO_EOL}\n"));
+        format!("{CURSOR_HOME}{cleared}{CLEAR_TO_END}")
     } else {
         content.to_string()
     }

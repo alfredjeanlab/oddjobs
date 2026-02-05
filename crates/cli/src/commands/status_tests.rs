@@ -3,7 +3,7 @@ use serial_test::serial;
 
 use super::{
     filter_namespaces, format_duration, format_text, friendly_name_label, render_frame,
-    truncate_reason, CLEAR_TO_END, CURSOR_HOME,
+    truncate_reason, CLEAR_TO_END, CLEAR_TO_EOL, CURSOR_HOME,
 };
 
 #[test]
@@ -534,9 +534,10 @@ fn render_frame_tty_wraps_with_cursor_home_and_clear() {
         frame.ends_with(CLEAR_TO_END),
         "TTY frame must end with clear-to-end sequence"
     );
-    // Content is sandwiched between the escape codes
+    // Each newline in the content should be preceded by a clear-to-EOL sequence
     let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
-    assert_eq!(inner, content);
+    let expected = content.replace('\n', &format!("{CLEAR_TO_EOL}\n"));
+    assert_eq!(inner, expected);
 }
 
 #[test]
@@ -580,9 +581,10 @@ fn render_frame_content_identical_across_tty_modes() {
     let tty_frame = render_frame(&text, true);
     let non_tty_frame = render_frame(&text, false);
 
-    // Strip the wrapping escape codes from TTY frame; remainder must match non-TTY
+    // Strip wrapping and per-line escape codes from TTY frame; remainder must match non-TTY
     let inner = &tty_frame[CURSOR_HOME.len()..tty_frame.len() - CLEAR_TO_END.len()];
-    assert_eq!(inner, non_tty_frame);
+    let stripped = inner.replace(CLEAR_TO_EOL, "");
+    assert_eq!(stripped, non_tty_frame);
 }
 
 #[test]
@@ -646,6 +648,79 @@ fn cursor_home_constant_is_correct_ansi() {
 fn clear_to_end_constant_is_correct_ansi() {
     assert_eq!(CLEAR_TO_END, "\x1B[J");
     assert_eq!(CLEAR_TO_END.len(), 3);
+}
+
+#[test]
+fn clear_to_eol_constant_is_correct_ansi() {
+    assert_eq!(CLEAR_TO_EOL, "\x1B[K");
+    assert_eq!(CLEAR_TO_EOL.len(), 3);
+}
+
+#[test]
+fn render_frame_tty_clears_each_line() {
+    let content = "line one\nline two\nline three\n";
+    let frame = render_frame(content, true);
+
+    // Every newline in the original content should be preceded by CLEAR_TO_EOL
+    let eol_count = frame.matches(CLEAR_TO_EOL).count();
+    let newline_count = content.matches('\n').count();
+    assert_eq!(
+        eol_count, newline_count,
+        "each newline should have a preceding clear-to-EOL sequence"
+    );
+
+    // Verify the pattern: text{CLEAR_TO_EOL}\n for each line
+    for line in content.lines() {
+        let pattern = format!("{line}{CLEAR_TO_EOL}\n");
+        assert!(
+            frame.contains(&pattern),
+            "TTY frame should contain '{line}\\x1B[K\\n'"
+        );
+    }
+}
+
+#[test]
+fn render_frame_non_tty_has_no_eol_clearing() {
+    let content = "line one\nline two\n";
+    let frame = render_frame(content, false);
+    assert!(
+        !frame.contains(CLEAR_TO_EOL),
+        "non-TTY frame should not contain clear-to-EOL sequences"
+    );
+}
+
+#[test]
+fn shorter_frame_clears_previous_line_remnants() {
+    // Simulate a frame transition where a shorter frame replaces a longer one.
+    // Without per-line CLEAR_TO_EOL, old characters would persist at the end of
+    // lines that are shorter in the new frame.
+    let short_content = "oj daemon: running 10m\n\
+                          ── wok ──────────\n\
+                          \x20   eeee1111  ci/lint  running  1s\n";
+
+    let short_frame = render_frame(short_content, true);
+
+    // Every line must end with CLEAR_TO_EOL before newline
+    for line in short_content.lines() {
+        let pattern = format!("{line}{CLEAR_TO_EOL}\n");
+        assert!(
+            short_frame.contains(&pattern),
+            "short TTY frame must clear-to-EOL after: {line}"
+        );
+    }
+
+    // Verify the overall structure: home, content with per-line clearing, clear-to-end
+    assert!(short_frame.starts_with(CURSOR_HOME));
+    assert!(short_frame.ends_with(CLEAR_TO_END));
+
+    // Stripping all clearing sequences must recover the original content
+    let stripped = short_frame
+        .strip_prefix(CURSOR_HOME)
+        .unwrap()
+        .strip_suffix(CLEAR_TO_END)
+        .unwrap()
+        .replace(CLEAR_TO_EOL, "");
+    assert_eq!(stripped, short_content);
 }
 
 #[test]
@@ -751,8 +826,9 @@ fn tty_frame_preserves_color_codes_in_content() {
 
     // Contains color codes from format_text (header coloring)
     let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
+    let stripped = inner.replace(CLEAR_TO_EOL, "");
     assert!(
-        inner.contains("\x1b[38;5;"),
+        stripped.contains("\x1b[38;5;"),
         "TTY frame should preserve color codes from content"
     );
 }
