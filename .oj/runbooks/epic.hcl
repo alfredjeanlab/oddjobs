@@ -159,10 +159,16 @@ agent "plan" {
   run = <<-CMD
     claude --model opus \
       --dangerously-skip-permissions \
-      --disallowed-tools EnterPlanMode,ExitPlanMode,Write,Edit,NotebookEdit,TodoWrite,TodoRead
+      --disallowed-tools EnterPlanMode,ExitPlanMode,Write,Edit,NotebookEdit,TodoWrite
   CMD
 
   on_dead = { action = "gate", run = "wok show ${var.epic.id} -o json | jq -e '.notes | length > 0'" }
+
+  session "tmux" {
+    color = "blue"
+    title = "Plan: ${var.epic.id}"
+    status { left = "${var.epic.id}: ${var.epic.title}" }
+  }
 
   prime = ["wok show ${var.epic.id}"]
 
@@ -179,6 +185,15 @@ agent "implement" {
   run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_idle = { action = "nudge", message = "Follow the plan, implement, test, commit." }
   on_dead = { action = "gate", run = "make check" }
+
+  session "tmux" {
+    color = "blue"
+    title = "Epic: ${var.epic.id}"
+    status {
+      left  = "${var.epic.id}: ${var.epic.title}"
+      right = "${workspace.branch}"
+    }
+  }
 
   prime = ["wok show ${var.epic.id} --notes"]
 

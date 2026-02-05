@@ -86,6 +86,15 @@ agent "bugs" {
   on_idle  = { action = "nudge", message = "Keep working. Fix the bug, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
 
+  session "tmux" {
+    color = "blue"
+    title = "Bug: ${var.bug.id}"
+    status {
+      left  = "${var.bug.id}: ${var.bug.title}"
+      right = "${workspace.branch}"
+    }
+  }
+
   prime = ["wok show ${var.bug.id}"]
 
   prompt = <<-PROMPT

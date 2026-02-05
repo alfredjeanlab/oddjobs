@@ -198,6 +198,15 @@ agent "conflicts" {
   on_idle  = { action = "gate", command = "test ! -f $(git rev-parse --git-dir)/MERGE_HEAD" }
   on_dead  = { action = "escalate" }
 
+  session "tmux" {
+    color = "blue"
+    title = "Merge: ${var.mr.branch}"
+    status {
+      left  = "${var.mr.title}"
+      right = "${var.mr.branch} -> ${var.mr.base}"
+    }
+  }
+
   prime = [
     "echo '## Git Status'",
     "git status",

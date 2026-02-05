@@ -86,6 +86,15 @@ agent "chores" {
   on_idle  = { action = "nudge", message = "Keep working. Complete the task, write tests, run make check, and commit." }
   on_dead  = { action = "gate", run = "make check" }
 
+  session "tmux" {
+    color = "blue"
+    title = "Chore: ${var.task.id}"
+    status {
+      left  = "${var.task.id}: ${var.task.title}"
+      right = "${workspace.branch}"
+    }
+  }
+
   prime = ["wok show ${var.task.id}"]
 
   prompt = <<-PROMPT
