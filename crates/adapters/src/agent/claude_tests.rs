@@ -42,12 +42,14 @@ async fn spawn_rejects_nonexistent_cwd() {
     );
 }
 
-#[test]
-fn test_prepare_workspace() {
+#[tokio::test]
+async fn test_prepare_workspace() {
     let project_dir = TempDir::new().unwrap();
     let workspace_dir = TempDir::new().unwrap();
 
-    prepare_workspace(workspace_dir.path(), project_dir.path()).unwrap();
+    prepare_workspace(workspace_dir.path(), project_dir.path())
+        .await
+        .unwrap();
 
     // Workspace directory should exist
     assert!(workspace_dir.path().exists());
@@ -57,8 +59,8 @@ fn test_prepare_workspace() {
     assert!(!claude_md.exists());
 }
 
-#[test]
-fn test_prepare_workspace_copies_settings() {
+#[tokio::test]
+async fn test_prepare_workspace_copies_settings() {
     let project_dir = TempDir::new().unwrap();
     let workspace_dir = TempDir::new().unwrap();
 
@@ -67,7 +69,9 @@ fn test_prepare_workspace_copies_settings() {
     fs::create_dir_all(&settings_dir).unwrap();
     fs::write(settings_dir.join("settings.json"), r#"{"key": "value"}"#).unwrap();
 
-    prepare_workspace(workspace_dir.path(), project_dir.path()).unwrap();
+    prepare_workspace(workspace_dir.path(), project_dir.path())
+        .await
+        .unwrap();
 
     let copied_settings = workspace_dir.path().join(".claude/settings.local.json");
     assert!(copied_settings.exists());

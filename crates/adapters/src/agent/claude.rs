@@ -366,6 +366,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
 
         // 1. Prepare workspace (directory and settings)
         prepare_workspace(&config.workspace_path, &config.project_root)
+            .await
             .map_err(|e| AgentError::WorkspaceError(e.to_string()))?;
 
         // 2. Determine effective working directory
@@ -660,16 +661,19 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
 }
 
 /// Prepare workspace for agent execution
-fn prepare_workspace(workspace_path: &Path, project_root: &Path) -> std::io::Result<()> {
+async fn prepare_workspace(workspace_path: &Path, project_root: &Path) -> std::io::Result<()> {
     // Ensure workspace exists
-    fs::create_dir_all(workspace_path)?;
+    tokio::fs::create_dir_all(workspace_path).await?;
 
     // Copy settings if they exist
     let project_settings = project_root.join(".claude/settings.json");
-    if project_settings.exists() {
+    if tokio::fs::try_exists(&project_settings)
+        .await
+        .unwrap_or(false)
+    {
         let claude_dir = workspace_path.join(".claude");
-        fs::create_dir_all(&claude_dir)?;
-        fs::copy(&project_settings, claude_dir.join("settings.local.json"))?;
+        tokio::fs::create_dir_all(&claude_dir).await?;
+        tokio::fs::copy(&project_settings, claude_dir.join("settings.local.json")).await?;
     }
 
     Ok(())
