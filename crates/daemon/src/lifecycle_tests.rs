@@ -13,7 +13,7 @@ use oj_core::{
 };
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{PipelineDef, RunDirective, Runbook, StepDef};
-use oj_storage::{MaterializedState, Wal, WorkerRecord};
+use oj_storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -818,7 +818,7 @@ async fn shutdown_saves_final_snapshot() {
     );
 
     // Verify the snapshot contains the correct state
-    let snapshot = Snapshot::load(&snapshot_path).unwrap().unwrap();
+    let snapshot = load_snapshot(&snapshot_path).unwrap().unwrap();
     assert!(
         snapshot.seq > 0,
         "snapshot seq should be non-zero after processing events"

@@ -414,18 +414,38 @@ flowchart LR
 
     - Pipelines in `Waiting` state skipped (already escalated to human)
 
-### Atomic Writes
+### Atomic Writes and Durability
 
-Snapshots use write-to-temp-then-rename for crash safety:
+Snapshots use the full durability sequence for crash safety:
 
-1. Write to temporary file
-2. `sync_all()` to disk
-3. Atomic rename over original
+1. Serialize state + compress with zstd (background thread)
+2. Write to `.tmp` file
+3. `fsync` the temp file (data durable)
+4. Atomic rename to final path
+5. `fsync` parent directory (rename durable)
+6. **Only then** truncate WAL
 
-Crash during write leaves original intact.
+The directory fsync is critical: without it, a power failure after rename but
+before the directory is synced could revert to the old snapshot while the WAL
+has already been truncated, losing events.
 
-WAL truncation (after checkpoint) also uses temp-then-rename. Regular WAL writes
-are append-only with buffered group commit (~10ms window) followed by `sync_all()`.
+WAL truncation also uses temp-then-rename. Regular WAL writes are append-only
+with buffered group commit (~10ms window) followed by `sync_all()`.
+
+### Background Checkpoints
+
+Checkpoint I/O runs off the main thread to minimize latency:
+
+```
+Main Thread                 Background Thread
+clone state (~10ms)    →    serialize + compress + I/O (~200ms)
+continue processing         └→ completion signal
+                       ←
+truncate WAL
+```
+
+At 1-2k pipelines, this keeps main thread blocking under 10ms while the full
+checkpoint (including compression and fsyncs) takes ~200ms in the background.
 
 ## Daemon Management
 

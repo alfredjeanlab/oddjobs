@@ -18,7 +18,7 @@ use oj_adapters::{
 use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, PipelineId, SystemClock};
 use oj_engine::breadcrumb::{self, Breadcrumb};
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps};
-use oj_storage::{MaterializedState, Snapshot, Wal};
+use oj_storage::{load_snapshot, Checkpointer, MaterializedState, Wal};
 use thiserror::Error;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -187,12 +187,17 @@ impl DaemonState {
         }
 
         // 0b. Save final snapshot so next startup doesn't need to replay WAL
+        // Uses synchronous checkpoint with compression for fast subsequent startup
         let processed_seq = self.event_bus.processed_seq();
         if processed_seq > 0 {
             let state_clone = self.state.lock().clone();
-            let snapshot = Snapshot::new(processed_seq, state_clone);
-            match snapshot.save(&self.config.snapshot_path) {
-                Ok(()) => info!(seq = processed_seq, "saved final shutdown snapshot"),
+            let checkpointer = Checkpointer::new(self.config.snapshot_path.clone());
+            match checkpointer.checkpoint_sync(processed_seq, &state_clone) {
+                Ok(result) => info!(
+                    seq = result.seq,
+                    size_bytes = result.size_bytes,
+                    "saved final shutdown snapshot"
+                ),
                 Err(e) => warn!("Failed to save shutdown snapshot: {}", e),
             }
         }
@@ -307,7 +312,8 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     )?;
 
     // 4. Load state from snapshot (if exists) and replay Wal
-    let (mut state, processed_seq) = match Snapshot::load(&config.snapshot_path)? {
+    // Supports both compressed (zstd) and uncompressed (JSON) formats
+    let (mut state, processed_seq) = match load_snapshot(&config.snapshot_path)? {
         Some(snapshot) => {
             info!(
                 "Loaded snapshot at seq {}: {} pipelines, {} sessions, {} workspaces",

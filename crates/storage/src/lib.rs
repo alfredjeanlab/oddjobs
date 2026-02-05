@@ -8,11 +8,16 @@
 
 //! Storage layer for Odd Jobs
 
+mod checkpoint;
 mod migration;
 mod snapshot;
 mod state;
 mod wal;
 
+pub use checkpoint::{
+    load_snapshot, CheckpointError, CheckpointHandle, CheckpointResult, CheckpointWriter,
+    Checkpointer, FsCheckpointWriter,
+};
 pub use migration::MigrationError;
 pub use snapshot::{Snapshot, SnapshotError, CURRENT_SNAPSHOT_VERSION};
 pub use state::{

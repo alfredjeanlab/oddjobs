@@ -14,6 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing = "0.1"
+zstd = "0.13"
 
 [dev-dependencies]
 tempfile.workspace = true

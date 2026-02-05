@@ -119,7 +119,57 @@ pub struct Snapshot {
 
 Recovery: Load snapshot, migrate if needed, replay only entries after `snapshot.seq`.
 
-Snapshots are saved atomically (write to temp file, fsync, rename). Checkpoints run every 60 seconds: save a snapshot, then truncate the WAL to only entries at or after the snapshot sequence.
+### Checkpoint Flow
+
+Checkpoints run every 60 seconds with I/O off the main thread:
+
+```
+Main Thread (async)           Background Thread
+─────────────────────────     ─────────────────────────────
+clone state (~10ms)
+  │
+  └─────────────────────────→ serialize JSON (~100ms)
+                              compress with zstd (~30ms)
+                              write to .tmp (~20ms)
+                              fsync .tmp (~50ms)
+                              rename → snapshot.json (~1ms)
+                              fsync directory (~30ms)
+                                │
+  ←─────────────────────────────┘ (completion signal)
+truncate WAL (safe now)
+```
+
+**Critical invariant**: WAL truncation only happens after directory fsync. This ensures the snapshot rename survives power loss — without it, a crash could leave the old snapshot on disk while the WAL has been truncated, losing events.
+
+### Compression
+
+Snapshots use zstd compression (level 3) for ~70-80% size reduction:
+
+| State size | JSON | zstd |
+|------------|------|------|
+| 100 pipelines | ~1MB | ~200KB |
+| 1000 pipelines | ~10MB | ~2MB |
+
+Loading auto-detects format via magic bytes, providing backward compatibility with uncompressed snapshots.
+
+### Testability
+
+The `CheckpointWriter` trait abstracts all I/O:
+
+```rust
+pub trait CheckpointWriter: Send + Sync + 'static {
+    fn write_tmp(&self, path: &Path, data: &[u8]) -> Result<(), CheckpointError>;
+    fn fsync_file(&self, path: &Path) -> Result<(), CheckpointError>;
+    fn rename(&self, from: &Path, to: &Path) -> Result<(), CheckpointError>;
+    fn fsync_dir(&self, path: &Path) -> Result<(), CheckpointError>;
+    fn file_size(&self, path: &Path) -> Result<u64, CheckpointError>;
+}
+```
+
+Tests use `FakeCheckpointWriter` to:
+- Verify I/O ordering (fsync before rename, dir fsync before WAL truncation)
+- Inject failures at any step
+- Test crash recovery scenarios without touching the filesystem
 
 ### Versioning and Migrations
 

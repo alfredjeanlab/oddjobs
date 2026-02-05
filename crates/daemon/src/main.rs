@@ -27,7 +27,7 @@ use parking_lot::Mutex;
 use std::time::Duration;
 
 use oj_core::{Clock, Event, PipelineId};
-use oj_storage::{MaterializedState, Snapshot, Wal};
+use oj_storage::{Checkpointer, MaterializedState, Wal};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Notify;
 use tracing::{error, info};
@@ -328,20 +328,36 @@ const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Spawn a task that periodically saves snapshots and truncates WAL.
 ///
-/// This provides durability with bounded recovery time.
+/// This provides durability with bounded recovery time. Checkpoints run in a
+/// background thread to minimize main thread blocking — only the state clone
+/// happens on the async task, with serialization/compression/I/O on a dedicated
+/// thread.
+///
+/// ## Durability Guarantee
+///
+/// WAL truncation only happens after the snapshot is fully durable:
+/// 1. Snapshot written to temp file
+/// 2. Temp file fsync'd
+/// 3. Atomic rename to final path
+/// 4. Directory fsync'd (makes rename durable across power loss)
+/// 5. THEN truncate WAL
+///
+/// This ordering ensures no data loss even on crash during checkpoint.
 fn spawn_checkpoint(
     state: Arc<Mutex<MaterializedState>>,
     event_wal: Arc<Mutex<Wal>>,
     snapshot_path: PathBuf,
 ) {
+    let checkpointer = Checkpointer::new(snapshot_path);
+
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(CHECKPOINT_INTERVAL);
 
         loop {
             interval.tick().await;
 
-            // Get current state and processed seq
-            let (state_clone, processed_seq) = {
+            // Get current state and processed seq (brief lock)
+            let (state_ref, processed_seq) = {
                 let state_guard = state.lock();
                 let wal_guard = event_wal.lock();
                 (state_guard.clone(), wal_guard.processed_seq())
@@ -352,13 +368,22 @@ fn spawn_checkpoint(
                 continue;
             }
 
-            // Save snapshot
-            let snapshot = Snapshot::new(processed_seq, state_clone);
-            match snapshot.save(&snapshot_path) {
-                Ok(()) => {
-                    tracing::debug!(seq = processed_seq, "saved checkpoint snapshot");
+            // Start background checkpoint (state clone happens here, I/O on thread)
+            let handle = checkpointer.start(processed_seq, &state_ref);
 
-                    // Truncate WAL entries before snapshot
+            // Wait for checkpoint to be fully durable before truncating WAL
+            // This runs on a thread pool, so we spawn_blocking to await it
+            let result = tokio::task::spawn_blocking(move || handle.wait()).await;
+
+            match result {
+                Ok(Ok(checkpoint_result)) => {
+                    tracing::debug!(
+                        seq = checkpoint_result.seq,
+                        size_bytes = checkpoint_result.size_bytes,
+                        "checkpoint complete"
+                    );
+
+                    // NOW safe to truncate WAL (snapshot is durable)
                     let mut wal = event_wal.lock();
                     if let Err(e) = wal.truncate_before(processed_seq) {
                         tracing::warn!(
@@ -367,10 +392,16 @@ fn spawn_checkpoint(
                         );
                     }
                 }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        error = %e,
+                        "checkpoint failed, WAL not truncated"
+                    );
+                }
                 Err(e) => {
                     tracing::warn!(
                         error = %e,
-                        "failed to save checkpoint snapshot"
+                        "checkpoint task panicked"
                     );
                 }
             }
