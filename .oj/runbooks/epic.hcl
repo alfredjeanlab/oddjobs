@@ -1,21 +1,33 @@
-# Plan and implement a large 'epic' wok issues with the 'plan:needed' and 'build:needed' labels.
+# Plan and implement large 'epic' wok issues.
 #
 # Creates an epic issue, then workers handle planning and implementation:
 # 1. Plan worker explores codebase and writes plan to issue notes
-# 2. Epic worker implements the plan and submits to merge queue
+# 2. Epic worker implements the plan and submits to merge queue (build:needed)
+#    — or draft worker implements without merging (draft:needed)
 
-# Create a new wok epic with 'plan:needed' and 'build:needed'.
+# Create a new wok epic with 'plan:needed' and 'build:needed' (or 'draft:needed').
 #
 # Examples:
 #   oj run epic "Implement user authentication with OAuth"
 #   oj run epic "Refactor storage layer for multi-tenancy"
+#   oj run epic "Prototype new UI layout" --draft
 command "epic" {
-  args = "<description>"
+  args = "<description> [--draft]"
   run  = <<-SHELL
-    wok new epic "${args.description}" -l plan:needed -l build:needed
-    oj worker start plan
-    oj worker start epic
+    if [ "${args.draft}" = "true" ]; then
+      wok new epic "${args.description}" -l plan:needed -l draft:needed
+      oj worker start plan
+      oj worker start draft
+    else
+      wok new epic "${args.description}" -l plan:needed -l build:needed
+      oj worker start plan
+      oj worker start epic
+    fi
   SHELL
+
+  defaults = {
+    draft = "false"
+  }
 }
 
 # Create a new wok epic with 'plan:needed' only.
@@ -45,7 +57,8 @@ command "plan" {
   SHELL
 }
 
-# Queue existing feature/epic for planning, adding the 'build:needed' label.
+# Queue existing feature/epic for building, adding the 'build:needed' label.
+# Submits to merge queue on completion.
 #
 # Examples:
 #   oj run build oj-abc123
@@ -53,9 +66,36 @@ command "plan" {
 command "build" {
   args = "<issues>"
   run  = <<-SHELL
+    for id in ${args.issues}; do
+      if ! wok show "$id" -o json | jq -e '.labels | index("plan:ready")' > /dev/null 2>&1; then
+        echo "error: $id is missing 'plan:ready' label" >&2
+        exit 1
+      fi
+    done
     wok label ${args.issues} build:needed
     wok reopen ${args.issues}
     oj worker start epic
+  SHELL
+}
+
+# Queue existing feature/epic for drafting, adding the 'draft:needed' label.
+# Like build, but skips the merge step — leaves changes on the branch.
+#
+# Examples:
+#   oj run draft oj-abc123
+#   oj run draft oj-abc123 oj-def456
+command "draft" {
+  args = "<issues>"
+  run  = <<-SHELL
+    for id in ${args.issues}; do
+      if ! wok show "$id" -o json | jq -e '.labels | index("plan:ready")' > /dev/null 2>&1; then
+        echo "error: $id is missing 'plan:ready' label" >&2
+        exit 1
+      fi
+    done
+    wok label ${args.issues} draft:needed
+    wok reopen ${args.issues}
+    oj worker start draft
   SHELL
 }
 
@@ -89,6 +129,7 @@ job "plan" {
       wok label ${var.epic.id} plan:ready
       wok reopen ${var.epic.id}
       oj worker start epic
+      oj worker start draft
     SHELL
   }
 
@@ -167,6 +208,66 @@ job "epic" {
   }
 }
 
+queue "drafts" {
+  type = "external"
+  list = "wok ready -t epic,feature -l draft:needed -l plan:ready -p oj -o json"
+  take = "wok start ${item.id}"
+  poll = "30s"
+}
+
+worker "draft" {
+  source      = { queue = "drafts" }
+  handler     = { job = "draft" }
+  concurrency = 2
+}
+
+job "draft" {
+  name      = "Draft: ${var.epic.title}"
+  vars      = ["epic"]
+  on_fail   = { step = "reopen" }
+  on_cancel = { step = "cancel" }
+
+  workspace {
+    git    = "worktree"
+    branch = "epic/${var.epic.id}-${workspace.nonce}"
+  }
+
+  locals {
+    title = "$(printf 'feat: %.76s' \"${var.epic.title}\")"
+  }
+
+  step "implement" {
+    run     = { agent = "draft" }
+    on_done = { step = "submit" }
+  }
+
+  step "submit" {
+    run = <<-SHELL
+      git add -A
+      git diff --cached --quiet || git commit -m "${local.title}"
+      if test "$(git rev-list --count HEAD ^origin/main)" -gt 0; then
+        git push origin "${workspace.branch}"
+        wok done ${var.epic.id}
+      else
+        echo "No changes" >&2
+        exit 1
+      fi
+    SHELL
+  }
+
+  step "reopen" {
+    run = <<-SHELL
+      wok unlabel ${var.epic.id} draft:needed
+      wok label ${var.epic.id} draft:failed
+      wok reopen ${var.epic.id} --reason 'Draft failed'
+    SHELL
+  }
+
+  step "cancel" {
+    run = "wok close ${var.epic.id} --reason 'Draft cancelled'"
+  }
+}
+
 # ------------------------------------------------------------------------------
 # Agents
 # ------------------------------------------------------------------------------
@@ -200,6 +301,35 @@ agent "implement" {
   session "tmux" {
     color = "blue"
     title = "Epic: ${var.epic.id}"
+    status {
+      left  = "${var.epic.id}: ${var.epic.title}"
+      right = "${workspace.branch}"
+    }
+  }
+
+  prime = ["wok show ${var.epic.id} --notes"]
+
+  prompt = <<-PROMPT
+    Implement: ${var.epic.id} - ${var.epic.title}
+
+    The plan is in the issue notes above.
+
+    1. Follow the plan
+    2. Implement
+    3. Run `make check`
+    4. Commit
+    5. Run: `wok done ${var.epic.id}`
+  PROMPT
+}
+
+agent "draft" {
+  run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
+  on_idle = { action = "nudge", message = "Follow the plan, implement, test, commit." }
+  on_dead = { action = "gate", run = "make check" }
+
+  session "tmux" {
+    color = "blue"
+    title = "Draft: ${var.epic.id}"
     status {
       left  = "${var.epic.id}: ${var.epic.title}"
       right = "${workspace.branch}"
