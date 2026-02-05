@@ -71,7 +71,8 @@ impl EscalationDecisionBuilder {
         self
     }
 
-    pub fn agent_log_tail(mut self, tail: impl Into<String>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn agent_log_tail(mut self, tail: impl Into<String>) -> Self {
         self.agent_log_tail = Some(tail.into());
         self
     }

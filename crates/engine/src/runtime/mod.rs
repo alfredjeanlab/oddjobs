@@ -9,8 +9,8 @@ mod job;
 mod monitor;
 
 use crate::{
-    breadcrumb::BreadcrumbWriter, error::RuntimeError, job_logger::JobLogger,
-    queue_logger::QueueLogger, worker_logger::WorkerLogger, Executor, Scheduler,
+    breadcrumb::BreadcrumbWriter, error::RuntimeError, executor::Executor, job_logger::JobLogger,
+    queue_logger::QueueLogger, scheduler::Scheduler, worker_logger::WorkerLogger,
 };
 use handlers::cron::CronState;
 use handlers::worker::WorkerState;

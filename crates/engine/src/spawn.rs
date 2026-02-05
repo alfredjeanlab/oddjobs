@@ -4,7 +4,7 @@
 //! Agent spawning functionality
 
 use crate::error::RuntimeError;
-use crate::ExecuteError;
+use crate::executor::ExecuteError;
 use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, ShortId, TimerId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;

@@ -8,7 +8,7 @@
 //! throughput, jobs combined with redirections, and pipefail behavior
 //! verification.
 
-use oj_shell::exec::{ExecError, ShellExecutor};
+use oj_shell::{ExecError, ShellExecutor};
 use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------

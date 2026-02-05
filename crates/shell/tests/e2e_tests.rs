@@ -6,7 +6,7 @@
 //! These tests execute real commands to validate multi-line scripts
 //! matching patterns found in production runbooks.
 
-use oj_shell::exec::{ExecError, ShellExecutor};
+use oj_shell::{ExecError, ShellExecutor};
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------

@@ -21,14 +21,14 @@ pub enum MigrationError {
 }
 
 /// A migration from one snapshot version to the next.
-pub trait Migration: Send + Sync {
+pub(crate) trait Migration: Send + Sync {
     fn source_version(&self) -> u32;
     fn target_version(&self) -> u32;
     fn migrate(&self, snapshot: &mut Value) -> Result<(), MigrationError>;
 }
 
 /// Registry of migrations for upgrading snapshots.
-pub struct MigrationRegistry {
+pub(crate) struct MigrationRegistry {
     migrations: Vec<Box<dyn Migration>>,
 }
 

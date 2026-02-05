@@ -36,7 +36,7 @@ use oj_engine::breadcrumb::Breadcrumb;
 use crate::protocol::{self, Request, Response, DEFAULT_TIMEOUT, PROTOCOL_VERSION};
 
 /// Listener task for accepting socket connections.
-pub struct Listener {
+pub(crate) struct Listener {
     socket: UnixListener,
     event_bus: EventBus,
     state: Arc<Mutex<MaterializedState>>,
@@ -48,7 +48,7 @@ pub struct Listener {
 
 /// Errors from connection handling.
 #[derive(Debug, Error)]
-pub enum ConnectionError {
+pub(crate) enum ConnectionError {
     #[error("Protocol error: {0}")]
     Protocol(#[from] protocol::ProtocolError),
 

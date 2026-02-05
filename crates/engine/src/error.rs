@@ -3,7 +3,7 @@
 
 //! Error types for the engine runtime
 
-use crate::ExecuteError;
+use crate::executor::ExecuteError;
 use thiserror::Error;
 
 /// Errors that can occur in the runtime

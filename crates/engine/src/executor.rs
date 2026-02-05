@@ -3,7 +3,7 @@
 
 //! Effect executor
 
-use crate::{RuntimeDeps, Scheduler};
+use crate::{scheduler::Scheduler, RuntimeDeps};
 use oj_adapters::{
     AgentAdapter, AgentReconnectConfig, AgentSpawnConfig, NotifyAdapter, SessionAdapter,
 };
@@ -638,12 +638,6 @@ where
                 Ok(None)
             }
         }
-    }
-
-    /// Kill a tmux session by ID.
-    pub async fn kill_session(&self, session_id: &str) -> Result<(), ExecuteError> {
-        self.sessions.kill(session_id).await?;
-        Ok(())
     }
 
     /// Reconnect monitoring for an already-running agent session.

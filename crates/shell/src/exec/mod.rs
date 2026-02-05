@@ -12,7 +12,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use oj_shell::{Parser, exec::ShellExecutor};
+//! use oj_shell::{Parser, ShellExecutor};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let ast = Parser::parse("echo hello && echo world")?;
@@ -69,7 +69,7 @@ pub mod result;
 pub(crate) mod run;
 
 pub use error::ExecError;
-pub use result::{CommandTrace, ExecOutput};
+use result::ExecOutput;
 
 /// Default snippet capture limit (bytes per stream).
 const DEFAULT_SNIPPET_LIMIT: usize = 8192;

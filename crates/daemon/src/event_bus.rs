@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 /// Events are written to WAL (buffered) before notifying the engine.
 /// This provides durability with group commit for performance.
 #[derive(Clone)]
-pub struct EventBus {
+pub(crate) struct EventBus {
     wal: Arc<Mutex<Wal>>,
     wake_tx: mpsc::Sender<()>,
 }
@@ -27,7 +27,7 @@ pub struct EventBus {
 /// Reader for the event bus.
 ///
 /// Used by the engine loop to process events from WAL.
-pub struct EventReader {
+pub(crate) struct EventReader {
     wal: Arc<Mutex<Wal>>,
     wake_rx: mpsc::Receiver<()>,
 }

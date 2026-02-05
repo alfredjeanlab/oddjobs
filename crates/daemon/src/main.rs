@@ -449,7 +449,7 @@ fn rotate_log_if_needed(log_path: &std::path::Path) {
 /// Startup marker prefix written to log before anything else.
 /// CLI uses this to find where the current startup attempt begins.
 /// Full format: "--- ojd: starting (pid: 12345) ---"
-pub const STARTUP_MARKER_PREFIX: &str = "--- ojd: starting (pid: ";
+const STARTUP_MARKER_PREFIX: &str = "--- ojd: starting (pid: ";
 
 /// Write startup marker to log file (appends to existing log)
 fn write_startup_marker(config: &Config) -> Result<(), LifecycleError> {

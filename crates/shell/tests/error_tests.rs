@@ -9,7 +9,7 @@
 //! - Trace completeness (all executed commands recorded even on failure)
 //! - Cleanup behavior after mid-script failures
 
-use oj_shell::{diagnostic_context, exec::ExecError, exec::ShellExecutor, Parser};
+use oj_shell::{diagnostic_context, ExecError, Parser, ShellExecutor};
 
 // ---------------------------------------------------------------------------
 // Helpers

@@ -12,7 +12,7 @@
 //! then compares exit codes and stdout to verify our shell implementation
 //! faithfully reproduces bash semantics.
 
-use oj_shell::exec::{ExecError, ShellExecutor};
+use oj_shell::{ExecError, ShellExecutor};
 use std::process::Command;
 
 // ---------------------------------------------------------------------------

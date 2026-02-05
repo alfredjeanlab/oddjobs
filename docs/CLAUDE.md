@@ -1,8 +1,8 @@
 # Documentation
 
-```toc
+```example
 docs/
-├── GUIDE.md                  # Runbook patterns, best practices, examples
+├── GUIDE.md                  # Runbook patterns, best practices, examples (planned)
 │
 ├── concepts/                 # What things are
 │   ├── RUNBOOKS.md           # Primitives: command, job, agent, cron

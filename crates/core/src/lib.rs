@@ -23,17 +23,17 @@ pub mod timer;
 pub mod worker;
 pub mod workspace;
 
-pub use action_tracker::{ActionTracker, AgentSignal};
+// ActionTracker and AgentSignal available via action_tracker module or job re-export
 pub use agent::{AgentError, AgentId, AgentState};
 pub use agent_run::{AgentRun, AgentRunId, AgentRunStatus};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};
 pub use effect::Effect;
 pub use event::{AgentSignalKind, Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
-pub use id::{IdGen, SequentialIdGen, ShortId, UuidIdGen};
+pub use id::{IdGen, ShortId, UuidIdGen};
 pub use job::{Job, JobConfig, JobId, StepOutcome, StepRecord, StepStatus};
 pub use namespace::{scoped_name, split_scoped_name};
 pub use session::SessionId;
 pub use timer::TimerId;
-pub use worker::WorkerId;
+// WorkerId available via worker module if needed
 pub use workspace::{WorkspaceId, WorkspaceStatus};

@@ -16,7 +16,7 @@ use tempfile::tempdir;
 
 /// Records all I/O operations for verification.
 #[derive(Debug, Clone, Default)]
-pub struct IoLog {
+struct IoLog {
     pub writes: Vec<(PathBuf, usize)>,
     pub fsyncs_file: Vec<PathBuf>,
     pub fsyncs_dir: Vec<PathBuf>,
@@ -25,7 +25,7 @@ pub struct IoLog {
 
 /// Fake writer that records operations and supports error injection.
 #[derive(Clone)]
-pub struct FakeCheckpointWriter {
+struct FakeCheckpointWriter {
     log: Arc<Mutex<IoLog>>,
     written_data: Arc<Mutex<HashMap<PathBuf, Vec<u8>>>>,
     fail_write: Arc<AtomicBool>,

@@ -3,7 +3,7 @@
 
 //! Integration tests for environment variable handling.
 
-use oj_shell::exec::ShellExecutor;
+use oj_shell::ShellExecutor;
 
 // ---------------------------------------------------------------------------
 // Helpers

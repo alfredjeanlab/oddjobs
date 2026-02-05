@@ -26,7 +26,7 @@ pub mod log_entry;
 mod watcher;
 
 pub use claude::{extract_process_name, ClaudeAgentAdapter};
-pub use watcher::{find_session_log, parse_session_log};
+pub use watcher::find_session_log;
 
 /// Configuration for reconnecting to an existing agent session
 #[derive(Debug, Clone)]

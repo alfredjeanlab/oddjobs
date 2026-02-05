@@ -6,7 +6,7 @@
 //! Tests verify that shell scripts correctly create, modify, and read files
 //! through redirections. All tests use tempfile for isolation.
 
-use oj_shell::exec::{ExecError, ShellExecutor};
+use oj_shell::{ExecError, ShellExecutor};
 use std::fs;
 use tempfile::TempDir;
 

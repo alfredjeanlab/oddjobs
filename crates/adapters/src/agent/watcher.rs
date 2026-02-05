@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 /// Configuration for the agent watcher
-pub struct WatcherConfig {
+pub(crate) struct WatcherConfig {
     pub agent_id: AgentId,
     /// Session ID for log file lookup (matches --session-id passed to claude)
     pub log_session_id: String,
@@ -45,7 +45,7 @@ fn session_log_poll_interval() -> Duration {
 /// process liveness checks as a fallback.
 ///
 /// Returns a shutdown sender that can be used to stop the watcher.
-pub fn start_watcher<S: SessionAdapter>(
+pub(crate) fn start_watcher<S: SessionAdapter>(
     config: WatcherConfig,
     sessions: S,
     event_tx: mpsc::Sender<Event>,
