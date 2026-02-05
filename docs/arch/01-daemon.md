@@ -102,66 +102,178 @@ The daemon solves these by being a single owner of state and the event loop.
 
 ```rs
 enum Request {
+    // Core operations
     Ping                                // Health check
     Hello { version }                   // Version handshake
     Status                              // Detailed status
     Event { event }                     // Deliver event to event loop
     Query { query }                     // Read state
-    Shutdown { kill }                    // Graceful shutdown (kill: terminate sessions)
+    Shutdown { kill }                   // Graceful shutdown (kill: terminate sessions)
     RunCommand { project_root, invoke_dir, namespace, command, args, named_args }
+
+    // Session operations
     SessionSend { id, input }           // Send input to a session
+    SessionKill { id }                  // Kill a session
     PeekSession { session_id, with_color }  // Capture tmux pane output
-    JobResume { id, message, vars }  // Resume escalated job
-    JobCancel { ids }              // Cancel jobs by ID
+
+    // Agent operations
+    AgentSend { agent_id, message }     // Send input to an agent
+    AgentResume { agent_id, kill, all } // Resume dead agents
+
+    // Job operations
+    JobResume { id, message, vars }     // Resume escalated job
+    JobCancel { ids }                   // Cancel jobs by ID
+    JobPrune { all, failed, orphans, dry_run, namespace }  // Prune terminal jobs
+
+    // Workspace operations
     WorkspaceDrop { id }                // Delete workspace by ID
     WorkspaceDropFailed                 // Delete failed workspaces
     WorkspaceDropAll                    // Delete all workspaces
-    WorkspacePrune { all, dry_run }          // Prune old workspaces
-    WorkerStart { project_root, namespace, worker_name }  // Start a worker
-    WorkerWake { worker_name }             // Wake worker to poll queue
-    QueuePush { project_root, namespace, queue_name, data }  // Push to persisted queue
-    QueueRetry { project_root, namespace, queue_name, item_id }  // Retry dead/failed item
+    WorkspacePrune { all, dry_run, namespace }  // Prune old workspaces
+    AgentPrune { all, dry_run }         // Prune agent logs
+
+    // Worker operations
+    WorkerStart { project_root, namespace, worker_name }
+    WorkerStop { worker_name, namespace, project_root }
+    WorkerRestart { project_root, namespace, worker_name }
+    WorkerWake { worker_name, namespace }
+    WorkerPrune { all, dry_run, namespace }
+
+    // Cron operations
+    CronStart { project_root, namespace, cron_name }
+    CronStop { cron_name, namespace, project_root }
+    CronRestart { project_root, namespace, cron_name }
+    CronOnce { project_root, namespace, cron_name }
+    CronPrune { all, dry_run }
+
+    // Queue operations
+    QueuePush { project_root, namespace, queue_name, data }
+    QueueDrop { project_root, namespace, queue_name, item_id }
+    QueueRetry { project_root, namespace, queue_name, item_id }
+    QueueDrain { project_root, namespace, queue_name }
+    QueueFail { project_root, namespace, queue_name, item_id }
+    QueueDone { project_root, namespace, queue_name, item_id }
+    QueuePrune { project_root, namespace, queue_name, all, dry_run }
+
+    // Decision operations
+    DecisionResolve { id, chosen, message }
 }
 
 enum Query {
+    // Jobs
     ListJobs
     GetJob { id }
-    GetJobLogs { id, lines }       // Fetch job logs
-    GetAgentLogs { id, step, lines }    // Fetch agent logs
+    GetJobLogs { id, lines }
+
+    // Agents
+    ListAgents { job_id, status }
+    GetAgent { agent_id }
+    GetAgentLogs { id, step, lines }
+    GetAgentSignal { agent_id }
+
+    // Sessions
     ListSessions
+    GetSession { id }
+
+    // Workspaces
     ListWorkspaces
     GetWorkspace { id }
-    GetAgentSignal { agent_id }     // Agent completion signal (for stop hook)
-    ListQueueItems { queue_name }  // List items in a persisted queue
-    ListWorkers                    // List all workers
+
+    // Workers
+    ListWorkers
+    GetWorkerLogs { name, namespace, lines, project_root }
+
+    // Crons
+    ListCrons
+    GetCronLogs { name, namespace, lines, project_root }
+
+    // Queues
+    ListQueues { project_root, namespace }
+    ListQueueItems { queue_name, namespace, project_root }
+    GetQueueLogs { queue_name, namespace, lines }
+
+    // Decisions
+    ListDecisions { namespace }
+    GetDecision { id }
+
+    // Overview
+    StatusOverview
+    ListProjects
+    ListOrphans
+    DismissOrphan { id }
 }
 
 enum Response {
+    // Basic responses
+    Ok
     Pong
     Hello { version }
-    Ok
+    ShuttingDown
     Event { accepted }
-    Jobs { jobs }
-    Job { job }               // Option (null if not found)
-    JobLogs { log_path, content }
-    AgentLogs { log_path, content, steps }
-    Sessions { sessions }
-    SessionPeek { output }
-    Workspaces { workspaces }
-    Workspace { workspace }             // Option (null if not found)
-    WorkspacesPruned { pruned, skipped }
-    Status { uptime_secs, jobs_active, sessions_active }
     Error { message }
+    Status { uptime_secs, jobs_active, sessions_active, orphan_count }
+
+    // Job responses
+    Jobs { jobs }
+    Job { job }
+    JobLogs { log_path, content }
     CommandStarted { job_id, job_name }
     JobsCancelled { cancelled, already_terminal, not_found }
-    WorkspacesDropped { dropped }
+    JobsPruned { pruned, skipped }
+
+    // Agent responses
+    Agents { agents }
+    Agent { agent }
+    AgentLogs { log_path, content, steps }
     AgentSignal { signaled, kind, message }
+    AgentRunStarted { agent_run_id, agent_name }
+    AgentsPruned { pruned, skipped }
+    AgentResumed { resumed, skipped }
+
+    // Session responses
+    Sessions { sessions }
+    Session { session }
+    SessionPeek { output }
+
+    // Workspace responses
+    Workspaces { workspaces }
+    Workspace { workspace }
+    WorkspacesDropped { dropped }
+    WorkspacesPruned { pruned, skipped }
+
+    // Worker responses
+    Workers { workers }
     WorkerStarted { worker_name }
+    WorkerLogs { log_path, content }
+    WorkersPruned { pruned, skipped }
+
+    // Cron responses
+    Crons { crons }
+    CronStarted { cron_name }
+    CronLogs { log_path, content }
+    CronsPruned { pruned, skipped }
+
+    // Queue responses
+    Queues { queues }
+    QueueItems { items }
     QueuePushed { queue_name, item_id }
+    QueueDropped { queue_name, item_id }
     QueueRetried { queue_name, item_id }
-    QueueItems { items }               // Vec<QueueItemSummary>
-    Workers { workers }                // Vec<WorkerSummary>
-    ShuttingDown
+    QueueDrained { queue_name, items }
+    QueueFailed { queue_name, item_id }
+    QueueCompleted { queue_name, item_id }
+    QueueLogs { log_path, content }
+    QueuesPruned { pruned, skipped }
+
+    // Decision responses
+    Decisions { decisions }
+    Decision { decision }
+    DecisionResolved { id }
+
+    // Overview responses
+    StatusOverview { uptime_secs, namespaces }
+    Projects { projects }
+    Orphans { orphans }
 }
 ```
 

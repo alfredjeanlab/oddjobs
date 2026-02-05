@@ -14,11 +14,13 @@ pub enum Effect {
         agent_id: AgentId,
         agent_name: String,
         job_id: JobId,
+        agent_run_id: Option<AgentRunId>,  // For standalone agents
         workspace_path: PathBuf,
         input: HashMap<String, String>,
         command: String,
         env: Vec<(String, String)>,
         cwd: Option<PathBuf>,
+        session_config: HashMap<String, serde_json::Value>,  // Adapter-specific config
     },
     SendToAgent { agent_id: AgentId, input: String },
     KillAgent { agent_id: AgentId },
@@ -32,7 +34,10 @@ pub enum Effect {
         workspace_id: WorkspaceId,
         path: PathBuf,
         owner: Option<String>,
-        mode: Option<String>,
+        workspace_type: Option<String>,  // "folder" or "worktree"
+        repo_root: Option<PathBuf>,      // For worktree: the repo root
+        branch: Option<String>,          // For worktree: the branch name
+        start_point: Option<String>,     // For worktree: the start point
     },
     DeleteWorkspace { workspace_id: WorkspaceId },
 
@@ -54,7 +59,13 @@ pub enum Effect {
 
     // Worker/queue effects
     PollQueue { worker_name: String, list_command: String, cwd: PathBuf },
-    TakeQueueItem { worker_name: String, take_command: String, cwd: PathBuf },
+    TakeQueueItem {
+        worker_name: String,
+        take_command: String,
+        cwd: PathBuf,
+        item_id: String,       // ID of the item being taken
+        item: serde_json::Value,  // Full item data for job creation
+    },
 }
 ```
 
