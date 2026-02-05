@@ -8,9 +8,9 @@ use std::io::Write;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
-use crate::output::{format_time_ago, should_use_color, OutputFormat};
+use crate::output::{format_time_ago, print_peek_frame, should_use_color, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 use oj_daemon::protocol::SessionSummary;
 
@@ -60,6 +60,15 @@ pub enum SessionCommand {
         #[arg(long)]
         dry_run: bool,
     },
+}
+
+impl SessionCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::Send { .. } | Self::Kill { .. } | Self::Prune { .. } => ClientKind::Action,
+            _ => ClientKind::Query,
+        }
+    }
 }
 
 /// Attach to a tmux session
@@ -132,9 +141,7 @@ pub async fn handle(
             let with_color = should_use_color();
             match client.peek_session(&id, with_color).await {
                 Ok(output) => {
-                    println!("╭────── {} ──────", color::header(&format!("peek: {}", id)));
-                    print!("{}", output);
-                    println!("╰────── {} ──────", color::header("end peek"));
+                    print_peek_frame(&id, &output);
                 }
                 Err(_) => {
                     anyhow::bail!("Session {} not found", id);

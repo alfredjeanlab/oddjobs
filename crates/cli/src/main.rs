@@ -283,192 +283,59 @@ async fn run() -> Result<()> {
     // OJ_NAMESPACE is NOT used for filtering — only the explicit CLI flag.
     let project_filter = cli.project.as_deref();
 
-    // Dispatch commands with appropriate client semantics:
-    // - Action commands: auto-start daemon, max 1 restart (user-initiated mutations)
-    // - Query commands: connect only, no restart (reads that need existing state)
-    // - Signal commands: connect only, no restart (agent-initiated, context-dependent)
+    // Dispatch commands with appropriate client semantics.
+    // Each command enum provides client_kind() to determine action/query/signal.
     match command {
-        // Run commands - shell commands execute inline, jobs/agents need the daemon
         Commands::Run(args) => run::handle(args, &project_root, &invoke_dir, &namespace).await?,
 
-        // Job commands - mixed action/query
         Commands::Job(args) => {
-            use job::JobCommand;
-            match &args.command {
-                // Action: mutates job state
-                JobCommand::Resume { .. }
-                | JobCommand::Cancel { .. }
-                | JobCommand::Prune { .. } => {
-                    let client = DaemonClient::for_action()?;
-                    job::handle(args.command, &client, cli.project.as_deref(), format).await?
-                }
-                // Query: reads job state
-                JobCommand::List { .. }
-                | JobCommand::Show { .. }
-                | JobCommand::Logs { .. }
-                | JobCommand::Peek { .. }
-                | JobCommand::Wait { .. }
-                | JobCommand::Attach { .. } => {
-                    let client = DaemonClient::for_query()?;
-                    job::handle(args.command, &client, cli.project.as_deref(), format).await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            job::handle(args.command, &client, cli.project.as_deref(), format).await?
         }
-
-        // Workspace commands - mixed action/query
         Commands::Workspace(args) => {
-            use workspace::WorkspaceCommand;
-            match &args.command {
-                // Action: mutates workspace state
-                WorkspaceCommand::Drop { .. } | WorkspaceCommand::Prune { .. } => {
-                    let client = DaemonClient::for_action()?;
-                    workspace::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-                // Query: reads workspace state
-                WorkspaceCommand::List { .. } | WorkspaceCommand::Show { .. } => {
-                    let client = DaemonClient::for_query()?;
-                    workspace::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            workspace::handle(args.command, &client, &namespace, project_filter, format).await?
         }
-
-        // Agent commands - mixed action/query/signal
         Commands::Agent(args) => {
-            use agent::AgentCommand;
-            match &args.command {
-                // Action: sends input to an agent
-                AgentCommand::Send { .. } => {
-                    let client = DaemonClient::for_action()?;
-                    agent::handle(args.command, &client, &namespace, project_filter, format).await?
-                }
-                // Signal: agent-initiated hooks (stop, pretooluse) - no restart
-                AgentCommand::Hook { .. } => {
-                    let client = DaemonClient::for_signal()?;
-                    agent::handle(args.command, &client, &namespace, project_filter, format).await?
-                }
-                // Query: reads agent state
-                _ => {
-                    let client = DaemonClient::for_query()?;
-                    agent::handle(args.command, &client, &namespace, project_filter, format).await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            agent::handle(args.command, &client, &namespace, project_filter, format).await?
         }
         Commands::Session(args) => {
-            use session::SessionCommand;
-            match &args.command {
-                // Actions: mutate session state
-                SessionCommand::Send { .. } | SessionCommand::Kill { .. } => {
-                    let client = DaemonClient::for_action()?;
-                    session::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-                // Query: reads session state
-                _ => {
-                    let client = DaemonClient::for_query()?;
-                    session::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            session::handle(args.command, &client, &namespace, project_filter, format).await?
         }
-
-        // Queue commands - mixed action/query
         Commands::Queue(args) => {
-            use queue::QueueCommand;
-            match &args.command {
-                QueueCommand::Push { .. }
-                | QueueCommand::Drop { .. }
-                | QueueCommand::Retry { .. }
-                | QueueCommand::Fail { .. }
-                | QueueCommand::Done { .. }
-                | QueueCommand::Drain { .. }
-                | QueueCommand::Prune { .. } => {
-                    let client = DaemonClient::for_action()?;
-                    queue::handle(args.command, &client, &project_root, &namespace, format).await?
-                }
-                QueueCommand::List { .. }
-                | QueueCommand::Show { .. }
-                | QueueCommand::Logs { .. } => {
-                    let client = DaemonClient::for_query()?;
-                    queue::handle(args.command, &client, &project_root, &namespace, format).await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            queue::handle(args.command, &client, &project_root, &namespace, format).await?
         }
-
-        // Worker commands - mixed action/query
-        Commands::Worker(args) => match &args.command {
-            worker::WorkerCommand::List { .. } => {
-                let client = DaemonClient::for_query()?;
-                worker::handle(
-                    args.command,
-                    &client,
-                    &project_root,
-                    &namespace,
-                    project_filter,
-                    format,
-                )
-                .await?
-            }
-            _ => {
-                let client = DaemonClient::for_action()?;
-                worker::handle(
-                    args.command,
-                    &client,
-                    &project_root,
-                    &namespace,
-                    project_filter,
-                    format,
-                )
-                .await?
-            }
-        },
-
-        // Cron commands - mixed action/query
-        Commands::Cron(args) => match &args.command {
-            cron::CronCommand::List { .. } => {
-                let client = DaemonClient::for_query()?;
-                cron::handle(
-                    args.command,
-                    &client,
-                    &project_root,
-                    &namespace,
-                    project_filter,
-                    format,
-                )
-                .await?
-            }
-            _ => {
-                let client = DaemonClient::for_action()?;
-                cron::handle(
-                    args.command,
-                    &client,
-                    &project_root,
-                    &namespace,
-                    project_filter,
-                    format,
-                )
-                .await?
-            }
-        },
-
-        // Decision commands - mixed action/query
+        Commands::Worker(args) => {
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            worker::handle(
+                args.command,
+                &client,
+                &project_root,
+                &namespace,
+                project_filter,
+                format,
+            )
+            .await?
+        }
+        Commands::Cron(args) => {
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            cron::handle(
+                args.command,
+                &client,
+                &project_root,
+                &namespace,
+                project_filter,
+                format,
+            )
+            .await?
+        }
         Commands::Decision(args) => {
-            use decision::DecisionCommand;
-            match &args.command {
-                DecisionCommand::Resolve { .. } | DecisionCommand::Review {} => {
-                    let client = DaemonClient::for_action()?;
-                    decision::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-                DecisionCommand::List { .. } | DecisionCommand::Show { .. } => {
-                    let client = DaemonClient::for_query()?;
-                    decision::handle(args.command, &client, &namespace, project_filter, format)
-                        .await?
-                }
-            }
+            let client = DaemonClient::for_kind(args.command.client_kind())?;
+            decision::handle(args.command, &client, &namespace, project_filter, format).await?
         }
-        // Signal commands - operational, agent-initiated
         Commands::Emit(args) => {
             let client = DaemonClient::for_signal()?;
             emit::handle(args.command, &client, format).await?

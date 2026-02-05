@@ -6,12 +6,10 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient, WorkerStartResult};
 use crate::color;
 use crate::output::{display_log, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
-
-use oj_daemon::{Query, Request, Response};
 
 #[derive(Args)]
 pub struct WorkerArgs {
@@ -71,6 +69,15 @@ pub enum WorkerCommand {
     },
 }
 
+impl WorkerCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List {} | Self::Logs { .. } => ClientKind::Query,
+            _ => ClientKind::Action,
+        }
+    }
+}
+
 pub async fn handle(
     command: WorkerCommand,
     client: &DaemonClient,
@@ -84,21 +91,19 @@ pub async fn handle(
             if !all && name.is_none() {
                 anyhow::bail!("worker name required (or use --all)");
             }
-            let request = Request::WorkerStart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                worker_name: name.clone().unwrap_or_default(),
-                all,
-            };
-            match client.send(&request).await? {
-                Response::WorkerStarted { worker_name } => {
+            let worker_name = name.unwrap_or_default();
+            match client
+                .worker_start(project_root, namespace, &worker_name, all)
+                .await?
+            {
+                WorkerStartResult::Single { worker_name } => {
                     println!(
                         "Worker '{}' started ({})",
                         color::header(&worker_name),
                         color::muted(namespace)
                     );
                 }
-                Response::WorkersStarted { started, skipped } => {
+                WorkerStartResult::Multiple { started, skipped } => {
                     for worker_name in &started {
                         println!(
                             "Worker '{}' started ({})",
@@ -117,84 +122,37 @@ pub async fn handle(
                         println!("No workers found in runbooks");
                     }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
             }
         }
         WorkerCommand::Stop { name } => {
-            let request = Request::WorkerStop {
-                worker_name: name.clone(),
-                namespace: namespace.to_string(),
-                project_root: Some(project_root.to_path_buf()),
-            };
-            match client.send(&request).await? {
-                Response::Ok => {
-                    println!(
-                        "Worker '{}' stopped ({})",
-                        color::header(&name),
-                        color::muted(namespace)
-                    );
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            client
+                .worker_stop(&name, namespace, Some(project_root))
+                .await?;
+            println!(
+                "Worker '{}' stopped ({})",
+                color::header(&name),
+                color::muted(namespace)
+            );
         }
         WorkerCommand::Restart { name } => {
-            let request = Request::WorkerRestart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                worker_name: name.clone(),
-            };
-            match client.send(&request).await? {
-                Response::WorkerStarted { worker_name } => {
-                    println!("Worker '{}' restarted", color::header(&worker_name));
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let worker_name = client
+                .worker_restart(project_root, namespace, &name)
+                .await?;
+            println!("Worker '{}' restarted", color::header(&worker_name));
         }
         WorkerCommand::Resize { name, concurrency } => {
             if concurrency == 0 {
                 anyhow::bail!("concurrency must be at least 1");
             }
-            let request = Request::WorkerResize {
-                worker_name: name.clone(),
-                namespace: namespace.to_string(),
-                concurrency,
-            };
-            match client.send(&request).await? {
-                Response::WorkerResized {
-                    worker_name,
-                    old_concurrency,
-                    new_concurrency,
-                } => {
-                    println!(
-                        "Worker '{}' resized: {} → {} ({})",
-                        color::header(&worker_name),
-                        old_concurrency,
-                        new_concurrency,
-                        color::muted(namespace)
-                    );
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let (worker_name, old, new) =
+                client.worker_resize(&name, namespace, concurrency).await?;
+            println!(
+                "Worker '{}' resized: {} → {} ({})",
+                color::header(&worker_name),
+                old,
+                new,
+                color::muted(namespace)
+            );
         }
         WorkerCommand::Logs {
             name,
@@ -207,60 +165,52 @@ pub async fn handle(
             display_log(&log_path, &content, follow, format, "worker", &name).await?;
         }
         WorkerCommand::List {} => {
-            let request = Request::Query {
-                query: Query::ListWorkers,
-            };
-            match client.send(&request).await? {
-                Response::Workers { mut workers } => {
-                    // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-                    if let Some(proj) = project_filter {
-                        workers.retain(|w| w.namespace == proj);
-                    }
-                    workers.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
-                    match format {
-                        OutputFormat::Json => {
-                            println!("{}", serde_json::to_string_pretty(&workers)?);
+            let mut workers = client.list_workers().await?;
+
+            // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
+            if let Some(proj) = project_filter {
+                workers.retain(|w| w.namespace == proj);
+            }
+            workers.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&workers)?);
+                }
+                OutputFormat::Text => {
+                    if workers.is_empty() {
+                        println!("No workers found");
+                    } else {
+                        let show_project =
+                            should_show_project(workers.iter().map(|w| w.namespace.as_str()));
+
+                        let mut cols = vec![Column::left("KIND")];
+                        if show_project {
+                            cols.push(Column::left("PROJECT"));
                         }
-                        OutputFormat::Text => {
-                            if workers.is_empty() {
-                                println!("No workers found");
-                            } else {
-                                let show_project = should_show_project(
-                                    workers.iter().map(|w| w.namespace.as_str()),
-                                );
+                        cols.extend([
+                            Column::left("QUEUE"),
+                            Column::status("STATUS"),
+                            Column::left("ACTIVE"),
+                            Column::left("CONCURRENCY"),
+                        ]);
+                        let mut table = Table::new(cols);
 
-                                let mut cols = vec![Column::left("KIND")];
-                                if show_project {
-                                    cols.push(Column::left("PROJECT"));
-                                }
-                                cols.extend([
-                                    Column::left("QUEUE"),
-                                    Column::status("STATUS"),
-                                    Column::left("ACTIVE"),
-                                    Column::left("CONCURRENCY"),
-                                ]);
-                                let mut table = Table::new(cols);
-
-                                for w in &workers {
-                                    let mut cells = vec![w.name.clone()];
-                                    if show_project {
-                                        cells.push(project_cell(&w.namespace));
-                                    }
-                                    cells.extend([
-                                        w.queue.clone(),
-                                        w.status.clone(),
-                                        w.active.to_string(),
-                                        w.concurrency.to_string(),
-                                    ]);
-                                    table.row(cells);
-                                }
-                                table.render(&mut std::io::stdout());
+                        for w in &workers {
+                            let mut cells = vec![w.name.clone()];
+                            if show_project {
+                                cells.push(project_cell(&w.namespace));
                             }
+                            cells.extend([
+                                w.queue.clone(),
+                                w.status.clone(),
+                                w.active.to_string(),
+                                w.concurrency.to_string(),
+                            ]);
+                            table.row(cells);
                         }
+                        table.render(&mut std::io::stdout());
                     }
                 }
-                Response::Error { message } => anyhow::bail!("{}", message),
-                _ => anyhow::bail!("unexpected response from daemon"),
             }
         }
         WorkerCommand::Prune { all, dry_run } => {

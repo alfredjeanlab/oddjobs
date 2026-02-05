@@ -8,11 +8,9 @@ use clap::{Args, Subcommand};
 use std::path::Path;
 
 use oj_core::ShortId;
-use oj_daemon::{Query, Request, Response};
 
+use crate::client::{ClientKind, DaemonClient, QueuePushResult, QueueRetryResult};
 use crate::color;
-
-use crate::client::DaemonClient;
 use crate::output::{display_log, format_time_ago, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
@@ -31,7 +29,7 @@ pub enum QueueCommand {
         /// Item data as JSON object (optional if --var is provided)
         data: Option<String>,
         /// Item variables (can be repeated: --var key=value)
-        #[arg(long = "var", value_parser = parse_key_value)]
+        #[arg(long = "var", value_parser = super::job::parse_key_value)]
         var: Vec<(String, String)>,
     },
     /// List all known queues
@@ -105,6 +103,15 @@ pub enum QueueCommand {
     },
 }
 
+impl QueueCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List {} | Self::Show { .. } | Self::Logs { .. } => ClientKind::Query,
+            _ => ClientKind::Action,
+        }
+    }
+}
+
 /// Format a queue item's data map as a sorted `key=value` string.
 fn format_item_data(data: &std::collections::HashMap<String, String>) -> String {
     let mut pairs: Vec<_> = data.iter().collect();
@@ -114,14 +121,6 @@ fn format_item_data(data: &std::collections::HashMap<String, String>) -> String 
         .map(|(k, v)| format!("{}={}", k, v))
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-/// Parse a key=value string for --var arguments.
-fn parse_key_value(s: &str) -> Result<(String, String), String> {
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid input format '{}': must be key=value", s))?;
-    Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
 /// Build a JSON object from optional JSON string and --var key=value pairs.
@@ -167,57 +166,30 @@ pub async fn handle(
                 build_data_map(data, var)?
             };
 
-            let request = Request::QueuePush {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                data: json_data,
-            };
-
-            match client.send(&request).await? {
-                Response::QueuePushed {
+            match client
+                .queue_push(project_root, namespace, &queue, json_data)
+                .await?
+            {
+                QueuePushResult::Pushed {
                     queue_name,
                     item_id,
                 } => {
                     println!("Pushed item '{}' to queue '{}'", item_id, queue_name);
                 }
-                Response::Ok => {
+                QueuePushResult::Refreshed => {
                     println!("Refreshed external queue '{}'", queue);
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
                 }
             }
         }
         QueueCommand::Drop { queue, item_id } => {
-            let request = Request::QueueDrop {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                item_id: item_id.clone(),
-            };
-
-            match client.send(&request).await? {
-                Response::QueueDropped {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!(
-                        "Dropped item {} from queue {}",
-                        item_id.short(8),
-                        queue_name
-                    );
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let (queue_name, item_id) = client
+                .queue_drop(project_root, namespace, &queue, &item_id)
+                .await?;
+            println!(
+                "Dropped item {} from queue {}",
+                item_id.short(8),
+                queue_name
+            );
         }
         QueueCommand::Retry {
             queue,
@@ -233,30 +205,22 @@ pub async fn handle(
                 }
             }
 
-            let request = Request::QueueRetry {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                item_ids: item_ids.clone(),
-                all_dead,
-                status: status.clone(),
-            };
-
-            match client.send(&request).await? {
-                Response::QueueRetried {
+            match client
+                .queue_retry(project_root, namespace, &queue, item_ids, all_dead, status)
+                .await?
+            {
+                QueueRetryResult::Single {
                     queue_name,
                     item_id,
                 } => {
-                    // Single item retried (backward compat)
                     println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
                 }
-                Response::QueueItemsRetried {
+                QueueRetryResult::Bulk {
                     queue_name,
                     item_ids: retried_ids,
                     already_retried,
                     not_found,
                 } => {
-                    // Bulk retry response
                     if !retried_ids.is_empty() {
                         println!(
                             "Retried {} item{} in queue '{}'",
@@ -286,98 +250,45 @@ pub async fn handle(
                         println!("No items to retry in queue '{}'", queue_name);
                     }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
             }
         }
         QueueCommand::Fail { queue, item_id } => {
-            let request = Request::QueueFail {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                item_id: item_id.clone(),
-            };
-
-            match client.send(&request).await? {
-                Response::QueueFailed {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!("Failed item {} in queue {}", item_id.short(8), queue_name);
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let (queue_name, item_id) = client
+                .queue_fail(project_root, namespace, &queue, &item_id)
+                .await?;
+            println!("Failed item {} in queue {}", item_id.short(8), queue_name);
         }
         QueueCommand::Done { queue, item_id } => {
-            let request = Request::QueueDone {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-                item_id: item_id.clone(),
-            };
-
-            match client.send(&request).await? {
-                Response::QueueCompleted {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!(
-                        "Completed item {} in queue {}",
-                        item_id.short(8),
-                        queue_name
-                    );
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let (queue_name, item_id) = client
+                .queue_done(project_root, namespace, &queue, &item_id)
+                .await?;
+            println!(
+                "Completed item {} in queue {}",
+                item_id.short(8),
+                queue_name
+            );
         }
         QueueCommand::Drain { queue } => {
-            let request = Request::QueueDrain {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                queue_name: queue.clone(),
-            };
-
-            match client.send(&request).await? {
-                Response::QueueDrained { queue_name, items } => match format {
-                    OutputFormat::Json => {
-                        println!("{}", serde_json::to_string_pretty(&items)?);
-                    }
-                    _ => {
-                        if items.is_empty() {
-                            println!("No pending items in queue '{}'", queue_name);
-                        } else {
-                            println!(
-                                "Drained {} item{} from queue '{}'",
-                                items.len(),
-                                if items.len() == 1 { "" } else { "s" },
-                                queue_name
-                            );
-                            for item in &items {
-                                let data_str = format_item_data(&item.data);
-                                println!("  {} {}", color::muted(item.id.short(8)), data_str,);
-                            }
-                        }
-                    }
-                },
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
+            let (queue_name, items) = client.queue_drain(project_root, namespace, &queue).await?;
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&items)?);
                 }
                 _ => {
-                    anyhow::bail!("unexpected response from daemon");
+                    if items.is_empty() {
+                        println!("No pending items in queue '{}'", queue_name);
+                    } else {
+                        println!(
+                            "Drained {} item{} from queue '{}'",
+                            items.len(),
+                            if items.len() == 1 { "" } else { "s" },
+                            queue_name
+                        );
+                        for item in &items {
+                            let data_str = format_item_data(&item.data);
+                            println!("  {} {}", color::muted(item.id.short(8)), data_str,);
+                        }
+                    }
                 }
             }
         }
@@ -390,65 +301,50 @@ pub async fn handle(
             display_log(&log_path, &content, follow, format, "queue", &queue).await?;
         }
         QueueCommand::List {} => {
-            let request = Request::Query {
-                query: Query::ListQueues {
-                    project_root: project_root.to_path_buf(),
-                    namespace: namespace.to_string(),
-                },
-            };
-            match client.send(&request).await? {
-                Response::Queues { queues } => {
-                    if queues.is_empty() {
-                        println!("No queues found");
-                        return Ok(());
-                    }
-                    match format {
-                        OutputFormat::Json => {
-                            println!("{}", serde_json::to_string_pretty(&queues)?);
-                        }
-                        _ => {
-                            let show_project =
-                                should_show_project(queues.iter().map(|q| q.namespace.as_str()));
-
-                            let mut cols = Vec::new();
-                            if show_project {
-                                cols.push(Column::left("PROJECT"));
-                            }
-                            cols.extend([
-                                Column::left("NAME"),
-                                Column::left("TYPE"),
-                                Column::right("ITEMS"),
-                                Column::left("WORKERS"),
-                            ]);
-                            let mut table = Table::new(cols);
-
-                            for q in &queues {
-                                let workers_str = if q.workers.is_empty() {
-                                    "-".to_string()
-                                } else {
-                                    q.workers.join(", ")
-                                };
-                                let mut cells = Vec::new();
-                                if show_project {
-                                    cells.push(project_cell(&q.namespace));
-                                }
-                                cells.extend([
-                                    q.name.clone(),
-                                    q.queue_type.clone(),
-                                    q.item_count.to_string(),
-                                    workers_str,
-                                ]);
-                                table.row(cells);
-                            }
-                            table.render(&mut std::io::stdout());
-                        }
-                    }
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
+            let queues = client.list_queues(project_root, namespace).await?;
+            if queues.is_empty() {
+                println!("No queues found");
+                return Ok(());
+            }
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&queues)?);
                 }
                 _ => {
-                    anyhow::bail!("unexpected response from daemon");
+                    let show_project =
+                        should_show_project(queues.iter().map(|q| q.namespace.as_str()));
+
+                    let mut cols = Vec::new();
+                    if show_project {
+                        cols.push(Column::left("PROJECT"));
+                    }
+                    cols.extend([
+                        Column::left("NAME"),
+                        Column::left("TYPE"),
+                        Column::right("ITEMS"),
+                        Column::left("WORKERS"),
+                    ]);
+                    let mut table = Table::new(cols);
+
+                    for q in &queues {
+                        let workers_str = if q.workers.is_empty() {
+                            "-".to_string()
+                        } else {
+                            q.workers.join(", ")
+                        };
+                        let mut cells = Vec::new();
+                        if show_project {
+                            cells.push(project_cell(&q.namespace));
+                        }
+                        cells.extend([
+                            q.name.clone(),
+                            q.queue_type.clone(),
+                            q.item_count.to_string(),
+                            workers_str,
+                        ]);
+                        table.row(cells);
+                    }
+                    table.render(&mut std::io::stdout());
                 }
             }
         }
@@ -479,53 +375,39 @@ pub async fn handle(
             )?;
         }
         QueueCommand::Show { queue } => {
-            let request = Request::Query {
-                query: Query::ListQueueItems {
-                    queue_name: queue.clone(),
-                    namespace: namespace.to_string(),
-                    project_root: Some(project_root.to_path_buf()),
-                },
-            };
-            match client.send(&request).await? {
-                Response::QueueItems { mut items } => {
-                    items.sort_by(|a, b| b.pushed_at_epoch_ms.cmp(&a.pushed_at_epoch_ms));
-                    if items.is_empty() {
-                        println!("No items in queue '{}'", queue);
-                        return Ok(());
-                    }
-                    match format {
-                        OutputFormat::Json => {
-                            println!("{}", serde_json::to_string_pretty(&items)?);
-                        }
-                        _ => {
-                            let mut table = Table::new(vec![
-                                Column::muted("ID"),
-                                Column::status("STATUS"),
-                                Column::right("AGE"),
-                                Column::left("WORKER"),
-                                Column::left("DATA"),
-                            ]);
-                            for item in &items {
-                                let data_str = format_item_data(&item.data);
-                                let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
-                                let age = format_time_ago(item.pushed_at_epoch_ms);
-                                table.row(vec![
-                                    item.id.short(8).to_string(),
-                                    item.status.clone(),
-                                    age,
-                                    worker,
-                                    data_str,
-                                ]);
-                            }
-                            table.render(&mut std::io::stdout());
-                        }
-                    }
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
+            let mut items = client
+                .list_queue_items(&queue, namespace, Some(project_root))
+                .await?;
+            items.sort_by(|a, b| b.pushed_at_epoch_ms.cmp(&a.pushed_at_epoch_ms));
+            if items.is_empty() {
+                println!("No items in queue '{}'", queue);
+                return Ok(());
+            }
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&items)?);
                 }
                 _ => {
-                    anyhow::bail!("unexpected response from daemon");
+                    let mut table = Table::new(vec![
+                        Column::muted("ID"),
+                        Column::status("STATUS"),
+                        Column::right("AGE"),
+                        Column::left("WORKER"),
+                        Column::left("DATA"),
+                    ]);
+                    for item in &items {
+                        let data_str = format_item_data(&item.data);
+                        let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
+                        let age = format_time_ago(item.pushed_at_epoch_ms);
+                        table.row(vec![
+                            item.id.short(8).to_string(),
+                            item.status.clone(),
+                            age,
+                            worker,
+                            data_str,
+                        ]);
+                    }
+                    table.render(&mut std::io::stdout());
                 }
             }
         }

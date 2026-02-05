@@ -10,9 +10,10 @@ use clap::{Args, Subcommand};
 
 use oj_core::ShortId;
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::output::{print_prune_results, OutputFormat};
+use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
 pub struct WorkspaceArgs {
@@ -59,6 +60,15 @@ pub enum WorkspaceCommand {
     },
 }
 
+impl WorkspaceCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List { .. } | Self::Show { .. } => ClientKind::Query,
+            _ => ClientKind::Action,
+        }
+    }
+}
+
 pub async fn handle(
     command: WorkspaceCommand,
     client: &DaemonClient,
@@ -91,95 +101,33 @@ pub async fn handle(
                     if workspaces.is_empty() {
                         println!("No workspaces");
                     } else {
-                        // Determine whether to show PROJECT column
-                        let namespaces: std::collections::HashSet<&str> =
-                            workspaces.iter().map(|w| w.namespace.as_str()).collect();
                         let show_project =
-                            namespaces.len() > 1 || namespaces.iter().any(|n| !n.is_empty());
+                            should_show_project(workspaces.iter().map(|w| w.namespace.as_str()));
 
-                        // Compute dynamic column widths from data
-                        let id_w = workspaces
-                            .iter()
-                            .map(|w| w.id.len().min(8))
-                            .max()
-                            .unwrap_or(2)
-                            .max(2);
-                        let no_project = "(no project)";
-                        let proj_w = if show_project {
-                            workspaces
-                                .iter()
-                                .map(|w| {
-                                    if w.namespace.is_empty() {
-                                        no_project.len()
-                                    } else {
-                                        w.namespace.len()
-                                    }
-                                })
-                                .max()
-                                .unwrap_or(7)
-                                .max(7)
-                        } else {
-                            0
-                        };
-                        let path_w = workspaces
-                            .iter()
-                            .map(|w| w.path.display().to_string().len())
-                            .max()
-                            .unwrap_or(4)
-                            .clamp(4, 60);
-                        let branch_w = workspaces
-                            .iter()
-                            .map(|w| w.branch.as_deref().unwrap_or("-").len())
-                            .max()
-                            .unwrap_or(6)
-                            .max(6);
-
+                        let mut cols = vec![Column::muted("ID").with_max(8)];
                         if show_project {
-                            println!(
-                                "{} {} {} {} {}",
-                                color::header(&format!("{:<id_w$}", "ID")),
-                                color::header(&format!("{:<proj_w$}", "PROJECT")),
-                                color::header(&format!("{:<path_w$}", "PATH")),
-                                color::header(&format!("{:<branch_w$}", "BRANCH")),
-                                color::header("STATUS"),
-                            );
-                        } else {
-                            println!(
-                                "{} {} {} {}",
-                                color::header(&format!("{:<id_w$}", "ID")),
-                                color::header(&format!("{:<path_w$}", "PATH")),
-                                color::header(&format!("{:<branch_w$}", "BRANCH")),
-                                color::header("STATUS"),
-                            );
+                            cols.push(Column::left("PROJECT"));
                         }
+                        cols.extend([
+                            Column::left("PATH").with_max(60),
+                            Column::left("BRANCH"),
+                            Column::status("STATUS"),
+                        ]);
+                        let mut table = Table::new(cols);
+
                         for w in &workspaces {
-                            let path_str: String =
-                                w.path.display().to_string().chars().take(path_w).collect();
-                            let branch = w.branch.as_deref().unwrap_or("-");
+                            let mut cells = vec![w.id.short(8).to_string()];
                             if show_project {
-                                let proj = if w.namespace.is_empty() {
-                                    no_project
-                                } else {
-                                    &w.namespace
-                                };
-                                println!(
-                                    "{} {:<proj_w$} {:<path_w$} {:<branch_w$} {}",
-                                    color::muted(&format!("{:<id_w$}", w.id.short(8))),
-                                    &proj[..proj_w.min(proj.len())],
-                                    path_str,
-                                    branch,
-                                    color::status(&w.status),
-                                );
-                            } else {
-                                println!(
-                                    "{} {:<path_w$} {:<branch_w$} {}",
-                                    color::muted(&format!("{:<id_w$}", w.id.short(8))),
-                                    path_str,
-                                    branch,
-                                    color::status(&w.status),
-                                );
+                                cells.push(project_cell(&w.namespace));
                             }
+                            cells.extend([
+                                w.path.display().to_string(),
+                                w.branch.as_deref().unwrap_or("-").to_string(),
+                                w.status.clone(),
+                            ]);
+                            table.row(cells);
                         }
+                        table.render(&mut std::io::stdout());
                     }
 
                     if truncated {

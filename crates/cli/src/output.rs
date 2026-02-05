@@ -16,6 +16,16 @@ pub fn should_use_color() -> bool {
     crate::color::should_colorize()
 }
 
+/// Print a peek frame with box-drawing characters around session output.
+pub fn print_peek_frame(session_id: &str, output: &str) {
+    println!(
+        "╭────── {} ──────",
+        crate::color::header(&format!("peek: {}", session_id))
+    );
+    print!("{}", output);
+    println!("╰────── {} ──────", crate::color::header("end peek"));
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
 pub enum OutputFormat {
     #[default]

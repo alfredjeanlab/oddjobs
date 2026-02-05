@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::{build_data_map, format_item_data, parse_key_value};
+use super::super::job::parse_key_value;
+use super::{build_data_map, format_item_data};
 use serde_json::json;
 use std::collections::HashMap;
 

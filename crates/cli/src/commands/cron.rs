@@ -6,12 +6,10 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, CronStartResult, DaemonClient};
 use crate::color;
 use crate::output::{display_log, print_prune_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
-
-use oj_daemon::{Query, Request, Response};
 
 #[derive(Args)]
 pub struct CronArgs {
@@ -69,6 +67,15 @@ pub enum CronCommand {
     },
 }
 
+impl CronCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::List {} | Self::Logs { .. } => ClientKind::Query,
+            _ => ClientKind::Action,
+        }
+    }
+}
+
 pub async fn handle(
     command: CronCommand,
     client: &DaemonClient,
@@ -82,21 +89,19 @@ pub async fn handle(
             if !all && name.is_none() {
                 anyhow::bail!("cron name required (or use --all)");
             }
-            let request = Request::CronStart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                cron_name: name.unwrap_or_default(),
-                all,
-            };
-            match client.send(&request).await? {
-                Response::CronStarted { cron_name } => {
+            let cron_name = name.unwrap_or_default();
+            match client
+                .cron_start(project_root, namespace, &cron_name, all)
+                .await?
+            {
+                CronStartResult::Single { cron_name } => {
                     println!(
                         "Cron '{}' started ({})",
                         color::header(&cron_name),
                         color::muted(namespace)
                     );
                 }
-                Response::CronsStarted { started, skipped } => {
+                CronStartResult::Multiple { started, skipped } => {
                     for cron_name in &started {
                         println!(
                             "Cron '{}' started ({})",
@@ -115,67 +120,21 @@ pub async fn handle(
                         println!("No crons found in runbooks");
                     }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
             }
         }
         CronCommand::Stop { name } => {
-            let request = Request::CronStop {
-                cron_name: name.clone(),
-                namespace: namespace.to_string(),
-                project_root: Some(project_root.to_path_buf()),
-            };
-            match client.send(&request).await? {
-                Response::Ok => {
-                    println!("Cron '{}' stopped ({})", name, namespace);
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            client
+                .cron_stop(&name, namespace, Some(project_root))
+                .await?;
+            println!("Cron '{}' stopped ({})", name, namespace);
         }
         CronCommand::Restart { name } => {
-            let request = Request::CronRestart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                cron_name: name.clone(),
-            };
-            match client.send(&request).await? {
-                Response::CronStarted { cron_name } => {
-                    println!("Cron '{}' restarted", cron_name);
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let cron_name = client.cron_restart(project_root, namespace, &name).await?;
+            println!("Cron '{}' restarted", cron_name);
         }
         CronCommand::Once { name } => {
-            let request = Request::CronOnce {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                cron_name: name,
-            };
-            match client.send(&request).await? {
-                Response::CommandStarted { job_id, job_name } => {
-                    println!("Job '{}' started ({})", job_name, job_id);
-                }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
-                }
-            }
+            let (job_id, job_name) = client.cron_once(project_root, namespace, &name).await?;
+            println!("Job '{}' started ({})", job_name, job_id);
         }
         CronCommand::Logs {
             name,
@@ -213,59 +172,52 @@ pub async fn handle(
             )?;
         }
         CronCommand::List {} => {
-            let request = Request::Query {
-                query: Query::ListCrons,
-            };
-            match client.send(&request).await? {
-                Response::Crons { mut crons } => {
-                    // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-                    if let Some(proj) = project_filter {
-                        crons.retain(|c| c.namespace == proj);
-                    }
-                    crons.sort_by(|a, b| a.name.cmp(&b.name));
-                    match format {
-                        OutputFormat::Json => {
-                            println!("{}", serde_json::to_string_pretty(&crons)?);
+            let mut crons = client.list_crons().await?;
+
+            // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
+            if let Some(proj) = project_filter {
+                crons.retain(|c| c.namespace == proj);
+            }
+            crons.sort_by(|a, b| a.name.cmp(&b.name));
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&crons)?);
+                }
+                OutputFormat::Text => {
+                    if crons.is_empty() {
+                        println!("No crons found");
+                    } else {
+                        let show_project =
+                            should_show_project(crons.iter().map(|c| c.namespace.as_str()));
+
+                        let mut cols = vec![Column::left("KIND")];
+                        if show_project {
+                            cols.push(Column::left("PROJECT"));
                         }
-                        OutputFormat::Text => {
-                            if crons.is_empty() {
-                                println!("No crons found");
-                            } else {
-                                let show_project =
-                                    should_show_project(crons.iter().map(|c| c.namespace.as_str()));
+                        cols.extend([
+                            Column::left("INTERVAL"),
+                            Column::left("JOB"),
+                            Column::left("TIME"),
+                            Column::status("STATUS"),
+                        ]);
+                        let mut table = Table::new(cols);
 
-                                let mut cols = vec![Column::left("KIND")];
-                                if show_project {
-                                    cols.push(Column::left("PROJECT"));
-                                }
-                                cols.extend([
-                                    Column::left("INTERVAL"),
-                                    Column::left("JOB"),
-                                    Column::left("TIME"),
-                                    Column::status("STATUS"),
-                                ]);
-                                let mut table = Table::new(cols);
-
-                                for c in &crons {
-                                    let mut cells = vec![c.name.clone()];
-                                    if show_project {
-                                        cells.push(project_cell(&c.namespace));
-                                    }
-                                    cells.extend([
-                                        c.interval.clone(),
-                                        c.job.clone(),
-                                        c.time.clone(),
-                                        c.status.clone(),
-                                    ]);
-                                    table.row(cells);
-                                }
-                                table.render(&mut std::io::stdout());
+                        for c in &crons {
+                            let mut cells = vec![c.name.clone()];
+                            if show_project {
+                                cells.push(project_cell(&c.namespace));
                             }
+                            cells.extend([
+                                c.interval.clone(),
+                                c.job.clone(),
+                                c.time.clone(),
+                                c.status.clone(),
+                            ]);
+                            table.row(cells);
                         }
+                        table.render(&mut std::io::stdout());
                     }
                 }
-                Response::Error { message } => anyhow::bail!("{}", message),
-                _ => anyhow::bail!("unexpected response from daemon"),
             }
         }
     }

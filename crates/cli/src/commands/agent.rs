@@ -13,10 +13,12 @@ use serde::{Deserialize, Serialize};
 
 use oj_core::{AgentId, Event, PromptType, QuestionData, ShortId};
 
-use crate::client::DaemonClient;
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::exit_error::ExitError;
-use crate::output::{display_log, print_prune_results, should_use_color, OutputFormat};
+use crate::output::{
+    display_log, print_peek_frame, print_prune_results, should_use_color, OutputFormat,
+};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 use super::job::parse_duration;
@@ -116,6 +118,16 @@ pub enum AgentCommand {
         #[command(subcommand)]
         hook: HookCommand,
     },
+}
+
+impl AgentCommand {
+    pub fn client_kind(&self) -> ClientKind {
+        match self {
+            Self::Send { .. } | Self::Resume { .. } | Self::Prune { .. } => ClientKind::Action,
+            Self::Hook { .. } => ClientKind::Signal,
+            _ => ClientKind::Query,
+        }
+    }
 }
 
 #[derive(Subcommand)]
@@ -342,12 +354,7 @@ pub async fn handle(
             let with_color = should_use_color();
             match client.peek_session(&session_id, with_color).await {
                 Ok(output) => {
-                    println!(
-                        "╭────── {} ──────",
-                        color::header(&format!("peek: {}", session_id))
-                    );
-                    print!("{}", output);
-                    println!("╰────── {} ──────", color::header("end peek"));
+                    print_peek_frame(&session_id, &output);
                 }
                 Err(crate::client::ClientError::Rejected(msg))
                     if msg.starts_with("Session not found") =>
