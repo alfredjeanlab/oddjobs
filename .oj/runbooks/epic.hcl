@@ -156,12 +156,7 @@ job "epic" {
 # ------------------------------------------------------------------------------
 
 agent "plan" {
-  run = <<-CMD
-    claude --model opus \
-      --dangerously-skip-permissions \
-      --disallowed-tools EnterPlanMode,ExitPlanMode,NotebookEdit,TodoWrite
-  CMD
-
+  run = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_dead = { action = "gate", run = "wok show ${var.epic.id} -o json | jq -e '.notes | length > 0'" }
 
   session "tmux" {

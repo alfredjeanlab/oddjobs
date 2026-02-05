@@ -876,6 +876,53 @@ fn build_spawn_effects_user_env_does_not_override_system_vars() {
 }
 
 #[test]
+fn build_spawn_effects_trims_trailing_newlines_from_command() {
+    let workspace = TempDir::new().unwrap();
+    // Simulate a heredoc-style run command with trailing newline (as from HCL <<-CMD)
+    // The bug: if trailing newline isn't trimmed, appended args become a separate command
+    let agent = AgentDef {
+        name: "worker".to_string(),
+        // Trailing newline from heredoc - if not trimmed, --session-id would be on new line
+        run: "claude --model opus\n".to_string(),
+        prompt: Some("Do the task".to_string()),
+        ..Default::default()
+    };
+    let job = test_job();
+
+    let pid = JobId::new("pipe-1");
+    let ctx = SpawnContext::from_job(&job, &pid);
+    let effects = build_spawn_effects(
+        &agent,
+        &ctx,
+        "worker",
+        &HashMap::new(),
+        workspace.path(),
+        workspace.path(),
+        None,
+    )
+    .unwrap();
+
+    if let Effect::SpawnAgent { command, .. } = &effects[0] {
+        // --session-id should be on the same line as the base command (no bare newline between)
+        // A well-formed command would be: "claude --model opus --session-id xxx ..."
+        // A broken command would have newline before --session-id making it a separate command
+        assert!(
+            !command.contains("\n--session-id") && !command.contains("\n --session-id"),
+            "trailing newline should be trimmed so appended args don't become separate command: {}",
+            command
+        );
+        // Verify the command is properly formed
+        assert!(
+            command.starts_with("claude --model opus --session-id"),
+            "command should have no embedded newlines before appended args: {}",
+            command
+        );
+    } else {
+        panic!("Expected SpawnAgent effect");
+    }
+}
+
+#[test]
 fn build_spawn_effects_project_env_overrides_global() {
     let workspace = TempDir::new().unwrap();
     let state_dir = TempDir::new().unwrap();

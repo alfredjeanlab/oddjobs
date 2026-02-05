@@ -166,7 +166,8 @@ pub fn build_spawn_effects(
     })?;
 
     // Build base command and append session-id, settings, and prompt (if not inline)
-    let base_command = agent_def.build_command(&vars);
+    // Trim trailing whitespace (including newlines from heredocs) so appended args stay on same line
+    let base_command = agent_def.build_command(&vars).trim_end().to_string();
     let command = if let Some(resume_id) = resume_session_id {
         // Resume mode: use --resume instead of passing prompt
         let resume_msg = input.get("resume_message").cloned().unwrap_or_default();
