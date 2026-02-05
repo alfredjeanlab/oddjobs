@@ -131,7 +131,8 @@ pub struct CheckpointHandle {
     /// Sequence number being checkpointed
     pub seq: u64,
     receiver: mpsc::Receiver<Result<CheckpointResult, CheckpointError>>,
-    #[allow(dead_code)] // Keep thread alive
+    // NOTE(lifetime): Keep thread alive
+    #[allow(dead_code)]
     handle: JoinHandle<()>,
 }
 
