@@ -31,11 +31,8 @@
 //!
 //! ## When Timeouts ARE Appropriate
 //!
-//! Timeouts make sense for bounded operations:
-//! - Shell commands with known execution bounds
-//! - Guard conditions that should fail fast
-//!
-//! These use the `timeout` field on guards—not on pipeline steps.
+//! Timeouts make sense for bounded operations like shell commands with known
+//! execution bounds — not for agent steps.
 //!
 //! See [`docs/01-concepts/EXECUTION.md`] for the full rationale.
 
