@@ -24,8 +24,11 @@ pub enum CronCommand {
     List {},
     /// Start a cron (begins interval timer)
     Start {
-        /// Cron name from runbook
-        name: String,
+        /// Cron name from runbook (required unless --all is set)
+        name: Option<String>,
+        /// Start all crons defined in runbooks
+        #[arg(long)]
+        all: bool,
     },
     /// Stop a cron (cancels interval timer)
     Stop {
@@ -74,21 +77,58 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        CronCommand::Start { name } => {
-            let request = Request::CronStart {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
-                cron_name: name,
-            };
-            match client.send(&request).await? {
-                Response::CronStarted { cron_name } => {
-                    println!("Cron '{}' started ({})", cron_name, namespace);
+        CronCommand::Start { name, all } => {
+            if all {
+                let request = Request::CronStartAll {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                };
+                match client.send(&request).await? {
+                    Response::CronsStarted { started, errors } => {
+                        if started.is_empty() && errors.is_empty() {
+                            println!("No crons defined in runbooks");
+                        } else {
+                            for cron_name in &started {
+                                println!("Cron '{}' started ({})", cron_name, namespace);
+                            }
+                            for (cron_name, error) in &errors {
+                                eprintln!("Cron '{}' failed: {}", cron_name, error);
+                            }
+                            if !errors.is_empty() {
+                                anyhow::bail!(
+                                    "{} cron(s) started, {} failed",
+                                    started.len(),
+                                    errors.len()
+                                );
+                            }
+                        }
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
-                Response::Error { message } => {
-                    anyhow::bail!("{}", message);
-                }
-                _ => {
-                    anyhow::bail!("unexpected response from daemon");
+            } else {
+                let name = name.ok_or_else(|| {
+                    anyhow::anyhow!("cron name required (or use --all to start all crons)")
+                })?;
+                let request = Request::CronStart {
+                    project_root: project_root.to_path_buf(),
+                    namespace: namespace.to_string(),
+                    cron_name: name,
+                };
+                match client.send(&request).await? {
+                    Response::CronStarted { cron_name } => {
+                        println!("Cron '{}' started ({})", cron_name, namespace);
+                    }
+                    Response::Error { message } => {
+                        anyhow::bail!("{}", message);
+                    }
+                    _ => {
+                        anyhow::bail!("unexpected response from daemon");
+                    }
                 }
             }
         }
