@@ -128,6 +128,7 @@ fn make_detail(resolved: bool) -> DecisionDetail {
         },
         created_at_ms: 0,
         resolved_at_ms: if resolved { Some(1000) } else { None },
+        superseded_by: None,
         namespace: "myproject".to_string(),
     }
 }

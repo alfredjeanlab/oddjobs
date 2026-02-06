@@ -251,7 +251,20 @@ pub(crate) fn format_decision_detail(
         );
     }
 
-    if d.resolved_at_ms.is_some() {
+    if let Some(ref sup_id) = d.superseded_by {
+        let _ = writeln!(
+            out,
+            "{} {}",
+            color::context("Status: "),
+            color::muted("superseded")
+        );
+        let _ = writeln!(
+            out,
+            "{} {}",
+            color::context("Superseded by:"),
+            color::muted(sup_id.short(8))
+        );
+    } else if d.resolved_at_ms.is_some() {
         let _ = writeln!(
             out,
             "{} {}",

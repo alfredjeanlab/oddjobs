@@ -160,6 +160,7 @@ fn make_decision(id: &str, job_id: &str, created_at_ms: u64) -> Decision {
         message: None,
         created_at_ms,
         resolved_at_ms: None,
+        superseded_by: None,
         namespace: "oddjobs".to_string(),
     }
 }

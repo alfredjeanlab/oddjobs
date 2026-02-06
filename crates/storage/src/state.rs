@@ -1014,10 +1014,19 @@ impl MaterializedState {
             } => {
                 // Idempotency: skip if already exists
                 if !self.decisions.contains_key(id) {
+                    // Auto-dismiss previous unresolved decisions for the same owner
+                    let new_decision_id = DecisionId::new(id.clone());
+                    for existing in self.decisions.values_mut() {
+                        if existing.owner == *owner && !existing.is_resolved() {
+                            existing.resolved_at_ms = Some(*created_at_ms);
+                            existing.superseded_by = Some(new_decision_id.clone());
+                        }
+                    }
+
                     self.decisions.insert(
                         id.clone(),
                         Decision {
-                            id: DecisionId::new(id.clone()),
+                            id: new_decision_id,
                             job_id: job_id.to_string(),
                             agent_id: agent_id.clone(),
                             owner: owner.clone(),
@@ -1028,6 +1037,7 @@ impl MaterializedState {
                             message: None,
                             created_at_ms: *created_at_ms,
                             resolved_at_ms: None,
+                            superseded_by: None,
                             namespace: namespace.clone(),
                         },
                     );

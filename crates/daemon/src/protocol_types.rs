@@ -228,6 +228,8 @@ pub struct DecisionDetail {
     pub message: Option<String>,
     pub created_at_ms: u64,
     pub resolved_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
     #[serde(default)]
     pub namespace: String,
 }
