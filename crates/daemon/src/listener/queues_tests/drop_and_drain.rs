@@ -12,7 +12,9 @@ use oj_storage::MaterializedState;
 use crate::protocol::Response;
 
 use super::super::{handle_queue_drain, handle_queue_drop};
-use super::{drain_events, make_ctx, project_with_queue_only, test_event_bus};
+use super::{
+    drain_events, make_ctx, project_with_queue_only, project_without_queue, test_event_bus,
+};
 
 // ── Drop tests ────────────────────────────────────────────────────────
 
@@ -431,4 +433,104 @@ fn drain_with_wrong_project_root_falls_back_to_namespace() {
         "expected QueueDrained from namespace fallback, got {:?}",
         result
     );
+}
+
+// ── No-runbook fallback tests ─────────────────────────────────────────
+
+#[test]
+fn drop_works_without_runbook_definition() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    // Pre-populate state with a queue item (persisted but no runbook definition)
+    let mut initial_state = MaterializedState::default();
+    initial_state.apply_event(&Event::QueuePushed {
+        queue_name: "removed-queue".to_string(),
+        item_id: "item-orphan-1".to_string(),
+        data: [("task".to_string(), "test".to_string())]
+            .into_iter()
+            .collect(),
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
+
+    let result =
+        handle_queue_drop(&ctx, project.path(), "", "removed-queue", "item-orphan-1").unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueDropped { ref queue_name, ref item_id }
+            if queue_name == "removed-queue" && item_id == "item-orphan-1"
+        ),
+        "expected QueueDropped for queue without runbook, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        Event::QueueDropped { queue_name, item_id, .. }
+        if queue_name == "removed-queue" && item_id == "item-orphan-1"
+    ));
+}
+
+#[test]
+fn drop_unknown_queue_not_in_state_returns_error() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let ctx = make_ctx(event_bus, state);
+
+    let result = handle_queue_drop(&ctx, project.path(), "", "totally-unknown", "item-1").unwrap();
+
+    assert!(
+        matches!(result, Response::Error { ref message } if message.contains("totally-unknown")),
+        "expected Error for queue not in runbook or state, got {:?}",
+        result
+    );
+}
+
+#[test]
+fn drain_works_without_runbook_definition() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+
+    let mut initial_state = MaterializedState::default();
+    for i in 1..=2 {
+        initial_state.apply_event(&Event::QueuePushed {
+            queue_name: "removed-queue".to_string(),
+            item_id: format!("item-{}", i),
+            data: [("task".to_string(), format!("task-{}", i))]
+                .into_iter()
+                .collect(),
+            pushed_at_epoch_ms: 1_000_000 + i,
+            namespace: String::new(),
+        });
+    }
+    let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
+
+    let result = handle_queue_drain(&ctx, project.path(), "", "removed-queue").unwrap();
+
+    match result {
+        Response::QueueDrained {
+            ref queue_name,
+            ref items,
+        } => {
+            assert_eq!(queue_name, "removed-queue");
+            assert_eq!(items.len(), 2);
+        }
+        other => panic!(
+            "expected QueueDrained for queue without runbook, got {:?}",
+            other
+        ),
+    }
+
+    let events = drain_events(&wal);
+    assert_eq!(events.len(), 2);
 }

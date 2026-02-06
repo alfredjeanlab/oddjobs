@@ -13,7 +13,8 @@ use crate::protocol::Response;
 
 use super::super::handle_queue_prune;
 use super::{
-    drain_events, make_ctx, project_with_queue_only, push_and_mark_failed, test_event_bus,
+    drain_events, make_ctx, project_with_queue_only, project_without_queue, push_and_mark_failed,
+    test_event_bus,
 };
 
 /// Helper: push an item and mark it as Completed.
@@ -362,4 +363,57 @@ fn prune_empty_queue_returns_empty() {
 
     let events = drain_events(&wal);
     assert!(events.is_empty());
+}
+
+// ── No-runbook fallback tests ─────────────────────────────────────────
+
+#[test]
+fn prune_works_without_runbook_definition() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let ctx = make_ctx(event_bus, Arc::clone(&state));
+
+    // Push and complete an item (with old timestamp so it passes the 12h threshold)
+    let data_map = [("task".to_string(), "a".to_string())]
+        .into_iter()
+        .collect();
+    ctx.state.lock().apply_event(&Event::QueuePushed {
+        queue_name: "removed-queue".to_string(),
+        item_id: "old-item-1".to_string(),
+        data: data_map,
+        pushed_at_epoch_ms: old_epoch_ms(),
+        namespace: String::new(),
+    });
+    ctx.state.lock().apply_event(&Event::QueueCompleted {
+        queue_name: "removed-queue".to_string(),
+        item_id: "old-item-1".to_string(),
+        namespace: String::new(),
+    });
+
+    let result =
+        handle_queue_prune(&ctx, project.path(), "", "removed-queue", false, false).unwrap();
+
+    match result {
+        Response::QueuesPruned {
+            ref pruned,
+            skipped,
+        } => {
+            assert_eq!(pruned.len(), 1);
+            assert_eq!(pruned[0].item_id, "old-item-1");
+            assert_eq!(skipped, 0);
+        }
+        other => panic!(
+            "expected QueuesPruned for queue without runbook, got {:?}",
+            other
+        ),
+    }
+
+    let events = drain_events(&wal);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0],
+        Event::QueueDropped { item_id, .. } if item_id == "old-item-1"
+    ));
 }

@@ -92,6 +92,28 @@ job "handle" {
     dir
 }
 
+/// Helper: create a project dir with a runbook that does NOT define any queues.
+///
+/// Used to test that management operations work on queues persisted in state
+/// even when the runbook definition has been removed.
+fn project_without_queue() -> tempfile::TempDir {
+    let dir = tempdir().unwrap();
+    let runbook_dir = dir.path().join(".oj/runbooks");
+    std::fs::create_dir_all(&runbook_dir).unwrap();
+    std::fs::write(
+        runbook_dir.join("test.hcl"),
+        r#"
+job "handle" {
+  step "run" {
+    run = "echo task"
+  }
+}
+"#,
+    )
+    .unwrap();
+    dir
+}
+
 /// Collect all events from the WAL.
 fn drain_events(wal: &Arc<Mutex<Wal>>) -> Vec<Event> {
     let mut events = Vec::new();
