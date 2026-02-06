@@ -3,10 +3,21 @@
 
 //! Event types for the Odd Jobs system
 
+mod agent;
+mod agent_run;
+mod core_types;
+mod cron_scheduler;
+mod decision;
+mod job;
+mod step;
+mod worker_queue;
+mod workspace;
+
+pub use agent::{AgentSignalKind, PromptType, QuestionData, QuestionEntry, QuestionOption};
+
 use crate::agent::{AgentError, AgentId, AgentState};
 use crate::agent_run::{AgentRunId, AgentRunStatus};
 use crate::decision::{DecisionOption, DecisionSource};
-use crate::id::ShortId;
 use crate::job::JobId;
 use crate::owner::OwnerId;
 use crate::session::SessionId;
@@ -16,59 +27,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Kind of signal an agent can emit
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentSignalKind {
-    /// Advance the job to the next step
-    Complete,
-    /// Pause the job and notify for human intervention
-    Escalate,
-    /// No-op acknowledgement — agent is still working
-    Continue,
-}
-
-/// Type of prompt the agent is showing
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PromptType {
-    Permission,
-    Idle,
-    PlanApproval,
-    Question,
-    Other,
-}
-
-/// Structured data from an AskUserQuestion tool call.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QuestionData {
-    pub questions: Vec<QuestionEntry>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QuestionEntry {
-    pub question: String,
-    #[serde(default)]
-    pub header: Option<String>,
-    #[serde(default)]
-    pub options: Vec<QuestionOption>,
-    #[serde(default, rename = "multiSelect")]
-    pub multi_select: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct QuestionOption {
-    pub label: String,
-    #[serde(default)]
-    pub description: Option<String>,
-}
-
-fn default_prompt_type() -> PromptType {
-    PromptType::Other
-}
-
-fn is_empty_map<K, V>(map: &HashMap<K, V>) -> bool {
-    map.is_empty()
+/// Returns ` ns={namespace}` when non-empty, empty string otherwise.
+fn ns_fragment(namespace: &str) -> String {
+    if namespace.is_empty() {
+        String::new()
+    } else {
+        format!(" ns={namespace}")
+    }
 }
 
 /// Events that trigger state transitions in the system.
@@ -142,7 +107,7 @@ pub enum Event {
     #[serde(rename = "agent:prompt")]
     AgentPrompt {
         agent_id: AgentId,
-        #[serde(default = "default_prompt_type")]
+        #[serde(default = "agent::default_prompt_type")]
         prompt_type: PromptType,
         /// Populated when prompt_type is Question — contains the actual question and options
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,7 +165,7 @@ pub enum Event {
         id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-        #[serde(default, skip_serializing_if = "is_empty_map")]
+        #[serde(default, skip_serializing_if = "core_types::is_empty_map")]
         vars: HashMap<String, String>,
         /// Kill the existing session and start fresh (don't use --resume)
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -592,51 +557,12 @@ pub enum Event {
 impl Event {
     /// Create an agent event from an AgentState with owner.
     pub fn from_agent_state(agent_id: AgentId, state: AgentState, owner: OwnerId) -> Self {
-        match state {
-            AgentState::Working => Event::AgentWorking { agent_id, owner },
-            AgentState::WaitingForInput => Event::AgentWaiting { agent_id, owner },
-            AgentState::Failed(error) => Event::AgentFailed {
-                agent_id,
-                error,
-                owner,
-            },
-            AgentState::Exited { exit_code } => Event::AgentExited {
-                agent_id,
-                exit_code,
-                owner,
-            },
-            AgentState::SessionGone => Event::AgentGone { agent_id, owner },
-        }
+        agent::from_agent_state(agent_id, state, owner)
     }
 
     /// Extract agent_id, state, and owner if this is an agent event.
     pub fn as_agent_state(&self) -> Option<(&AgentId, AgentState, &OwnerId)> {
-        match self {
-            Event::AgentWorking { agent_id, owner } => Some((agent_id, AgentState::Working, owner)),
-            Event::AgentWaiting { agent_id, owner } => {
-                Some((agent_id, AgentState::WaitingForInput, owner))
-            }
-            Event::AgentFailed {
-                agent_id,
-                error,
-                owner,
-            } => Some((agent_id, AgentState::Failed(error.clone()), owner)),
-            Event::AgentExited {
-                agent_id,
-                exit_code,
-                owner,
-            } => Some((
-                agent_id,
-                AgentState::Exited {
-                    exit_code: *exit_code,
-                },
-                owner,
-            )),
-            Event::AgentGone { agent_id, owner } => {
-                Some((agent_id, AgentState::SessionGone, owner))
-            }
-            _ => None,
-        }
+        agent::as_agent_state(self)
     }
 
     pub fn name(&self) -> &str {
@@ -709,317 +635,125 @@ impl Event {
     pub fn log_summary(&self) -> String {
         let t = self.name();
         match self {
-            Event::AgentWorking { agent_id, .. }
-            | Event::AgentWaiting { agent_id, .. }
-            | Event::AgentFailed { agent_id, .. }
-            | Event::AgentExited { agent_id, .. }
-            | Event::AgentGone { agent_id, .. } => format!("{t} agent={agent_id}"),
-            Event::AgentInput { agent_id, .. } => format!("{t} agent={agent_id}"),
-            Event::AgentSignal { agent_id, kind, .. } => {
-                format!("{t} id={agent_id} kind={kind:?}")
+            // Agent events
+            Event::AgentWorking { .. }
+            | Event::AgentWaiting { .. }
+            | Event::AgentFailed { .. }
+            | Event::AgentExited { .. }
+            | Event::AgentGone { .. }
+            | Event::AgentInput { .. }
+            | Event::AgentSignal { .. }
+            | Event::AgentIdle { .. }
+            | Event::AgentStop { .. }
+            | Event::AgentPrompt { .. } => agent::log_summary(self, t),
+
+            // Job events
+            Event::JobCreated { .. }
+            | Event::JobAdvanced { .. }
+            | Event::JobUpdated { .. }
+            | Event::JobResume { .. }
+            | Event::JobCancelling { .. }
+            | Event::JobCancel { .. }
+            | Event::JobDeleted { .. } => job::log_summary(self, t),
+
+            // Step events
+            Event::StepStarted { .. }
+            | Event::StepWaiting { .. }
+            | Event::StepCompleted { .. }
+            | Event::StepFailed { .. } => step::log_summary(self, t),
+
+            // Workspace events
+            Event::WorkspaceCreated { .. }
+            | Event::WorkspaceReady { .. }
+            | Event::WorkspaceFailed { .. }
+            | Event::WorkspaceDeleted { .. }
+            | Event::WorkspaceDrop { .. } => workspace::log_summary(self, t),
+
+            // Worker and queue events
+            Event::WorkerStarted { .. }
+            | Event::WorkerWake { .. }
+            | Event::WorkerPollComplete { .. }
+            | Event::WorkerTakeComplete { .. }
+            | Event::WorkerItemDispatched { .. }
+            | Event::WorkerStopped { .. }
+            | Event::WorkerResized { .. }
+            | Event::WorkerDeleted { .. }
+            | Event::QueuePushed { .. }
+            | Event::QueueTaken { .. }
+            | Event::QueueCompleted { .. }
+            | Event::QueueFailed { .. }
+            | Event::QueueDropped { .. }
+            | Event::QueueItemRetry { .. }
+            | Event::QueueItemDead { .. } => worker_queue::log_summary(self, t),
+
+            // Cron events
+            Event::CronStarted { .. }
+            | Event::CronStopped { .. }
+            | Event::CronOnce { .. }
+            | Event::CronFired { .. }
+            | Event::CronDeleted { .. } => cron_scheduler::log_summary(self, t),
+
+            // Decision events
+            Event::DecisionCreated { .. } | Event::DecisionResolved { .. } => {
+                decision::log_summary(self, t)
             }
-            Event::AgentIdle { agent_id } => format!("{t} agent={agent_id}"),
-            Event::AgentStop { agent_id } => format!("{t} agent={agent_id}"),
-            Event::AgentPrompt {
-                agent_id,
-                prompt_type,
-                ..
-            } => format!("{t} agent={agent_id} prompt_type={prompt_type:?}"),
-            Event::CommandRun {
-                job_id,
-                command,
-                namespace,
-                ..
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} id={job_id} cmd={command}")
-                } else {
-                    format!("{t} id={job_id} ns={namespace} cmd={command}")
-                }
-            }
-            Event::JobCreated {
-                id,
-                kind,
-                name,
-                namespace,
-                ..
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} id={id} kind={kind} name={name}")
-                } else {
-                    format!("{t} id={id} ns={namespace} kind={kind} name={name}")
-                }
-            }
-            Event::JobAdvanced { id, step } => format!("{t} id={id} step={step}"),
-            Event::JobUpdated { id, .. } => format!("{t} id={id}"),
-            Event::JobResume { id, .. } => format!("{t} id={id}"),
-            Event::JobCancelling { id } => format!("{t} id={id}"),
-            Event::JobCancel { id } => format!("{t} id={id}"),
-            Event::JobDeleted { id } => format!("{t} id={id}"),
-            Event::RunbookLoaded {
-                hash,
-                version,
-                runbook,
-            } => {
-                let agents = runbook
-                    .get("agents")
-                    .and_then(|v| v.as_object())
-                    .map(|o| o.len())
-                    .unwrap_or(0);
-                let jobs = runbook
-                    .get("jobs")
-                    .and_then(|v| v.as_object())
-                    .map(|o| o.len())
-                    .unwrap_or(0);
-                format!(
-                    "{t} hash={} v={version} agents={agents} jobs={jobs}",
-                    hash.short(12)
-                )
-            }
-            Event::SessionCreated { id, owner } => match owner {
-                OwnerId::Job(job_id) => format!("{t} id={id} job={job_id}"),
-                OwnerId::AgentRun(ar_id) => format!("{t} id={id} agent_run={ar_id}"),
-            },
-            Event::SessionInput { id, .. } => format!("{t} id={id}"),
-            Event::SessionDeleted { id } => format!("{t} id={id}"),
-            Event::ShellExited {
-                job_id,
-                step,
-                exit_code,
-                ..
-            } => format!("{t} job={job_id} step={step} exit={exit_code}"),
-            Event::StepStarted { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
-            Event::StepWaiting { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
-            Event::StepCompleted { job_id, step } => {
-                format!("{t} job={job_id} step={step}")
-            }
-            Event::StepFailed { job_id, step, .. } => format!("{t} job={job_id} step={step}"),
-            Event::Shutdown | Event::Custom => t.to_string(),
-            Event::TimerStart { id } => format!("{t} id={id}"),
-            Event::WorkspaceCreated { id, .. } => format!("{t} id={id}"),
-            Event::WorkspaceReady { id }
-            | Event::WorkspaceFailed { id, .. }
-            | Event::WorkspaceDeleted { id } => format!("{t} id={id}"),
-            Event::WorkspaceDrop { id, .. } => format!("{t} id={id}"),
-            Event::CronStarted { cron_name, .. } => format!("{t} cron={cron_name}"),
-            Event::CronStopped { cron_name, .. } => format!("{t} cron={cron_name}"),
-            Event::CronOnce {
-                cron_name,
-                job_id,
-                agent_name,
-                ..
-            } => {
-                if let Some(agent) = agent_name {
-                    format!("{t} cron={cron_name} agent={agent}")
-                } else {
-                    format!("{t} cron={cron_name} job={job_id}")
-                }
-            }
-            Event::CronFired {
-                cron_name,
-                job_id,
-                agent_run_id,
-                ..
-            } => {
-                if let Some(ar_id) = agent_run_id {
-                    format!("{t} cron={cron_name} agent_run={ar_id}")
-                } else {
-                    format!("{t} cron={cron_name} job={job_id}")
-                }
-            }
-            Event::CronDeleted {
-                cron_name,
-                namespace,
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} cron={cron_name}")
-                } else {
-                    format!("{t} cron={cron_name} ns={namespace}")
-                }
-            }
-            Event::WorkerStarted { worker_name, .. } => {
-                format!("{t} worker={worker_name}")
-            }
-            Event::WorkerWake { worker_name, .. } => format!("{t} worker={worker_name}"),
-            Event::WorkerPollComplete {
-                worker_name, items, ..
-            } => format!("{t} worker={worker_name} items={}", items.len()),
-            Event::WorkerTakeComplete {
-                worker_name,
-                item_id,
-                exit_code,
-                ..
-            } => format!("{t} worker={worker_name} item={item_id} exit={exit_code}"),
-            Event::WorkerItemDispatched {
-                worker_name,
-                item_id,
-                job_id,
-                ..
-            } => format!("{t} worker={worker_name} item={item_id} job={job_id}"),
-            Event::WorkerStopped { worker_name, .. } => format!("{t} worker={worker_name}"),
-            Event::WorkerResized {
-                worker_name,
-                concurrency,
-                namespace,
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} worker={worker_name} concurrency={concurrency}")
-                } else {
-                    format!("{t} worker={worker_name} ns={namespace} concurrency={concurrency}")
-                }
-            }
-            Event::WorkerDeleted {
-                worker_name,
-                namespace,
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} worker={worker_name}")
-                } else {
-                    format!("{t} worker={worker_name} ns={namespace}")
-                }
-            }
-            Event::QueuePushed {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueTaken {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueCompleted {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueFailed {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueDropped {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueItemRetry {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::QueueItemDead {
-                queue_name,
-                item_id,
-                ..
-            } => format!("{t} queue={queue_name} item={item_id}"),
-            Event::DecisionCreated {
-                id,
-                job_id,
-                owner,
-                source,
-                ..
-            } => match owner {
-                OwnerId::AgentRun(ar_id) => {
-                    format!("{t} id={id} agent_run={ar_id} source={source:?}")
-                }
-                OwnerId::Job(_) => format!("{t} id={id} job={job_id} source={source:?}"),
-            },
-            Event::DecisionResolved { id, chosen, .. } => {
-                if let Some(c) = chosen {
-                    format!("{t} id={id} chosen={c}")
-                } else {
-                    format!("{t} id={id}")
-                }
-            }
-            Event::AgentRunCreated {
-                id,
-                agent_name,
-                namespace,
-                ..
-            } => {
-                if namespace.is_empty() {
-                    format!("{t} id={id} agent={agent_name}")
-                } else {
-                    format!("{t} id={id} ns={namespace} agent={agent_name}")
-                }
-            }
-            Event::AgentRunStarted { id, agent_id } => {
-                format!("{t} id={id} agent_id={agent_id}")
-            }
-            Event::AgentRunStatusChanged { id, status, reason } => {
-                if let Some(reason) = reason {
-                    format!("{t} id={id} status={status} reason={reason}")
-                } else {
-                    format!("{t} id={id} status={status}")
-                }
-            }
-            Event::AgentRunResume { id, message, kill } => {
-                if *kill {
-                    format!("{t} id={id} kill=true")
-                } else if message.is_some() {
-                    format!("{t} id={id} msg=true")
-                } else {
-                    format!("{t} id={id}")
-                }
-            }
-            Event::AgentRunDeleted { id } => format!("{t} id={id}"),
+
+            // Agent run events
+            Event::AgentRunCreated { .. }
+            | Event::AgentRunStarted { .. }
+            | Event::AgentRunStatusChanged { .. }
+            | Event::AgentRunResume { .. }
+            | Event::AgentRunDeleted { .. } => agent_run::log_summary(self, t),
+
+            // Core events (command, runbook, session, shell, system, timer)
+            Event::CommandRun { .. }
+            | Event::RunbookLoaded { .. }
+            | Event::SessionCreated { .. }
+            | Event::SessionInput { .. }
+            | Event::SessionDeleted { .. }
+            | Event::ShellExited { .. }
+            | Event::Shutdown
+            | Event::TimerStart { .. }
+            | Event::Custom => core_types::log_summary(self, t),
         }
     }
 
     pub fn job_id(&self) -> Option<&JobId> {
         match self {
-            Event::CommandRun { job_id, .. }
-            | Event::ShellExited { job_id, .. }
-            | Event::StepStarted { job_id, .. }
-            | Event::StepWaiting { job_id, .. }
-            | Event::StepCompleted { job_id, .. }
-            | Event::StepFailed { job_id, .. } => Some(job_id),
-            Event::JobCreated { id, .. }
-            | Event::JobAdvanced { id, .. }
-            | Event::JobUpdated { id, .. }
-            | Event::JobResume { id, .. }
-            | Event::JobCancelling { id, .. }
-            | Event::JobCancel { id, .. }
-            | Event::JobDeleted { id, .. } => Some(id),
-            Event::WorkerItemDispatched { job_id, .. } => Some(job_id),
-            Event::CronOnce {
-                job_id, agent_name, ..
-            } => {
-                if agent_name.is_some() {
-                    None
-                } else {
-                    Some(job_id)
-                }
+            // Job events
+            Event::JobCreated { .. }
+            | Event::JobAdvanced { .. }
+            | Event::JobUpdated { .. }
+            | Event::JobResume { .. }
+            | Event::JobCancelling { .. }
+            | Event::JobCancel { .. }
+            | Event::JobDeleted { .. } => job::job_id(self),
+
+            // Step events
+            Event::StepStarted { .. }
+            | Event::StepWaiting { .. }
+            | Event::StepCompleted { .. }
+            | Event::StepFailed { .. } => step::job_id(self),
+
+            // Worker dispatch
+            Event::WorkerItemDispatched { .. } => worker_queue::job_id(self),
+
+            // Cron events
+            Event::CronOnce { .. } | Event::CronFired { .. } => cron_scheduler::job_id(self),
+
+            // Decision events
+            Event::DecisionCreated { .. } => decision::job_id(self),
+
+            // Core events (command, shell, session)
+            Event::CommandRun { .. } | Event::ShellExited { .. } | Event::SessionCreated { .. } => {
+                core_types::job_id(self)
             }
-            Event::CronFired {
-                job_id,
-                agent_run_id,
-                ..
-            } => {
-                if agent_run_id.is_some() {
-                    None
-                } else {
-                    Some(job_id)
-                }
-            }
-            Event::DecisionCreated { job_id, owner, .. } => {
-                // Return None for agent run owners (job_id is empty for them)
-                if matches!(owner, OwnerId::AgentRun(_)) {
-                    None
-                } else {
-                    Some(job_id)
-                }
-            }
-            Event::SessionCreated { owner, .. } => match owner {
-                OwnerId::Job(id) => Some(id),
-                OwnerId::AgentRun(_) => None,
-            },
+
             _ => None,
         }
     }
 }
 
 #[cfg(test)]
-#[path = "event_tests/mod.rs"]
+#[path = "../event_tests/mod.rs"]
 mod tests;
