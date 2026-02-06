@@ -115,14 +115,14 @@ pub struct StartupResult {
     /// Event reader for the engine loop
     pub event_reader: EventReader,
     /// Context for running reconciliation as a background task
-    pub reconcile_ctx: ReconcileContext,
+    pub reconcile_ctx: ReconcileCtx,
 }
 
 /// Data needed to run reconciliation as a background task.
 ///
 /// Reconciliation is deferred until after READY is printed so the daemon
 /// is immediately responsive to CLI commands.
-pub struct ReconcileContext {
+pub struct ReconcileCtx {
     /// Runtime for agent recovery operations
     pub runtime: Arc<DaemonRuntime>,
     /// Snapshot of state at startup (avoids holding mutex during reconciliation)
@@ -505,7 +505,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         },
         listener,
         event_reader,
-        reconcile_ctx: ReconcileContext {
+        reconcile_ctx: ReconcileCtx {
             runtime,
             state_snapshot,
             session_adapter,

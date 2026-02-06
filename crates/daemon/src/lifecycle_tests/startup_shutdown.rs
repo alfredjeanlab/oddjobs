@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn reconcile_context_counts_non_terminal_jobs() {
-    // Verify ReconcileContext.job_count matches non-terminal jobs.
+    // Verify ReconcileCtx.job_count matches non-terminal jobs.
     // This ensures background reconciliation knows how many jobs to process.
     let mut state = MaterializedState::default();
 

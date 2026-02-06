@@ -26,7 +26,7 @@ pub(crate) fn idle_grace_period() -> Duration {
 }
 
 /// Result of looking up an agent's owner context.
-enum OwnerContext {
+enum OwnerCtx {
     /// Agent is owned by a job
     Job { job: Box<Job>, job_id: JobId },
     /// Agent is owned by a standalone agent run
@@ -52,21 +52,21 @@ where
     /// Returns the owner (Job or AgentRun) if found and valid for processing,
     /// Skip if the owner is terminal or the agent_id is stale, or Unknown if
     /// no owner is registered.
-    fn get_owner_context(&self, agent_id: &AgentId) -> OwnerContext {
+    fn get_owner_context(&self, agent_id: &AgentId) -> OwnerCtx {
         let Some(owner) = self.get_agent_owner(agent_id) else {
-            return OwnerContext::Unknown;
+            return OwnerCtx::Unknown;
         };
 
         match owner {
             OwnerId::Job(job_id) => {
                 // Get the job from state
                 let Some(job) = self.get_job(job_id.as_str()) else {
-                    return OwnerContext::Unknown;
+                    return OwnerCtx::Unknown;
                 };
 
                 // Skip if terminal
                 if job.is_terminal() {
-                    return OwnerContext::Skip;
+                    return OwnerCtx::Skip;
                 }
 
                 // Verify this event is for the current step's agent, not a stale event
@@ -83,10 +83,10 @@ where
                         current_agent = ?current_agent_id,
                         "dropping stale agent event (agent_id mismatch)"
                     );
-                    return OwnerContext::Skip;
+                    return OwnerCtx::Skip;
                 }
 
-                OwnerContext::Job {
+                OwnerCtx::Job {
                     job: Box::new(job),
                     job_id,
                 }
@@ -96,12 +96,12 @@ where
                 let Some(agent_run) =
                     self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
                 else {
-                    return OwnerContext::Unknown;
+                    return OwnerCtx::Unknown;
                 };
 
                 // Skip if terminal
                 if agent_run.status.is_terminal() {
-                    return OwnerContext::Skip;
+                    return OwnerCtx::Skip;
                 }
 
                 // Verify agent_id matches
@@ -111,10 +111,10 @@ where
                         agent_run_id = %agent_run.id,
                         "dropping stale standalone agent event (agent_id mismatch)"
                     );
-                    return OwnerContext::Skip;
+                    return OwnerCtx::Skip;
                 }
 
-                OwnerContext::AgentRun {
+                OwnerCtx::AgentRun {
                     agent_run: Box::new(agent_run),
                     agent_run_id,
                 }
@@ -128,7 +128,7 @@ where
         state: &oj_core::AgentState,
     ) -> Result<Vec<Event>, RuntimeError> {
         match self.get_owner_context(agent_id) {
-            OwnerContext::Job { job, .. } => {
+            OwnerCtx::Job { job, .. } => {
                 let runbook = self.cached_runbook(&job.runbook_hash)?;
                 let agent_def = match monitor::get_agent_def(&runbook, &job) {
                     Ok(def) => def.clone(),
@@ -140,7 +140,7 @@ where
                 self.handle_monitor_state(&job, &agent_def, MonitorState::from_agent_state(state))
                     .await
             }
-            OwnerContext::AgentRun { agent_run, .. } => {
+            OwnerCtx::AgentRun { agent_run, .. } => {
                 let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
                 let agent_def = runbook
                     .get_agent(&agent_run.agent_name)
@@ -153,8 +153,8 @@ where
                 )
                 .await
             }
-            OwnerContext::Skip => Ok(vec![]),
-            OwnerContext::Unknown => {
+            OwnerCtx::Skip => Ok(vec![]),
+            OwnerCtx::Unknown => {
                 tracing::warn!(agent_id = %agent_id, "received AgentStateChanged for unknown agent");
                 Ok(vec![])
             }
@@ -171,7 +171,7 @@ where
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
         match self.get_owner_context(agent_id) {
-            OwnerContext::Job { job, job_id } => {
+            OwnerCtx::Job { job, job_id } => {
                 // If job has a signal or is already waiting for a decision, ignore
                 if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
                     return Ok(vec![]);
@@ -212,7 +212,7 @@ where
 
                 Ok(vec![])
             }
-            OwnerContext::AgentRun {
+            OwnerCtx::AgentRun {
                 agent_run,
                 agent_run_id,
             } => {
@@ -259,8 +259,8 @@ where
 
                 Ok(vec![])
             }
-            OwnerContext::Skip => Ok(vec![]),
-            OwnerContext::Unknown => {
+            OwnerCtx::Skip => Ok(vec![]),
+            OwnerCtx::Unknown => {
                 tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
                 Ok(vec![])
             }
@@ -276,7 +276,7 @@ where
         assistant_context: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
         match self.get_owner_context(agent_id) {
-            OwnerContext::Job { job, .. } => {
+            OwnerCtx::Job { job, .. } => {
                 // If job has a signal or is already waiting for a decision, ignore
                 if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
                     return Ok(vec![]);
@@ -295,7 +295,7 @@ where
                 )
                 .await
             }
-            OwnerContext::AgentRun { agent_run, .. } => {
+            OwnerCtx::AgentRun { agent_run, .. } => {
                 // Additional skip checks for prompt handling
                 if agent_run.action_tracker.agent_signal.is_some()
                     || agent_run.status == AgentRunStatus::Waiting
@@ -319,8 +319,8 @@ where
                 )
                 .await
             }
-            OwnerContext::Skip => Ok(vec![]),
-            OwnerContext::Unknown => {
+            OwnerCtx::Skip => Ok(vec![]),
+            OwnerCtx::Unknown => {
                 tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
                 Ok(vec![])
             }
@@ -336,7 +336,7 @@ where
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
         match self.get_owner_context(agent_id) {
-            OwnerContext::Job { job, job_id } => {
+            OwnerCtx::Job { job, job_id } => {
                 if job.step_status.is_waiting() {
                     return Ok(vec![]); // Already escalated — no-op
                 }
@@ -360,7 +360,7 @@ where
                 ];
                 Ok(self.executor.execute_all(effects).await?)
             }
-            OwnerContext::AgentRun {
+            OwnerCtx::AgentRun {
                 agent_run,
                 agent_run_id,
             } => {
@@ -384,7 +384,7 @@ where
                 ];
                 Ok(self.executor.execute_all(effects).await?)
             }
-            OwnerContext::Skip | OwnerContext::Unknown => Ok(vec![]),
+            OwnerCtx::Skip | OwnerCtx::Unknown => Ok(vec![]),
         }
     }
 

@@ -17,7 +17,7 @@ use uuid::Uuid;
 pub const LIVENESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Context for spawning an agent, abstracting over jobs and standalone runs.
-pub struct SpawnContext<'a> {
+pub struct SpawnCtx<'a> {
     /// Owner of this agent (job or agent_run)
     pub owner: OwnerId,
     /// Display name (job name or command name)
@@ -26,8 +26,8 @@ pub struct SpawnContext<'a> {
     pub namespace: &'a str,
 }
 
-impl<'a> SpawnContext<'a> {
-    /// Create a SpawnContext from a Job.
+impl<'a> SpawnCtx<'a> {
+    /// Create a SpawnCtx from a Job.
     pub fn from_job(job: &'a Job, job_id: &JobId) -> Self {
         Self {
             owner: OwnerId::Job(job_id.clone()),
@@ -36,7 +36,7 @@ impl<'a> SpawnContext<'a> {
         }
     }
 
-    /// Create a SpawnContext for a standalone agent run.
+    /// Create a SpawnCtx for a standalone agent run.
     pub fn from_agent_run(agent_run_id: &AgentRunId, name: &'a str, namespace: &'a str) -> Self {
         Self {
             owner: OwnerId::AgentRun(agent_run_id.clone()),
@@ -58,7 +58,7 @@ impl<'a> SpawnContext<'a> {
 /// to preserve conversation history from a previous run.
 pub fn build_spawn_effects(
     agent_def: &AgentDef,
-    ctx: &SpawnContext<'_>,
+    ctx: &SpawnCtx<'_>,
     agent_name: &str,
     input: &HashMap<String, String>,
     workspace_path: &Path,

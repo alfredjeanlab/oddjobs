@@ -53,8 +53,8 @@ where
             resume_session_id,
         } = params;
 
-        // Build a SpawnContext for standalone agent
-        let ctx = crate::spawn::SpawnContext::from_agent_run(agent_run_id, agent_name, namespace);
+        // Build a SpawnCtx for standalone agent
+        let ctx = crate::spawn::SpawnCtx::from_agent_run(agent_run_id, agent_name, namespace);
 
         let effects = crate::spawn::build_spawn_effects(
             agent_def,

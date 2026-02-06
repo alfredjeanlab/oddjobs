@@ -109,7 +109,7 @@ where
             .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.to_string()))?;
         let execution_dir = self.execution_dir(&job);
 
-        let ctx = crate::spawn::SpawnContext::from_job(&job, job_id);
+        let ctx = crate::spawn::SpawnCtx::from_job(&job, job_id);
         let mut effects = crate::spawn::build_spawn_effects(
             agent_def,
             &ctx,

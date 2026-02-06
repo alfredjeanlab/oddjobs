@@ -58,7 +58,7 @@ fn build_spawn_effects_creates_agent_and_timer() {
         .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -90,7 +90,7 @@ fn build_spawn_effects_interpolates_variables() {
         .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -121,7 +121,7 @@ fn build_spawn_effects_uses_absolute_cwd() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -148,7 +148,7 @@ fn build_spawn_effects_uses_relative_cwd() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -174,7 +174,7 @@ fn build_spawn_effects_prepares_workspace() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     build_spawn_effects(
         &agent,
         &ctx,
@@ -203,7 +203,7 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let result = build_spawn_effects(
         &agent,
         &ctx,
@@ -229,7 +229,7 @@ fn build_spawn_effects_carries_full_config() {
         .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -282,7 +282,7 @@ fn build_spawn_effects_timer_uses_liveness_interval() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -318,7 +318,7 @@ fn build_spawn_effects_namespaces_job_inputs() {
         .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -372,7 +372,7 @@ fn build_spawn_effects_inputs_namespace_in_prompt() {
     .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -425,7 +425,7 @@ fn build_spawn_effects_escapes_backticks_in_prompt() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -460,7 +460,7 @@ fn build_spawn_effects_with_prime_succeeds() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -485,7 +485,7 @@ fn build_spawn_effects_with_prime_script_succeeds() {
     let job = test_job();
 
     let pid = JobId::new("pipe-prime-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -522,7 +522,7 @@ fn build_spawn_effects_exposes_locals_in_prompt() {
     .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -559,7 +559,7 @@ fn build_spawn_effects_standalone_agent_carries_agent_run_id() {
         .collect();
 
     let agent_run_id = oj_core::AgentRunId::new("ar-test-1");
-    let ctx = SpawnContext::from_agent_run(&agent_run_id, "fixer", "");
+    let ctx = SpawnCtx::from_agent_run(&agent_run_id, "fixer", "");
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -611,7 +611,7 @@ fn build_spawn_effects_includes_default_status() {
     job.namespace = "myproject".to_string();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -677,7 +677,7 @@ fn build_spawn_effects_explicit_session_overrides_defaults() {
     job.namespace = "ns".to_string();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -723,7 +723,7 @@ fn build_spawn_effects_always_passes_oj_state_dir() {
     std::env::remove_var("OJ_STATE_DIR");
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -758,7 +758,7 @@ fn build_spawn_effects_no_session_block_gets_defaults() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -814,7 +814,7 @@ fn build_spawn_effects_session_config_interpolates_variables() {
     .collect();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -876,7 +876,7 @@ fn build_spawn_effects_injects_user_env_vars() {
     job.namespace = "testproject".to_string();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -914,7 +914,7 @@ fn build_spawn_effects_user_env_does_not_override_system_vars() {
     job.namespace = "real-ns".to_string();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -953,7 +953,7 @@ fn build_spawn_effects_trims_trailing_newlines_from_command() {
     let job = test_job();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
@@ -1010,7 +1010,7 @@ fn build_spawn_effects_project_env_overrides_global() {
     job.namespace = "myns".to_string();
 
     let pid = JobId::new("pipe-1");
-    let ctx = SpawnContext::from_job(&job, &pid);
+    let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
         &ctx,
