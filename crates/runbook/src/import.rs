@@ -211,6 +211,16 @@ static CONST_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\$\{const\.([a-zA-Z_][a-zA-Z0-9_]*)\}").expect("constant regex pattern is valid")
 });
 
+/// Strip `%{ if/else/endif }` const directives from library content.
+///
+/// Evaluates all conditionals with empty values, effectively removing all
+/// directive lines and any content inside `%{ if const.X != "" }` blocks.
+/// Used for lightweight parsing (e.g. extracting entity names) when const
+/// values are not yet known.
+pub fn strip_const_directives(content: &str) -> Result<String, String> {
+    process_const_directives(content, &HashMap::new())
+}
+
 /// Interpolate const values into library content.
 ///
 /// 1. Evaluate `%{ if/else/endif }` directives — strip or keep text blocks
