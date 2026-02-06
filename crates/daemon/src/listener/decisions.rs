@@ -4,28 +4,23 @@
 //! Decision resolve handler.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use parking_lot::Mutex;
-
 use oj_core::{AgentRunId, AgentRunStatus, DecisionOption, DecisionSource, Event, JobId, OwnerId};
-use oj_storage::MaterializedState;
 
-use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::mutations::emit;
 use super::ConnectionError;
+use super::ListenCtx;
 
 pub(super) fn handle_decision_resolve(
     id: &str,
     chosen: Option<usize>,
     message: Option<String>,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
-    let state_guard = state.lock();
+    let state_guard = ctx.state.lock();
 
     // Find decision by ID or prefix
     let decision = state_guard
@@ -94,7 +89,7 @@ pub(super) fn handle_decision_resolve(
         resolved_at_ms,
         namespace: decision_namespace,
     };
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     // Map chosen option to action based on owner type
     let action_events = match &decision_owner {
@@ -123,7 +118,7 @@ pub(super) fn handle_decision_resolve(
     };
 
     for action in action_events {
-        emit(event_bus, action)?;
+        emit(&ctx.event_bus, action)?;
     }
 
     Ok(Response::DecisionResolved { id: full_id })

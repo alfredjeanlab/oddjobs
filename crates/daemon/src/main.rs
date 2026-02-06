@@ -138,16 +138,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_notify = Arc::new(Notify::new());
 
     // Spawn listener task
-    let listener = Listener::new(
-        unix_listener,
-        daemon.event_bus.clone(),
-        Arc::clone(&daemon.state),
-        Arc::clone(&daemon.orphans),
-        Arc::clone(&daemon.metrics_health),
-        daemon.config.logs_path.clone(),
-        daemon.start_time,
-        Arc::clone(&shutdown_notify),
-    );
+    let ctx = Arc::new(listener::ListenCtx {
+        event_bus: daemon.event_bus.clone(),
+        state: Arc::clone(&daemon.state),
+        orphans: Arc::clone(&daemon.orphans),
+        metrics_health: Arc::clone(&daemon.metrics_health),
+        logs_path: daemon.config.logs_path.clone(),
+        start_time: daemon.start_time,
+        shutdown: Arc::clone(&shutdown_notify),
+    });
+    let listener = Listener::new(unix_listener, ctx);
     tokio::spawn(listener.run());
 
     // Spawn checkpoint task for periodic snapshots

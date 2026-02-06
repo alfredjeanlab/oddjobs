@@ -36,16 +36,21 @@ use oj_engine::MetricsHealth;
 
 use crate::protocol::{self, Request, Response, DEFAULT_TIMEOUT, PROTOCOL_VERSION};
 
+/// Shared daemon context for all request handlers.
+pub(crate) struct ListenCtx {
+    pub event_bus: EventBus,
+    pub state: Arc<Mutex<MaterializedState>>,
+    pub orphans: Arc<Mutex<Vec<Breadcrumb>>>,
+    pub metrics_health: Arc<Mutex<MetricsHealth>>,
+    pub logs_path: PathBuf,
+    pub start_time: Instant,
+    pub shutdown: Arc<Notify>,
+}
+
 /// Listener task for accepting socket connections.
 pub(crate) struct Listener {
     socket: UnixListener,
-    event_bus: EventBus,
-    state: Arc<Mutex<MaterializedState>>,
-    orphans: Arc<Mutex<Vec<Breadcrumb>>>,
-    metrics_health: Arc<Mutex<MetricsHealth>>,
-    logs_path: std::path::PathBuf,
-    start_time: Instant,
-    shutdown: Arc<Notify>,
+    ctx: Arc<ListenCtx>,
 }
 
 /// Errors from connection handling.
@@ -63,27 +68,8 @@ pub(crate) enum ConnectionError {
 
 impl Listener {
     /// Create a new listener.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        socket: UnixListener,
-        event_bus: EventBus,
-        state: Arc<Mutex<MaterializedState>>,
-        orphans: Arc<Mutex<Vec<Breadcrumb>>>,
-        metrics_health: Arc<Mutex<MetricsHealth>>,
-        logs_path: std::path::PathBuf,
-        start_time: Instant,
-        shutdown: Arc<Notify>,
-    ) -> Self {
-        Self {
-            socket,
-            event_bus,
-            state,
-            orphans,
-            metrics_health,
-            logs_path,
-            start_time,
-            shutdown,
-        }
+    pub fn new(socket: UnixListener, ctx: Arc<ListenCtx>) -> Self {
+        Self { socket, ctx }
     }
 
     /// Run the listener loop until shutdown, spawning tasks for each connection.
@@ -91,27 +77,9 @@ impl Listener {
         loop {
             match self.socket.accept().await {
                 Ok((stream, _)) => {
-                    let event_bus = self.event_bus.clone();
-                    let state = Arc::clone(&self.state);
-                    let orphans = Arc::clone(&self.orphans);
-                    let metrics_health = Arc::clone(&self.metrics_health);
-                    let logs_path = self.logs_path.clone();
-                    let start_time = self.start_time;
-                    let shutdown = Arc::clone(&self.shutdown);
-
+                    let ctx = Arc::clone(&self.ctx);
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(
-                            stream,
-                            event_bus,
-                            state,
-                            orphans,
-                            &metrics_health,
-                            logs_path,
-                            start_time,
-                            shutdown,
-                        )
-                        .await
-                        {
+                        if let Err(e) = handle_connection(stream, &ctx).await {
                             match e {
                                 ConnectionError::Protocol(
                                     protocol::ProtocolError::ConnectionClosed,
@@ -133,17 +101,7 @@ impl Listener {
 }
 
 /// Handle a single client connection.
-#[allow(clippy::too_many_arguments)]
-async fn handle_connection(
-    stream: UnixStream,
-    event_bus: EventBus,
-    state: Arc<Mutex<MaterializedState>>,
-    orphans: Arc<Mutex<Vec<Breadcrumb>>>,
-    metrics_health: &Arc<Mutex<MetricsHealth>>,
-    logs_path: std::path::PathBuf,
-    start_time: Instant,
-    shutdown: Arc<Notify>,
-) -> Result<(), ConnectionError> {
+async fn handle_connection(stream: UnixStream, ctx: &ListenCtx) -> Result<(), ConnectionError> {
     let (mut reader, mut writer) = stream.into_split();
 
     // Read request with timeout
@@ -157,17 +115,7 @@ async fn handle_connection(
     }
 
     // Handle request
-    let response = handle_request(
-        request,
-        &event_bus,
-        &state,
-        &orphans,
-        metrics_health,
-        &logs_path,
-        start_time,
-        &shutdown,
-    )
-    .await?;
+    let response = handle_request(request, ctx).await?;
 
     debug!("Sending response: {:?}", response);
 
@@ -178,17 +126,7 @@ async fn handle_connection(
 }
 
 /// Handle a single request and return a response.
-#[allow(clippy::too_many_arguments)]
-async fn handle_request(
-    request: Request,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
-    orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
-    metrics_health: &Arc<Mutex<MetricsHealth>>,
-    logs_path: &std::path::Path,
-    start_time: Instant,
-    shutdown: &Notify,
-) -> Result<Response, ConnectionError> {
+async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, ConnectionError> {
     match request {
         Request::Ping => Ok(Response::Pong),
 
@@ -197,37 +135,28 @@ async fn handle_request(
         }),
 
         Request::Event { event } => {
-            mutations::emit(event_bus, event)?;
+            mutations::emit(&ctx.event_bus, event)?;
             Ok(Response::Ok)
         }
 
-        Request::Query { query } => Ok(query::handle_query(
-            query,
-            state,
-            orphans,
-            metrics_health,
-            logs_path,
-            start_time,
-        )),
+        Request::Query { query } => Ok(query::handle_query(query, ctx)),
 
         Request::Shutdown { kill } => {
             if kill {
-                tmux::kill_state_sessions(state).await;
+                tmux::kill_state_sessions(&ctx.state).await;
             }
-            shutdown.notify_one();
+            ctx.shutdown.notify_one();
             Ok(Response::ShuttingDown)
         }
 
-        Request::Status => Ok(mutations::handle_status(state, orphans, start_time)),
+        Request::Status => Ok(mutations::handle_status(ctx)),
 
-        Request::SessionSend { id, input } => {
-            mutations::handle_session_send(state, event_bus, id, input)
-        }
+        Request::SessionSend { id, input } => mutations::handle_session_send(ctx, id, input),
 
-        Request::SessionKill { id } => mutations::handle_session_kill(state, event_bus, &id).await,
+        Request::SessionKill { id } => mutations::handle_session_kill(ctx, &id).await,
 
         Request::AgentSend { agent_id, message } => {
-            mutations::handle_agent_send(state, event_bus, agent_id, message).await
+            mutations::handle_agent_send(ctx, agent_id, message).await
         }
 
         Request::JobResume {
@@ -238,15 +167,15 @@ async fn handle_request(
             all,
         } => {
             if all {
-                mutations::handle_job_resume_all(state, event_bus, kill)
+                mutations::handle_job_resume_all(ctx, kill)
             } else {
-                mutations::handle_job_resume(state, orphans, event_bus, id, message, vars, kill)
+                mutations::handle_job_resume(ctx, id, message, vars, kill)
             }
         }
 
-        Request::JobResumeAll { kill } => mutations::handle_job_resume_all(state, event_bus, kill),
+        Request::JobResumeAll { kill } => mutations::handle_job_resume_all(ctx, kill),
 
-        Request::JobCancel { ids } => mutations::handle_job_cancel(state, event_bus, ids),
+        Request::JobCancel { ids } => mutations::handle_job_cancel(ctx, ids),
 
         Request::RunCommand {
             project_root,
@@ -263,8 +192,7 @@ async fn handle_request(
                 command: &command,
                 args: &args,
                 named_args: &named_args,
-                event_bus,
-                state,
+                ctx,
             })
             .await
         }
@@ -278,16 +206,14 @@ async fn handle_request(
         },
 
         Request::WorkspaceDrop { id } => {
-            mutations::handle_workspace_drop(state, event_bus, Some(&id), false, false).await
+            mutations::handle_workspace_drop(ctx, Some(&id), false, false).await
         }
 
         Request::WorkspaceDropFailed => {
-            mutations::handle_workspace_drop(state, event_bus, None, true, false).await
+            mutations::handle_workspace_drop(ctx, None, true, false).await
         }
 
-        Request::WorkspaceDropAll => {
-            mutations::handle_workspace_drop(state, event_bus, None, false, true).await
-        }
+        Request::WorkspaceDropAll => mutations::handle_workspace_drop(ctx, None, false, true).await,
 
         Request::JobPrune {
             all,
@@ -301,15 +227,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_job_prune(
-                state,
-                event_bus,
-                logs_path,
-                orphans,
-                &flags,
-                failed,
-                prune_orphans,
-            )
+            mutations::handle_job_prune(ctx, &flags, failed, prune_orphans)
         }
 
         Request::AgentPrune { all, dry_run } => {
@@ -318,7 +236,7 @@ async fn handle_request(
                 dry_run,
                 namespace: None,
             };
-            mutations::handle_agent_prune(state, event_bus, logs_path, &flags)
+            mutations::handle_agent_prune(ctx, &flags)
         }
 
         Request::WorkspacePrune {
@@ -331,7 +249,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_workspace_prune(state, event_bus, &flags).await
+            mutations::handle_workspace_prune(ctx, &flags).await
         }
 
         Request::WorkerPrune {
@@ -344,7 +262,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_worker_prune(state, event_bus, &flags)
+            mutations::handle_worker_prune(ctx, &flags)
         }
 
         Request::CronPrune { all, dry_run } => {
@@ -353,7 +271,7 @@ async fn handle_request(
                 dry_run,
                 namespace: None,
             };
-            mutations::handle_cron_prune(state, event_bus, &flags)
+            mutations::handle_cron_prune(ctx, &flags)
         }
 
         Request::WorkerStart {
@@ -361,23 +279,14 @@ async fn handle_request(
             namespace,
             worker_name,
             all,
-        } => workers::handle_worker_start(
-            &project_root,
-            &namespace,
-            &worker_name,
-            all,
-            event_bus,
-            state,
-        ),
+        } => workers::handle_worker_start(&project_root, &namespace, &worker_name, all, ctx),
 
         Request::WorkerWake {
             worker_name,
             namespace,
         } => {
-            // Internal-only: emits WorkerWake event for queue auto-wake.
-            // CLI uses WorkerStart (idempotent) instead.
             mutations::emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::WorkerWake {
                     worker_name,
                     namespace,
@@ -390,90 +299,58 @@ async fn handle_request(
             worker_name,
             namespace,
             project_root,
-        } => workers::handle_worker_stop(
-            &worker_name,
-            &namespace,
-            event_bus,
-            state,
-            project_root.as_deref(),
-        ),
+        } => workers::handle_worker_stop(&worker_name, &namespace, project_root.as_deref(), ctx),
 
         Request::WorkerRestart {
             project_root,
             namespace,
             worker_name,
-        } => workers::handle_worker_restart(
-            &project_root,
-            &namespace,
-            &worker_name,
-            event_bus,
-            state,
-        ),
+        } => workers::handle_worker_restart(&project_root, &namespace, &worker_name, ctx),
 
         Request::WorkerResize {
             worker_name,
             namespace,
             concurrency,
-        } => workers::handle_worker_resize(&worker_name, &namespace, concurrency, event_bus, state),
+        } => workers::handle_worker_resize(&worker_name, &namespace, concurrency, ctx),
 
         Request::CronStart {
             project_root,
             namespace,
             cron_name,
             all,
-        } => crons::handle_cron_start(&project_root, &namespace, &cron_name, all, event_bus, state),
+        } => crons::handle_cron_start(&project_root, &namespace, &cron_name, all, ctx),
 
         Request::CronStop {
             cron_name,
             namespace,
             project_root,
-        } => crons::handle_cron_stop(
-            &cron_name,
-            &namespace,
-            event_bus,
-            state,
-            project_root.as_deref(),
-        ),
+        } => crons::handle_cron_stop(&cron_name, &namespace, ctx, project_root.as_deref()),
 
         Request::CronRestart {
             project_root,
             namespace,
             cron_name,
-        } => crons::handle_cron_restart(&project_root, &namespace, &cron_name, event_bus, state),
+        } => crons::handle_cron_restart(&project_root, &namespace, &cron_name, ctx),
 
         Request::CronOnce {
             project_root,
             namespace,
             cron_name,
-        } => crons::handle_cron_once(&project_root, &namespace, &cron_name, event_bus, state).await,
+        } => crons::handle_cron_once(&project_root, &namespace, &cron_name, ctx).await,
 
         Request::QueuePush {
             project_root,
             namespace,
             queue_name,
             data,
-        } => queues::handle_queue_push(
-            &project_root,
-            &namespace,
-            &queue_name,
-            data,
-            event_bus,
-            state,
-        ),
+        } => queues::handle_queue_push(&project_root, &namespace, &queue_name, data, ctx),
 
         Request::QueueDrop {
             project_root,
             namespace,
             queue_name,
             item_id,
-        } => queues::handle_queue_drop(
-            &project_root,
-            &namespace,
-            &queue_name,
-            &item_id,
-            event_bus,
-            state,
-        ),
+        } => queues::handle_queue_drop(&project_root, &namespace, &queue_name, &item_id, ctx),
 
         Request::QueueRetry {
             project_root,
@@ -486,11 +363,12 @@ async fn handle_request(
             &project_root,
             &namespace,
             &queue_name,
-            &item_ids,
-            all_dead,
-            status.as_deref(),
-            event_bus,
-            state,
+            queues::RetryFilter {
+                item_ids: &item_ids,
+                all_dead,
+                status_filter: status.as_deref(),
+            },
+            ctx,
         ),
 
         Request::QueueRetryBulk {
@@ -500,50 +378,37 @@ async fn handle_request(
             item_ids,
             all_dead,
             status_filter,
-        } => queues::handle_queue_retry_bulk(
+        } => queues::handle_queue_retry(
             &project_root,
             &namespace,
             &queue_name,
-            &item_ids,
-            all_dead,
-            status_filter.as_deref(),
-            event_bus,
-            state,
+            queues::RetryFilter {
+                item_ids: &item_ids,
+                all_dead,
+                status_filter: status_filter.as_deref(),
+            },
+            ctx,
         ),
 
         Request::QueueDrain {
             project_root,
             namespace,
             queue_name,
-        } => queues::handle_queue_drain(&project_root, &namespace, &queue_name, event_bus, state),
+        } => queues::handle_queue_drain(&project_root, &namespace, &queue_name, ctx),
 
         Request::QueueFail {
             project_root,
             namespace,
             queue_name,
             item_id,
-        } => queues::handle_queue_fail(
-            &project_root,
-            &namespace,
-            &queue_name,
-            &item_id,
-            event_bus,
-            state,
-        ),
+        } => queues::handle_queue_fail(&project_root, &namespace, &queue_name, &item_id, ctx),
 
         Request::QueueDone {
             project_root,
             namespace,
             queue_name,
             item_id,
-        } => queues::handle_queue_done(
-            &project_root,
-            &namespace,
-            &queue_name,
-            &item_id,
-            event_bus,
-            state,
-        ),
+        } => queues::handle_queue_done(&project_root, &namespace, &queue_name, &item_id, ctx),
 
         Request::QueuePrune {
             project_root,
@@ -551,27 +416,19 @@ async fn handle_request(
             queue_name,
             all,
             dry_run,
-        } => queues::handle_queue_prune(
-            &project_root,
-            &namespace,
-            &queue_name,
-            all,
-            dry_run,
-            event_bus,
-            state,
-        ),
+        } => queues::handle_queue_prune(&project_root, &namespace, &queue_name, all, dry_run, ctx),
 
         Request::DecisionResolve {
             id,
             chosen,
             message,
-        } => decisions::handle_decision_resolve(&id, chosen, message, event_bus, state),
+        } => decisions::handle_decision_resolve(&id, chosen, message, ctx),
 
         Request::AgentResume {
             agent_id,
             kill,
             all,
-        } => mutations::handle_agent_resume(state, event_bus, agent_id, kill, all).await,
+        } => mutations::handle_agent_resume(ctx, agent_id, kill, all).await,
 
         Request::SessionPrune {
             all,
@@ -583,7 +440,7 @@ async fn handle_request(
                 dry_run,
                 namespace: namespace.as_deref(),
             };
-            mutations::handle_session_prune(state, event_bus, &flags).await
+            mutations::handle_session_prune(ctx, &flags).await
         }
     }
 }
@@ -709,6 +566,34 @@ fn collect_start_results(
     }
 
     Ok((started, skipped))
+}
+
+#[cfg(test)]
+fn make_listen_ctx(event_bus: crate::event_bus::EventBus, dir: &std::path::Path) -> ListenCtx {
+    ListenCtx {
+        event_bus,
+        state: Arc::new(Mutex::new(MaterializedState::default())),
+        orphans: Arc::new(Mutex::new(Vec::new())),
+        metrics_health: Arc::new(Mutex::new(Default::default())),
+        logs_path: dir.to_path_buf(),
+        start_time: Instant::now(),
+        shutdown: Arc::new(Notify::new()),
+    }
+}
+
+#[cfg(test)]
+pub(super) fn test_ctx(dir: &std::path::Path) -> ListenCtx {
+    let wal = oj_storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
+    let (event_bus, _reader) = crate::event_bus::EventBus::new(wal);
+    make_listen_ctx(event_bus, dir)
+}
+
+#[cfg(test)]
+pub(super) fn test_ctx_with_wal(dir: &std::path::Path) -> (ListenCtx, Arc<Mutex<oj_storage::Wal>>) {
+    let wal = oj_storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
+    let (event_bus, reader) = crate::event_bus::EventBus::new(wal);
+    let wal = reader.wal();
+    (make_listen_ctx(event_bus, dir), wal)
 }
 
 #[cfg(test)]

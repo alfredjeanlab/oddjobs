@@ -13,13 +13,13 @@ use oj_core::{scoped_name, Event};
 use oj_runbook::QueueType;
 use oj_storage::{MaterializedState, QueueItemStatus};
 
-use crate::event_bus::EventBus;
 use crate::protocol::{QueueItemEntry, Response};
 
 use super::mutations::emit;
 use super::suggest;
 use super::workers::hash_and_emit_runbook;
 use super::ConnectionError;
+use super::ListenCtx;
 
 /// Handle a QueuePush request.
 pub(super) fn handle_queue_push(
@@ -27,16 +27,23 @@ pub(super) fn handle_queue_push(
     namespace: &str,
     queue_name: &str,
     data: serde_json::Value,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue push", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue push",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -55,14 +62,7 @@ pub(super) fn handle_queue_push(
 
     // External queues: wake workers to re-run the list command (no data needed)
     if queue_def.queue_type != QueueType::Persisted {
-        wake_attached_workers(
-            project_root,
-            namespace,
-            queue_name,
-            &runbook,
-            event_bus,
-            state,
-        )?;
+        wake_attached_workers(project_root, namespace, queue_name, &runbook, ctx)?;
 
         return Ok(Response::Ok);
     }
@@ -110,7 +110,7 @@ pub(super) fn handle_queue_push(
 
     // Deduplicate: if a pending or active item with the same data already exists, return it
     {
-        let st = state.lock();
+        let st = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         if let Some(items) = st.queue_items.get(&key) {
             if let Some(existing) = items.iter().find(|i| {
@@ -122,14 +122,7 @@ pub(super) fn handle_queue_push(
                 drop(st);
 
                 // Still wake workers so they can pick up pending work
-                wake_attached_workers(
-                    project_root,
-                    namespace,
-                    queue_name,
-                    &runbook,
-                    event_bus,
-                    state,
-                )?;
+                wake_attached_workers(project_root, namespace, queue_name, &runbook, ctx)?;
 
                 return Ok(Response::QueuePushed {
                     queue_name: queue_name.to_string(),
@@ -156,17 +149,10 @@ pub(super) fn handle_queue_push(
         pushed_at_epoch_ms,
         namespace: namespace.to_string(),
     };
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     // Wake workers attached to this queue (auto-starting stopped workers)
-    wake_attached_workers(
-        project_root,
-        namespace,
-        queue_name,
-        &runbook,
-        event_bus,
-        state,
-    )?;
+    wake_attached_workers(project_root, namespace, queue_name, &runbook, ctx)?;
 
     Ok(Response::QueuePushed {
         queue_name: queue_name.to_string(),
@@ -185,8 +171,7 @@ fn wake_attached_workers(
     namespace: &str,
     queue_name: &str,
     runbook: &oj_runbook::Runbook,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<(), ConnectionError> {
     // Find workers in the runbook that source from this queue
     let worker_names: Vec<&str> = runbook
@@ -199,7 +184,7 @@ fn wake_attached_workers(
     for name in &worker_names {
         let scoped = scoped_name(namespace, name);
         let is_running = {
-            let state = state.lock();
+            let state = ctx.state.lock();
             state
                 .workers
                 .get(&scoped)
@@ -215,7 +200,7 @@ fn wake_attached_workers(
                 "waking running worker on queue push"
             );
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::WorkerWake {
                     worker_name: (*name).to_string(),
                     namespace: namespace.to_string(),
@@ -226,10 +211,10 @@ fn wake_attached_workers(
             let Some(worker_def) = runbook.get_worker(name) else {
                 continue;
             };
-            let runbook_hash = hash_and_emit_runbook(event_bus, runbook)?;
+            let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, runbook)?;
 
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::WorkerStarted {
                     worker_name: (*name).to_string(),
                     project_root: project_root.to_path_buf(),
@@ -307,16 +292,23 @@ pub(super) fn handle_queue_drop(
     namespace: &str,
     queue_name: &str,
     item_id: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (runbook, _effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue drop", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue drop",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -340,7 +332,7 @@ pub(super) fn handle_queue_drop(
     }
 
     // Resolve item ID (exact or prefix match)
-    let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+    let resolved_id = match resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
         Ok(id) => id,
         Err(resp) => return Ok(resp),
     };
@@ -351,7 +343,7 @@ pub(super) fn handle_queue_drop(
         item_id: resolved_id.clone(),
         namespace: namespace.to_string(),
     };
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     Ok(Response::QueueDropped {
         queue_name: queue_name.to_string(),
@@ -359,26 +351,41 @@ pub(super) fn handle_queue_drop(
     })
 }
 
+/// Filter parameters for queue retry operations.
+pub(super) struct RetryFilter<'a> {
+    pub item_ids: &'a [String],
+    pub all_dead: bool,
+    pub status_filter: Option<&'a str>,
+}
+
 /// Handle a QueueRetry request (single or bulk).
-// TODO(refactor): Consolidate filter args into a RetryOptions struct once patterns stabilize
-#[allow(clippy::too_many_arguments)]
 pub(super) fn handle_queue_retry(
     project_root: &Path,
     namespace: &str,
     queue_name: &str,
-    item_ids: &[String],
-    all_dead: bool,
-    status_filter: Option<&str>,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    filter: RetryFilter<'_>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
+    let RetryFilter {
+        item_ids,
+        all_dead,
+        status_filter,
+    } = filter;
     // Load runbook containing the queue.
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue retry", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue retry",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -405,7 +412,7 @@ pub(super) fn handle_queue_retry(
     // Determine which items to retry
     let items_to_process: Vec<String> = if all_dead || status_filter.is_some() {
         // Filter mode: collect items by status
-        let st = state.lock();
+        let st = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         st.queue_items
             .get(&key)
@@ -449,14 +456,14 @@ pub(super) fn handle_queue_retry(
         let item_id = &items_to_process[0];
 
         // Resolve item ID (exact or prefix match)
-        let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+        let resolved_id = match resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
             Ok(id) => id,
             Err(resp) => return Ok(resp),
         };
 
         // Validate item is in Dead or Failed status
         {
-            let st = state.lock();
+            let st = ctx.state.lock();
             let key = scoped_name(namespace, queue_name);
             let item = st
                 .queue_items
@@ -480,17 +487,10 @@ pub(super) fn handle_queue_retry(
             item_id: resolved_id.clone(),
             namespace: namespace.to_string(),
         };
-        emit(event_bus, event)?;
+        emit(&ctx.event_bus, event)?;
 
         // Wake workers attached to this queue
-        wake_attached_workers(
-            project_root,
-            namespace,
-            queue_name,
-            &runbook,
-            event_bus,
-            state,
-        )?;
+        wake_attached_workers(project_root, namespace, queue_name, &runbook, ctx)?;
 
         return Ok(Response::QueueRetried {
             queue_name: queue_name.to_string(),
@@ -505,7 +505,7 @@ pub(super) fn handle_queue_retry(
 
     for item_id in &items_to_process {
         // Resolve item ID (exact or prefix match)
-        let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+        let resolved_id = match resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
             Ok(id) => id,
             Err(_) => {
                 not_found.push(item_id.clone());
@@ -515,7 +515,7 @@ pub(super) fn handle_queue_retry(
 
         // Check item status
         let item_status = {
-            let st = state.lock();
+            let st = ctx.state.lock();
             let key = scoped_name(namespace, queue_name);
             st.queue_items
                 .get(&key)
@@ -531,7 +531,7 @@ pub(super) fn handle_queue_retry(
                     item_id: resolved_id.clone(),
                     namespace: namespace.to_string(),
                 };
-                emit(event_bus, event)?;
+                emit(&ctx.event_bus, event)?;
                 retried.push(resolved_id);
             }
             Some(_) => {
@@ -545,187 +545,12 @@ pub(super) fn handle_queue_retry(
 
     // Wake workers if any items were retried
     if !retried.is_empty() {
-        wake_attached_workers(
-            project_root,
-            namespace,
-            queue_name,
-            &runbook,
-            event_bus,
-            state,
-        )?;
+        wake_attached_workers(project_root, namespace, queue_name, &runbook, ctx)?;
     }
 
     Ok(Response::QueueItemsRetried {
         queue_name: queue_name.to_string(),
         item_ids: retried,
-        already_retried,
-        not_found,
-    })
-}
-
-/// Handle a QueueRetryBulk request.
-///
-/// Retries multiple dead or failed queue items. Supports:
-/// - Specific item IDs (with prefix resolution)
-/// - `all_dead` flag to retry all dead items
-/// - `status_filter` to retry items by status (e.g., "dead", "failed")
-// TODO(refactor): consider grouping filter options (item_ids, all_dead, status_filter) into a struct
-#[allow(clippy::too_many_arguments)]
-pub(super) fn handle_queue_retry_bulk(
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
-    item_ids: &[String],
-    all_dead: bool,
-    status_filter: Option<&str>,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
-) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (runbook, effective_root) = match super::load_runbook_with_fallback(
-        project_root,
-        namespace,
-        state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue retry", state),
-    ) {
-        Ok(result) => result,
-        Err(resp) => return Ok(resp),
-    };
-    let project_root = &effective_root;
-
-    // Validate queue exists
-    let queue_def = match runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-
-    // Validate queue is persisted
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
-    }
-
-    // Collect items to retry based on mode
-    let items_to_retry: Vec<(String, Option<QueueItemStatus>)> = {
-        let st = state.lock();
-        let key = scoped_name(namespace, queue_name);
-        let items = st.queue_items.get(&key);
-
-        if all_dead {
-            // Retry all dead items
-            items
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter(|i| i.status == QueueItemStatus::Dead)
-                        .map(|i| (i.id.clone(), Some(i.status.clone())))
-                        .collect()
-                })
-                .unwrap_or_default()
-        } else if let Some(status) = status_filter {
-            // Filter by status
-            let target_status = match status.to_lowercase().as_str() {
-                "dead" => Some(QueueItemStatus::Dead),
-                "failed" => Some(QueueItemStatus::Failed),
-                _ => None,
-            };
-            if let Some(target) = target_status {
-                items
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter(|i| i.status == target)
-                            .map(|i| (i.id.clone(), Some(i.status.clone())))
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                return Ok(Response::Error {
-                    message: format!(
-                        "invalid status filter '{}': must be 'dead' or 'failed'",
-                        status
-                    ),
-                });
-            }
-        } else {
-            // Resolve specific item IDs
-            let mut resolved = Vec::new();
-            for id in item_ids {
-                // Try exact match first
-                if let Some(item) = items.and_then(|items| items.iter().find(|i| i.id == *id)) {
-                    resolved.push((item.id.clone(), Some(item.status.clone())));
-                    continue;
-                }
-
-                // Try prefix match
-                let matches: Vec<_> = items
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter(|i| i.id.starts_with(id))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-
-                match matches.len() {
-                    1 => resolved.push((matches[0].id.clone(), Some(matches[0].status.clone()))),
-                    0 => resolved.push((id.clone(), None)), // Not found
-                    _ => resolved.push((id.clone(), None)), // Ambiguous - will be skipped
-                }
-            }
-            resolved
-        }
-    };
-
-    // Process each item
-    let mut item_ids = Vec::new();
-    let mut already_retried = Vec::new();
-    let mut not_found = Vec::new();
-
-    for (item_id, status) in items_to_retry {
-        match status {
-            None => {
-                // Item not found or ambiguous
-                not_found.push(item_id);
-            }
-            Some(QueueItemStatus::Dead) | Some(QueueItemStatus::Failed) => {
-                // Valid for retry - emit event
-                let event = Event::QueueItemRetry {
-                    queue_name: queue_name.to_string(),
-                    item_id: item_id.clone(),
-                    namespace: namespace.to_string(),
-                };
-                emit(event_bus, event)?;
-                item_ids.push(item_id);
-            }
-            Some(_status) => {
-                // Not in a retryable status
-                already_retried.push(item_id);
-            }
-        }
-    }
-
-    // Wake workers attached to this queue (if any items were retried)
-    if !item_ids.is_empty() {
-        wake_attached_workers(
-            project_root,
-            namespace,
-            queue_name,
-            &runbook,
-            event_bus,
-            state,
-        )?;
-    }
-
-    Ok(Response::QueueItemsRetried {
-        queue_name: queue_name.to_string(),
-        item_ids,
         already_retried,
         not_found,
     })
@@ -738,16 +563,23 @@ pub(super) fn handle_queue_drain(
     project_root: &Path,
     namespace: &str,
     queue_name: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (runbook, _effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue drain", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue drain",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -772,7 +604,7 @@ pub(super) fn handle_queue_drain(
 
     // Collect pending item IDs and build response summaries
     let pending_items: Vec<crate::protocol::QueueItemSummary> = {
-        let state = state.lock();
+        let state = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         state
             .queue_items
@@ -801,7 +633,7 @@ pub(super) fn handle_queue_drain(
             item_id: item.id.clone(),
             namespace: namespace.to_string(),
         };
-        emit(event_bus, event)?;
+        emit(&ctx.event_bus, event)?;
     }
 
     Ok(Response::QueueDrained {
@@ -816,16 +648,23 @@ pub(super) fn handle_queue_fail(
     namespace: &str,
     queue_name: &str,
     item_id: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (_runbook, _effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue fail", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue fail",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -847,14 +686,14 @@ pub(super) fn handle_queue_fail(
     }
 
     // Resolve item ID (exact or prefix match)
-    let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+    let resolved_id = match resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
         Ok(id) => id,
         Err(resp) => return Ok(resp),
     };
 
     // Validate item is Active
     {
-        let st = state.lock();
+        let st = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         let item = st
             .queue_items
@@ -880,7 +719,7 @@ pub(super) fn handle_queue_fail(
         error: "force-failed via oj queue fail".to_string(),
         namespace: namespace.to_string(),
     };
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     Ok(Response::QueueFailed {
         queue_name: queue_name.to_string(),
@@ -894,16 +733,23 @@ pub(super) fn handle_queue_done(
     namespace: &str,
     queue_name: &str,
     item_id: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (_runbook, _effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue done", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue done",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -925,14 +771,14 @@ pub(super) fn handle_queue_done(
     }
 
     // Resolve item ID (exact or prefix match)
-    let resolved_id = match resolve_queue_item_id(state, namespace, queue_name, item_id) {
+    let resolved_id = match resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
         Ok(id) => id,
         Err(resp) => return Ok(resp),
     };
 
     // Validate item is Active
     {
-        let st = state.lock();
+        let st = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         let item = st
             .queue_items
@@ -957,7 +803,7 @@ pub(super) fn handle_queue_done(
         item_id: resolved_id.clone(),
         namespace: namespace.to_string(),
     };
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     Ok(Response::QueueCompleted {
         queue_name: queue_name.to_string(),
@@ -976,16 +822,23 @@ pub(super) fn handle_queue_prune(
     queue_name: &str,
     all: bool,
     dry_run: bool,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook containing the queue.
     let (runbook, _effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || suggest_for_queue(project_root, queue_name, namespace, "oj queue prune", state),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                "oj queue prune",
+                &ctx.state,
+            )
+        },
     ) {
         Ok(result) => result,
         Err(resp) => return Ok(resp),
@@ -1018,7 +871,7 @@ pub(super) fn handle_queue_prune(
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
     {
-        let state = state.lock();
+        let state = ctx.state.lock();
         let key = scoped_name(namespace, queue_name);
         if let Some(items) = state.queue_items.get(&key) {
             for item in items {
@@ -1051,7 +904,7 @@ pub(super) fn handle_queue_prune(
                 item_id: entry.item_id.clone(),
                 namespace: namespace.to_string(),
             };
-            emit(event_bus, event)?;
+            emit(&ctx.event_bus, event)?;
         }
     }
 

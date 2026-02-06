@@ -9,7 +9,6 @@ use parking_lot::Mutex;
 
 use oj_adapters::subprocess::{run_with_timeout, GIT_WORKTREE_TIMEOUT, TMUX_TIMEOUT};
 use oj_core::{AgentId, AgentRunId, Event, JobId, SessionId, ShortId, WorkspaceId};
-use oj_engine::breadcrumb::Breadcrumb;
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 
@@ -19,6 +18,7 @@ use crate::protocol::{
 };
 
 use super::ConnectionError;
+use super::ListenCtx;
 
 /// Emit an event via the event bus.
 ///
@@ -55,19 +55,15 @@ fn cleanup_agent_files(logs_path: &std::path::Path, agent_id: &str) {
 }
 
 /// Handle a status request.
-pub(super) fn handle_status(
-    state: &Arc<Mutex<MaterializedState>>,
-    orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
-    start_time: std::time::Instant,
-) -> Response {
-    let uptime_secs = start_time.elapsed().as_secs();
+pub(super) fn handle_status(ctx: &ListenCtx) -> Response {
+    let uptime_secs = ctx.start_time.elapsed().as_secs();
     let (jobs_active, sessions_active) = {
-        let state = state.lock();
+        let state = ctx.state.lock();
         let active = state.jobs.values().filter(|p| !p.is_terminal()).count();
         let sessions = state.sessions.len();
         (active, sessions)
     };
-    let orphan_count = orphans.lock().len();
+    let orphan_count = ctx.orphans.lock().len();
 
     Response::Status {
         uptime_secs,
@@ -79,13 +75,12 @@ pub(super) fn handle_status(
 
 /// Handle a session send request.
 pub(super) fn handle_session_send(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     id: String,
     input: String,
 ) -> Result<Response, ConnectionError> {
     let session_id = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         if state_guard.sessions.contains_key(&id) {
             Some(id.clone())
         } else {
@@ -96,7 +91,7 @@ pub(super) fn handle_session_send(
     match session_id {
         Some(sid) => {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::SessionInput {
                     id: SessionId::new(sid),
                     input,
@@ -115,12 +110,11 @@ pub(super) fn handle_session_send(
 /// Validates that the session exists, kills the tmux session, and emits
 /// a SessionDeleted event to clean up state.
 pub(super) async fn handle_session_kill(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     id: &str,
 ) -> Result<Response, ConnectionError> {
     let session_id = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         if state_guard.sessions.contains_key(id) {
             Some(id.to_string())
         } else {
@@ -137,7 +131,7 @@ pub(super) async fn handle_session_kill(
 
             // Emit SessionDeleted to clean up state
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::SessionDeleted {
                     id: SessionId::new(sid),
                 },
@@ -156,9 +150,7 @@ pub(super) async fn handle_session_kill(
 /// emitting the resume event. For orphaned jobs, emits synthetic events
 /// to reconstruct the job in state, then resumes.
 pub(super) fn handle_job_resume(
-    state: &Arc<Mutex<MaterializedState>>,
-    orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     id: String,
     message: Option<String>,
     vars: std::collections::HashMap<String, String>,
@@ -166,7 +158,7 @@ pub(super) fn handle_job_resume(
 ) -> Result<Response, ConnectionError> {
     // Check if job exists in state and get relevant info for validation
     let job_info = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         state_guard.get_job(&id).map(|p| {
             (
                 p.id.clone(),
@@ -180,15 +172,19 @@ pub(super) fn handle_job_resume(
     if let Some((job_id, job_kind, current_step, runbook_hash)) = job_info {
         // Validate agent steps require --message before emitting event
         if message.is_none() && current_step != "failed" {
-            if let Err(err_msg) =
-                validate_resume_message(state, &job_id, &job_kind, &current_step, &runbook_hash)
-            {
+            if let Err(err_msg) = validate_resume_message(
+                &ctx.state,
+                &job_id,
+                &job_kind,
+                &current_step,
+                &runbook_hash,
+            ) {
                 return Ok(Response::Error { message: err_msg });
             }
         }
 
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::JobResume {
                 id: JobId::new(job_id),
                 message,
@@ -201,7 +197,7 @@ pub(super) fn handle_job_resume(
 
     // Not in state — check orphan registry
     let orphan = {
-        let orphans_guard = orphans.lock();
+        let orphans_guard = ctx.orphans.lock();
         orphans_guard
             .iter()
             .find(|bc| bc.job_id == id || bc.job_id.starts_with(&id))
@@ -228,7 +224,7 @@ pub(super) fn handle_job_resume(
 
     // Verify the runbook is in state (needed for step definitions during resume)
     let runbook_available = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         state_guard.runbooks.contains_key(&orphan.runbook_hash)
     };
 
@@ -252,7 +248,7 @@ pub(super) fn handle_job_resume(
     let cwd = orphan.cwd.or(orphan.workspace_root).unwrap_or_default();
 
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::JobCreated {
             id: job_id.clone(),
             kind: orphan.kind,
@@ -268,7 +264,7 @@ pub(super) fn handle_job_resume(
     )?;
 
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::JobAdvanced {
             id: job_id.clone(),
             step: "failed".to_string(),
@@ -276,7 +272,7 @@ pub(super) fn handle_job_resume(
     )?;
 
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::JobResume {
             id: job_id,
             message,
@@ -287,7 +283,7 @@ pub(super) fn handle_job_resume(
 
     // Remove from orphan registry
     {
-        let mut orphans_guard = orphans.lock();
+        let mut orphans_guard = ctx.orphans.lock();
         if let Some(idx) = orphans_guard.iter().position(|bc| bc.job_id == orphan_id) {
             orphans_guard.remove(idx);
         }
@@ -301,12 +297,11 @@ pub(super) fn handle_job_resume(
 /// Resumes all non-terminal jobs that are in a resumable state:
 /// waiting, failed, or pending. With `--kill`, also resumes running jobs.
 pub(super) fn handle_job_resume_all(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     kill: bool,
 ) -> Result<Response, ConnectionError> {
     let (targets, skipped) = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         let mut targets: Vec<String> = Vec::new();
         let mut skipped: Vec<(String, String)> = Vec::new();
 
@@ -340,7 +335,7 @@ pub(super) fn handle_job_resume_all(
     let mut resumed = Vec::new();
     for job_id in targets {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::JobResume {
                 id: JobId::new(&job_id),
                 message: None,
@@ -356,8 +351,7 @@ pub(super) fn handle_job_resume_all(
 
 /// Handle a job cancel request.
 pub(super) fn handle_job_cancel(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     ids: Vec<String>,
 ) -> Result<Response, ConnectionError> {
     let mut cancelled = Vec::new();
@@ -366,14 +360,14 @@ pub(super) fn handle_job_cancel(
 
     for id in ids {
         let is_valid = {
-            let state_guard = state.lock();
+            let state_guard = ctx.state.lock();
             state_guard.get_job(&id).map(|p| !p.is_terminal())
         };
 
         match is_valid {
             Some(true) => {
                 emit(
-                    event_bus,
+                    &ctx.event_bus,
                     Event::JobCancel {
                         id: JobId::new(id.clone()),
                     },
@@ -398,14 +392,13 @@ pub(super) fn handle_job_cancel(
 
 /// Handle workspace drop requests.
 pub(super) async fn handle_workspace_drop(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     id: Option<&str>,
     failed_only: bool,
     drop_all: bool,
 ) -> Result<Response, ConnectionError> {
     let workspaces_to_drop: Vec<(String, std::path::PathBuf, Option<String>)> = {
-        let state = state.lock();
+        let state = ctx.state.lock();
 
         if let Some(id) = id {
             // Find workspace by exact match or prefix
@@ -462,7 +455,7 @@ pub(super) async fn handle_workspace_drop(
     // Emit delete events for each workspace
     for (id, _path, _branch) in workspaces_to_drop {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::WorkspaceDrop {
                 id: WorkspaceId::new(id),
             },
@@ -481,13 +474,12 @@ pub(super) async fn handle_workspace_drop(
 /// 4. Standalone agent_runs match
 /// 5. Session liveness check (tmux has-session) before returning 'not found'
 pub(super) async fn handle_agent_send(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     agent_id: String,
     message: String,
 ) -> Result<Response, ConnectionError> {
     let resolved_agent_id = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
 
         // (1) Exact agent_id match across ALL step history, prefer latest
         let mut found: Option<String> = None;
@@ -554,7 +546,7 @@ pub(super) async fn handle_agent_send(
 
     if let Some(aid) = resolved_agent_id {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::AgentInput {
                 agent_id: AgentId::new(aid),
                 input: message,
@@ -574,7 +566,7 @@ pub(super) async fn handle_agent_send(
 
     if session_alive {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::AgentInput {
                 agent_id: AgentId::new(&agent_id),
                 input: message,
@@ -594,10 +586,7 @@ pub(super) async fn handle_agent_send(
 /// cleans up their log files. By default only prunes jobs older
 /// than 12 hours; use `--all` to prune all terminal jobs.
 pub(super) fn handle_job_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
-    logs_path: &std::path::Path,
-    orphans_registry: &Arc<Mutex<Vec<oj_engine::breadcrumb::Breadcrumb>>>,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
     failed: bool,
     orphans: bool,
@@ -616,7 +605,7 @@ pub(super) fn handle_job_prune(
     let prune_terminal = flags.all || failed || !orphans;
 
     if prune_terminal {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         for job in state_guard.jobs.values() {
             // Filter by namespace when --project is specified
             if let Some(ns) = flags.namespace {
@@ -666,18 +655,18 @@ pub(super) fn handle_job_prune(
     if !flags.dry_run {
         for entry in &to_prune {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::JobDeleted {
                     id: JobId::new(entry.id.clone()),
                 },
             )?;
-            cleanup_job_files(logs_path, &entry.id);
+            cleanup_job_files(&ctx.logs_path, &entry.id);
         }
     }
 
     // When --orphans flag is set, collect orphaned jobs
     if orphans {
-        let mut orphan_guard = orphans_registry.lock();
+        let mut orphan_guard = ctx.orphans.lock();
         let drain_indices: Vec<usize> = (0..orphan_guard.len()).collect();
         for &i in drain_indices.iter().rev() {
             let bc = &orphan_guard[i];
@@ -688,7 +677,7 @@ pub(super) fn handle_job_prune(
             });
             if !flags.dry_run {
                 let removed = orphan_guard.remove(i);
-                cleanup_job_files(logs_path, &removed.job_id);
+                cleanup_job_files(&ctx.logs_path, &removed.job_id);
             }
         }
     }
@@ -705,9 +694,7 @@ pub(super) fn handle_job_prune(
 /// (failed/cancelled/done) and standalone agent runs in terminal state.
 /// By default only prunes agents older than 24 hours; use `--all` to prune all.
 pub(super) fn handle_agent_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
-    logs_path: &std::path::Path,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
@@ -722,7 +709,7 @@ pub(super) fn handle_agent_prune(
     let mut skipped = 0usize;
 
     {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
 
         // (1) Collect agents from terminal jobs
         for job in state_guard.jobs.values() {
@@ -794,18 +781,18 @@ pub(super) fn handle_agent_prune(
         // Delete the terminal jobs from state so agents no longer appear in `agent list`
         for job_id in &job_ids_to_delete {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::JobDeleted {
                     id: JobId::new(job_id.clone()),
                 },
             )?;
-            cleanup_job_files(logs_path, job_id);
+            cleanup_job_files(&ctx.logs_path, job_id);
         }
 
         // Delete standalone agent runs from state
         for agent_run_id in &agent_run_ids_to_delete {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::AgentRunDeleted {
                     id: AgentRunId::new(agent_run_id),
                 },
@@ -813,7 +800,7 @@ pub(super) fn handle_agent_prune(
         }
 
         for entry in &to_prune {
-            cleanup_agent_files(logs_path, &entry.agent_id);
+            cleanup_agent_files(&ctx.logs_path, &entry.agent_id);
         }
     }
 
@@ -834,13 +821,12 @@ pub(super) fn handle_agent_prune(
 ///
 /// Emits `WorkspaceDeleted` events to keep daemon state in sync.
 pub(super) async fn handle_workspace_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let state_dir = crate::env::state_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let workspaces_dir = state_dir.join("workspaces");
-    workspace_prune_inner(state, event_bus, flags, &workspaces_dir).await
+    workspace_prune_inner(&ctx.state, &ctx.event_bus, flags, &workspaces_dir).await
 }
 
 /// Inner implementation of workspace prune, parameterized by workspaces directory
@@ -1017,15 +1003,14 @@ async fn workspace_prune_inner(
 /// Workers are either "running" or "stopped" — all stopped workers are eligible
 /// for pruning with no age threshold.
 pub(super) fn handle_worker_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
 
     {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         for record in state_guard.workers.values() {
             // Filter by namespace if specified
             if let Some(ns) = flags.namespace {
@@ -1047,7 +1032,7 @@ pub(super) fn handle_worker_prune(
     if !flags.dry_run {
         for entry in &to_prune {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::WorkerDeleted {
                     worker_name: entry.name.clone(),
                     namespace: entry.namespace.clone(),
@@ -1068,15 +1053,14 @@ pub(super) fn handle_worker_prune(
 /// Crons are either "running" or "stopped" — all stopped crons are eligible
 /// for pruning with no age threshold.
 pub(super) fn handle_cron_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
 
     {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         for record in state_guard.crons.values() {
             if record.status != "stopped" {
                 skipped += 1;
@@ -1092,7 +1076,7 @@ pub(super) fn handle_cron_prune(
     if !flags.dry_run {
         for entry in &to_prune {
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::CronDeleted {
                     cron_name: entry.name.clone(),
                     namespace: entry.namespace.clone(),
@@ -1113,8 +1097,7 @@ pub(super) fn handle_cron_prune(
 /// or missing from state. By default only prunes sessions older than 12 hours;
 /// use `--all` to prune all orphaned sessions.
 pub(super) async fn handle_session_prune(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
 ) -> Result<Response, ConnectionError> {
     let now_ms = std::time::SystemTime::now()
@@ -1127,7 +1110,7 @@ pub(super) async fn handle_session_prune(
     let mut skipped = 0usize;
 
     {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         for session in state_guard.sessions.values() {
             // Get the namespace from the associated job
             let (namespace, job_is_terminal, job_created_at_ms) =
@@ -1196,7 +1179,7 @@ pub(super) async fn handle_session_prune(
 
             // Emit SessionDeleted to clean up state
             emit(
-                event_bus,
+                &ctx.event_bus,
                 Event::SessionDeleted {
                     id: SessionId::new(&entry.id),
                 },
@@ -1216,8 +1199,7 @@ pub(super) async fn handle_session_prune(
 /// optionally kills the tmux session, then emits JobResume to trigger
 /// the engine's resume flow (which uses `--resume` to preserve conversation).
 pub(super) async fn handle_agent_resume(
-    state: &Arc<Mutex<MaterializedState>>,
-    event_bus: &EventBus,
+    ctx: &ListenCtx,
     agent_id: String,
     kill: bool,
     all: bool,
@@ -1225,7 +1207,7 @@ pub(super) async fn handle_agent_resume(
     // Collect (job_id, agent_id, session_id) tuples to resume
     // Use a scoped block to ensure lock is released before any await points
     let (targets, skipped) = {
-        let state_guard = state.lock();
+        let state_guard = ctx.state.lock();
         let mut targets: Vec<(String, String, Option<String>)> = Vec::new();
         let mut skipped: Vec<(String, String)> = Vec::new();
 
@@ -1307,7 +1289,7 @@ pub(super) async fn handle_agent_resume(
                 let event = Event::SessionDeleted {
                     id: SessionId::new(sid),
                 };
-                let _ = event_bus.send(event);
+                let _ = ctx.event_bus.send(event);
             }
         }
     }
@@ -1316,7 +1298,7 @@ pub(super) async fn handle_agent_resume(
 
     for (job_id, aid, _) in targets {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::JobResume {
                 id: JobId::new(&job_id),
                 message: None,

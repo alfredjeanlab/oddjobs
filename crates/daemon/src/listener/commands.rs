@@ -5,19 +5,15 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
-
-use parking_lot::Mutex;
 
 use oj_core::{IdGen, JobId, UuidIdGen};
-use oj_storage::MaterializedState;
 
-use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::mutations::emit;
 use super::suggest;
 use super::ConnectionError;
+use super::ListenCtx;
 
 /// Parameters for handling a run command request.
 pub(super) struct RunCommandParams<'a> {
@@ -27,8 +23,7 @@ pub(super) struct RunCommandParams<'a> {
     pub command: &'a str,
     pub args: &'a [String],
     pub named_args: &'a HashMap<String, String>,
-    pub event_bus: &'a EventBus,
-    pub state: &'a Arc<Mutex<MaterializedState>>,
+    pub ctx: &'a ListenCtx,
 }
 
 /// Handle a RunCommand request.
@@ -42,14 +37,13 @@ pub(super) async fn handle_run_command(
         command,
         args,
         named_args,
-        event_bus,
-        state,
+        ctx,
     } = params;
     // Load runbook from project (with --project fallback and suggest hints)
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook(root, command),
         || {
             let runbook_dir = project_root.join(".oj/runbooks");
@@ -57,7 +51,7 @@ pub(super) async fn handle_run_command(
                 command,
                 namespace,
                 "oj run",
-                state,
+                &ctx.state,
                 suggest::ResourceType::Command,
                 || {
                     oj_runbook::collect_all_commands(&runbook_dir)
@@ -122,7 +116,7 @@ pub(super) async fn handle_run_command(
         args: parsed_args,
     };
 
-    emit(event_bus, event)?;
+    emit(&ctx.event_bus, event)?;
 
     if is_agent {
         // For standalone agent commands, return AgentRunStarted

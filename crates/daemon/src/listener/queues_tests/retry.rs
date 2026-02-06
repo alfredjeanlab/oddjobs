@@ -11,7 +11,7 @@ use oj_storage::MaterializedState;
 
 use crate::protocol::Response;
 
-use super::super::handle_queue_retry;
+use super::super::{handle_queue_retry, RetryFilter};
 use super::{
     drain_events, project_with_queue_only, push_and_mark_dead, push_and_mark_failed, test_event_bus,
 };
@@ -37,9 +37,11 @@ fn retry_with_prefix_resolves_unique_match() {
         project.path(),
         "",
         "tasks",
-        &["def98".to_string()],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &["def98".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -80,9 +82,11 @@ fn retry_with_exact_id_still_works() {
         project.path(),
         "",
         "tasks",
-        &["exact-id-1234".to_string()],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &["exact-id-1234".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -120,9 +124,11 @@ fn retry_ambiguous_prefix_returns_error() {
         project.path(),
         "",
         "tasks",
-        &["abc".to_string()],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &["abc".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -146,9 +152,11 @@ fn retry_no_match_returns_not_found() {
         project.path(),
         "",
         "tasks",
-        &["nonexistent".to_string()],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &["nonexistent".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -181,17 +189,20 @@ fn retry_bulk_multiple_items() {
         );
     }
 
+    let ids = [
+        "item-1".to_string(),
+        "item-2".to_string(),
+        "item-3".to_string(),
+    ];
     let result = handle_queue_retry(
         project.path(),
         "",
         "tasks",
-        &[
-            "item-1".to_string(),
-            "item-2".to_string(),
-            "item-3".to_string(),
-        ],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &ids,
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -251,9 +262,11 @@ fn retry_all_dead_items() {
         project.path(),
         "",
         "tasks",
-        &[],  // Empty - using --all-dead flag
-        true, // all_dead = true
-        None,
+        RetryFilter {
+            item_ids: &[],
+            all_dead: true,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -310,9 +323,11 @@ fn retry_by_status_failed() {
         project.path(),
         "",
         "tasks",
-        &[], // Empty - using --status flag
-        false,
-        Some("failed"), // status filter
+        RetryFilter {
+            item_ids: &[],
+            all_dead: false,
+            status_filter: Some("failed"),
+        },
         &event_bus,
         &state,
     )
@@ -364,17 +379,20 @@ fn retry_bulk_mixed_results() {
     });
     // "nonexistent" doesn't exist
 
+    let ids = [
+        "dead-1".to_string(),
+        "pending-1".to_string(),
+        "nonexistent".to_string(),
+    ];
     let result = handle_queue_retry(
         project.path(),
         "",
         "tasks",
-        &[
-            "dead-1".to_string(),
-            "pending-1".to_string(),
-            "nonexistent".to_string(),
-        ],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &ids,
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -410,9 +428,11 @@ fn retry_all_dead_empty_queue() {
         project.path(),
         "",
         "tasks",
-        &[],
-        true, // all_dead = true
-        None,
+        RetryFilter {
+            item_ids: &[],
+            all_dead: true,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )
@@ -489,9 +509,11 @@ fn retry_with_wrong_project_root_falls_back_to_namespace() {
         std::path::Path::new("/wrong/path"),
         "my-project",
         "tasks",
-        &["item-dead-1".to_string()],
-        false,
-        None,
+        RetryFilter {
+            item_ids: &["item-dead-1".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
         &event_bus,
         &state,
     )

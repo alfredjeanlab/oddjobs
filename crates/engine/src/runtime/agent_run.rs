@@ -416,6 +416,7 @@ where
     }
 
     /// Execute an action with attempt tracking for standalone agent runs.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_standalone_action_with_attempts(
         &self,
         agent_run: &AgentRun,

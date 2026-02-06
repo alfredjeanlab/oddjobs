@@ -456,7 +456,7 @@ fn detect_error(json: &serde_json::Value) -> Option<AgentError> {
 pub fn extract_last_assistant_text(path: &Path) -> Option<String> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
-    let lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+    let lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
 
     // Search last ~50 lines in reverse for the last assistant message
     for line in lines.iter().rev().take(50) {

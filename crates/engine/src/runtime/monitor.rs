@@ -191,7 +191,7 @@ where
                     .iter()
                     .rfind(|r| r.name == job.step)
                     .and_then(|r| r.agent_id.as_ref())
-                    .map(|s| AgentId::new(s));
+                    .map(AgentId::new);
                 match agent_id {
                     Some(aid) => self.executor.get_last_assistant_message(&aid).await,
                     None => None,
@@ -348,6 +348,7 @@ where
     }
 
     /// Execute an action with attempt tracking and cooldown support
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn execute_action_with_attempts(
         &self,
         job: &Job,

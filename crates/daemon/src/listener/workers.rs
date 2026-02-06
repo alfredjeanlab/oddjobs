@@ -17,6 +17,7 @@ use crate::protocol::Response;
 use super::mutations::emit;
 use super::suggest;
 use super::ConnectionError;
+use super::ListenCtx;
 
 /// Handle a WorkerStart request.
 ///
@@ -30,18 +31,17 @@ pub(super) fn handle_worker_start(
     namespace: &str,
     worker_name: &str,
     all: bool,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     if all {
-        return handle_worker_start_all(project_root, namespace, event_bus, state);
+        return handle_worker_start_all(project_root, namespace, ctx);
     }
 
     // Load runbook to validate worker exists.
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_worker(root, worker_name),
         || {
             suggest_for_worker(
@@ -49,7 +49,7 @@ pub(super) fn handle_worker_start(
                 worker_name,
                 namespace,
                 "oj worker start",
-                state,
+                &ctx.state,
             )
         },
     ) {
@@ -91,7 +91,8 @@ pub(super) fn handle_worker_start(
     // If the worker is already running, emit WorkerWake instead of WorkerStarted
     // to trigger a re-poll without resetting in-memory state.
     let scoped = oj_core::scoped_name(namespace, worker_name);
-    let already_running = state
+    let already_running = ctx
+        .state
         .lock()
         .workers
         .get(&scoped)
@@ -100,7 +101,7 @@ pub(super) fn handle_worker_start(
 
     if already_running {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::WorkerWake {
                 worker_name: worker_name.to_string(),
                 namespace: namespace.to_string(),
@@ -112,11 +113,11 @@ pub(super) fn handle_worker_start(
     }
 
     // Hash runbook and emit RunbookLoaded for WAL persistence
-    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
+    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
 
     // Emit WorkerStarted event
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::WorkerStarted {
             worker_name: worker_name.to_string(),
             project_root: project_root.to_path_buf(),
@@ -136,11 +137,10 @@ pub(super) fn handle_worker_start(
 fn handle_worker_start_all(
     project_root: &Path,
     namespace: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Resolve the effective project root: prefer known root when namespace doesn't match
-    let effective_root = resolve_effective_project_root(project_root, namespace, state);
+    let effective_root = resolve_effective_project_root(project_root, namespace, &ctx.state);
     let runbook_dir = effective_root.join(".oj/runbooks");
     let names = oj_runbook::collect_all_workers(&runbook_dir)
         .unwrap_or_default()
@@ -149,7 +149,7 @@ fn handle_worker_start_all(
 
     let (started, skipped) = super::collect_start_results(
         names,
-        |name| handle_worker_start(&effective_root, namespace, name, false, event_bus, state),
+        |name| handle_worker_start(&effective_root, namespace, name, false, ctx),
         |resp| match resp {
             Response::WorkerStarted { worker_name } => Some(worker_name.clone()),
             _ => None,
@@ -185,13 +185,12 @@ fn resolve_effective_project_root(
 pub(super) fn handle_worker_stop(
     worker_name: &str,
     namespace: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
     project_root: Option<&Path>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Check if worker exists in state
     if let Err(resp) = super::require_scoped_resource(
-        state,
+        &ctx.state,
         namespace,
         worker_name,
         "worker",
@@ -202,7 +201,7 @@ pub(super) fn handle_worker_stop(
                 worker_name,
                 namespace,
                 "oj worker stop",
-                state,
+                &ctx.state,
             )
         },
     ) {
@@ -210,7 +209,7 @@ pub(super) fn handle_worker_stop(
     }
 
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::WorkerStopped {
             worker_name: worker_name.to_string(),
             namespace: namespace.to_string(),
@@ -225,15 +224,14 @@ pub(super) fn handle_worker_restart(
     project_root: &Path,
     namespace: &str,
     worker_name: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Stop worker if it exists in state
-    if super::scoped_exists(state, namespace, worker_name, |s, k| {
+    if super::scoped_exists(&ctx.state, namespace, worker_name, |s, k| {
         s.workers.contains_key(k)
     }) {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::WorkerStopped {
                 worker_name: worker_name.to_string(),
                 namespace: namespace.to_string(),
@@ -242,14 +240,7 @@ pub(super) fn handle_worker_restart(
     }
 
     // Start with fresh runbook
-    handle_worker_start(
-        project_root,
-        namespace,
-        worker_name,
-        false,
-        event_bus,
-        state,
-    )
+    handle_worker_start(project_root, namespace, worker_name, false, ctx)
 }
 
 /// Handle a WorkerResize request: update concurrency at runtime.
@@ -257,8 +248,7 @@ pub(super) fn handle_worker_resize(
     worker_name: &str,
     namespace: &str,
     concurrency: u32,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Validate concurrency > 0
     if concurrency == 0 {
@@ -269,7 +259,7 @@ pub(super) fn handle_worker_resize(
 
     // Check if worker exists and get current concurrency
     let scoped = oj_core::scoped_name(namespace, worker_name);
-    let old_concurrency = match state.lock().workers.get(&scoped) {
+    let old_concurrency = match ctx.state.lock().workers.get(&scoped) {
         Some(record) => record.concurrency,
         None => {
             return Ok(Response::Error {
@@ -280,7 +270,7 @@ pub(super) fn handle_worker_resize(
 
     // Emit event
     emit(
-        event_bus,
+        &ctx.event_bus,
         Event::WorkerResized {
             worker_name: worker_name.to_string(),
             concurrency,

@@ -11,13 +11,13 @@ use parking_lot::Mutex;
 use oj_core::{Event, IdGen, JobId, UuidIdGen};
 use oj_storage::MaterializedState;
 
-use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
 use super::mutations::emit;
 use super::suggest;
 use super::workers::hash_and_emit_runbook;
 use super::ConnectionError;
+use super::ListenCtx;
 
 /// Handle a CronStart request.
 ///
@@ -29,18 +29,17 @@ pub(super) fn handle_cron_start(
     namespace: &str,
     cron_name: &str,
     all: bool,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     if all {
-        return handle_cron_start_all(project_root, namespace, event_bus, state);
+        return handle_cron_start_all(project_root, namespace, ctx);
     }
 
     // Load runbook to validate cron exists.
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_cron(root, cron_name),
         || {
             suggest_for_cron(
@@ -48,7 +47,7 @@ pub(super) fn handle_cron_start(
                 cron_name,
                 namespace,
                 "oj cron start",
-                state,
+                &ctx.state,
             )
         },
     ) {
@@ -93,7 +92,7 @@ pub(super) fn handle_cron_start(
     };
 
     // Hash runbook and emit RunbookLoaded for WAL persistence
-    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
+    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
 
     // Emit CronStarted event
     let event = Event::CronStarted {
@@ -105,13 +104,13 @@ pub(super) fn handle_cron_start(
         namespace: namespace.to_string(),
     };
 
-    emit(event_bus, event.clone())?;
+    emit(&ctx.event_bus, event.clone())?;
 
     // Apply to materialized state before responding so queries see it
     // immediately. apply_event is idempotent so the second apply when the
     // main loop processes this event from the WAL is harmless.
     {
-        let mut state = state.lock();
+        let mut state = ctx.state.lock();
         state.apply_event(&event);
     }
 
@@ -124,8 +123,7 @@ pub(super) fn handle_cron_start(
 fn handle_cron_start_all(
     project_root: &Path,
     namespace: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     let runbook_dir = project_root.join(".oj/runbooks");
     let names = oj_runbook::collect_all_crons(&runbook_dir)
@@ -135,7 +133,7 @@ fn handle_cron_start_all(
 
     let (started, skipped) = super::collect_start_results(
         names,
-        |name| handle_cron_start(project_root, namespace, name, false, event_bus, state),
+        |name| handle_cron_start(project_root, namespace, name, false, ctx),
         |resp| match resp {
             Response::CronStarted { cron_name } => Some(cron_name.clone()),
             _ => None,
@@ -149,18 +147,25 @@ fn handle_cron_start_all(
 pub(super) fn handle_cron_stop(
     cron_name: &str,
     namespace: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
     project_root: Option<&Path>,
 ) -> Result<Response, ConnectionError> {
     // Check if cron exists in state
     if let Err(resp) = super::require_scoped_resource(
-        state,
+        &ctx.state,
         namespace,
         cron_name,
         "cron",
         |s, k| s.crons.contains_key(k),
-        || suggest_for_cron(project_root, cron_name, namespace, "oj cron stop", state),
+        || {
+            suggest_for_cron(
+                project_root,
+                cron_name,
+                namespace,
+                "oj cron stop",
+                &ctx.state,
+            )
+        },
     ) {
         return Ok(resp);
     }
@@ -170,12 +175,12 @@ pub(super) fn handle_cron_stop(
         namespace: namespace.to_string(),
     };
 
-    emit(event_bus, event.clone())?;
+    emit(&ctx.event_bus, event.clone())?;
 
     // Apply to materialized state before responding so queries see it
     // immediately. apply_event is idempotent.
     {
-        let mut state = state.lock();
+        let mut state = ctx.state.lock();
         state.apply_event(&event);
     }
 
@@ -187,14 +192,13 @@ pub(super) async fn handle_cron_once(
     project_root: &Path,
     namespace: &str,
     cron_name: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Load runbook to validate cron exists.
     let (runbook, effective_root) = match super::load_runbook_with_fallback(
         project_root,
         namespace,
-        state,
+        &ctx.state,
         |root| load_runbook_for_cron(root, cron_name),
         || {
             suggest_for_cron(
@@ -202,7 +206,7 @@ pub(super) async fn handle_cron_once(
                 cron_name,
                 namespace,
                 "oj cron once",
-                state,
+                &ctx.state,
             )
         },
     ) {
@@ -247,7 +251,7 @@ pub(super) async fn handle_cron_once(
     };
 
     // Hash runbook and emit RunbookLoaded for WAL persistence
-    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
+    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
 
     let is_agent = run_target.starts_with("agent:");
 
@@ -268,7 +272,7 @@ pub(super) async fn handle_cron_once(
             namespace: namespace.to_string(),
         };
 
-        emit(event_bus, event)?;
+        emit(&ctx.event_bus, event)?;
 
         Ok(Response::CommandStarted {
             job_id: agent_run_id,
@@ -293,7 +297,7 @@ pub(super) async fn handle_cron_once(
             namespace: namespace.to_string(),
         };
 
-        emit(event_bus, event)?;
+        emit(&ctx.event_bus, event)?;
 
         Ok(Response::CommandStarted {
             job_id: job_id.to_string(),
@@ -307,13 +311,14 @@ pub(super) fn handle_cron_restart(
     project_root: &Path,
     namespace: &str,
     cron_name: &str,
-    event_bus: &EventBus,
-    state: &Arc<Mutex<MaterializedState>>,
+    ctx: &ListenCtx,
 ) -> Result<Response, ConnectionError> {
     // Stop cron if it exists in state
-    if super::scoped_exists(state, namespace, cron_name, |s, k| s.crons.contains_key(k)) {
+    if super::scoped_exists(&ctx.state, namespace, cron_name, |s, k| {
+        s.crons.contains_key(k)
+    }) {
         emit(
-            event_bus,
+            &ctx.event_bus,
             Event::CronStopped {
                 cron_name: cron_name.to_string(),
                 namespace: namespace.to_string(),
@@ -322,7 +327,7 @@ pub(super) fn handle_cron_restart(
     }
 
     // Start with fresh runbook
-    handle_cron_start(project_root, namespace, cron_name, false, event_bus, state)
+    handle_cron_start(project_root, namespace, cron_name, false, ctx)
 }
 
 #[cfg(test)]

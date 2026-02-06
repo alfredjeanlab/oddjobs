@@ -855,7 +855,7 @@ fn read_on_stop_config(agent_id: &str) -> String {
 fn extract_last_assistant_text(path: &std::path::Path) -> Option<String> {
     let file = std::fs::File::open(path).ok()?;
     let reader = io::BufReader::new(file);
-    let lines: Vec<String> = io::BufRead::lines(reader).filter_map(|l| l.ok()).collect();
+    let lines: Vec<String> = io::BufRead::lines(reader).map_while(Result::ok).collect();
 
     for line in lines.iter().rev().take(50) {
         let trimmed = line.trim();
