@@ -5,137 +5,6 @@ use super::*;
 use std::collections::HashMap;
 
 // =============================================================================
-// extract_labels tests
-// =============================================================================
-
-#[test]
-fn extract_labels_single() {
-    let labels = extract_labels(r#"import "oj/wok" {}"#, "import");
-    assert_eq!(labels, vec!["oj/wok"]);
-}
-
-#[test]
-fn extract_labels_two() {
-    let labels = extract_labels(r#"import "oj/wok" "wok" {}"#, "import");
-    assert_eq!(labels, vec!["oj/wok", "wok"]);
-}
-
-#[test]
-fn extract_labels_const() {
-    let labels = extract_labels(r#"const "prefix" {}"#, "const");
-    assert_eq!(labels, vec!["prefix"]);
-}
-
-// =============================================================================
-// extract_blocks tests
-// =============================================================================
-
-#[test]
-fn extract_empty_import() {
-    let content = r#"import "oj/wok" {}
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.imports.len(), 1);
-    assert_eq!(result.imports[0].source, "oj/wok");
-    assert!(result.imports[0].alias.is_none());
-    assert!(result.imports[0].consts.is_empty());
-    assert!(result.remaining.trim().is_empty());
-}
-
-#[test]
-fn extract_import_with_alias() {
-    let content = r#"import "oj/wok" "wok" {}
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.imports.len(), 1);
-    assert_eq!(result.imports[0].source, "oj/wok");
-    assert_eq!(result.imports[0].alias.as_deref(), Some("wok"));
-}
-
-#[test]
-fn extract_import_with_consts() {
-    let content = r#"import "oj/wok" { const = { prefix = "oj" } }
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.imports.len(), 1);
-    assert_eq!(
-        result.imports[0].consts.get("prefix"),
-        Some(&"oj".to_string())
-    );
-}
-
-#[test]
-fn extract_import_with_alias_and_consts() {
-    let content = r#"import "oj/wok" "wok" { const = { prefix = "oj", check = "make check" } }
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.imports.len(), 1);
-    assert_eq!(result.imports[0].source, "oj/wok");
-    assert_eq!(result.imports[0].alias.as_deref(), Some("wok"));
-    assert_eq!(
-        result.imports[0].consts.get("prefix"),
-        Some(&"oj".to_string())
-    );
-    assert_eq!(
-        result.imports[0].consts.get("check"),
-        Some(&"make check".to_string())
-    );
-}
-
-#[test]
-fn extract_const_required() {
-    let content = r#"const "prefix" {}
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.consts.len(), 1);
-    assert_eq!(result.consts[0].name, "prefix");
-    assert!(result.consts[0].default.is_none());
-}
-
-#[test]
-fn extract_const_with_default() {
-    let content = r#"const "check" { default = "true" }
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.consts.len(), 1);
-    assert_eq!(result.consts[0].name, "check");
-    assert_eq!(result.consts[0].default.as_deref(), Some("true"));
-}
-
-#[test]
-fn extract_preserves_remaining() {
-    let content = r#"import "oj/wok" {}
-
-command "test" {
-  run = "echo test"
-}
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.imports.len(), 1);
-    assert!(result.remaining.contains("command \"test\""));
-    assert!(!result.remaining.contains("import"));
-}
-
-#[test]
-fn extract_multiple_blocks() {
-    let content = r#"const "prefix" {}
-const "check" { default = "true" }
-
-import "oj/wok" { const = { prefix = "oj" } }
-
-command "test" {
-  run = "echo test"
-}
-"#;
-    let result = extract_blocks(content).unwrap();
-    assert_eq!(result.consts.len(), 2);
-    assert_eq!(result.imports.len(), 1);
-    assert!(result.remaining.contains("command \"test\""));
-    assert!(!result.remaining.contains("const "));
-    assert!(!result.remaining.contains("import "));
-}
-
-// =============================================================================
 // interpolate_consts tests
 // =============================================================================
 
@@ -188,10 +57,9 @@ fn interpolate_unknown_const_left_alone() {
 
 #[test]
 fn validate_consts_required_provided() {
-    let defs = vec![ConstDef {
-        name: "prefix".to_string(),
-        default: None,
-    }];
+    let defs: HashMap<String, ConstDef> = [("prefix".to_string(), ConstDef { default: None })]
+        .into_iter()
+        .collect();
     let provided: HashMap<String, String> = [("prefix".to_string(), "oj".to_string())]
         .into_iter()
         .collect();
@@ -202,10 +70,9 @@ fn validate_consts_required_provided() {
 
 #[test]
 fn validate_consts_required_missing() {
-    let defs = vec![ConstDef {
-        name: "prefix".to_string(),
-        default: None,
-    }];
+    let defs: HashMap<String, ConstDef> = [("prefix".to_string(), ConstDef { default: None })]
+        .into_iter()
+        .collect();
     let provided: HashMap<String, String> = HashMap::new();
     let err = validate_consts(&defs, &provided, "oj/wok").unwrap_err();
     let msg = err.to_string();
@@ -217,10 +84,14 @@ fn validate_consts_required_missing() {
 
 #[test]
 fn validate_consts_default_used() {
-    let defs = vec![ConstDef {
-        name: "check".to_string(),
-        default: Some("true".to_string()),
-    }];
+    let defs: HashMap<String, ConstDef> = [(
+        "check".to_string(),
+        ConstDef {
+            default: Some("true".to_string()),
+        },
+    )]
+    .into_iter()
+    .collect();
     let provided: HashMap<String, String> = HashMap::new();
     let (values, _) = validate_consts(&defs, &provided, "oj/wok").unwrap();
     assert_eq!(values.get("check"), Some(&"true".to_string()));
@@ -228,10 +99,14 @@ fn validate_consts_default_used() {
 
 #[test]
 fn validate_consts_default_overridden() {
-    let defs = vec![ConstDef {
-        name: "check".to_string(),
-        default: Some("true".to_string()),
-    }];
+    let defs: HashMap<String, ConstDef> = [(
+        "check".to_string(),
+        ConstDef {
+            default: Some("true".to_string()),
+        },
+    )]
+    .into_iter()
+    .collect();
     let provided: HashMap<String, String> = [("check".to_string(), "make check".to_string())]
         .into_iter()
         .collect();
@@ -241,10 +116,9 @@ fn validate_consts_default_overridden() {
 
 #[test]
 fn validate_consts_unknown_warns() {
-    let defs = vec![ConstDef {
-        name: "prefix".to_string(),
-        default: None,
-    }];
+    let defs: HashMap<String, ConstDef> = [("prefix".to_string(), ConstDef { default: None })]
+        .into_iter()
+        .collect();
     let provided: HashMap<String, String> = [
         ("prefix".to_string(), "oj".to_string()),
         ("extra".to_string(), "value".to_string()),
@@ -394,7 +268,10 @@ fn parse_import_oj_wok() {
 
 #[test]
 fn parse_import_oj_wok_with_alias() {
-    let content = r#"import "oj/wok" "wok" { const = { prefix = "oj" } }
+    let content = r#"import "oj/wok" {
+  alias = "wok"
+  const = { prefix = "oj" }
+}
 "#;
     let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
 
@@ -502,13 +379,9 @@ fn available_libraries_have_descriptions() {
 fn available_libraries_parse_successfully() {
     let libs = available_libraries();
     for lib in &libs {
-        let extracted = extract_blocks(lib.content).unwrap_or_else(|e| {
-            panic!("failed to extract blocks from '{}': {}", lib.source, e);
+        crate::parser::parse_runbook_no_xref(lib.content, Format::Hcl).unwrap_or_else(|e| {
+            panic!("failed to parse library '{}': {}", lib.source, e);
         });
-        let _runbook = crate::parser::parse_runbook_no_xref(&extracted.remaining, Format::Hcl)
-            .unwrap_or_else(|e| {
-                panic!("failed to parse library '{}': {}", lib.source, e);
-            });
     }
 }
 

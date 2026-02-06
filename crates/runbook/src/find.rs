@@ -337,7 +337,7 @@ pub struct RunbookSummary {
     /// Short description from the file's leading comment.
     pub description: Option<String>,
     /// Import declarations in this file.
-    pub imports: Vec<crate::ImportDef>,
+    pub imports: HashMap<String, crate::ImportDef>,
     /// Local command names defined in this file.
     pub commands: Vec<String>,
     /// Local job names.
@@ -377,20 +377,7 @@ pub fn collect_runbook_summaries(runbook_dir: &Path) -> Result<Vec<RunbookSummar
 
         let description = extract_file_comment(&content).map(|c| c.short);
 
-        // Extract imports, then parse remaining for local-only entities
-        let (imports, local_content) = if format == Format::Hcl {
-            match crate::import::extract_blocks(&content) {
-                Ok(result) => (result.imports, result.remaining),
-                Err(e) => {
-                    tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
-                    continue;
-                }
-            }
-        } else {
-            (Vec::new(), content.clone())
-        };
-
-        let runbook = match crate::parser::parse_runbook_no_xref(&local_content, format) {
+        let runbook = match crate::parser::parse_runbook_no_xref(&content, format) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
@@ -401,7 +388,7 @@ pub fn collect_runbook_summaries(runbook_dir: &Path) -> Result<Vec<RunbookSummar
         let mut summary = RunbookSummary {
             file: file_name,
             description,
-            imports,
+            imports: runbook.imports,
             commands: runbook.commands.keys().cloned().collect(),
             jobs: runbook.jobs.keys().cloned().collect(),
             agents: runbook.agents.keys().cloned().collect(),

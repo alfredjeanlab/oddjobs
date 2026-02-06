@@ -3,6 +3,7 @@
 
 //! Runbook parsing (TOML, HCL, and JSON)
 
+use crate::import::{ConstDef, ImportDef};
 use crate::validate::{
     sorted_keys, sorted_names, validate_agent_command, validate_command_template_refs,
     validate_duration_str, validate_shell_command, validate_template_namespaces,
@@ -67,6 +68,10 @@ pub enum ParseError {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Runbook {
+    #[serde(default, alias = "import")]
+    pub imports: HashMap<String, ImportDef>,
+    #[serde(default, alias = "const")]
+    pub consts: HashMap<String, ConstDef>,
     #[serde(default, alias = "command")]
     pub commands: HashMap<String, CommandDef>,
     #[serde(default, alias = "job")]

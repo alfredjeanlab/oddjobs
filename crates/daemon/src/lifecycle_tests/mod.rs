@@ -54,6 +54,8 @@ fn test_runbook() -> Runbook {
         },
     );
     Runbook {
+        imports: HashMap::new(),
+        consts: HashMap::new(),
         commands: HashMap::new(),
         jobs,
         agents: HashMap::new(),

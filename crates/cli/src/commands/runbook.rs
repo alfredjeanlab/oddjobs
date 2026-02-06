@@ -64,8 +64,8 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
                 } else {
                     summary
                         .imports
-                        .iter()
-                        .map(|i| i.source.as_str())
+                        .keys()
+                        .map(|s| s.as_str())
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
@@ -100,7 +100,7 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
                 .map(|s| {
                     serde_json::json!({
                         "file": s.file,
-                        "imports": s.imports.iter().map(|i| &i.source).collect::<Vec<_>>(),
+                        "imports": s.imports.keys().collect::<Vec<_>>(),
                         "commands": s.commands,
                         "jobs": s.jobs,
                         "agents": s.agents,
@@ -119,26 +119,21 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
 }
 
 /// Resolve command names from imports by parsing each library.
-fn imported_command_names(imports: &[oj_runbook::ImportDef]) -> Vec<String> {
+fn imported_command_names(
+    imports: &std::collections::HashMap<String, oj_runbook::ImportDef>,
+) -> Vec<String> {
     let mut names = Vec::new();
-    for import in imports {
-        let content = match oj_runbook::resolve_library(&import.source) {
+    for (source, import_def) in imports {
+        let content = match oj_runbook::resolve_library(source) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        // Extract blocks to get remaining content, then parse for command names
-        let extracted = match oj_runbook::extract_blocks(content) {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let runbook = match oj_runbook::parse_runbook_with_format(
-            &extracted.remaining,
-            oj_runbook::Format::Hcl,
-        ) {
+        let runbook = match oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl)
+        {
             Ok(rb) => rb,
             Err(_) => continue,
         };
-        let prefix = import.alias.as_deref();
+        let prefix = import_def.alias.as_deref();
         for cmd_name in runbook.commands.keys() {
             let name = match prefix {
                 Some(p) => format!("{}.{}", p, cmd_name),
@@ -227,12 +222,9 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
         .map(|c| c.short)
         .unwrap_or_default();
 
-    let const_defs = extract_const_defs(content);
-
-    // Parse library to enumerate entities
-    let extracted = oj_runbook::extract_blocks(content)?;
-    let runbook =
-        oj_runbook::parse_runbook_with_format(&extracted.remaining, oj_runbook::Format::Hcl)?;
+    // Parse library to get const definitions and enumerate entities
+    let runbook = oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl)?;
+    let const_defs = &runbook.consts;
 
     match format {
         OutputFormat::Text => {
@@ -243,7 +235,9 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
 
             if !const_defs.is_empty() {
                 println!("\nParameters:");
-                for def in &const_defs {
+                let mut sorted_consts: Vec<_> = const_defs.iter().collect();
+                sorted_consts.sort_by_key(|(name, _)| *name);
+                for (name, def) in &sorted_consts {
                     let req = if def.default.is_none() {
                         "(required)"
                     } else {
@@ -253,7 +247,7 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
                         Some(d) => format!(" [default: \"{}\"]", d),
                         None => String::new(),
                     };
-                    println!("  {:<12} {:<12} {}", def.name, req, default_str.trim());
+                    println!("  {:<12} {:<12} {}", name, req, default_str.trim());
                 }
             }
 
@@ -315,12 +309,13 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
             }
 
             // Usage example
-            let const_example = if const_defs.iter().any(|c| c.default.is_none()) {
-                let required: Vec<_> = const_defs
+            let const_example = if const_defs.values().any(|c| c.default.is_none()) {
+                let mut required: Vec<_> = const_defs
                     .iter()
-                    .filter(|c| c.default.is_none())
-                    .map(|c| format!("{} = \"...\"", c.name))
+                    .filter(|(_, c)| c.default.is_none())
+                    .map(|(name, _)| format!("{} = \"...\"", name))
                     .collect();
+                required.sort();
                 format!(" {{ const = {{ {} }} }}", required.join(", "))
             } else {
                 " {}".to_string()
@@ -329,16 +324,17 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
             println!("  import \"{}\"{}", path, const_example);
         }
         OutputFormat::Json => {
-            let consts_json: Vec<serde_json::Value> = const_defs
+            let mut consts_json: Vec<serde_json::Value> = const_defs
                 .iter()
-                .map(|c| {
+                .map(|(name, c)| {
                     serde_json::json!({
-                        "name": c.name,
+                        "name": name,
                         "required": c.default.is_none(),
                         "default": c.default,
                     })
                 })
                 .collect();
+            consts_json.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
 
             let entities = build_entity_map(&runbook);
 
@@ -383,23 +379,26 @@ fn build_entity_map(runbook: &oj_runbook::Runbook) -> serde_json::Value {
 
 /// Format const definitions as a JSON array.
 fn format_consts_json(content: &str) -> Vec<serde_json::Value> {
-    extract_const_defs(content)
+    let consts = extract_const_defs(content);
+    let mut result: Vec<serde_json::Value> = consts
         .iter()
-        .map(|c| {
+        .map(|(name, c)| {
             serde_json::json!({
-                "name": c.name,
+                "name": name,
                 "required": c.default.is_none(),
                 "default": c.default,
             })
         })
-        .collect()
+        .collect();
+    result.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+    result
 }
 
 /// Extract const definitions from library content.
-fn extract_const_defs(content: &str) -> Vec<oj_runbook::ConstDef> {
-    match oj_runbook::extract_blocks(content) {
-        Ok(result) => result.consts,
-        Err(_) => Vec::new(),
+fn extract_const_defs(content: &str) -> std::collections::HashMap<String, oj_runbook::ConstDef> {
+    match oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl) {
+        Ok(runbook) => runbook.consts,
+        Err(_) => std::collections::HashMap::new(),
     }
 }
 
@@ -409,16 +408,18 @@ fn format_const_summary(content: &str) -> String {
     if defs.is_empty() {
         return "-".to_string();
     }
-    defs.iter()
-        .map(|c| {
+    let mut items: Vec<_> = defs
+        .iter()
+        .map(|(name, c)| {
             if c.default.is_none() {
-                format!("{} (req)", c.name)
+                format!("{} (req)", name)
             } else {
-                c.name.clone()
+                name.clone()
             }
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect();
+    items.sort();
+    items.join(", ")
 }
 
 #[cfg(test)]

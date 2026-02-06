@@ -40,8 +40,8 @@ pub use find::{
     FileComment, FindError, RunbookSummary,
 };
 pub use import::{
-    available_libraries, extract_blocks, parse_with_imports, resolve_library, ConstDef,
-    ExtractResult, ImportDef, ImportWarning, LibraryInfo,
+    available_libraries, parse_with_imports, resolve_library, ConstDef, ImportDef, ImportWarning,
+    LibraryInfo,
 };
 pub use job::{
     GitWorkspaceMode, JobDef, NotifyConfig, StepDef, StepTransition, WorkspaceBlock,
