@@ -148,6 +148,130 @@ where
         Ok(result_events)
     }
 
+    /// Handle resume for a standalone agent: nudge if alive, respawn if dead.
+    ///
+    /// Mirrors `handle_agent_resume` (for pipeline agents) but adapted for
+    /// standalone agent runs:
+    /// - If agent is alive and `kill` is false: nudge (send message to running agent)
+    /// - If agent is alive and `kill` is true: kill session, then respawn with --resume
+    /// - If agent is dead: respawn with --resume to continue conversation
+    pub(crate) async fn handle_agent_run_resume(
+        &self,
+        agent_run_id: &AgentRunId,
+        message: Option<&str>,
+        kill: bool,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let agent_run = self
+            .lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
+            .ok_or_else(|| {
+                RuntimeError::InvalidRequest(format!("agent run not found: {}", agent_run_id))
+            })?;
+
+        let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
+        let agent_def = runbook
+            .get_agent(&agent_run.agent_name)
+            .ok_or_else(|| RuntimeError::AgentNotFound(agent_run.agent_name.clone()))?
+            .clone();
+
+        // Check if agent is alive
+        let agent_id = agent_run.agent_id.as_ref().map(AgentId::new);
+        let agent_state = match &agent_id {
+            Some(id) => self.executor.get_agent_state(id).await.ok(),
+            None => None,
+        };
+        let is_alive = matches!(
+            agent_state,
+            Some(oj_core::AgentState::Working) | Some(oj_core::AgentState::WaitingForInput)
+        );
+
+        // If alive and not killing, nudge the agent
+        if !kill && is_alive {
+            if let Some(id) = &agent_id {
+                if let Some(msg) = message {
+                    self.executor
+                        .execute(Effect::SendToAgent {
+                            agent_id: id.clone(),
+                            input: msg.to_string(),
+                        })
+                        .await?;
+                }
+
+                // Reset status to Running
+                self.executor
+                    .execute(Effect::Emit {
+                        event: Event::AgentRunStatusChanged {
+                            id: agent_run_id.clone(),
+                            status: AgentRunStatus::Running,
+                            reason: Some("resumed".to_string()),
+                        },
+                    })
+                    .await?;
+
+                // Restart liveness timer
+                self.executor
+                    .execute(Effect::SetTimer {
+                        id: TimerId::liveness_agent_run(agent_run_id),
+                        duration: crate::spawn::LIVENESS_INTERVAL,
+                    })
+                    .await?;
+
+                // Record nudge timestamp to suppress auto-resume from our own nudge text
+                let now = self.clock().epoch_ms();
+                self.lock_state_mut(|state| {
+                    if let Some(ar) = state.agent_runs.get_mut(agent_run_id.as_str()) {
+                        ar.last_nudge_at = Some(now);
+                    }
+                });
+
+                tracing::info!(agent_run_id = %agent_run.id, "nudged standalone agent");
+                return Ok(vec![]);
+            }
+        }
+
+        // Agent dead OR --kill requested: recover using --resume
+        // Kill old tmux session if it exists
+        if let Some(ref session_id) = agent_run.session_id {
+            let _ = self
+                .executor
+                .execute(Effect::KillSession {
+                    session_id: SessionId::new(session_id),
+                })
+                .await;
+        }
+
+        // Find a valid session file to resume from
+        let resume_session_id = agent_run
+            .agent_id
+            .as_ref()
+            .and_then(|aid| find_session_log(&agent_run.cwd, aid).map(|_| aid.clone()));
+
+        // Respawn agent with resume
+        let mut input = agent_run.vars.clone();
+        if let Some(msg) = message {
+            input.insert("resume_message".to_string(), msg.to_string());
+        }
+
+        let result = self
+            .spawn_standalone_agent(SpawnAgentParams {
+                agent_run_id,
+                agent_def: &agent_def,
+                agent_name: &agent_run.agent_name,
+                input: &input,
+                cwd: &agent_run.cwd,
+                namespace: &agent_run.namespace,
+                resume_session_id: resume_session_id.as_deref(),
+            })
+            .await?;
+
+        tracing::info!(
+            agent_run_id = %agent_run.id,
+            kill,
+            resume = resume_session_id.is_some(),
+            "resumed standalone agent with --resume"
+        );
+        Ok(result)
+    }
+
     /// Handle lifecycle state change for a standalone agent.
     pub(crate) async fn handle_standalone_monitor_state(
         &self,

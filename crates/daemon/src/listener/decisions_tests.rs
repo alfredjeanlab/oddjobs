@@ -157,7 +157,7 @@ fn question_resume_message_no_choice_no_message() {
 // ===================== Tests for agent run action mapping =====================
 
 #[test]
-fn agent_run_idle_nudge_sends_to_session() {
+fn agent_run_idle_nudge_emits_resume() {
     let ar_id = AgentRunId::new("ar-123");
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
@@ -171,11 +171,12 @@ fn agent_run_idle_nudge_sends_to_session() {
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-abc");
-            assert!(input.contains("please continue"));
+        Event::AgentRunResume { id, message, kill } => {
+            assert_eq!(id.as_str(), "ar-123");
+            assert_eq!(message.as_deref(), Some("please continue"));
+            assert!(!kill);
         }
-        other => panic!("expected SessionInput, got {:?}", other),
+        other => panic!("expected AgentRunResume, got {:?}", other),
     }
 }
 
@@ -243,7 +244,7 @@ fn agent_run_idle_dismiss_returns_empty() {
 }
 
 #[test]
-fn agent_run_error_retry_sets_running() {
+fn agent_run_error_retry_emits_resume_with_kill() {
     let ar_id = AgentRunId::new("ar-err1");
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Error,
@@ -257,12 +258,12 @@ fn agent_run_error_retry_sets_running() {
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::AgentRunStatusChanged { id, status, reason } => {
+        Event::AgentRunResume { id, message, kill } => {
             assert_eq!(id.as_str(), "ar-err1");
-            assert_eq!(*status, AgentRunStatus::Running);
-            assert!(reason.as_ref().unwrap().contains("retry"));
+            assert!(message.is_some());
+            assert!(*kill);
         }
-        other => panic!("expected AgentRunStatusChanged(Running), got {:?}", other),
+        other => panic!("expected AgentRunResume(kill=true), got {:?}", other),
     }
 }
 
@@ -384,20 +385,28 @@ fn agent_run_question_cancel_marks_failed() {
 }
 
 #[test]
-fn agent_run_no_session_returns_empty_for_session_input() {
+fn agent_run_no_session_nudge_still_emits_resume() {
     let ar_id = AgentRunId::new("ar-nosession");
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
-        Some(1), // Nudge (would need session)
+        Some(1), // Nudge
         Some("continue"),
         "dec-nosession",
         &ar_id,
-        None, // No session
+        None, // No session — AgentRunResume handles liveness check in engine
         &[],
     );
 
-    // Without a session, session input events can't be sent
-    assert!(events.is_empty());
+    // AgentRunResume is emitted regardless of session; the engine handles liveness
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::AgentRunResume { id, message, kill } => {
+            assert_eq!(id.as_str(), "ar-nosession");
+            assert_eq!(message.as_deref(), Some("continue"));
+            assert!(!kill);
+        }
+        other => panic!("expected AgentRunResume, got {:?}", other),
+    }
 }
 
 // ===================== Tests for resolve_decision_action =====================

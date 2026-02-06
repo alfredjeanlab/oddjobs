@@ -569,6 +569,15 @@ pub enum Event {
         reason: Option<String>,
     },
 
+    #[serde(rename = "agent_run:resume")]
+    AgentRunResume {
+        id: AgentRunId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        kill: bool,
+    },
+
     #[serde(rename = "agent_run:deleted")]
     AgentRunDeleted { id: AgentRunId },
 
@@ -688,6 +697,7 @@ impl Event {
             Event::AgentRunCreated { .. } => "agent_run:created",
             Event::AgentRunStarted { .. } => "agent_run:started",
             Event::AgentRunStatusChanged { .. } => "agent_run:status_changed",
+            Event::AgentRunResume { .. } => "agent_run:resume",
             Event::AgentRunDeleted { .. } => "agent_run:deleted",
             Event::Custom => "custom",
         }
@@ -939,6 +949,15 @@ impl Event {
                     format!("{t} id={id} status={status} reason={reason}")
                 } else {
                     format!("{t} id={id} status={status}")
+                }
+            }
+            Event::AgentRunResume { id, message, kill } => {
+                if *kill {
+                    format!("{t} id={id} kill=true")
+                } else if message.is_some() {
+                    format!("{t} id={id} msg=true")
+                } else {
+                    format!("{t} id={id}")
                 }
             }
             Event::AgentRunDeleted { id } => format!("{t} id={id}"),
