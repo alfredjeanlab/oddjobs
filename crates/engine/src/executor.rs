@@ -710,5 +710,5 @@ where
 }
 
 #[cfg(test)]
-#[path = "executor_tests.rs"]
+#[path = "executor_tests/mod.rs"]
 mod tests;
