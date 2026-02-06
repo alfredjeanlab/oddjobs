@@ -15,6 +15,7 @@ use oj_storage::MaterializedState;
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
+use super::mutations::emit;
 use super::ConnectionError;
 
 pub(super) fn handle_decision_resolve(
@@ -93,9 +94,7 @@ pub(super) fn handle_decision_resolve(
         resolved_at_ms,
         namespace: decision_namespace,
     };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     // Map chosen option to action based on owner type
     let action_events = match &decision_owner {
@@ -127,9 +126,7 @@ pub(super) fn handle_decision_resolve(
     };
 
     for action in action_events {
-        event_bus
-            .send(action)
-            .map_err(|_| ConnectionError::WalError)?;
+        emit(event_bus, action)?;
     }
 
     Ok(Response::DecisionResolved { id: full_id })
