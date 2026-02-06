@@ -3,6 +3,9 @@ version = 1
 [rust]
 cfg_test_split = "require"
 
+[check]
+cloc = { check = "error" }
+
 [check.license]
 check = "error"
 license = "BUSL-1.1"
