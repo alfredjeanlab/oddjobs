@@ -43,15 +43,7 @@ pub fn format_time_ago(epoch_ms: u64) -> String {
         .unwrap_or_default()
         .as_millis() as u64;
     let elapsed_secs = now_ms.saturating_sub(epoch_ms) / 1000;
-    if elapsed_secs < 60 {
-        format!("{}s", elapsed_secs)
-    } else if elapsed_secs < 3600 {
-        format!("{}m", elapsed_secs / 60)
-    } else if elapsed_secs < 86400 {
-        format!("{}h", elapsed_secs / 3600)
-    } else {
-        format!("{}d", elapsed_secs / 86400)
-    }
+    oj_core::format_elapsed(elapsed_secs)
 }
 
 /// Print prune results in text or JSON format.

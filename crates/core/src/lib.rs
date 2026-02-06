@@ -21,6 +21,7 @@ pub mod job;
 pub mod namespace;
 pub mod owner;
 pub mod session;
+pub mod time_fmt;
 pub mod timer;
 pub mod worker;
 pub mod workspace;
@@ -38,6 +39,7 @@ pub use job::{Job, JobConfig, JobId, StepOutcome, StepRecord, StepStatus};
 pub use namespace::{scoped_name, split_scoped_name};
 pub use owner::OwnerId;
 pub use session::SessionId;
+pub use time_fmt::{format_elapsed, format_elapsed_ms};
 pub use timer::TimerId;
 // WorkerId available via worker module if needed
 pub use workspace::{WorkspaceId, WorkspaceStatus};

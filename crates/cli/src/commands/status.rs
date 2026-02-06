@@ -482,25 +482,11 @@ fn format_text(
 }
 
 fn format_duration(secs: u64) -> String {
-    if secs < 60 {
-        format!("{}s", secs)
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else if secs < 86400 {
-        let h = secs / 3600;
-        let m = (secs % 3600) / 60;
-        if m > 0 {
-            format!("{}h{}m", h, m)
-        } else {
-            format!("{}h", h)
-        }
-    } else {
-        format!("{}d", secs / 86400)
-    }
+    oj_core::format_elapsed(secs)
 }
 
 fn format_duration_ms(ms: u64) -> String {
-    format_duration(ms / 1000)
+    oj_core::format_elapsed_ms(ms)
 }
 
 /// Returns the job name when it is a meaningful friendly name,

@@ -56,15 +56,7 @@ pub(super) fn parse_interval_ms(s: &str) -> Option<u64> {
 
 /// Format seconds as a short human-readable duration: "12s", "5m", "2h", "3d".
 pub(super) fn format_duration_short(total_secs: u64) -> String {
-    if total_secs < 60 {
-        format!("{}s", total_secs)
-    } else if total_secs < 3600 {
-        format!("{}m", total_secs / 60)
-    } else if total_secs < 86400 {
-        format!("{}h", total_secs / 3600)
-    } else {
-        format!("{}d", total_secs / 86400)
-    }
+    oj_core::format_elapsed(total_secs)
 }
 
 #[cfg(test)]

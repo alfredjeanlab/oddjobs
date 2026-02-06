@@ -57,7 +57,7 @@ fn interval_parsing(input: &str, expected: Option<u64>) {
     one_minute = { 60, "1m" },
     minutes = { 3599, "59m" },
     one_hour = { 3600, "1h" },
-    hours = { 86399, "23h" },
+    hours = { 86399, "23h59m" },
     one_day = { 86400, "1d" },
     days = { 172800, "2d" },
 )]
