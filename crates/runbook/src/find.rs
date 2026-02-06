@@ -330,6 +330,98 @@ pub fn collect_all_crons(runbook_dir: &Path) -> Result<Vec<(String, crate::CronD
     })
 }
 
+/// Summary of a single runbook file for `oj runbook list`.
+pub struct RunbookSummary {
+    /// Relative path (e.g. "merge.hcl").
+    pub file: String,
+    /// Short description from the file's leading comment.
+    pub description: Option<String>,
+    /// Import declarations in this file.
+    pub imports: Vec<crate::ImportDef>,
+    /// Local command names defined in this file.
+    pub commands: Vec<String>,
+    /// Local job names.
+    pub jobs: Vec<String>,
+    /// Local agent names.
+    pub agents: Vec<String>,
+    /// Local queue names.
+    pub queues: Vec<String>,
+    /// Local worker names.
+    pub workers: Vec<String>,
+    /// Local cron names.
+    pub crons: Vec<String>,
+}
+
+/// Collect per-file summaries for all runbooks in a directory.
+pub fn collect_runbook_summaries(runbook_dir: &Path) -> Result<Vec<RunbookSummary>, FindError> {
+    if !runbook_dir.exists() {
+        return Ok(Vec::new());
+    }
+    let files = collect_runbook_files(runbook_dir)?;
+    let mut summaries = Vec::new();
+
+    for (path, format) in files {
+        let content = match std::fs::read_to_string(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping unreadable runbook");
+                continue;
+            }
+        };
+
+        let file_name = path
+            .strip_prefix(runbook_dir)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        let description = extract_file_comment(&content).map(|c| c.short);
+
+        // Extract imports, then parse remaining for local-only entities
+        let (imports, local_content) = if format == Format::Hcl {
+            match crate::import::extract_blocks(&content) {
+                Ok(result) => (result.imports, result.remaining),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
+                    continue;
+                }
+            }
+        } else {
+            (Vec::new(), content.clone())
+        };
+
+        let runbook = match crate::parser::parse_runbook_no_xref(&local_content, format) {
+            Ok(rb) => rb,
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
+                continue;
+            }
+        };
+
+        let mut summary = RunbookSummary {
+            file: file_name,
+            description,
+            imports,
+            commands: runbook.commands.keys().cloned().collect(),
+            jobs: runbook.jobs.keys().cloned().collect(),
+            agents: runbook.agents.keys().cloned().collect(),
+            queues: runbook.queues.keys().cloned().collect(),
+            workers: runbook.workers.keys().cloned().collect(),
+            crons: runbook.crons.keys().cloned().collect(),
+        };
+        summary.commands.sort();
+        summary.jobs.sort();
+        summary.agents.sort();
+        summary.queues.sort();
+        summary.workers.sort();
+        summary.crons.sort();
+        summaries.push(summary);
+    }
+
+    summaries.sort_by(|a, b| a.file.cmp(&b.file));
+    Ok(summaries)
+}
+
 /// Validate all runbooks in a directory for cross-file conflicts.
 ///
 /// Returns errors for any entity name defined in multiple files within the same

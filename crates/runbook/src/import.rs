@@ -10,6 +10,7 @@
 //! import "oj/merge" "merge" {}
 //! ```
 
+use crate::find::extract_file_comment;
 use crate::parser::{Format, ParseError, Runbook};
 use crate::template::escape_for_shell;
 use regex::Regex;
@@ -433,6 +434,32 @@ const LIBRARY_WOK: &str = include_str!("library/wok.hcl");
 
 /// Built-in library: oj/merge
 const LIBRARY_MERGE: &str = include_str!("library/merge.hcl");
+
+/// Metadata about a built-in library.
+#[derive(Debug, Clone)]
+pub struct LibraryInfo {
+    pub source: &'static str,
+    pub content: &'static str,
+    pub description: String,
+}
+
+/// Return metadata for all built-in libraries.
+pub fn available_libraries() -> Vec<LibraryInfo> {
+    static SOURCES: &[(&str, &str)] = &[("oj/merge", LIBRARY_MERGE), ("oj/wok", LIBRARY_WOK)];
+    SOURCES
+        .iter()
+        .map(|(source, content)| {
+            let description = extract_file_comment(content)
+                .map(|c| c.short)
+                .unwrap_or_default();
+            LibraryInfo {
+                source,
+                content,
+                description,
+            }
+        })
+        .collect()
+}
 
 /// Resolve a library source path to its HCL content.
 ///

@@ -15,6 +15,7 @@ pub mod project;
 pub mod queue;
 pub mod resolve;
 pub mod run;
+pub mod runbook;
 pub mod session;
 pub mod status;
 pub mod worker;

@@ -473,6 +473,45 @@ fn parse_import_missing_required_const() {
     );
 }
 
+// =============================================================================
+// available_libraries tests
+// =============================================================================
+
+#[test]
+fn available_libraries_returns_all() {
+    let libs = available_libraries();
+    assert_eq!(libs.len(), 2);
+    let sources: Vec<&str> = libs.iter().map(|l| l.source).collect();
+    assert!(sources.contains(&"oj/wok"), "missing oj/wok");
+    assert!(sources.contains(&"oj/merge"), "missing oj/merge");
+}
+
+#[test]
+fn available_libraries_have_descriptions() {
+    let libs = available_libraries();
+    for lib in &libs {
+        assert!(
+            !lib.description.is_empty(),
+            "library '{}' has empty description",
+            lib.source
+        );
+    }
+}
+
+#[test]
+fn available_libraries_parse_successfully() {
+    let libs = available_libraries();
+    for lib in &libs {
+        let extracted = extract_blocks(lib.content).unwrap_or_else(|e| {
+            panic!("failed to extract blocks from '{}': {}", lib.source, e);
+        });
+        let _runbook = crate::parser::parse_runbook_no_xref(&extracted.remaining, Format::Hcl)
+            .unwrap_or_else(|e| {
+                panic!("failed to parse library '{}': {}", lib.source, e);
+            });
+    }
+}
+
 #[test]
 fn parse_no_imports_passthrough() {
     let content = r#"

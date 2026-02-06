@@ -59,6 +59,7 @@ Resources:
   cron        Cron management
   decision    Decision management
   project     Project management
+  runbook     Runbook management
 
 System:
   env         Environment variable management

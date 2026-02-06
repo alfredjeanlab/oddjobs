@@ -56,6 +56,7 @@ fn all_commands_assigned_to_section() {
             Commands::Cron(_) => "Resources",
             Commands::Decision(_) => "Resources",
             Commands::Project(_) => "Resources",
+            Commands::Runbook(_) => "Resources",
             Commands::Env(_) => "System",
             Commands::Logs { .. } => "System",
             Commands::Emit(_) => "System",

@@ -20,7 +20,7 @@ use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{
     agent, cron, daemon, decision, emit, env as env_cmd, job, project, queue, resolve, run,
-    session, status, worker, workspace,
+    runbook, session, status, worker, workspace,
 };
 use std::path::{Path, PathBuf};
 
@@ -84,6 +84,8 @@ enum Commands {
     Emit(emit::EmitArgs),
     /// Project management
     Project(project::ProjectArgs),
+    /// Runbook management
+    Runbook(runbook::RunbookArgs),
     /// Show overview of active work across all projects
     Status(status::StatusArgs),
     /// Peek at the active tmux session (auto-detects entity type)
@@ -271,6 +273,12 @@ async fn run() -> Result<()> {
         return env_cmd::handle(args.command, format);
     }
 
+    // Handle runbook command separately (doesn't need client connection)
+    if let Commands::Runbook(args) = command {
+        let project_root = find_project_root();
+        return runbook::handle(args.command, &project_root, format);
+    }
+
     // Find project root for runbook loading (now from potentially-changed cwd)
     let project_root = find_project_root();
     let invoke_dir = std::env::current_dir().unwrap_or_else(|_| project_root.clone());
@@ -421,7 +429,7 @@ async fn run() -> Result<()> {
             .await?
         }
 
-        Commands::Daemon(_) | Commands::Env(_) => unreachable!(),
+        Commands::Daemon(_) | Commands::Env(_) | Commands::Runbook(_) => unreachable!(),
     }
 
     Ok(())
