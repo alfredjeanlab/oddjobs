@@ -8,14 +8,15 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{scoped_name, Event, IdGen, JobId, UuidIdGen};
+use oj_core::{Event, IdGen, JobId, UuidIdGen};
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
+use super::mutations::emit;
 use super::suggest;
-use super::workers::hash_runbook;
+use super::workers::hash_and_emit_runbook;
 use super::ConnectionError;
 
 /// Handle a CronStart request.
@@ -91,21 +92,8 @@ pub(super) fn handle_cron_start(
         }
     };
 
-    // Serialize and hash the runbook for WAL storage
-    let (runbook_json, runbook_hash) = match hash_runbook(&runbook) {
-        Ok(result) => result,
-        Err(msg) => return Ok(Response::Error { message: msg }),
-    };
-
-    // Emit RunbookLoaded for WAL persistence
-    let runbook_event = Event::RunbookLoaded {
-        hash: runbook_hash.clone(),
-        version: 1,
-        runbook: runbook_json,
-    };
-    event_bus
-        .send(runbook_event)
-        .map_err(|_| ConnectionError::WalError)?;
+    // Hash runbook and emit RunbookLoaded for WAL persistence
+    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
 
     // Emit CronStarted event
     let event = Event::CronStarted {
@@ -117,9 +105,7 @@ pub(super) fn handle_cron_start(
         namespace: namespace.to_string(),
     };
 
-    event_bus
-        .send(event.clone())
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event.clone())?;
 
     // Apply to materialized state before responding so queries see it
     // immediately. apply_event is idempotent so the second apply when the
@@ -142,27 +128,19 @@ fn handle_cron_start_all(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     let runbook_dir = project_root.join(".oj/runbooks");
-    let crons = oj_runbook::collect_all_crons(&runbook_dir).unwrap_or_default();
+    let names = oj_runbook::collect_all_crons(&runbook_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, _)| name);
 
-    let mut started = Vec::new();
-    let mut skipped = Vec::new();
-
-    for (cron_name, _) in crons {
-        match handle_cron_start(project_root, namespace, &cron_name, false, event_bus, state) {
-            Ok(Response::CronStarted { cron_name }) => {
-                started.push(cron_name);
-            }
-            Ok(Response::Error { message }) => {
-                skipped.push((cron_name, message));
-            }
-            Ok(_) => {
-                skipped.push((cron_name, "unexpected response".to_string()));
-            }
-            Err(e) => {
-                skipped.push((cron_name, e.to_string()));
-            }
-        }
-    }
+    let (started, skipped) = super::collect_start_results(
+        names,
+        |name| handle_cron_start(project_root, namespace, name, false, event_bus, state),
+        |resp| match resp {
+            Response::CronStarted { cron_name } => Some(cron_name.clone()),
+            _ => None,
+        },
+    )?;
 
     Ok(Response::CronsStarted { started, skipped })
 }
@@ -176,16 +154,15 @@ pub(super) fn handle_cron_stop(
     project_root: Option<&Path>,
 ) -> Result<Response, ConnectionError> {
     // Check if cron exists in state
-    let scoped = scoped_name(namespace, cron_name);
-    let exists = {
-        let state = state.lock();
-        state.crons.contains_key(&scoped)
-    };
-    if !exists {
-        let hint = suggest_for_cron(project_root, cron_name, namespace, "oj cron stop", state);
-        return Ok(Response::Error {
-            message: format!("unknown cron: {}{}", cron_name, hint),
-        });
+    if let Err(resp) = super::require_scoped_resource(
+        state,
+        namespace,
+        cron_name,
+        "cron",
+        |s, k| s.crons.contains_key(k),
+        || suggest_for_cron(project_root, cron_name, namespace, "oj cron stop", state),
+    ) {
+        return Ok(resp);
     }
 
     let event = Event::CronStopped {
@@ -193,9 +170,7 @@ pub(super) fn handle_cron_stop(
         namespace: namespace.to_string(),
     };
 
-    event_bus
-        .send(event.clone())
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event.clone())?;
 
     // Apply to materialized state before responding so queries see it
     // immediately. apply_event is idempotent.
@@ -271,21 +246,8 @@ pub(super) async fn handle_cron_once(
         }
     };
 
-    // Serialize and hash the runbook for WAL storage
-    let (runbook_json, runbook_hash) = match hash_runbook(&runbook) {
-        Ok(result) => result,
-        Err(msg) => return Ok(Response::Error { message: msg }),
-    };
-
-    // Emit RunbookLoaded for WAL persistence
-    let runbook_event = Event::RunbookLoaded {
-        hash: runbook_hash.clone(),
-        version: 1,
-        runbook: runbook_json,
-    };
-    event_bus
-        .send(runbook_event)
-        .map_err(|_| ConnectionError::WalError)?;
+    // Hash runbook and emit RunbookLoaded for WAL persistence
+    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
 
     let is_agent = run_target.starts_with("agent:");
 
@@ -306,9 +268,7 @@ pub(super) async fn handle_cron_once(
             namespace: namespace.to_string(),
         };
 
-        event_bus
-            .send(event)
-            .map_err(|_| ConnectionError::WalError)?;
+        emit(event_bus, event)?;
 
         Ok(Response::CommandStarted {
             job_id: agent_run_id,
@@ -333,9 +293,7 @@ pub(super) async fn handle_cron_once(
             namespace: namespace.to_string(),
         };
 
-        event_bus
-            .send(event)
-            .map_err(|_| ConnectionError::WalError)?;
+        emit(event_bus, event)?;
 
         Ok(Response::CommandStarted {
             job_id: job_id.to_string(),
@@ -353,19 +311,14 @@ pub(super) fn handle_cron_restart(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Stop cron if it exists in state
-    let scoped = scoped_name(namespace, cron_name);
-    let exists = {
-        let state = state.lock();
-        state.crons.contains_key(&scoped)
-    };
-    if exists {
-        let stop_event = Event::CronStopped {
-            cron_name: cron_name.to_string(),
-            namespace: namespace.to_string(),
-        };
-        event_bus
-            .send(stop_event)
-            .map_err(|_| ConnectionError::WalError)?;
+    if super::scoped_exists(state, namespace, cron_name, |s, k| s.crons.contains_key(k)) {
+        emit(
+            event_bus,
+            Event::CronStopped {
+                cron_name: cron_name.to_string(),
+                namespace: namespace.to_string(),
+            },
+        )?;
     }
 
     // Start with fresh runbook

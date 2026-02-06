@@ -15,6 +15,7 @@ use oj_storage::MaterializedState;
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
+use super::mutations::emit;
 use super::suggest;
 use super::ConnectionError;
 
@@ -121,9 +122,7 @@ pub(super) async fn handle_run_command(
         args: parsed_args,
     };
 
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     if is_agent {
         // For standalone agent commands, return AgentRunStarted

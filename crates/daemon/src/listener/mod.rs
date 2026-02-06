@@ -173,9 +173,7 @@ async fn handle_request(
         }),
 
         Request::Event { event } => {
-            event_bus
-                .send(event)
-                .map_err(|_| ConnectionError::WalError)?;
+            mutations::emit(event_bus, event)?;
             Ok(Response::Ok)
         }
 
@@ -349,13 +347,13 @@ async fn handle_request(
         } => {
             // Internal-only: emits WorkerWake event for queue auto-wake.
             // CLI uses WorkerStart (idempotent) instead.
-            let event = Event::WorkerWake {
-                worker_name,
-                namespace,
-            };
-            event_bus
-                .send(event)
-                .map_err(|_| ConnectionError::WalError)?;
+            mutations::emit(
+                event_bus,
+                Event::WorkerWake {
+                    worker_name,
+                    namespace,
+                },
+            )?;
             Ok(Response::Ok)
         }
 
@@ -611,6 +609,77 @@ fn load_runbook_with_fallback(
             }
         }
     }
+}
+
+/// Check that a scoped resource exists in state, returning an error response if not.
+///
+/// The `check` closure receives the locked state and the scoped name, and should
+/// return `true` if the resource exists. On failure, calls `suggest_fn` to
+/// generate a "did you mean" hint.
+fn require_scoped_resource(
+    state: &Arc<Mutex<MaterializedState>>,
+    namespace: &str,
+    name: &str,
+    resource_type: &str,
+    check: impl FnOnce(&MaterializedState, &str) -> bool,
+    suggest_fn: impl FnOnce() -> String,
+) -> Result<(), Response> {
+    let scoped = oj_core::scoped_name(namespace, name);
+    let exists = check(&state.lock(), &scoped);
+    if exists {
+        Ok(())
+    } else {
+        let hint = suggest_fn();
+        Err(Response::Error {
+            message: format!("unknown {}: {}{}", resource_type, name, hint),
+        })
+    }
+}
+
+/// Check if a scoped resource exists in state.
+fn scoped_exists(
+    state: &Arc<Mutex<MaterializedState>>,
+    namespace: &str,
+    name: &str,
+    check: impl FnOnce(&MaterializedState, &str) -> bool,
+) -> bool {
+    let scoped = oj_core::scoped_name(namespace, name);
+    check(&state.lock(), &scoped)
+}
+
+/// Result of a batch start operation: (started_names, skipped_with_reasons).
+type StartAllResult = (Vec<String>, Vec<(String, String)>);
+
+/// Collect start results for a batch of resources.
+///
+/// Calls `start_fn` for each name and classifies results into started/skipped.
+/// The `extract_name` closure extracts the started name from a success response.
+fn collect_start_results(
+    names: impl Iterator<Item = String>,
+    start_fn: impl Fn(&str) -> Result<Response, ConnectionError>,
+    extract_name: impl Fn(&Response) -> Option<String>,
+) -> Result<StartAllResult, ConnectionError> {
+    let mut started = Vec::new();
+    let mut skipped = Vec::new();
+
+    for name in names {
+        match start_fn(&name) {
+            Ok(ref resp) => {
+                if let Some(started_name) = extract_name(resp) {
+                    started.push(started_name);
+                } else if let Response::Error { message } = resp {
+                    skipped.push((name, message.clone()));
+                } else {
+                    skipped.push((name, "unexpected response".to_string()));
+                }
+            }
+            Err(e) => {
+                skipped.push((name, e.to_string()));
+            }
+        }
+    }
+
+    Ok((started, skipped))
 }
 
 #[cfg(test)]

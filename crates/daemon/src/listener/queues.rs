@@ -16,8 +16,9 @@ use oj_storage::{MaterializedState, QueueItemStatus};
 use crate::event_bus::EventBus;
 use crate::protocol::{QueueItemEntry, Response};
 
+use super::mutations::emit;
 use super::suggest;
-use super::workers::hash_runbook;
+use super::workers::hash_and_emit_runbook;
 use super::ConnectionError;
 
 /// Handle a QueuePush request.
@@ -155,9 +156,7 @@ pub(super) fn handle_queue_push(
         pushed_at_epoch_ms,
         namespace: namespace.to_string(),
     };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     // Wake workers attached to this queue (auto-starting stopped workers)
     wake_attached_workers(
@@ -215,39 +214,31 @@ fn wake_attached_workers(
                 worker = *name,
                 "waking running worker on queue push"
             );
-            let event = Event::WorkerWake {
-                worker_name: (*name).to_string(),
-                namespace: namespace.to_string(),
-            };
-            event_bus
-                .send(event)
-                .map_err(|_| ConnectionError::WalError)?;
+            emit(
+                event_bus,
+                Event::WorkerWake {
+                    worker_name: (*name).to_string(),
+                    namespace: namespace.to_string(),
+                },
+            )?;
         } else {
             // Auto-start: emit RunbookLoaded + WorkerStarted (same as handle_worker_start)
             let Some(worker_def) = runbook.get_worker(name) else {
                 continue;
             };
-            let (runbook_json, runbook_hash) =
-                hash_runbook(runbook).map_err(ConnectionError::Internal)?;
+            let runbook_hash = hash_and_emit_runbook(event_bus, runbook)?;
 
-            event_bus
-                .send(Event::RunbookLoaded {
-                    hash: runbook_hash.clone(),
-                    version: 1,
-                    runbook: runbook_json,
-                })
-                .map_err(|_| ConnectionError::WalError)?;
-
-            event_bus
-                .send(Event::WorkerStarted {
+            emit(
+                event_bus,
+                Event::WorkerStarted {
                     worker_name: (*name).to_string(),
                     project_root: project_root.to_path_buf(),
                     runbook_hash,
                     queue_name: worker_def.source.queue.clone(),
                     concurrency: worker_def.concurrency,
                     namespace: namespace.to_string(),
-                })
-                .map_err(|_| ConnectionError::WalError)?;
+                },
+            )?;
 
             tracing::info!(
                 queue = queue_name,
@@ -360,9 +351,7 @@ pub(super) fn handle_queue_drop(
         item_id: resolved_id.clone(),
         namespace: namespace.to_string(),
     };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     Ok(Response::QueueDropped {
         queue_name: queue_name.to_string(),
@@ -491,9 +480,7 @@ pub(super) fn handle_queue_retry(
             item_id: resolved_id.clone(),
             namespace: namespace.to_string(),
         };
-        event_bus
-            .send(event)
-            .map_err(|_| ConnectionError::WalError)?;
+        emit(event_bus, event)?;
 
         // Wake workers attached to this queue
         wake_attached_workers(
@@ -544,9 +531,7 @@ pub(super) fn handle_queue_retry(
                     item_id: resolved_id.clone(),
                     namespace: namespace.to_string(),
                 };
-                event_bus
-                    .send(event)
-                    .map_err(|_| ConnectionError::WalError)?;
+                emit(event_bus, event)?;
                 retried.push(resolved_id);
             }
             Some(_) => {
@@ -716,9 +701,7 @@ pub(super) fn handle_queue_retry_bulk(
                     item_id: item_id.clone(),
                     namespace: namespace.to_string(),
                 };
-                event_bus
-                    .send(event)
-                    .map_err(|_| ConnectionError::WalError)?;
+                emit(event_bus, event)?;
                 item_ids.push(item_id);
             }
             Some(_status) => {
@@ -818,9 +801,7 @@ pub(super) fn handle_queue_drain(
             item_id: item.id.clone(),
             namespace: namespace.to_string(),
         };
-        event_bus
-            .send(event)
-            .map_err(|_| ConnectionError::WalError)?;
+        emit(event_bus, event)?;
     }
 
     Ok(Response::QueueDrained {
@@ -899,9 +880,7 @@ pub(super) fn handle_queue_fail(
         error: "force-failed via oj queue fail".to_string(),
         namespace: namespace.to_string(),
     };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     Ok(Response::QueueFailed {
         queue_name: queue_name.to_string(),
@@ -978,9 +957,7 @@ pub(super) fn handle_queue_done(
         item_id: resolved_id.clone(),
         namespace: namespace.to_string(),
     };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(event_bus, event)?;
 
     Ok(Response::QueueCompleted {
         queue_name: queue_name.to_string(),
@@ -1074,9 +1051,7 @@ pub(super) fn handle_queue_prune(
                 item_id: entry.item_id.clone(),
                 namespace: namespace.to_string(),
             };
-            event_bus
-                .send(event)
-                .map_err(|_| ConnectionError::WalError)?;
+            emit(event_bus, event)?;
         }
     }
 

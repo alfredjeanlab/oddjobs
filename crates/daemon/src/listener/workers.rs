@@ -8,12 +8,13 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{scoped_name, Event};
+use oj_core::Event;
 use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
 use crate::protocol::Response;
 
+use super::mutations::emit;
 use super::suggest;
 use super::ConnectionError;
 
@@ -85,35 +86,21 @@ pub(super) fn handle_worker_start(
         });
     }
 
-    // Serialize and hash the runbook for WAL storage
-    let (runbook_json, runbook_hash) = match hash_runbook(&runbook) {
-        Ok(result) => result,
-        Err(msg) => return Ok(Response::Error { message: msg }),
-    };
-
-    // Emit RunbookLoaded for WAL persistence
-    let runbook_event = Event::RunbookLoaded {
-        hash: runbook_hash.clone(),
-        version: 1,
-        runbook: runbook_json,
-    };
-    event_bus
-        .send(runbook_event)
-        .map_err(|_| ConnectionError::WalError)?;
+    // Hash runbook and emit RunbookLoaded for WAL persistence
+    let runbook_hash = hash_and_emit_runbook(event_bus, &runbook)?;
 
     // Emit WorkerStarted event
-    let event = Event::WorkerStarted {
-        worker_name: worker_name.to_string(),
-        project_root: project_root.to_path_buf(),
-        runbook_hash,
-        queue_name: worker_def.source.queue.clone(),
-        concurrency: worker_def.concurrency,
-        namespace: namespace.to_string(),
-    };
-
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(
+        event_bus,
+        Event::WorkerStarted {
+            worker_name: worker_name.to_string(),
+            project_root: project_root.to_path_buf(),
+            runbook_hash,
+            queue_name: worker_def.source.queue.clone(),
+            concurrency: worker_def.concurrency,
+            namespace: namespace.to_string(),
+        },
+    )?;
 
     Ok(Response::WorkerStarted {
         worker_name: worker_name.to_string(),
@@ -130,34 +117,19 @@ fn handle_worker_start_all(
     // Resolve the effective project root: prefer known root when namespace doesn't match
     let effective_root = resolve_effective_project_root(project_root, namespace, state);
     let runbook_dir = effective_root.join(".oj/runbooks");
-    let workers = oj_runbook::collect_all_workers(&runbook_dir).unwrap_or_default();
+    let names = oj_runbook::collect_all_workers(&runbook_dir)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(name, _)| name);
 
-    let mut started = Vec::new();
-    let mut skipped = Vec::new();
-
-    for (worker_name, _) in workers {
-        match handle_worker_start(
-            &effective_root,
-            namespace,
-            &worker_name,
-            false,
-            event_bus,
-            state,
-        ) {
-            Ok(Response::WorkerStarted { worker_name }) => {
-                started.push(worker_name);
-            }
-            Ok(Response::Error { message }) => {
-                skipped.push((worker_name, message));
-            }
-            Ok(_) => {
-                skipped.push((worker_name, "unexpected response".to_string()));
-            }
-            Err(e) => {
-                skipped.push((worker_name, e.to_string()));
-            }
-        }
-    }
+    let (started, skipped) = super::collect_start_results(
+        names,
+        |name| handle_worker_start(&effective_root, namespace, name, false, event_bus, state),
+        |resp| match resp {
+            Response::WorkerStarted { worker_name } => Some(worker_name.clone()),
+            _ => None,
+        },
+    )?;
 
     Ok(Response::WorkersStarted { started, skipped })
 }
@@ -193,32 +165,32 @@ pub(super) fn handle_worker_stop(
     project_root: Option<&Path>,
 ) -> Result<Response, ConnectionError> {
     // Check if worker exists in state
-    let scoped = scoped_name(namespace, worker_name);
-    let exists = {
-        let state = state.lock();
-        state.workers.contains_key(&scoped)
-    };
-    if !exists {
-        let hint = suggest_for_worker(
-            project_root,
-            worker_name,
-            namespace,
-            "oj worker stop",
-            state,
-        );
-        return Ok(Response::Error {
-            message: format!("unknown worker: {}{}", worker_name, hint),
-        });
+    if let Err(resp) = super::require_scoped_resource(
+        state,
+        namespace,
+        worker_name,
+        "worker",
+        |s, k| s.workers.contains_key(k),
+        || {
+            suggest_for_worker(
+                project_root,
+                worker_name,
+                namespace,
+                "oj worker stop",
+                state,
+            )
+        },
+    ) {
+        return Ok(resp);
     }
 
-    let event = Event::WorkerStopped {
-        worker_name: worker_name.to_string(),
-        namespace: namespace.to_string(),
-    };
-
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(
+        event_bus,
+        Event::WorkerStopped {
+            worker_name: worker_name.to_string(),
+            namespace: namespace.to_string(),
+        },
+    )?;
 
     Ok(Response::Ok)
 }
@@ -232,19 +204,16 @@ pub(super) fn handle_worker_restart(
     state: &Arc<Mutex<MaterializedState>>,
 ) -> Result<Response, ConnectionError> {
     // Stop worker if it exists in state
-    let scoped = scoped_name(namespace, worker_name);
-    let exists = {
-        let state = state.lock();
-        state.workers.contains_key(&scoped)
-    };
-    if exists {
-        let stop_event = Event::WorkerStopped {
-            worker_name: worker_name.to_string(),
-            namespace: namespace.to_string(),
-        };
-        event_bus
-            .send(stop_event)
-            .map_err(|_| ConnectionError::WalError)?;
+    if super::scoped_exists(state, namespace, worker_name, |s, k| {
+        s.workers.contains_key(k)
+    }) {
+        emit(
+            event_bus,
+            Event::WorkerStopped {
+                worker_name: worker_name.to_string(),
+                namespace: namespace.to_string(),
+            },
+        )?;
     }
 
     // Start with fresh runbook
@@ -273,31 +242,26 @@ pub(super) fn handle_worker_resize(
         });
     }
 
-    // Check if worker exists
-    let scoped = scoped_name(namespace, worker_name);
-    let (exists, old_concurrency) = {
-        let state = state.lock();
-        match state.workers.get(&scoped) {
-            Some(record) => (true, record.concurrency),
-            None => (false, 0),
+    // Check if worker exists and get current concurrency
+    let scoped = oj_core::scoped_name(namespace, worker_name);
+    let old_concurrency = match state.lock().workers.get(&scoped) {
+        Some(record) => record.concurrency,
+        None => {
+            return Ok(Response::Error {
+                message: format!("unknown worker: {}", worker_name),
+            })
         }
     };
 
-    if !exists {
-        return Ok(Response::Error {
-            message: format!("unknown worker: {}", worker_name),
-        });
-    }
-
     // Emit event
-    let event = Event::WorkerResized {
-        worker_name: worker_name.to_string(),
-        concurrency,
-        namespace: namespace.to_string(),
-    };
-    event_bus
-        .send(event)
-        .map_err(|_| ConnectionError::WalError)?;
+    emit(
+        event_bus,
+        Event::WorkerResized {
+            worker_name: worker_name.to_string(),
+            concurrency,
+            namespace: namespace.to_string(),
+        },
+    )?;
 
     Ok(Response::WorkerResized {
         worker_name: worker_name.to_string(),
@@ -309,6 +273,26 @@ pub(super) fn handle_worker_resize(
 #[cfg(test)]
 #[path = "workers_tests.rs"]
 mod tests;
+
+/// Hash a runbook, emit `RunbookLoaded`, and return the hash.
+///
+/// Combines [`hash_runbook`] with emitting the `RunbookLoaded` event, which
+/// is the common pattern across worker, cron, and queue start handlers.
+pub(super) fn hash_and_emit_runbook(
+    event_bus: &EventBus,
+    runbook: &oj_runbook::Runbook,
+) -> Result<String, ConnectionError> {
+    let (runbook_json, runbook_hash) = hash_runbook(runbook).map_err(ConnectionError::Internal)?;
+    emit(
+        event_bus,
+        Event::RunbookLoaded {
+            hash: runbook_hash.clone(),
+            version: 1,
+            runbook: runbook_json,
+        },
+    )?;
+    Ok(runbook_hash)
+}
 
 /// Serialize a runbook to JSON and compute its SHA256 hash.
 /// Returns (runbook_json, hash_hex).

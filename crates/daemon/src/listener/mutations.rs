@@ -23,7 +23,7 @@ use super::ConnectionError;
 /// Emit an event via the event bus.
 ///
 /// Maps send errors to `ConnectionError::WalError`.
-fn emit(event_bus: &EventBus, event: Event) -> Result<(), ConnectionError> {
+pub(super) fn emit(event_bus: &EventBus, event: Event) -> Result<(), ConnectionError> {
     event_bus
         .send(event)
         .map(|_| ())
