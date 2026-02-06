@@ -98,6 +98,53 @@ pub fn print_prune_results<T: Serialize>(
     Ok(())
 }
 
+/// Print start results for worker/cron commands.
+///
+/// Handles single-start and bulk-start (`--all`) output that is shared across
+/// `oj worker start` and `oj cron start`.
+///
+/// - `label` — capitalized entity name, e.g. `"Worker"` or `"Cron"`.
+/// - `plural` — lowercase plural, e.g. `"workers"` or `"crons"`.
+pub fn print_start_results(
+    result: &crate::client::StartResult,
+    label: &str,
+    plural: &str,
+    namespace: &str,
+) {
+    use crate::client::StartResult;
+    match result {
+        StartResult::Single { name } => {
+            println!(
+                "{} '{}' started ({})",
+                label,
+                crate::color::header(name),
+                crate::color::muted(namespace)
+            );
+        }
+        StartResult::Multiple { started, skipped } => {
+            for name in started {
+                println!(
+                    "{} '{}' started ({})",
+                    label,
+                    crate::color::header(name),
+                    crate::color::muted(namespace)
+                );
+            }
+            for (name, reason) in skipped {
+                println!(
+                    "{} '{}' skipped: {}",
+                    label,
+                    crate::color::header(name),
+                    crate::color::muted(reason)
+                );
+            }
+            if started.is_empty() && skipped.is_empty() {
+                println!("No {} found in runbooks", plural);
+            }
+        }
+    }
+}
+
 /// Display log content with optional follow mode, handling text/json output.
 pub async fn display_log(
     log_path: &std::path::Path,
