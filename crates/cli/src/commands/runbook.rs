@@ -407,7 +407,14 @@ fn extract_const_defs(
 ) -> std::collections::HashMap<String, oj_runbook::ConstDef> {
     let mut all_consts = std::collections::HashMap::new();
     for (_, content) in files {
-        if let Ok(runbook) = oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl)
+        // Strip %{...} const directives before parsing to avoid shell validation
+        // errors on template content (const defs are never inside conditional blocks)
+        let stripped = match oj_runbook::strip_const_directives(content) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        if let Ok(runbook) =
+            oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)
         {
             all_consts.extend(runbook.consts);
         }
@@ -419,7 +426,12 @@ fn extract_const_defs(
 fn merge_library_files(files: &[(&str, &str)]) -> Result<oj_runbook::Runbook> {
     let mut merged = oj_runbook::Runbook::default();
     for (_, content) in files {
-        let runbook = oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl)?;
+        // Strip %{...} const directives before parsing to avoid shell validation
+        // errors on template content
+        let stripped = oj_runbook::strip_const_directives(content)
+            .map_err(|msg| anyhow::anyhow!("{}", msg))?;
+        let runbook =
+            oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)?;
         // Simple merge — library files shouldn't conflict
         merged.commands.extend(runbook.commands);
         merged.jobs.extend(runbook.jobs);
