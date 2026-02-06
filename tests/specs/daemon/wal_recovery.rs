@@ -275,7 +275,7 @@ fn corrupt_snapshot_produces_clear_error() {
 /// This verifies that the WAL and snapshot system handles repeated
 /// crashes gracefully without accumulating corruption.
 #[test]
-#[skip] // FLAKY: not sure why
+#[ignore = "FLAKY: not sure why"]
 fn multiple_crash_recovery_cycles_preserve_state() {
     let temp = Project::empty();
     temp.git_init();
