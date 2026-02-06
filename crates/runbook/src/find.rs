@@ -36,6 +36,19 @@ fn strip_comment_prefix(line: &str) -> &str {
         .unwrap_or(line.strip_prefix('#').unwrap_or(""))
 }
 
+/// Split collected comment lines into short/long on the first blank line.
+fn split_comment_lines(lines: &[String]) -> FileComment {
+    let split_pos = lines.iter().position(|l| l.is_empty());
+    let (short_lines, long_lines): (&[String], &[String]) = match split_pos {
+        Some(pos) => (&lines[..pos], &lines[pos + 1..]),
+        None => (lines, &[]),
+    };
+    FileComment {
+        short: short_lines.join("\n"),
+        long: long_lines.join("\n"),
+    }
+}
+
 /// Extract the leading comment block from a runbook file's raw content.
 ///
 /// Reads lines starting with `#`, strips the `# ` prefix, and returns:
@@ -60,16 +73,7 @@ pub fn extract_file_comment(content: &str) -> Option<FileComment> {
         return None;
     }
 
-    let split_pos = lines.iter().position(|l| l.is_empty());
-    let (short_lines, long_lines) = match split_pos {
-        Some(pos) => (&lines[..pos], &lines[pos + 1..]),
-        None => (lines.as_slice(), &[][..]),
-    };
-
-    Some(FileComment {
-        short: short_lines.join("\n"),
-        long: long_lines.join("\n"),
-    })
+    Some(split_comment_lines(&lines))
 }
 
 /// Extract comment blocks preceding each `command "name"` block in HCL content.
@@ -123,21 +127,8 @@ pub fn extract_block_comments(content: &str) -> HashMap<String, FileComment> {
             continue;
         }
 
-        // Split into short/long on first blank comment line
         let owned: Vec<String> = comment_lines.iter().map(|s| s.to_string()).collect();
-        let split_pos = owned.iter().position(|l| l.is_empty());
-        let (short_lines, long_lines) = match split_pos {
-            Some(pos) => (&owned[..pos], &owned[pos + 1..]),
-            None => (owned.as_slice(), &[][..]),
-        };
-
-        result.insert(
-            name.to_string(),
-            FileComment {
-                short: short_lines.join("\n"),
-                long: long_lines.join("\n"),
-            },
-        );
+        result.insert(name.to_string(), split_comment_lines(&owned));
     }
 
     result
@@ -289,17 +280,24 @@ pub fn collect_all_commands(
     })
 }
 
+/// Collect all definitions of a given type from runbooks using a field accessor.
+fn collect_all_by_field<T: Clone>(
+    runbook_dir: &Path,
+    field: impl Fn(&Runbook) -> &HashMap<String, T>,
+) -> Result<Vec<(String, T)>, FindError> {
+    collect_all(runbook_dir, |runbook, _| {
+        field(runbook)
+            .iter()
+            .map(|(name, val)| (name.clone(), val.clone()))
+            .collect()
+    })
+}
+
 /// Scan `.oj/runbooks/` and collect all queue definitions.
 /// Returns a sorted vec of (queue_name, QueueDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_queues(runbook_dir: &Path) -> Result<Vec<(String, crate::QueueDef)>, FindError> {
-    collect_all(runbook_dir, |runbook, _| {
-        runbook
-            .queues
-            .iter()
-            .map(|(name, queue)| (name.clone(), queue.clone()))
-            .collect()
-    })
+    collect_all_by_field(runbook_dir, |rb| &rb.queues)
 }
 
 /// Scan `.oj/runbooks/` and collect all worker definitions.
@@ -308,26 +306,14 @@ pub fn collect_all_queues(runbook_dir: &Path) -> Result<Vec<(String, crate::Queu
 pub fn collect_all_workers(
     runbook_dir: &Path,
 ) -> Result<Vec<(String, crate::WorkerDef)>, FindError> {
-    collect_all(runbook_dir, |runbook, _| {
-        runbook
-            .workers
-            .iter()
-            .map(|(name, worker)| (name.clone(), worker.clone()))
-            .collect()
-    })
+    collect_all_by_field(runbook_dir, |rb| &rb.workers)
 }
 
 /// Scan `.oj/runbooks/` and collect all cron definitions.
 /// Returns a sorted vec of (cron_name, CronDef) pairs.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_crons(runbook_dir: &Path) -> Result<Vec<(String, crate::CronDef)>, FindError> {
-    collect_all(runbook_dir, |runbook, _| {
-        runbook
-            .crons
-            .iter()
-            .map(|(name, cron)| (name.clone(), cron.clone()))
-            .collect()
-    })
+    collect_all_by_field(runbook_dir, |rb| &rb.crons)
 }
 
 /// Summary of a single runbook file for `oj runbook list`.
