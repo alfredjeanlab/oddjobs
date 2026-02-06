@@ -6,9 +6,9 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::client::{ClientKind, DaemonClient, WorkerStartResult};
+use crate::client::{ClientKind, DaemonClient};
 use crate::color;
-use crate::output::{display_log, print_prune_results, OutputFormat};
+use crate::output::{display_log, print_prune_results, print_start_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -92,37 +92,10 @@ pub async fn handle(
                 anyhow::bail!("worker name required (or use --all)");
             }
             let worker_name = name.unwrap_or_default();
-            match client
+            let result = client
                 .worker_start(project_root, namespace, &worker_name, all)
-                .await?
-            {
-                WorkerStartResult::Single { worker_name } => {
-                    println!(
-                        "Worker '{}' started ({})",
-                        color::header(&worker_name),
-                        color::muted(namespace)
-                    );
-                }
-                WorkerStartResult::Multiple { started, skipped } => {
-                    for worker_name in &started {
-                        println!(
-                            "Worker '{}' started ({})",
-                            color::header(worker_name),
-                            color::muted(namespace)
-                        );
-                    }
-                    for (worker_name, reason) in &skipped {
-                        println!(
-                            "Worker '{}' skipped: {}",
-                            color::header(worker_name),
-                            color::muted(reason)
-                        );
-                    }
-                    if started.is_empty() && skipped.is_empty() {
-                        println!("No workers found in runbooks");
-                    }
-                }
-            }
+                .await?;
+            print_start_results(&result, "Worker", "workers", namespace);
         }
         WorkerCommand::Stop { name } => {
             client

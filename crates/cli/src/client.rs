@@ -21,9 +21,7 @@ use tokio::net::UnixStream;
 
 #[path = "client_queries.rs"]
 mod queries;
-pub use queries::{
-    CronStartResult, QueuePushResult, QueueRetryResult, RunCommandResult, WorkerStartResult,
-};
+pub use queries::{QueuePushResult, QueueRetryResult, RunCommandResult, StartResult};
 
 /// Client semantics for CLI command dispatch.
 ///
