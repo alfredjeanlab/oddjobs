@@ -299,7 +299,10 @@ async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, C
             worker_name,
             namespace,
             project_root,
-        } => workers::handle_worker_stop(ctx, &worker_name, &namespace, project_root.as_deref()),
+            all,
+        } => {
+            workers::handle_worker_stop(ctx, &worker_name, &namespace, project_root.as_deref(), all)
+        }
 
         Request::WorkerRestart {
             project_root,

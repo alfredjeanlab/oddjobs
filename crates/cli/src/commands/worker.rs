@@ -8,7 +8,9 @@ use clap::{Args, Subcommand};
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
-use crate::output::{display_log, print_prune_results, print_start_results, OutputFormat};
+use crate::output::{
+    display_log, print_prune_results, print_start_results, print_stop_results, OutputFormat,
+};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -29,8 +31,11 @@ pub enum WorkerCommand {
     },
     /// Stop a worker (active jobs continue, no new items dispatched)
     Stop {
-        /// Worker name from runbook
-        name: String,
+        /// Worker name from runbook (required unless --all)
+        name: Option<String>,
+        /// Stop all running workers
+        #[arg(long)]
+        all: bool,
     },
     /// Restart a worker (stop, reload runbook, start)
     Restart {
@@ -97,15 +102,15 @@ pub async fn handle(
                 .await?;
             print_start_results(&result, "Worker", "workers", namespace);
         }
-        WorkerCommand::Stop { name } => {
-            client
-                .worker_stop(&name, namespace, Some(project_root))
+        WorkerCommand::Stop { name, all } => {
+            if !all && name.is_none() {
+                anyhow::bail!("worker name required (or use --all)");
+            }
+            let worker_name = name.unwrap_or_default();
+            let result = client
+                .worker_stop(&worker_name, namespace, Some(project_root), all)
                 .await?;
-            println!(
-                "Worker '{}' stopped ({})",
-                color::header(&name),
-                color::muted(namespace)
-            );
+            print_stop_results(&result, "Worker", "workers", namespace);
         }
         WorkerCommand::Restart { name } => {
             let worker_name = client
