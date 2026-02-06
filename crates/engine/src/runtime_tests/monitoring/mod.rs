@@ -12,7 +12,7 @@ mod timers;
 
 use super::*;
 use oj_adapters::SessionCall;
-use oj_core::{AgentRunId, AgentSignalKind, JobId, StepStatus, TimerId};
+use oj_core::{AgentRunId, AgentSignalKind, JobId, OwnerId, StepStatus, TimerId};
 
 /// Helper: create a job and advance it to the "plan" agent step.
 ///

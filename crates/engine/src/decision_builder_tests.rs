@@ -396,7 +396,7 @@ fn test_for_agent_run_idle_trigger() {
             // job_id should be empty for agent runs
             assert!(job_id.as_str().is_empty());
             // owner should be AgentRun
-            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-123"))));
+            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-123")));
             assert_eq!(source, DecisionSource::Idle);
             assert_eq!(options.len(), 4);
             assert_eq!(options[0].label, "Nudge");
@@ -429,7 +429,7 @@ fn test_for_agent_run_error_trigger() {
             context,
             ..
         } => {
-            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-456"))));
+            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-456")));
             assert_eq!(source, DecisionSource::Error);
             assert_eq!(options.len(), 3);
             assert_eq!(options[0].label, "Retry");
@@ -452,7 +452,7 @@ fn test_for_job_creates_job_owner() {
     match event {
         Event::DecisionCreated { job_id, owner, .. } => {
             assert_eq!(job_id.as_str(), "job-789");
-            assert_eq!(owner, Some(OwnerId::Job(JobId::new("job-789"))));
+            assert_eq!(owner, OwnerId::Job(JobId::new("job-789")));
         }
         _ => panic!("expected DecisionCreated"),
     }
@@ -473,7 +473,7 @@ fn test_for_agent_run_with_agent_id() {
             agent_id, owner, ..
         } => {
             assert_eq!(agent_id, Some("agent-uuid-123".to_string()));
-            assert_eq!(owner, Some(OwnerId::AgentRun(AgentRunId::new("ar-001"))));
+            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-001")));
         }
         _ => panic!("expected DecisionCreated"),
     }

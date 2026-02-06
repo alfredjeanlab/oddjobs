@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::session::{FakeSessionAdapter, SessionCall};
-use oj_core::AgentId;
+use oj_core::{AgentId, JobId, OwnerId};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -30,6 +30,7 @@ async fn spawn_rejects_nonexistent_cwd() {
         job_id: "pipe-1".to_string(),
         project_root: project_dir.path().to_path_buf(),
         session_config: HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let result = adapter.spawn(config, tx).await;

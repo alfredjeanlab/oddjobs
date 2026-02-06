@@ -5,8 +5,8 @@
 
 use oj_core::{
     job::AgentSignal, scoped_name, AgentRecord, AgentRecordStatus, AgentRun, AgentRunStatus,
-    AgentSignalKind, Decision, DecisionId, Event, Job, JobConfig, JobId, OwnerId, StepOutcome,
-    StepStatus, WorkspaceStatus,
+    AgentSignalKind, Decision, DecisionId, Event, Job, JobConfig, OwnerId, StepOutcome, StepStatus,
+    WorkspaceStatus,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -60,53 +60,6 @@ impl<'de> serde::Deserialize<'de> for WorkspaceType {
     }
 }
 
-/// Custom deserializer for workspace owner that handles backward compatibility.
-///
-/// Accepts:
-/// - `null` / missing → `None`
-/// - Plain string `"job-abc"` → `Some(OwnerId::Job(JobId::new("job-abc")))` (legacy snapshot)
-/// - Tagged object `{"type": "job", "id": "..."}` → `Some(OwnerId::Job(...))` (new format)
-/// - Tagged object `{"type": "agent_run", "id": "..."}` → `Some(OwnerId::AgentRun(...))` (new)
-fn deserialize_workspace_owner<'de, D>(deserializer: D) -> Result<Option<OwnerId>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de;
-
-    struct WorkspaceOwnerVisitor;
-
-    impl<'de> de::Visitor<'de> for WorkspaceOwnerVisitor {
-        type Value = Option<OwnerId>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("null, a string (legacy job_id), or an OwnerId object")
-        }
-
-        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            Ok(Some(OwnerId::Job(JobId::new(v))))
-        }
-
-        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
-            Ok(Some(OwnerId::Job(JobId::new(&v))))
-        }
-
-        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-            let owner = OwnerId::deserialize(de::value::MapAccessDeserializer::new(map))?;
-            Ok(Some(owner))
-        }
-    }
-
-    deserializer.deserialize_any(WorkspaceOwnerVisitor)
-}
-
 /// Workspace record with lifecycle management
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workspace {
@@ -115,7 +68,7 @@ pub struct Workspace {
     /// Branch for the worktree (None for folder workspaces)
     pub branch: Option<String>,
     /// Owner of the workspace (job or agent_run)
-    #[serde(default, deserialize_with = "deserialize_workspace_owner")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerId>,
     /// Current lifecycle status
     pub status: WorkspaceStatus,
@@ -324,9 +277,9 @@ impl MaterializedState {
             Event::AgentWorking {
                 agent_id, owner, ..
             } => {
-                // Route by owner when present; standalone agent status is
+                // Route by owner; standalone agent status is
                 // handled via AgentRunStatusChanged events.
-                if let Some(OwnerId::Job(job_id)) = owner {
+                if let OwnerId::Job(job_id) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                         job.step_status = StepStatus::Running;
                     }
@@ -350,8 +303,8 @@ impl MaterializedState {
                 owner,
                 ..
             } => {
-                // Route by owner when present
-                if let Some(OwnerId::Job(job_id)) = owner {
+                // Route by owner
+                if let OwnerId::Job(job_id) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                         if *exit_code == Some(0) {
                             job.step_status = StepStatus::Completed;
@@ -373,8 +326,8 @@ impl MaterializedState {
                 owner,
                 ..
             } => {
-                // Route by owner when present
-                if let Some(OwnerId::Job(job_id)) = owner {
+                // Route by owner
+                if let OwnerId::Job(job_id) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                         job.step_status = StepStatus::Failed;
                         job.error = Some(error.to_string());
@@ -389,8 +342,8 @@ impl MaterializedState {
             Event::AgentGone {
                 agent_id, owner, ..
             } => {
-                // Route by owner when present
-                if let Some(OwnerId::Job(job_id)) = owner {
+                // Route by owner
+                if let OwnerId::Job(job_id) = owner {
                     if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
                         job.step_status = StepStatus::Failed;
                         job.error = Some("session terminated unexpectedly".to_string());
@@ -1062,20 +1015,14 @@ impl MaterializedState {
 
                 // Route by owner for setting status
                 match owner {
-                    Some(OwnerId::Job(jid)) => {
+                    OwnerId::Job(jid) => {
                         if let Some(job) = self.jobs.get_mut(jid.as_str()) {
                             job.step_status = StepStatus::Waiting(Some(id.clone()));
                         }
                     }
-                    Some(OwnerId::AgentRun(ar_id)) => {
+                    OwnerId::AgentRun(ar_id) => {
                         if let Some(agent_run) = self.agent_runs.get_mut(ar_id.as_str()) {
                             agent_run.status = AgentRunStatus::Waiting;
-                        }
-                    }
-                    None => {
-                        // Legacy fallback via job_id
-                        if let Some(job) = self.jobs.get_mut(job_id.as_str()) {
-                            job.step_status = StepStatus::Waiting(Some(id.clone()));
                         }
                     }
                 }
@@ -1166,7 +1113,7 @@ impl MaterializedState {
                 if status.is_terminal() {
                     let ar_id = id.as_str().to_string();
                     self.decisions.retain(|_, d| match &d.owner {
-                        Some(OwnerId::AgentRun(owner_id)) if owner_id.as_str() == ar_id => {
+                        OwnerId::AgentRun(owner_id) if owner_id.as_str() == ar_id => {
                             d.is_resolved()
                         }
                         _ => true,

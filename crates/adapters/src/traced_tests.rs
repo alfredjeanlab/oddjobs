@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::agent::AgentSpawnConfig;
-use oj_core::AgentId;
+use oj_core::{AgentId, JobId, OwnerId};
 use serial_test::{parallel, serial};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -106,6 +106,7 @@ fn test_spawn_config(cwd: Option<PathBuf>) -> AgentSpawnConfig {
         job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: std::collections::HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     }
 }
 

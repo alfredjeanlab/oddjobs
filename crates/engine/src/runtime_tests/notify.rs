@@ -4,6 +4,7 @@
 //! Tests for job notification lifecycle (on_start, on_done, on_fail)
 
 use super::*;
+use oj_core::OwnerId;
 
 const NOTIFY_ON_START_RUNBOOK: &str = r#"
 [command.notified]
@@ -212,7 +213,7 @@ async fn gate_failure_does_not_produce_automatic_notification() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -282,7 +283,7 @@ async fn gate_dead_failure_does_not_produce_automatic_notification() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

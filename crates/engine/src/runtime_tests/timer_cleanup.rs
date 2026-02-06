@@ -7,7 +7,7 @@
 //! cleaned up when jobs advance, complete, fail, or are cancelled.
 
 use super::*;
-use oj_core::{JobId, TimerId};
+use oj_core::{JobId, OwnerId, TimerId};
 
 /// Collect all pending timer IDs from the scheduler by advancing time far
 /// into the future and draining fired timers.
@@ -128,7 +128,7 @@ async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -264,7 +264,7 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -403,7 +403,7 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -412,7 +412,7 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -561,7 +561,7 @@ async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

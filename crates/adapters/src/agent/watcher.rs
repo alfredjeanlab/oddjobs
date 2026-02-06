@@ -8,7 +8,7 @@
 use crate::agent::log_entry::{self, AgentLogMessage};
 use crate::session::SessionAdapter;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use oj_core::{AgentError, AgentId, AgentState, Event};
+use oj_core::{AgentError, AgentId, AgentState, Event, OwnerId};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -24,6 +24,8 @@ pub(crate) struct WatcherConfig {
     pub tmux_session_id: String,
     pub project_path: PathBuf,
     pub process_name: String,
+    /// Owner of this agent (job or agent_run)
+    pub owner: OwnerId,
 }
 
 /// Get the watcher fallback poll interval.
@@ -77,6 +79,7 @@ async fn watch_agent<S: SessionAdapter>(
         tmux_session_id,
         project_path,
         process_name,
+        owner,
     } = config;
     // Track spawn-to-first-log duration
     let spawn_time = std::time::Instant::now();
@@ -112,7 +115,7 @@ async fn watch_agent<S: SessionAdapter>(
             let _ = event_tx
                 .send(Event::AgentGone {
                     agent_id,
-                    owner: None,
+                    owner: owner.clone(),
                 })
                 .await;
             return;
@@ -129,6 +132,7 @@ async fn watch_agent<S: SessionAdapter>(
                 agent_id,
                 tmux_session_id,
                 process_name,
+                owner,
                 sessions,
                 event_tx,
                 shutdown_rx,
@@ -160,6 +164,7 @@ async fn watch_agent<S: SessionAdapter>(
                 agent_id,
                 tmux_session_id,
                 process_name,
+                owner,
                 sessions,
                 event_tx,
                 shutdown_rx,
@@ -173,6 +178,7 @@ async fn watch_agent<S: SessionAdapter>(
         agent_id,
         tmux_session_id,
         process_name,
+        owner,
         log_path,
         sessions,
         event_tx,
@@ -187,6 +193,7 @@ struct WatchLoopParams<S> {
     agent_id: AgentId,
     tmux_session_id: String,
     process_name: String,
+    owner: OwnerId,
     log_path: PathBuf,
     sessions: S,
     event_tx: mpsc::Sender<Event>,
@@ -200,6 +207,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
         agent_id,
         tmux_session_id,
         process_name,
+        owner,
         log_path,
         sessions,
         event_tx,
@@ -237,7 +245,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
             .send(Event::from_agent_state(
                 agent_id.clone(),
                 initial_state,
-                None,
+                owner.clone(),
             ))
             .await;
     }
@@ -262,7 +270,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
                             .await;
                     } else {
                         let _ = event_tx
-                            .send(Event::from_agent_state(agent_id.clone(), new_state, None))
+                            .send(Event::from_agent_state(agent_id.clone(), new_state, owner.clone()))
                             .await;
                     }
                 }
@@ -280,7 +288,7 @@ async fn watch_loop<S: SessionAdapter>(params: WatchLoopParams<S>) {
             // Periodic check for process death
             _ = tokio::time::sleep(watcher_poll_interval()) => {
                 if let Some(state) = check_liveness(&sessions, &tmux_session_id, &process_name, &agent_id).await {
-                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, None)).await;
+                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, owner.clone())).await;
                     break;
                 }
             }
@@ -299,6 +307,7 @@ async fn poll_process_only<S: SessionAdapter>(
     agent_id: AgentId,
     session_id: String,
     process_name: String,
+    owner: OwnerId,
     sessions: S,
     event_tx: mpsc::Sender<Event>,
     mut shutdown_rx: oneshot::Receiver<()>,
@@ -308,7 +317,7 @@ async fn poll_process_only<S: SessionAdapter>(
         tokio::select! {
             _ = tokio::time::sleep(watcher_poll_interval()) => {
                 if let Some(state) = check_liveness(&sessions, &session_id, &process_name, &agent_id).await {
-                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, None)).await;
+                    let _ = event_tx.send(Event::from_agent_state(agent_id.clone(), state, owner.clone())).await;
                     break;
                 }
                 poll_count += 1;

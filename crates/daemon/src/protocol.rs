@@ -76,7 +76,7 @@ pub enum Request {
         /// Message for nudge/recovery (required for agent steps)
         message: Option<String>,
         /// Variable updates to persist
-        #[serde(default, alias = "input")]
+        #[serde(default)]
         vars: HashMap<String, String>,
         /// Kill running agent and restart (still uses --resume to preserve conversation)
         #[serde(default)]

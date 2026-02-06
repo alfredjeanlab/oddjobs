@@ -165,7 +165,7 @@ async fn idle_grace_timer_cancelled_on_working() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -363,7 +363,7 @@ async fn auto_resume_suppressed_after_nudge() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -385,7 +385,7 @@ async fn auto_resume_suppressed_after_nudge() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -430,7 +430,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -451,7 +451,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -505,7 +505,7 @@ async fn rapid_idle_working_cycling_no_nudge() {
         ctx.runtime
             .handle_event(Event::AgentWorking {
                 agent_id: agent_id.clone(),
-                owner: None,
+                owner: OwnerId::Job(JobId::new(&job_id)),
             })
             .await
             .unwrap();

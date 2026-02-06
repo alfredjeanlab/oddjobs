@@ -7,7 +7,7 @@
 //! event-based paths: `Agent{State}` events and liveness timer flow.
 
 use super::*;
-use oj_core::{JobId, TimerId};
+use oj_core::{JobId, OwnerId, TimerId};
 
 // =============================================================================
 // Session death tests (via liveness timer flow)
@@ -155,7 +155,7 @@ async fn agent_exited_on_terminal_job_is_noop() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -171,7 +171,7 @@ async fn agent_exited_for_unknown_agent_is_noop() {
         .handle_event(Event::AgentExited {
             agent_id: AgentId::new("nonexistent-plan".to_string()),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::default()),
         })
         .await
         .unwrap();
@@ -235,7 +235,7 @@ async fn agent_exited_advances_when_on_dead_is_done() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -287,7 +287,7 @@ async fn agent_exited_fails_when_on_dead_is_fail() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -339,7 +339,7 @@ async fn agent_exited_escalates_by_default() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -406,7 +406,7 @@ async fn gate_dead_advances_when_command_passes() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -475,7 +475,7 @@ async fn gate_dead_result_events_advance_past_shell_step() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -519,7 +519,7 @@ async fn agent_exited_ignores_non_agent_step() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -533,7 +533,7 @@ async fn agent_exited_ignores_non_agent_step() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -592,7 +592,7 @@ async fn gate_dead_escalates_when_command_fails() {
         .handle_event(Event::AgentExited {
             agent_id,
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

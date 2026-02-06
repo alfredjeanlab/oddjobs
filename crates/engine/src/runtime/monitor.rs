@@ -69,6 +69,7 @@ where
             session_id: session_id.clone(),
             workspace_path,
             process_name,
+            owner: OwnerId::job(job_id.clone()),
         };
         self.executor.reconnect_agent(config).await?;
 

@@ -327,7 +327,7 @@ async fn stale_agent_event_dropped_after_job_advances() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id: old_agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

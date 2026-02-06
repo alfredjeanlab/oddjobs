@@ -806,6 +806,7 @@ where
             session_id: session_id.clone(),
             workspace_path: agent_run.cwd.clone(),
             process_name,
+            owner: OwnerId::agent_run(agent_run_id.clone()),
         };
         self.executor.reconnect_agent(config).await?;
 

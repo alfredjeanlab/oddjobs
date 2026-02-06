@@ -151,6 +151,7 @@ where
                     job_id: job_id_str,
                     project_root: workspace_path,
                     session_config,
+                    owner: owner.clone(),
                 };
 
                 // Spawn agent (this starts the watcher that emits events)

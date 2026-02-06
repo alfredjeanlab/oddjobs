@@ -11,7 +11,7 @@
 
 use super::*;
 use oj_adapters::SessionCall;
-use oj_core::{Event, JobId};
+use oj_core::{Event, JobId, OwnerId};
 
 /// Collect all pending timer IDs from the scheduler.
 fn pending_timer_ids(ctx: &TestContext) -> Vec<String> {
@@ -314,7 +314,7 @@ async fn job_deleted_handles_terminal_job() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

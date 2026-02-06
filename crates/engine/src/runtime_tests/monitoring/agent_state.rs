@@ -17,7 +17,7 @@ async fn agent_state_changed_unknown_agent_is_noop() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id: AgentId::new("unknown-agent".to_string()),
-            owner: None,
+            owner: OwnerId::Job(JobId::default()),
         })
         .await
         .unwrap();
@@ -50,7 +50,7 @@ async fn agent_state_changed_terminal_job_is_noop() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id,
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -85,7 +85,7 @@ async fn agent_state_changed_routes_through_agent_jobs() {
         .runtime
         .handle_event(Event::AgentWaiting {
             agent_id,
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -128,7 +128,7 @@ async fn gate_idle_escalates_when_command_fails() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -165,7 +165,7 @@ async fn agent_signal_complete_overrides_gate_escalation() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();

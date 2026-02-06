@@ -12,14 +12,14 @@ fn log_summary_agent_state_events() {
         (
             Event::AgentWorking {
                 agent_id: AgentId::new("a1"),
-                owner: None,
+                owner: OwnerId::Job(JobId::default()),
             },
             "agent:working agent=a1",
         ),
         (
             Event::AgentWaiting {
                 agent_id: AgentId::new("a2"),
-                owner: None,
+                owner: OwnerId::Job(JobId::default()),
             },
             "agent:waiting agent=a2",
         ),
@@ -27,7 +27,7 @@ fn log_summary_agent_state_events() {
             Event::AgentFailed {
                 agent_id: AgentId::new("a3"),
                 error: AgentError::RateLimited,
-                owner: None,
+                owner: OwnerId::Job(JobId::default()),
             },
             "agent:failed agent=a3",
         ),
@@ -35,14 +35,14 @@ fn log_summary_agent_state_events() {
             Event::AgentExited {
                 agent_id: AgentId::new("a4"),
                 exit_code: Some(0),
-                owner: None,
+                owner: OwnerId::Job(JobId::default()),
             },
             "agent:exited agent=a4",
         ),
         (
             Event::AgentGone {
                 agent_id: AgentId::new("a5"),
-                owner: None,
+                owner: OwnerId::Job(JobId::default()),
             },
             "agent:gone agent=a5",
         ),

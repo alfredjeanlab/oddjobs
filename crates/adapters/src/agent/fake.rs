@@ -6,7 +6,7 @@
 
 use super::{AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
 use async_trait::async_trait;
-use oj_core::{AgentId, AgentState, Event};
+use oj_core::{AgentId, AgentState, Event, OwnerId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -53,6 +53,7 @@ struct FakeAgentState {
 
 struct FakeAgent {
     state: AgentState,
+    owner: OwnerId,
     event_tx: Option<mpsc::Sender<Event>>,
     session_log_size: Option<u64>,
 }
@@ -97,14 +98,17 @@ impl FakeAgentAdapter {
 
     /// Emit a state change event for an agent
     pub async fn emit_state_change(&self, agent_id: &AgentId, state: AgentState) {
-        let event_tx = {
+        let (event_tx, owner) = {
             let inner = self.inner.lock();
-            inner.agents.get(agent_id).and_then(|a| a.event_tx.clone())
+            match inner.agents.get(agent_id) {
+                Some(a) => (a.event_tx.clone(), a.owner.clone()),
+                None => return,
+            }
         };
 
         if let Some(tx) = event_tx {
             let _ = tx
-                .send(Event::from_agent_state(agent_id.clone(), state, None))
+                .send(Event::from_agent_state(agent_id.clone(), state, owner))
                 .await;
         }
     }
@@ -165,6 +169,7 @@ impl AgentAdapter for FakeAgentAdapter {
             config.agent_id.clone(),
             FakeAgent {
                 state: AgentState::Working,
+                owner: config.owner.clone(),
                 event_tx: Some(event_tx),
                 session_log_size: None,
             },
@@ -197,6 +202,7 @@ impl AgentAdapter for FakeAgentAdapter {
             config.agent_id.clone(),
             FakeAgent {
                 state: AgentState::Working,
+                owner: config.owner.clone(),
                 event_tx: Some(event_tx),
                 session_log_size: None,
             },

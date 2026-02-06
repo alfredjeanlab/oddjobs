@@ -1110,7 +1110,7 @@ fn decision_created_event(id: &str, job_id: &str) -> Event {
         id: id.to_string(),
         job_id: JobId::new(job_id),
         agent_id: Some("agent-1".to_string()),
-        owner: None,
+        owner: OwnerId::Job(JobId::new(job_id)),
         source: oj_core::DecisionSource::Gate,
         context: "Gate check failed".to_string(),
         options: vec![
@@ -1600,7 +1600,7 @@ fn agent_record_status_updates_from_lifecycle_events() {
 
     state.apply_event(&Event::AgentWorking {
         agent_id: oj_core::AgentId::new("agent-1"),
-        owner: None,
+        owner: OwnerId::Job(JobId::new("pipe-1")),
     });
     assert_eq!(
         state.agents["agent-1"].status,
@@ -1609,7 +1609,7 @@ fn agent_record_status_updates_from_lifecycle_events() {
 
     state.apply_event(&Event::AgentWaiting {
         agent_id: oj_core::AgentId::new("agent-1"),
-        owner: None,
+        owner: OwnerId::Job(JobId::new("pipe-1")),
     });
     assert_eq!(
         state.agents["agent-1"].status,
@@ -1619,7 +1619,7 @@ fn agent_record_status_updates_from_lifecycle_events() {
     state.apply_event(&Event::AgentExited {
         agent_id: oj_core::AgentId::new("agent-1"),
         exit_code: Some(0),
-        owner: None,
+        owner: OwnerId::Job(JobId::new("pipe-1")),
     });
     assert_eq!(
         state.agents["agent-1"].status,
@@ -1641,7 +1641,7 @@ fn agent_record_gone_status() {
 
     state.apply_event(&Event::AgentGone {
         agent_id: oj_core::AgentId::new("agent-1"),
-        owner: None,
+        owner: OwnerId::Job(JobId::new("pipe-1")),
     });
     assert_eq!(
         state.agents["agent-1"].status,

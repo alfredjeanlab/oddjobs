@@ -40,9 +40,8 @@ pub struct Decision {
     pub job_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
-    /// Owner of this decision (job or agent_run). None for legacy events.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<OwnerId>,
+    /// Owner of this decision (job or agent_run).
+    pub owner: OwnerId,
     pub source: DecisionSource,
     pub context: String,
     #[serde(default)]

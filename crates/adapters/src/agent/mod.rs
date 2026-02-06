@@ -35,6 +35,8 @@ pub struct AgentReconnectConfig {
     pub session_id: String,
     pub workspace_path: PathBuf,
     pub process_name: String,
+    /// Owner of this agent (job or agent_run)
+    pub owner: OwnerId,
 }
 
 // Test support - only compiled for tests or when explicitly requested
@@ -44,7 +46,7 @@ mod fake;
 pub use fake::{AgentCall, FakeAgentAdapter};
 
 use async_trait::async_trait;
-use oj_core::{AgentId, AgentState, Event};
+use oj_core::{AgentId, AgentState, Event, OwnerId};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -91,6 +93,8 @@ pub struct AgentSpawnConfig {
     pub project_root: PathBuf,
     /// Adapter-specific session configuration (provider -> config as JSON)
     pub session_config: std::collections::HashMap<String, serde_json::Value>,
+    /// Owner of this agent (job or agent_run)
+    pub owner: OwnerId,
 }
 
 /// Handle to a running agent

@@ -121,7 +121,7 @@ impl EscalationDecisionBuilder {
             id: decision_id.clone(),
             job_id,
             agent_id: self.agent_id,
-            owner: Some(self.owner),
+            owner: self.owner,
             source: self.trigger.to_source(),
             context,
             options,

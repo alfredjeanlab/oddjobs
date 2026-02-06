@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use oj_core::JobId;
 
 // --- check_liveness ---
 
@@ -159,6 +160,7 @@ async fn poll_process_only_exits_when_session_dies() {
         agent_id,
         "test-session".to_string(),
         "claude".to_string(),
+        OwnerId::Job(JobId::default()),
         sessions,
         event_tx,
         shutdown_rx,
@@ -198,6 +200,7 @@ async fn poll_process_only_exits_on_shutdown() {
         agent_id,
         "test-session".to_string(),
         "claude".to_string(),
+        OwnerId::Job(JobId::default()),
         sessions,
         event_tx,
         shutdown_rx,
@@ -234,6 +237,7 @@ async fn poll_process_only_detects_process_exit() {
         agent_id,
         "test-session".to_string(),
         "claude".to_string(),
+        OwnerId::Job(JobId::default()),
         sessions,
         event_tx,
         shutdown_rx,
@@ -525,6 +529,7 @@ async fn watch_agent_emits_agent_gone_when_session_dies_before_log() {
         tmux_session_id: "dead-session".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let handle = tokio::spawn(watch_agent(config, sessions, event_tx, shutdown_rx, None));
@@ -566,6 +571,7 @@ async fn watch_agent_falls_back_to_poll_on_timeout() {
         tmux_session_id: "alive-session".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let sessions_clone = sessions.clone();
@@ -624,6 +630,7 @@ async fn watch_agent_with_session_log_enters_watch_loop() {
         tmux_session_id: "tmux-found".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let sessions_clone = sessions.clone();
@@ -678,6 +685,7 @@ async fn start_watcher_returns_shutdown_sender() {
         tmux_session_id: "start-watcher-tmux".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let shutdown_tx = start_watcher(config, sessions, event_tx, None);
@@ -727,6 +735,7 @@ async fn start_watcher_shutdown_stops_watcher() {
         tmux_session_id: "shutdown-tmux".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let shutdown_tx = start_watcher(config, sessions, event_tx, None);
@@ -768,6 +777,7 @@ async fn start_watcher_with_log_entry_tx() {
         tmux_session_id: "log-entry-tmux".to_string(),
         project_path: workspace_dir.path().to_path_buf(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let shutdown_tx = start_watcher(config, sessions, event_tx, Some(log_entry_tx));

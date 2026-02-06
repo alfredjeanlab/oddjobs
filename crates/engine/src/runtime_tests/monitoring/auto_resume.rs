@@ -35,7 +35,7 @@ async fn working_auto_resumes_job_from_waiting() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -48,7 +48,7 @@ async fn working_auto_resumes_job_from_waiting() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -87,7 +87,7 @@ async fn working_noop_when_job_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -126,7 +126,7 @@ async fn working_auto_resume_resets_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -143,7 +143,7 @@ async fn working_auto_resume_resets_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::Job(JobId::new(&job_id)),
         })
         .await
         .unwrap();
@@ -196,7 +196,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -210,7 +210,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -255,7 +255,7 @@ async fn working_noop_when_standalone_agent_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -296,7 +296,7 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -315,7 +315,7 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();

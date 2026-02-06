@@ -104,7 +104,7 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -181,7 +181,7 @@ async fn standalone_nudge_records_timestamp() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -233,7 +233,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -256,7 +256,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
         .runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -310,7 +310,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -332,7 +332,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();

@@ -82,43 +82,38 @@ pub enum Event {
     #[serde(rename = "agent:working")]
     AgentWorking {
         agent_id: AgentId,
-        /// Owner of this agent (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this agent (job or agent_run).
+        owner: OwnerId,
     },
 
     #[serde(rename = "agent:waiting")]
     AgentWaiting {
         agent_id: AgentId,
-        /// Owner of this agent (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this agent (job or agent_run).
+        owner: OwnerId,
     },
 
     #[serde(rename = "agent:failed")]
     AgentFailed {
         agent_id: AgentId,
         error: AgentError,
-        /// Owner of this agent (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this agent (job or agent_run).
+        owner: OwnerId,
     },
 
     #[serde(rename = "agent:exited")]
     AgentExited {
         agent_id: AgentId,
         exit_code: Option<i32>,
-        /// Owner of this agent (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this agent (job or agent_run).
+        owner: OwnerId,
     },
 
     #[serde(rename = "agent:gone")]
     AgentGone {
         agent_id: AgentId,
-        /// Owner of this agent (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this agent (job or agent_run).
+        owner: OwnerId,
     },
 
     /// User-initiated input to an agent
@@ -305,7 +300,7 @@ pub enum Event {
         id: WorkspaceId,
         path: PathBuf,
         branch: Option<String>,
-        #[serde(default, deserialize_with = "deserialize_workspace_owner")]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         owner: Option<OwnerId>,
         /// "folder" or "worktree"
         #[serde(default)]
@@ -522,9 +517,8 @@ pub enum Event {
         job_id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         agent_id: Option<String>,
-        /// Owner of this decision (job or agent_run). None for legacy events.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        /// Owner of this decision (job or agent_run).
+        owner: OwnerId,
         source: DecisionSource,
         context: String,
         #[serde(default)]
@@ -584,8 +578,8 @@ pub enum Event {
 }
 
 impl Event {
-    /// Create an agent event from an AgentState with optional owner.
-    pub fn from_agent_state(agent_id: AgentId, state: AgentState, owner: Option<OwnerId>) -> Self {
+    /// Create an agent event from an AgentState with owner.
+    pub fn from_agent_state(agent_id: AgentId, state: AgentState, owner: OwnerId) -> Self {
         match state {
             AgentState::Working => Event::AgentWorking { agent_id, owner },
             AgentState::WaitingForInput => Event::AgentWaiting { agent_id, owner },
@@ -604,19 +598,17 @@ impl Event {
     }
 
     /// Extract agent_id, state, and owner if this is an agent event.
-    pub fn as_agent_state(&self) -> Option<(&AgentId, AgentState, Option<&OwnerId>)> {
+    pub fn as_agent_state(&self) -> Option<(&AgentId, AgentState, &OwnerId)> {
         match self {
-            Event::AgentWorking { agent_id, owner } => {
-                Some((agent_id, AgentState::Working, owner.as_ref()))
-            }
+            Event::AgentWorking { agent_id, owner } => Some((agent_id, AgentState::Working, owner)),
             Event::AgentWaiting { agent_id, owner } => {
-                Some((agent_id, AgentState::WaitingForInput, owner.as_ref()))
+                Some((agent_id, AgentState::WaitingForInput, owner))
             }
             Event::AgentFailed {
                 agent_id,
                 error,
                 owner,
-            } => Some((agent_id, AgentState::Failed(error.clone()), owner.as_ref())),
+            } => Some((agent_id, AgentState::Failed(error.clone()), owner)),
             Event::AgentExited {
                 agent_id,
                 exit_code,
@@ -626,10 +618,10 @@ impl Event {
                 AgentState::Exited {
                     exit_code: *exit_code,
                 },
-                owner.as_ref(),
+                owner,
             )),
             Event::AgentGone { agent_id, owner } => {
-                Some((agent_id, AgentState::SessionGone, owner.as_ref()))
+                Some((agent_id, AgentState::SessionGone, owner))
             }
             _ => None,
         }
@@ -915,10 +907,10 @@ impl Event {
                 source,
                 ..
             } => match owner {
-                Some(OwnerId::AgentRun(ar_id)) => {
+                OwnerId::AgentRun(ar_id) => {
                     format!("{t} id={id} agent_run={ar_id} source={source:?}")
                 }
-                _ => format!("{t} id={id} job={job_id} source={source:?}"),
+                OwnerId::Job(_) => format!("{t} id={id} job={job_id} source={source:?}"),
             },
             Event::DecisionResolved { id, chosen, .. } => {
                 if let Some(c) = chosen {
@@ -991,7 +983,7 @@ impl Event {
             }
             Event::DecisionCreated { job_id, owner, .. } => {
                 // Return None for agent run owners (job_id is empty for them)
-                if matches!(owner, Some(OwnerId::AgentRun(_))) {
+                if matches!(owner, OwnerId::AgentRun(_)) {
                     None
                 } else {
                     Some(job_id)
@@ -1004,55 +996,6 @@ impl Event {
             _ => None,
         }
     }
-}
-
-/// Custom deserializer for workspace owner that handles backward compatibility.
-///
-/// Accepts:
-/// - `null` / missing → `None`
-/// - Plain string `"job-abc"` → `Some(OwnerId::Job(JobId::new("job-abc")))` (legacy WAL)
-/// - Tagged object `{"type": "job", "id": "..."}` → `Some(OwnerId::Job(...))` (new format)
-/// - Tagged object `{"type": "agent_run", "id": "..."}` → `Some(OwnerId::AgentRun(...))` (new)
-fn deserialize_workspace_owner<'de, D>(deserializer: D) -> Result<Option<OwnerId>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::de;
-
-    struct WorkspaceOwnerVisitor;
-
-    impl<'de> de::Visitor<'de> for WorkspaceOwnerVisitor {
-        type Value = Option<OwnerId>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("null, a string (legacy job_id), or an OwnerId object")
-        }
-
-        fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            // Legacy format: plain string is a job_id
-            Ok(Some(OwnerId::Job(JobId::new(v))))
-        }
-
-        fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
-            Ok(Some(OwnerId::Job(JobId::new(&v))))
-        }
-
-        fn visit_map<A: de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
-            // Tagged object format: delegate to OwnerId deserialization
-            let owner = OwnerId::deserialize(de::value::MapAccessDeserializer::new(map))?;
-            Ok(Some(owner))
-        }
-    }
-
-    deserializer.deserialize_any(WorkspaceOwnerVisitor)
 }
 
 #[cfg(test)]

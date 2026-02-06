@@ -61,7 +61,7 @@ async fn standalone_agent_on_idle_done_kills_session() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("pipe-1")),
         })
         .await
         .unwrap();

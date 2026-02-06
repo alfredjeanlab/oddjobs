@@ -72,11 +72,11 @@ pub(super) fn handle_decision_resolve(
 
     // Get agent run session_id (for agent_run-owned decisions)
     let agent_run_session_id = match &decision_owner {
-        Some(OwnerId::AgentRun(ar_id)) => state_guard
+        OwnerId::AgentRun(ar_id) => state_guard
             .agent_runs
             .get(ar_id.as_str())
             .and_then(|r| r.session_id.clone()),
-        _ => None,
+        OwnerId::Job(_) => None,
     };
 
     drop(state_guard);
@@ -98,7 +98,7 @@ pub(super) fn handle_decision_resolve(
 
     // Map chosen option to action based on owner type
     let action_events = match &decision_owner {
-        Some(OwnerId::AgentRun(ar_id)) => map_decision_to_agent_run_action(
+        OwnerId::AgentRun(ar_id) => map_decision_to_agent_run_action(
             &decision_source,
             chosen,
             message.as_deref(),
@@ -109,20 +109,17 @@ pub(super) fn handle_decision_resolve(
                 .or(decision_session_id.as_deref()),
             &decision_options,
         ),
-        Some(OwnerId::Job(_)) | None => {
-            // Job owner or legacy (no owner field)
-            map_decision_to_job_action(
-                &decision_source,
-                chosen,
-                message.as_deref(),
-                &full_id,
-                &job_id,
-                job_step.as_deref(),
-                &decision_options,
-            )
-            .into_iter()
-            .collect()
-        }
+        OwnerId::Job(_) => map_decision_to_job_action(
+            &decision_source,
+            chosen,
+            message.as_deref(),
+            &full_id,
+            &job_id,
+            job_step.as_deref(),
+            &decision_options,
+        )
+        .into_iter()
+        .collect(),
     };
 
     for action in action_events {

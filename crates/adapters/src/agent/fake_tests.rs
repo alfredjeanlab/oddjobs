@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use oj_core::JobId;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -22,6 +23,7 @@ async fn spawn_and_kill() {
         job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let handle = adapter.spawn(config, tx).await.unwrap();
@@ -49,6 +51,7 @@ async fn state_changes() {
         job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     adapter.spawn(config, tx).await.unwrap();
@@ -103,6 +106,7 @@ async fn error_injection() {
         job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let result = adapter.spawn(config, tx).await;
@@ -126,6 +130,7 @@ async fn call_recording() {
         job_id: "pipe-1".to_string(),
         project_root: PathBuf::from("/project"),
         session_config: HashMap::new(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     adapter.spawn(config, tx).await.unwrap();

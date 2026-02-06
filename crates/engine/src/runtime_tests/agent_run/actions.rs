@@ -45,7 +45,7 @@ async fn standalone_on_dead_fail_fails_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -105,7 +105,7 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -156,7 +156,7 @@ async fn standalone_on_dead_gate_fail_escalates_agent_run() {
         .handle_event(Event::AgentExited {
             agent_id: agent_id.clone(),
             exit_code: Some(0),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -227,7 +227,7 @@ on_idle = { action = "gate", run = "true" }
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();
@@ -288,7 +288,7 @@ async fn standalone_on_error_fail_fails_agent_run() {
         .handle_event(Event::AgentFailed {
             agent_id: agent_id.clone(),
             error: oj_core::AgentError::Other("API error".to_string()),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();

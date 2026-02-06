@@ -12,7 +12,9 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use oj_core::{Decision, DecisionId, DecisionSource, Job, StepOutcome, StepRecord, StepStatus};
+use oj_core::{
+    Decision, DecisionId, DecisionSource, Job, JobId, OwnerId, StepOutcome, StepRecord, StepStatus,
+};
 use oj_storage::{CronRecord, MaterializedState, QueueItem, QueueItemStatus, WorkerRecord};
 
 use oj_engine::breadcrumb::{Breadcrumb, BreadcrumbAgent};
@@ -139,7 +141,7 @@ fn make_decision(id: &str, job_id: &str, created_at_ms: u64) -> Decision {
         id: DecisionId::new(id),
         job_id: job_id.to_string(),
         agent_id: None,
-        owner: None,
+        owner: OwnerId::Job(JobId::new(job_id)),
         source: DecisionSource::Idle,
         context: "test context".to_string(),
         options: vec![],

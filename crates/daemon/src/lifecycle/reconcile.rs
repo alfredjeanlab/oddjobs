@@ -233,7 +233,7 @@ pub(crate) async fn reconcile_state(
                     .send(Event::AgentExited {
                         agent_id,
                         exit_code: None,
-                        owner: Some(OwnerId::agent_run(agent_run_id)),
+                        owner: OwnerId::agent_run(agent_run_id),
                     })
                     .await;
             }
@@ -249,7 +249,7 @@ pub(crate) async fn reconcile_state(
             let _ = event_tx
                 .send(Event::AgentGone {
                     agent_id,
-                    owner: Some(OwnerId::agent_run(agent_run_id)),
+                    owner: OwnerId::agent_run(agent_run_id),
                 })
                 .await;
         }
@@ -321,7 +321,7 @@ pub(crate) async fn reconcile_state(
                     let _ = event_tx
                         .send(Event::AgentGone {
                             agent_id,
-                            owner: Some(OwnerId::job(job_id)),
+                            owner: OwnerId::job(job_id),
                         })
                         .await;
                 }
@@ -347,7 +347,7 @@ pub(crate) async fn reconcile_state(
                     .send(Event::AgentExited {
                         agent_id,
                         exit_code: None,
-                        owner: Some(OwnerId::job(job_id)),
+                        owner: OwnerId::job(job_id),
                     })
                     .await;
             }
@@ -371,7 +371,7 @@ pub(crate) async fn reconcile_state(
             let _ = event_tx
                 .send(Event::AgentGone {
                     agent_id,
-                    owner: Some(OwnerId::job(job_id)),
+                    owner: OwnerId::job(job_id),
                 })
                 .await;
         }

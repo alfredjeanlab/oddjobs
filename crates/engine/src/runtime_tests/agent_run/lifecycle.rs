@@ -146,7 +146,7 @@ async fn standalone_working_clears_idle_grace() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new(&agent_run_id)),
         })
         .await
         .unwrap();

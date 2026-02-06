@@ -372,6 +372,7 @@ async fn reconnect_agent_delegates_to_adapter() {
         session_id: "sess-recon".to_string(),
         workspace_path: std::path::PathBuf::from("/tmp/ws"),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
     };
 
     let result = harness.executor.reconnect_agent(config).await;

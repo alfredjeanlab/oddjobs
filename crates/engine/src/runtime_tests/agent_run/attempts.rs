@@ -49,7 +49,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("run-1")),
         })
         .await
         .unwrap();
@@ -63,7 +63,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("run-1")),
         })
         .await
         .unwrap();
@@ -77,7 +77,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("run-1")),
         })
         .await
         .unwrap();
@@ -129,7 +129,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("run-1")),
         })
         .await
         .unwrap();
@@ -138,7 +138,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     ctx.runtime
         .handle_event(Event::AgentWaiting {
             agent_id: agent_id.clone(),
-            owner: None,
+            owner: OwnerId::AgentRun(AgentRunId::new("run-1")),
         })
         .await
         .unwrap();

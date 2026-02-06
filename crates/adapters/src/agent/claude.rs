@@ -474,6 +474,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             tmux_session_id: spawned_id.clone(),
             project_path: cwd.clone(),
             process_name,
+            owner: config.owner.clone(),
         };
         let shutdown_tx = start_watcher(
             watcher_config,
@@ -523,6 +524,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             tmux_session_id: config.session_id.clone(),
             project_path: config.workspace_path.clone(),
             process_name: config.process_name.clone(),
+            owner: config.owner.clone(),
         };
         let shutdown_tx = start_watcher(
             watcher_config,

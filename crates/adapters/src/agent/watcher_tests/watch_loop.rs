@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use oj_core::JobId;
 
 /// Helper to set up the watcher loop for testing.
 ///
@@ -40,6 +41,7 @@ async fn setup_watch_loop() -> (
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path: log_path.clone(),
         sessions,
         event_tx,
@@ -200,6 +202,7 @@ async fn emits_idle_immediately_for_initial_waiting_state() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path,
         sessions,
         event_tx,
@@ -245,6 +248,7 @@ async fn emits_event_for_initial_non_working_state() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path,
         sessions,
         event_tx,
@@ -294,6 +298,7 @@ async fn does_not_emit_for_initial_working_state() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path,
         sessions,
         event_tx,
@@ -346,6 +351,7 @@ async fn detects_process_death_via_liveness_check() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path,
         sessions,
         event_tx,
@@ -399,6 +405,7 @@ async fn exits_on_shutdown_signal() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path,
         sessions,
         event_tx,
@@ -456,6 +463,7 @@ async fn extracts_log_entries_when_log_entry_tx_set() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path: log_path.clone(),
         sessions,
         event_tx,
@@ -516,6 +524,7 @@ async fn forwards_log_entries_on_file_change() {
         agent_id: AgentId::new("test-agent"),
         tmux_session_id: "test-tmux".to_string(),
         process_name: "claude".to_string(),
+        owner: OwnerId::Job(JobId::default()),
         log_path: log_path.clone(),
         sessions,
         event_tx,
