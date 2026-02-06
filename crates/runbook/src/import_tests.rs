@@ -156,7 +156,6 @@ fn resolve_unknown_library() {
 fn test_cmd(name: &str, run: &str) -> crate::CommandDef {
     crate::CommandDef {
         name: name.to_string(),
-        description: None,
         args: crate::ArgSpec::default(),
         defaults: HashMap::new(),
         run: crate::RunDirective::Shell(run.to_string()),
@@ -503,73 +502,6 @@ fn const_directive_comparison(value: &str, op: &str, literal: &str, expected: &s
     let input = format!("%{{ if const.x {op} \"{literal}\" }}\nyes\n%{{ endif }}\n");
     let result = interpolate_consts(&input, &values).unwrap();
     assert_eq!(result, expected);
-}
-
-// =============================================================================
-// imported command description tests
-// =============================================================================
-
-#[test]
-fn imported_commands_get_descriptions_from_doc_comments() {
-    let content = r#"import "oj/wok" {
-  const "prefix" { value = "oj" }
-}
-"#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
-
-    // Each imported command should have a description from its library doc comment
-    let fix = runbook.commands.get("fix").unwrap();
-    assert_eq!(
-        fix.description.as_deref(),
-        Some("File a wok bug and dispatch it to a fix worker."),
-    );
-
-    let chore = runbook.commands.get("chore").unwrap();
-    assert_eq!(
-        chore.description.as_deref(),
-        Some("File a wok chore and dispatch it to a worker."),
-    );
-
-    let epic = runbook.commands.get("epic").unwrap();
-    assert!(
-        epic.description.is_some(),
-        "epic command should have a description"
-    );
-
-    let idea = runbook.commands.get("idea").unwrap();
-    assert_eq!(
-        idea.description.as_deref(),
-        Some("Create a new wok epic with 'plan:needed' only."),
-    );
-}
-
-#[test]
-fn imported_commands_with_alias_get_descriptions() {
-    let content = r#"import "oj/git" {
-  alias = "git"
-}
-"#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
-
-    let merge = runbook.commands.get("git:merge").unwrap();
-    assert_eq!(
-        merge.description.as_deref(),
-        Some("Queue a branch for the local merge queue."),
-    );
-}
-
-#[test]
-fn explicit_description_not_overridden_by_import() {
-    // Commands with explicit description fields should keep them
-    let content = r#"import "oj/git" {}
-"#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
-    let merge = runbook.commands.get("merge").unwrap();
-    // Should have the doc comment description, not None
-    assert!(
-        merge.description.is_some(),
-        "merge should have description from doc comment"
-    );
 }
 
 #[test]

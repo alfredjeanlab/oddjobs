@@ -256,37 +256,42 @@ fn collect_all<T>(
 }
 
 /// Scan `.oj/runbooks/` and collect all command definitions.
-/// Returns a sorted vec of (command_name, CommandDef) pairs.
+/// Returns a sorted vec of (command_name, CommandDef, description) triples.
+/// Descriptions are extracted from block comments preceding each command.
 /// Skips runbooks that fail to parse (logs warnings).
 pub fn collect_all_commands(
     runbook_dir: &Path,
-) -> Result<Vec<(String, crate::CommandDef)>, FindError> {
-    collect_all(runbook_dir, |runbook, content| {
-        let block_comments = extract_block_comments(content);
-        let file_comment = extract_file_comment(content);
-        runbook
-            .commands
-            .iter()
-            .map(|(name, cmd)| {
-                let mut cmd = cmd.clone();
-                if cmd.description.is_none() {
+) -> Result<Vec<(String, crate::CommandDef, Option<String>)>, FindError> {
+    let items: Vec<(String, (crate::CommandDef, Option<String>))> =
+        collect_all(runbook_dir, |runbook, content| {
+            let block_comments = extract_block_comments(content);
+            let file_comment = extract_file_comment(content);
+            runbook
+                .commands
+                .iter()
+                .map(|(name, cmd)| {
                     let comment = block_comments.get(name).or(file_comment.as_ref());
-                    if let Some(comment) = comment {
-                        let desc_line = comment
+                    let description = comment.and_then(|c| {
+                        let desc_line = c
                             .short
                             .lines()
                             .nth(1)
-                            .or_else(|| comment.short.lines().next())
+                            .or_else(|| c.short.lines().next())
                             .unwrap_or("");
-                        if !desc_line.is_empty() {
-                            cmd.description = Some(desc_line.to_string());
+                        if desc_line.is_empty() {
+                            None
+                        } else {
+                            Some(desc_line.to_string())
                         }
-                    }
-                }
-                (name.clone(), cmd)
-            })
-            .collect()
-    })
+                    });
+                    (name.clone(), (cmd.clone(), description))
+                })
+                .collect()
+        })?;
+    Ok(items
+        .into_iter()
+        .map(|(name, (cmd, desc))| (name, cmd, desc))
+        .collect())
 }
 
 /// Scan `.oj/runbooks/` and collect all queue definitions.
