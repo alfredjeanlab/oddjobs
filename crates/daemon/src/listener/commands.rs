@@ -57,7 +57,7 @@ pub(super) async fn handle_run_command(
                     oj_runbook::collect_all_commands(&runbook_dir)
                         .unwrap_or_default()
                         .into_iter()
-                        .map(|(name, _)| name)
+                        .map(|(name, _, _)| name)
                         .collect()
                 },
                 |_| Vec::new(),

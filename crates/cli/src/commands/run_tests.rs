@@ -12,7 +12,6 @@ use crate::color::HelpPrinter;
 fn make_shell_command(name: &str, run: &str) -> CommandDef {
     CommandDef {
         name: name.to_string(),
-        description: None,
         args: ArgSpec::default(),
         defaults: HashMap::new(),
         run: RunDirective::Shell(run.to_string()),
@@ -22,7 +21,6 @@ fn make_shell_command(name: &str, run: &str) -> CommandDef {
 fn make_shell_command_with_args(name: &str, args: &str, run: &str) -> CommandDef {
     CommandDef {
         name: name.to_string(),
-        description: None,
         args: oj_runbook::parse_arg_spec(args).unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell(run.to_string()),
@@ -293,10 +291,12 @@ fn format_available_commands_shows_commands() {
         (
             "build".to_string(),
             make_shell_command("build", "make build"),
+            None,
         ),
         (
             "greet".to_string(),
             make_shell_command_with_args("greet", "<name>", "echo ${args.name}"),
+            None,
         ),
     ];
 
@@ -313,9 +313,12 @@ fn format_available_commands_shows_commands() {
 
 #[test]
 fn format_available_commands_shows_description() {
-    let mut cmd = make_shell_command("deploy", "deploy.sh");
-    cmd.description = Some("Deploy to production".to_string());
-    let commands = vec![("deploy".to_string(), cmd)];
+    let cmd = make_shell_command("deploy", "deploy.sh");
+    let commands = vec![(
+        "deploy".to_string(),
+        cmd,
+        Some("Deploy to production".to_string()),
+    )];
 
     let mut help = HelpPrinter::uncolored();
     format_available_commands(&mut help, &commands, &[]);
@@ -330,6 +333,7 @@ fn format_available_commands_shows_warnings() {
     let commands = vec![(
         "build".to_string(),
         make_shell_command("build", "make build"),
+        None,
     )];
     let warnings = vec!["runbooks/broken.hcl: expected `{`, found `}`".to_string()];
 
@@ -348,6 +352,7 @@ fn format_available_commands_no_warnings_when_empty() {
     let commands = vec![(
         "build".to_string(),
         make_shell_command("build", "make build"),
+        None,
     )];
 
     let mut help = HelpPrinter::uncolored();

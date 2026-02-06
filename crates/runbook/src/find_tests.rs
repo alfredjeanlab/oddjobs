@@ -290,7 +290,7 @@ fn collect_all_commands_multiple_files() {
     write_hcl(tmp.path(), "build.hcl", CMD_RUNBOOK_B);
 
     let commands = collect_all_commands(tmp.path()).unwrap();
-    let names: Vec<&str> = commands.iter().map(|(n, _)| n.as_str()).collect();
+    let names: Vec<&str> = commands.iter().map(|(n, _, _)| n.as_str()).collect();
     assert_eq!(names, vec!["build", "deploy", "test"]);
 }
 
@@ -429,19 +429,9 @@ fn collect_all_commands_populates_description_from_comment() {
     let commands = collect_all_commands(tmp.path()).unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(
-        commands[0].1.description.as_deref(),
+        commands[0].2.as_deref(),
         Some("Feature workflow: init → plan → implement")
     );
-}
-
-#[test]
-fn collect_all_commands_explicit_description_not_overridden() {
-    let tmp = TempDir::new().unwrap();
-    let content = "# Build Runbook\n# Comment description\n\ncommand \"build\" {\n  description = \"Explicit\"\n  args = \"<name>\"\n  run  = \"echo build\"\n}\n";
-    write_hcl(tmp.path(), "build.hcl", content);
-
-    let commands = collect_all_commands(tmp.path()).unwrap();
-    assert_eq!(commands[0].1.description.as_deref(), Some("Explicit"));
 }
 
 #[test]
@@ -451,7 +441,7 @@ fn collect_all_commands_single_line_comment_used_as_description() {
     write_hcl(tmp.path(), "test.hcl", content);
 
     let commands = collect_all_commands(tmp.path()).unwrap();
-    assert_eq!(commands[0].1.description.as_deref(), Some("Simple command"));
+    assert_eq!(commands[0].2.as_deref(), Some("Simple command"));
 }
 
 // ============================================================================
@@ -644,10 +634,10 @@ command "beta" {
 "#;
     write_hcl(tmp.path(), "multi.hcl", content);
     let commands = collect_all_commands(tmp.path()).unwrap();
-    let alpha = commands.iter().find(|(n, _)| n == "alpha").unwrap();
-    let beta = commands.iter().find(|(n, _)| n == "beta").unwrap();
-    assert_eq!(alpha.1.description.as_deref(), Some("First command"));
-    assert_eq!(beta.1.description.as_deref(), Some("Second command"));
+    let alpha = commands.iter().find(|(n, _, _)| n == "alpha").unwrap();
+    let beta = commands.iter().find(|(n, _, _)| n == "beta").unwrap();
+    assert_eq!(alpha.2.as_deref(), Some("First command"));
+    assert_eq!(beta.2.as_deref(), Some("Second command"));
 }
 
 #[test]

@@ -10,7 +10,7 @@ use crate::find::FileComment;
 fn format_help_full_args() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name> <instructions> [--base <branch>] [--rebase] [--new <folder>]")
             .unwrap(),
         defaults: [
@@ -52,7 +52,7 @@ fn format_help_full_args() {
 fn format_help_no_args() {
     let cmd = CommandDef {
         name: "test".to_string(),
-        description: None,
+
         args: ArgSpec::default(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo test".to_string()),
@@ -66,30 +66,10 @@ fn format_help_no_args() {
 }
 
 #[test]
-fn format_help_description_overrides_comment() {
-    let cmd = CommandDef {
-        name: "build".to_string(),
-        description: Some("Explicit description".to_string()),
-        args: parse_arg_spec("<name>").unwrap(),
-        defaults: HashMap::new(),
-        run: RunDirective::Shell("echo".to_string()),
-    };
-
-    let comment = FileComment {
-        short: "Comment description".to_string(),
-        long: String::new(),
-    };
-
-    let help = cmd.format_help("build", Some(&comment));
-    assert!(help.starts_with("Explicit description\n"));
-    assert!(!help.contains("Comment description"));
-}
-
-#[test]
 fn format_help_usage_rewritten_to_examples() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: ArgSpec::default(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
@@ -108,7 +88,7 @@ fn format_help_usage_rewritten_to_examples() {
 fn format_help_with_variadic() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<env> [targets...]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -123,7 +103,7 @@ fn format_help_with_variadic() {
 fn format_help_with_short_options() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<env> [-t/--tag <version>] [-f/--force]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -138,7 +118,7 @@ fn format_help_with_short_options() {
 fn format_help_empty_default_not_shown() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("[--rebase]").unwrap(),
         defaults: [("rebase".to_string(), String::new())]
             .into_iter()

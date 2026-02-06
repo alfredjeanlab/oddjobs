@@ -528,9 +528,6 @@ pub struct CommandDef {
     /// Command name (e.g., "build", "test")
     #[serde(default)]
     pub name: String,
-    /// Short description for help text (e.g., "Run a build job")
-    #[serde(default)]
-    pub description: Option<String>,
     /// Argument specification
     #[serde(default)]
     pub args: ArgSpec,

@@ -16,12 +16,8 @@ pub fn format_command_help(
 ) -> String {
     let mut out = String::new();
 
-    // 1. Short description (from description field or comment)
-    if let Some(desc) = cmd
-        .description
-        .as_deref()
-        .or(comment.map(|c| c.short.as_str()))
-    {
+    // 1. Short description (from block comment)
+    if let Some(desc) = comment.map(|c| c.short.as_str()) {
         out.push_str(desc);
         out.push_str("\n\n");
     }

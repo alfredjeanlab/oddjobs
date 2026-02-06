@@ -90,7 +90,7 @@ fn print_available_commands(project_root: &Path) -> Result<()> {
 
 fn format_available_commands(
     help: &mut crate::color::HelpPrinter,
-    commands: &[(String, oj_runbook::CommandDef)],
+    commands: &[(String, oj_runbook::CommandDef, Option<String>)],
     warnings: &[String],
 ) {
     help.usage("oj run <COMMAND>");
@@ -101,8 +101,8 @@ fn format_available_commands(
         help.plain("Define commands in .oj/runbooks/*.hcl");
     } else {
         help.header("Commands:");
-        for (name, cmd) in commands {
-            help.entry(name, 20, cmd.description.as_deref());
+        for (name, _cmd, description) in commands {
+            help.entry(name, 20, description.as_deref());
         }
     }
 

@@ -663,26 +663,6 @@ pub fn parse_with_imports(
             file_runbook.consts.clear();
             file_runbook.imports.clear();
 
-            // Populate command descriptions from library source doc comments
-            let block_comments = crate::find::extract_block_comments(content);
-            let file_comment = extract_file_comment(content);
-            for (name, cmd) in file_runbook.commands.iter_mut() {
-                if cmd.description.is_none() {
-                    let comment = block_comments.get(name).or(file_comment.as_ref());
-                    if let Some(comment) = comment {
-                        let desc_line = comment
-                            .short
-                            .lines()
-                            .nth(1)
-                            .or_else(|| comment.short.lines().next())
-                            .unwrap_or("");
-                        if !desc_line.is_empty() {
-                            cmd.description = Some(desc_line.to_string());
-                        }
-                    }
-                }
-            }
-
             let file_source = format!("{}/{}", source, filename);
             merge_runbook(&mut lib_runbook, file_runbook, None, &file_source)?;
         }

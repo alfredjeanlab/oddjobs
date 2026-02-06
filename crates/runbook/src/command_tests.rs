@@ -8,7 +8,7 @@ use super::*;
 fn validate_required_positional_missing() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name> <prompt>").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
@@ -37,7 +37,7 @@ fn validate_required_positional_missing() {
 fn validate_required_positional_with_default() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name>").unwrap(),
         defaults: [("name".to_string(), "default-name".to_string())]
             .into_iter()
@@ -54,7 +54,7 @@ fn validate_required_positional_with_default() {
 fn validate_required_option_missing() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("--env <environment>").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -81,7 +81,7 @@ fn validate_required_option_missing() {
 fn validate_required_variadic_missing() {
     let cmd = CommandDef {
         name: "copy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<files...>").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("cp".to_string()),
@@ -103,7 +103,7 @@ fn validate_required_variadic_missing() {
 fn validate_optional_args_not_required() {
     let cmd = CommandDef {
         name: "test".to_string(),
-        description: None,
+
         args: parse_arg_spec("[name] [-v/--verbose] [files...]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("test.sh".to_string()),
@@ -357,7 +357,7 @@ fn deserialize_arg_spec_string() {
 fn command_parse_args() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: ArgSpec {
             positional: vec![
                 ArgDef {
@@ -395,7 +395,7 @@ fn command_parse_args() {
 fn command_named_overrides() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: ArgSpec {
             positional: vec![ArgDef {
                 name: "name".to_string(),
@@ -431,7 +431,7 @@ fn command_named_overrides() {
 fn command_variadic_args() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: ArgSpec {
             positional: vec![ArgDef {
                 name: "env".to_string(),
@@ -461,7 +461,7 @@ fn command_variadic_args() {
 fn validate_unexpected_positional() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name>").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
@@ -479,7 +479,7 @@ fn validate_unexpected_positional() {
 fn validate_unexpected_positional_variadic_ok() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name> [extras...]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
@@ -501,7 +501,7 @@ fn validate_unexpected_positional_variadic_ok() {
 fn validate_unknown_option() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<env> [--tag <v>]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -524,7 +524,7 @@ fn validate_unknown_option() {
 fn validate_known_option_by_name() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<env> [--tag <v>]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -544,7 +544,7 @@ fn validate_known_option_by_name() {
 fn validate_positional_by_name() {
     let cmd = CommandDef {
         name: "build".to_string(),
-        description: None,
+
         args: parse_arg_spec("<name> <prompt>").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("echo".to_string()),
@@ -564,7 +564,7 @@ fn validate_positional_by_name() {
 fn validate_flag_by_name() {
     let cmd = CommandDef {
         name: "deploy".to_string(),
-        description: None,
+
         args: parse_arg_spec("<env> [-f/--force]").unwrap(),
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -627,45 +627,6 @@ fn usage_line_mixed() {
         spec.usage_line(),
         "<env> [targets...] [--tag <tag>] [--force]"
     );
-}
-
-// description field tests
-#[test]
-fn command_def_description_none_by_default() {
-    let cmd = CommandDef {
-        name: "build".to_string(),
-        description: None,
-        args: ArgSpec::default(),
-        defaults: HashMap::new(),
-        run: RunDirective::Shell("echo".to_string()),
-    };
-    assert!(cmd.description.is_none());
-}
-
-#[test]
-fn command_def_description_some() {
-    let cmd = CommandDef {
-        name: "build".to_string(),
-        description: Some("Run a build job".to_string()),
-        args: ArgSpec::default(),
-        defaults: HashMap::new(),
-        run: RunDirective::Shell("echo".to_string()),
-    };
-    assert_eq!(cmd.description.as_deref(), Some("Run a build job"));
-}
-
-#[test]
-fn deserialize_description_from_hcl() {
-    let hcl = r#"
-command "build" {
-  description = "Run a build job"
-  args = "<name>"
-  run  = "echo build"
-}
-"#;
-    let runbook: crate::Runbook = hcl::from_str(hcl).unwrap();
-    let cmd = runbook.commands.get("build").unwrap();
-    assert_eq!(cmd.description.as_deref(), Some("Run a build job"));
 }
 
 // split_raw_args tests
