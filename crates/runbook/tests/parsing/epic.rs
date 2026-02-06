@@ -26,14 +26,20 @@ fn job() {
     let job = &parse_epic().jobs["epic"];
     assert_eq!(job.name.as_deref(), Some("${var.name}"));
     assert_eq!(job.vars, vec!["name", "instructions", "blocked-by"]);
-    assert_eq!(job.workspace, Some(WorkspaceConfig::Simple(WorkspaceType::Folder)));
+    assert_eq!(
+        job.workspace,
+        Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
+    );
     assert_eq!(job.steps.len(), 5);
 
     let steps: Vec<_> = job.steps.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(steps, ["init", "decompose", "build", "submit", "cleanup"]);
 
     assert!(job.steps[0].run.is_shell());
-    assert_eq!(job.steps[0].on_done.as_ref().map(|t| t.step_name()), Some("decompose"));
+    assert_eq!(
+        job.steps[0].on_done.as_ref().map(|t| t.step_name()),
+        Some("decompose")
+    );
     assert!(job.steps[1].run.is_agent());
     assert_eq!(job.steps[1].agent_name(), Some("decompose"));
     assert!(job.steps[2].run.is_agent());

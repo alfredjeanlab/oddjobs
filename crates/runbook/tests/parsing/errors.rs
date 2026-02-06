@@ -64,7 +64,9 @@ name = "invalid"
 run = "echo 'broken"
 "#;
     let err = parse_runbook(toml).unwrap_err();
-    assert!(matches!(err, ParseError::ShellError { ref location, .. } if location.contains("step[1]")));
+    assert!(
+        matches!(err, ParseError::ShellError { ref location, .. } if location.contains("step[1]"))
+    );
 }
 
 // ============================================================================
@@ -101,12 +103,18 @@ fn job_not_table() {
 
 #[test]
 fn duplicate_arg_name() {
-    super::assert_toml_err("[command.test]\nargs = \"<name> <name>\"\nrun = \"test.sh\"", &["duplicate"]);
+    super::assert_toml_err(
+        "[command.test]\nargs = \"<name> <name>\"\nrun = \"test.sh\"",
+        &["duplicate"],
+    );
 }
 
 #[test]
 fn variadic_not_last() {
-    super::assert_toml_err("[command.test]\nargs = \"<files...> <extra>\"\nrun = \"test.sh\"", &["variadic"]);
+    super::assert_toml_err(
+        "[command.test]\nargs = \"<files...> <extra>\"\nrun = \"test.sh\"",
+        &["variadic"],
+    );
 }
 
 #[test]
@@ -123,33 +131,32 @@ fn agent_missing_run() {
 // Valid Shell Commands
 // ============================================================================
 
-#[test]
-fn valid_shell_commands() {
-    assert!(parse_runbook("[command.build]\nrun = \"cargo build --release\"").is_ok());
+#[yare::parameterized(
+    simple              = { "cargo build --release" },
+    pipes_and_logic     = { "cat file.txt | grep pattern | wc -l && echo success || echo failure" },
+    subshell            = { "(cd /tmp && ls)" },
+    brace_group         = { "{ echo hello; echo world; }" },
+    variable_expansion  = { "echo ${VAR:-default} $HOME" },
+    command_substitution = { "echo $(date +%Y-%m-%d)" },
+    template_variables  = { "git worktree add worktrees/${name} -b feature/${name}" },
+)]
+fn valid_shell(run: &str) {
+    let toml = format!("[command.c]\nrun = \"{run}\"");
+    assert!(parse_runbook(&toml).is_ok(), "should parse: {run}");
 }
 
 #[test]
-fn shell_with_pipes_and_logical_operators() {
+fn valid_shell_template_variables_in_job() {
     assert!(parse_runbook(
-        "[command.c]\nrun = \"cat file.txt | grep pattern | wc -l && echo success || echo failure\""
-    ).is_ok());
+        "[[job.b.step]]\nname = \"init\"\nrun = \"echo ${message} | tee ${output_file}\""
+    )
+    .is_ok());
 }
 
 #[test]
-fn shell_with_subshell() {
-    assert!(parse_runbook("[command.c]\nrun = \"(cd /tmp && ls)\"").is_ok());
-}
-
-#[test]
-fn shell_with_brace_group() {
-    assert!(parse_runbook("[command.c]\nrun = \"{ echo hello; echo world; }\"").is_ok());
-}
-
-#[test]
-fn shell_with_template_variables() {
-    assert!(parse_runbook(
-        "[command.c]\nrun = \"git worktree add worktrees/${name} -b feature/${name}\""
-    ).is_ok());
+fn unterminated_command_substitution() {
+    let err = parse_runbook("[command.c]\nrun = \"echo $(date\"").unwrap_err();
+    assert!(matches!(err, ParseError::ShellError { .. }));
 }
 
 #[test]

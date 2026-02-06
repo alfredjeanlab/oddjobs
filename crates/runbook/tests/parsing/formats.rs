@@ -72,8 +72,14 @@ fn json_sample_runbook() {
     assert_sample_build_runbook(&runbook);
 
     let job = &runbook.jobs["build"];
-    assert_eq!(job.steps[2].on_done.as_ref().map(|t| t.step_name()), Some("done"));
-    assert_eq!(job.steps[2].on_fail.as_ref().map(|t| t.step_name()), Some("failed"));
+    assert_eq!(
+        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
+        Some("done")
+    );
+    assert_eq!(
+        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
+        Some("failed")
+    );
 }
 
 #[test]
@@ -93,8 +99,14 @@ fn hcl_sample_runbook() {
     assert_sample_build_runbook(&runbook);
 
     let job = &runbook.jobs["build"];
-    assert_eq!(job.steps[2].on_done.as_ref().map(|t| t.step_name()), Some("done"));
-    assert_eq!(job.steps[2].on_fail.as_ref().map(|t| t.step_name()), Some("failed"));
+    assert_eq!(
+        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
+        Some("done")
+    );
+    assert_eq!(
+        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
+        Some("failed")
+    );
 }
 
 #[test]
@@ -129,6 +141,9 @@ job "deploy" {
     assert_eq!(job.steps.len(), 3);
     assert_eq!(job.steps[0].name, "build");
     assert_eq!(job.steps[1].name, "test");
-    assert_eq!(job.steps[1].on_done.as_ref().map(|t| t.step_name()), Some("deploy"));
+    assert_eq!(
+        job.steps[1].on_done.as_ref().map(|t| t.step_name()),
+        Some("deploy")
+    );
     assert_eq!(job.steps[2].name, "deploy");
 }

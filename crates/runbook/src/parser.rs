@@ -665,7 +665,3 @@ pub(crate) fn validate_cross_refs(runbook: &Runbook) -> Result<(), ParseError> {
 
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "parser_tests/mod.rs"]
-mod tests;

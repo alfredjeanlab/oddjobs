@@ -40,12 +40,19 @@ fn unrecognized_absolute_path() {
 
 #[test]
 fn hcl_agent_validation() {
-    assert!(super::parse_hcl("agent \"p\" { run = \"claude --print 'Plan'\" }").agents.contains_key("p"));
+    assert!(
+        super::parse_hcl("agent \"p\" {\n  run = \"claude --print 'Plan'\"\n}")
+            .agents
+            .contains_key("p")
+    );
 }
 
 #[test]
 fn hcl_unrecognized_agent_command() {
-    super::assert_hcl_err("agent \"t\" { run = \"unknown-tool -p 'do'\" }", &["unrecognized"]);
+    super::assert_hcl_err(
+        "agent \"t\" {\n  run = \"unknown-tool -p 'do'\"\n}",
+        &["unrecognized"],
+    );
 }
 
 // ============================================================================
@@ -66,7 +73,10 @@ fn prompt_file_no_inline() {
 
 #[test]
 fn prompt_field_with_positional_rejected() {
-    let err = parse_runbook("[agent.plan]\nrun = \"claude --print \\\"${prompt}\\\"\"\nprompt = \"Plan\"").unwrap_err();
+    let err = parse_runbook(
+        "[agent.plan]\nrun = \"claude --print \\\"${prompt}\\\"\"\nprompt = \"Plan\"",
+    )
+    .unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     super::assert_err_contains(&err, &["positional"]);
 }
@@ -105,10 +115,19 @@ fn session_hcl_with_color() {
     let hcl = r#"
 agent "mayor" {
   run = "claude"
-  session "tmux" { color = "cyan"; title = "mayor" }
+  session "tmux" {
+    color = "cyan"
+    title = "mayor"
+  }
 }
 "#;
-    let tmux = super::parse_hcl(hcl).get_agent("mayor").unwrap().session.get("tmux").unwrap().clone();
+    let tmux = super::parse_hcl(hcl)
+        .get_agent("mayor")
+        .unwrap()
+        .session
+        .get("tmux")
+        .unwrap()
+        .clone();
     assert_eq!(tmux.color.as_deref(), Some("cyan"));
     assert_eq!(tmux.title.as_deref(), Some("mayor"));
 }
@@ -120,11 +139,20 @@ agent "mayor" {
   run = "claude"
   session "tmux" {
     color = "green"
-    status { left = "myproject merge/check"; right = "custom-id" }
+    status {
+      left  = "myproject merge/check"
+      right = "custom-id"
+    }
   }
 }
 "#;
-    let tmux = super::parse_hcl(hcl).get_agent("mayor").unwrap().session.get("tmux").unwrap().clone();
+    let tmux = super::parse_hcl(hcl)
+        .get_agent("mayor")
+        .unwrap()
+        .session
+        .get("tmux")
+        .unwrap()
+        .clone();
     assert_eq!(tmux.color.as_deref(), Some("green"));
     let status = tmux.status.unwrap();
     assert_eq!(status.left.as_deref(), Some("myproject merge/check"));
@@ -133,14 +161,16 @@ agent "mayor" {
 
 #[test]
 fn session_rejects_invalid_color() {
-    let hcl = "agent \"w\" { run = \"claude\"\n  session \"tmux\" { color = \"purple\" } }";
-    super::assert_hcl_err(hcl, &["unknown color 'purple'"]);
+    super::assert_hcl_err(
+        "agent \"w\" {\n  run = \"claude\"\n  session \"tmux\" {\n    color = \"purple\"\n  }\n}",
+        &["unknown color 'purple'"],
+    );
 }
 
 #[test]
 fn session_accepts_all_valid_colors() {
     for color in ["red", "green", "blue", "cyan", "magenta", "yellow", "white"] {
-        let hcl = format!("agent \"w\" {{ run = \"claude\"\n  session \"tmux\" {{ color = \"{color}\" }} }}");
+        let hcl = format!("agent \"w\" {{\n  run = \"claude\"\n  session \"tmux\" {{\n    color = \"{color}\"\n  }}\n}}");
         assert!(
             parse_runbook_with_format(&hcl, Format::Hcl).is_ok(),
             "color '{color}' should be valid"
