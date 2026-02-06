@@ -430,8 +430,7 @@ fn merge_library_files(files: &[(&str, &str)]) -> Result<oj_runbook::Runbook> {
         // errors on template content
         let stripped = oj_runbook::strip_const_directives(content)
             .map_err(|msg| anyhow::anyhow!("{}", msg))?;
-        let runbook =
-            oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)?;
+        let runbook = oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)?;
         // Simple merge — library files shouldn't conflict
         merged.commands.extend(runbook.commands);
         merged.jobs.extend(runbook.jobs);
