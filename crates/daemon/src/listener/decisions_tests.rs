@@ -3,7 +3,7 @@
 
 use super::{
     build_question_resume_message, build_resume_message, map_decision_to_agent_run_action,
-    map_decision_to_job_action,
+    map_decision_to_job_action, resolve_decision_action, ResolvedAction,
 };
 use oj_core::{AgentRunId, AgentRunStatus, DecisionOption, DecisionSource, Event};
 
@@ -398,4 +398,148 @@ fn agent_run_no_session_returns_empty_for_session_input() {
 
     // Without a session, session input events can't be sent
     assert!(events.is_empty());
+}
+
+// ===================== Tests for resolve_decision_action =====================
+
+#[test]
+fn resolve_no_choice_returns_freeform() {
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Idle, None, &[]),
+        ResolvedAction::Freeform
+    );
+}
+
+#[test]
+fn resolve_idle_choices() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Idle, Some(1), opts),
+        ResolvedAction::Nudge
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Idle, Some(2), opts),
+        ResolvedAction::Complete
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Idle, Some(3), opts),
+        ResolvedAction::Cancel
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Idle, Some(4), opts),
+        ResolvedAction::Dismiss
+    );
+}
+
+#[test]
+fn resolve_error_choices() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Error, Some(1), opts),
+        ResolvedAction::Retry
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Error, Some(2), opts),
+        ResolvedAction::Complete
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Error, Some(3), opts),
+        ResolvedAction::Cancel
+    );
+}
+
+#[test]
+fn resolve_gate_choices() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Gate, Some(1), opts),
+        ResolvedAction::Retry
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Gate, Some(2), opts),
+        ResolvedAction::Complete
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Gate, Some(3), opts),
+        ResolvedAction::Cancel
+    );
+}
+
+#[test]
+fn resolve_approval_choices() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Approval, Some(1), opts),
+        ResolvedAction::Approve
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Approval, Some(2), opts),
+        ResolvedAction::Deny
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Approval, Some(3), opts),
+        ResolvedAction::Cancel
+    );
+}
+
+#[test]
+fn resolve_question_cancel_is_last_option() {
+    let options = make_question_options(); // 3 options
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(3), &options),
+        ResolvedAction::Cancel
+    );
+}
+
+#[test]
+fn resolve_question_non_cancel_is_answer() {
+    let options = make_question_options(); // 3 options
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(1), &options),
+        ResolvedAction::Answer
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(2), &options),
+        ResolvedAction::Answer
+    );
+}
+
+#[test]
+fn resolve_question_option_3_is_not_cancel_when_more_options() {
+    // 4 user options + Cancel = 5 total; option 3 should be Answer, not Cancel
+    let options = vec![
+        DecisionOption {
+            label: "A".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOption {
+            label: "B".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOption {
+            label: "C".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOption {
+            label: "D".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOption {
+            label: "Cancel".to_string(),
+            description: None,
+            recommended: false,
+        },
+    ];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(3), &options),
+        ResolvedAction::Answer,
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(5), &options),
+        ResolvedAction::Cancel,
+    );
 }

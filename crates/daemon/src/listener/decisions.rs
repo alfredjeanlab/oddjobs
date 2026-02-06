@@ -135,13 +135,84 @@ pub(super) fn handle_decision_resolve(
     Ok(Response::DecisionResolved { id: full_id })
 }
 
-/// Map a decision resolution to the appropriate job action event.
+/// Intermediate representation of a resolved decision action.
+///
+/// Captures the intent of a decision resolution independent of whether the
+/// target is a job or an agent run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedAction {
+    /// Send a nudge/message to continue working.
+    Nudge,
+    /// Mark the step/run as complete.
+    Complete,
+    /// Cancel/abort the job/run.
+    Cancel,
+    /// Retry the current step (resume for jobs, set Running for agent runs).
+    Retry,
+    /// Approve a gate/approval.
+    Approve,
+    /// Deny a gate/approval.
+    Deny,
+    /// Answer a question with a specific choice.
+    Answer,
+    /// No action (dismiss or unrecognized choice).
+    Dismiss,
+    /// Freeform message without a choice.
+    Freeform,
+}
+
+/// Resolve a decision source + choice into an action.
 ///
 /// Option numbering (1-indexed):
 /// - Idle: 1=Nudge, 2=Done, 3=Cancel, 4=Dismiss
 /// - Error/Gate: 1=Retry, 2=Skip, 3=Cancel
 /// - Approval: 1=Approve, 2=Deny, 3=Cancel
 /// - Question: 1..N=user options, N+1=Cancel (dynamic position)
+fn resolve_decision_action(
+    source: &DecisionSource,
+    chosen: Option<usize>,
+    options: &[DecisionOption],
+) -> ResolvedAction {
+    let choice = match chosen {
+        Some(c) => c,
+        None => return ResolvedAction::Freeform,
+    };
+
+    // For Question decisions, Cancel is the last option (dynamic position).
+    // For all other decision types, Cancel is always option 3.
+    if matches!(source, DecisionSource::Question) {
+        return if choice == options.len() {
+            ResolvedAction::Cancel
+        } else {
+            ResolvedAction::Answer
+        };
+    }
+    if choice == 3 {
+        return ResolvedAction::Cancel;
+    }
+
+    match source {
+        DecisionSource::Idle => match choice {
+            1 => ResolvedAction::Nudge,
+            2 => ResolvedAction::Complete,
+            4 => ResolvedAction::Dismiss,
+            _ => ResolvedAction::Dismiss,
+        },
+        DecisionSource::Error | DecisionSource::Gate => match choice {
+            1 => ResolvedAction::Retry,
+            2 => ResolvedAction::Complete,
+            _ => ResolvedAction::Dismiss,
+        },
+        DecisionSource::Approval => match choice {
+            1 => ResolvedAction::Approve,
+            2 => ResolvedAction::Deny,
+            _ => ResolvedAction::Dismiss,
+        },
+        DecisionSource::Question => unreachable!(),
+    }
+}
+
+/// Map a decision resolution to the appropriate job action event.
 fn map_decision_to_job_action(
     source: &DecisionSource,
     chosen: Option<usize>,
@@ -152,101 +223,49 @@ fn map_decision_to_job_action(
     options: &[DecisionOption],
 ) -> Option<Event> {
     let pid = JobId::new(job_id);
+    let action = resolve_decision_action(source, chosen, options);
 
-    // Handle based on whether a choice was provided
-    let choice = match chosen {
-        Some(c) => c,
-        None => {
-            // No choice provided - if there's a message, treat as freeform nudge
-            return message.map(|msg| Event::JobResume {
-                id: pid,
-                message: Some(format!("decision {} freeform: {}", decision_id, msg)),
-                vars: HashMap::new(),
-                kill: false,
-            });
-        }
-    };
-
-    // Cancel is always option 3 for all decision types
-    if choice == 3 {
-        return Some(Event::JobCancel { id: pid });
-    }
-
-    match source {
-        DecisionSource::Idle => match choice {
-            // 1 = Nudge: resume with message
-            1 => Some(Event::JobResume {
-                id: pid,
-                message: Some(build_resume_message(chosen, message, decision_id)),
-                vars: HashMap::new(),
-                kill: false,
-            }),
-            // 2 = Done: mark step complete
-            2 => job_step.map(|step| Event::StepCompleted {
-                job_id: pid,
-                step: step.to_string(),
-            }),
-            // 4 = Dismiss: resolve without action
-            4 => None,
-            _ => None,
-        },
-        DecisionSource::Error | DecisionSource::Gate => match choice {
-            // 1 = Retry: resume (runtime will re-run)
-            1 => Some(Event::JobResume {
-                id: pid,
-                message: Some(build_resume_message(chosen, message, decision_id)),
-                vars: HashMap::new(),
-                kill: false,
-            }),
-            // 2 = Skip: mark step complete
-            2 => job_step.map(|step| Event::StepCompleted {
-                job_id: pid,
-                step: step.to_string(),
-            }),
-            _ => None,
-        },
-        DecisionSource::Approval => match choice {
-            // 1 = Approve: resume with approval message
-            1 => Some(Event::JobResume {
-                id: pid,
-                message: Some(format!("decision {} approved", decision_id)),
-                vars: HashMap::new(),
-                kill: false,
-            }),
-            // 2 = Deny: cancel (deny usually means abort)
-            2 => Some(Event::JobCancel { id: pid }),
-            _ => None,
-        },
-        DecisionSource::Question => {
-            if let Some(c) = chosen {
-                // Last option is always Cancel
-                if c == options.len() {
-                    return Some(Event::JobCancel { id: pid });
-                }
-            }
-            // For non-Cancel choices: resume with the selected option info
-            Some(Event::JobResume {
-                id: pid,
-                message: Some(build_question_resume_message(
-                    chosen,
-                    message,
-                    decision_id,
-                    options,
-                )),
-                vars: HashMap::new(),
-                kill: false,
-            })
-        }
+    match action {
+        ResolvedAction::Freeform => message.map(|msg| Event::JobResume {
+            id: pid,
+            message: Some(format!("decision {} freeform: {}", decision_id, msg)),
+            vars: HashMap::new(),
+            kill: false,
+        }),
+        ResolvedAction::Cancel => Some(Event::JobCancel { id: pid }),
+        ResolvedAction::Nudge | ResolvedAction::Retry => Some(Event::JobResume {
+            id: pid,
+            message: Some(build_resume_message(chosen, message, decision_id)),
+            vars: HashMap::new(),
+            kill: false,
+        }),
+        ResolvedAction::Complete => job_step.map(|step| Event::StepCompleted {
+            job_id: pid,
+            step: step.to_string(),
+        }),
+        ResolvedAction::Approve => Some(Event::JobResume {
+            id: pid,
+            message: Some(format!("decision {} approved", decision_id)),
+            vars: HashMap::new(),
+            kill: false,
+        }),
+        ResolvedAction::Deny => Some(Event::JobCancel { id: pid }),
+        ResolvedAction::Answer => Some(Event::JobResume {
+            id: pid,
+            message: Some(build_question_resume_message(
+                chosen,
+                message,
+                decision_id,
+                options,
+            )),
+            vars: HashMap::new(),
+            kill: false,
+        }),
+        ResolvedAction::Dismiss => None,
     }
 }
 
 /// Map a decision resolution to the appropriate agent run action events.
-///
-/// Option numbering (1-indexed):
-/// - Idle: 1=Nudge, 2=Done, 3=Cancel, 4=Dismiss
-/// - Error/Gate: 1=Retry, 2=Skip, 3=Cancel
-/// - Approval: 1=Approve, 2=Deny, 3=Cancel
-/// - Question: 1..N=user options, N+1=Cancel (dynamic position)
 fn map_decision_to_agent_run_action(
     source: &DecisionSource,
     chosen: Option<usize>,
@@ -257,8 +276,8 @@ fn map_decision_to_agent_run_action(
     options: &[DecisionOption],
 ) -> Vec<Event> {
     let ar_id = agent_run_id.clone();
+    let action = resolve_decision_action(source, chosen, options);
 
-    // Helper to create session input event
     let send_to_session = |input: String| -> Option<Event> {
         session_id.map(|sid| Event::SessionInput {
             id: oj_core::SessionId::new(sid),
@@ -266,79 +285,41 @@ fn map_decision_to_agent_run_action(
         })
     };
 
-    // Handle based on whether a choice was provided
-    let choice = match chosen {
-        Some(c) => c,
-        None => {
-            // No choice provided - if there's a message, treat as freeform nudge
-            return message
-                .and_then(|msg| send_to_session(format!("{}\n", msg)))
-                .into_iter()
-                .collect();
-        }
-    };
-
-    // Cancel is always option 3 for Idle/Error/Gate/Approval types
-    if choice == 3 && !matches!(source, DecisionSource::Question) {
-        return vec![Event::AgentRunStatusChanged {
+    match action {
+        ResolvedAction::Freeform => message
+            .and_then(|msg| send_to_session(format!("{}\n", msg)))
+            .into_iter()
+            .collect(),
+        ResolvedAction::Cancel => vec![Event::AgentRunStatusChanged {
             id: ar_id,
             status: AgentRunStatus::Failed,
             reason: Some(format!("cancelled via decision {}", decision_id)),
-        }];
-    }
-
-    match source {
-        DecisionSource::Idle => match choice {
-            // 1 = Nudge: send message to session
-            1 => {
-                let msg = message.unwrap_or("Please continue with the task.");
-                send_to_session(format!("{}\n", msg)).into_iter().collect()
-            }
-            // 2 = Done: mark agent run as completed
-            2 => vec![Event::AgentRunStatusChanged {
-                id: ar_id,
-                status: AgentRunStatus::Completed,
-                reason: Some(format!("marked done via decision {}", decision_id)),
-            }],
-            // 4 = Dismiss: resolve without action
-            4 => vec![],
-            _ => vec![],
-        },
-        DecisionSource::Error | DecisionSource::Gate => match choice {
-            // 1 = Retry: set status to Running (triggers recovery)
-            1 => vec![Event::AgentRunStatusChanged {
-                id: ar_id,
-                status: AgentRunStatus::Running,
-                reason: Some(format!("retry via decision {}", decision_id)),
-            }],
-            // 2 = Skip: mark as completed
-            2 => vec![Event::AgentRunStatusChanged {
-                id: ar_id,
-                status: AgentRunStatus::Completed,
-                reason: Some(format!("skipped via decision {}", decision_id)),
-            }],
-            _ => vec![],
-        },
-        DecisionSource::Approval => match choice {
-            // 1 = Approve: send "y" to session
-            1 => send_to_session("y\n".to_string()).into_iter().collect(),
-            // 2 = Deny: send "n" to session
-            2 => send_to_session("n\n".to_string()).into_iter().collect(),
-            _ => vec![],
-        },
-        DecisionSource::Question => {
-            if let Some(c) = chosen {
-                // Last option is always Cancel
-                if c == options.len() {
-                    return vec![Event::AgentRunStatusChanged {
-                        id: ar_id,
-                        status: AgentRunStatus::Failed,
-                        reason: Some(format!("cancelled via decision {}", decision_id)),
-                    }];
+        }],
+        ResolvedAction::Nudge => {
+            let msg = message.unwrap_or("Please continue with the task.");
+            send_to_session(format!("{}\n", msg)).into_iter().collect()
+        }
+        ResolvedAction::Complete => {
+            let reason = match source {
+                DecisionSource::Error | DecisionSource::Gate => {
+                    format!("skipped via decision {}", decision_id)
                 }
-            }
-            // For non-Cancel choices: send the selected option number to session
-            // Claude Code expects the option number as input
+                _ => format!("marked done via decision {}", decision_id),
+            };
+            vec![Event::AgentRunStatusChanged {
+                id: ar_id,
+                status: AgentRunStatus::Completed,
+                reason: Some(reason),
+            }]
+        }
+        ResolvedAction::Retry => vec![Event::AgentRunStatusChanged {
+            id: ar_id,
+            status: AgentRunStatus::Running,
+            reason: Some(format!("retry via decision {}", decision_id)),
+        }],
+        ResolvedAction::Approve => send_to_session("y\n".to_string()).into_iter().collect(),
+        ResolvedAction::Deny => send_to_session("n\n".to_string()).into_iter().collect(),
+        ResolvedAction::Answer => {
             if let Some(c) = chosen {
                 send_to_session(format!("{}\n", c)).into_iter().collect()
             } else if let Some(msg) = message {
@@ -347,6 +328,7 @@ fn map_decision_to_agent_run_action(
                 vec![]
             }
         }
+        ResolvedAction::Dismiss => vec![],
     }
 }
 
