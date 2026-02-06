@@ -556,7 +556,7 @@ async fn find_agent(
 
 async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClient) -> Result<()> {
     let timeout_dur = timeout.map(parse_duration).transpose()?;
-    let poll_interval = crate::client::wait_poll_interval();
+    let mut poller = crate::poll::Poller::new(crate::client::wait_poll_interval(), timeout_dur);
     let start = Instant::now();
 
     // Resolve agent to a job on first iteration; re-scan if not found yet
@@ -575,22 +575,23 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
         let job_id = match &resolved_job_id {
             Some(id) => id.clone(),
             None => {
-                // Agent not found yet; check timeout before retrying
-                if let Some(t) = timeout_dur {
-                    if start.elapsed() >= t {
+                // On first poll with no match, give a grace period for the agent to appear
+                if start.elapsed() > Duration::from_secs(10) {
+                    return Err(ExitError::new(3, format!("Agent not found: {}", agent_id)).into());
+                }
+                match poller.tick().await {
+                    crate::poll::Tick::Ready => continue,
+                    crate::poll::Tick::Timeout => {
                         return Err(ExitError::new(
                             2,
                             format!("Timeout waiting for agent {}", agent_id),
                         )
                         .into());
                     }
+                    crate::poll::Tick::Interrupted => {
+                        return Err(ExitError::new(130, String::new()).into());
+                    }
                 }
-                // On first poll with no match, give a grace period for the agent to appear
-                if start.elapsed() > Duration::from_secs(10) {
-                    return Err(ExitError::new(3, format!("Agent not found: {}", agent_id)).into());
-                }
-                tokio::time::sleep(poll_interval).await;
-                continue;
             }
         };
 
@@ -666,14 +667,17 @@ async fn handle_wait(agent_id: &str, timeout: Option<&str>, client: &DaemonClien
                 }
             }
         }
-        if let Some(t) = timeout_dur {
-            if start.elapsed() >= t {
+        match poller.tick().await {
+            crate::poll::Tick::Ready => {}
+            crate::poll::Tick::Timeout => {
                 return Err(
                     ExitError::new(2, format!("Timeout waiting for agent {}", agent_id)).into(),
                 );
             }
+            crate::poll::Tick::Interrupted => {
+                return Err(ExitError::new(130, String::new()).into());
+            }
         }
-        tokio::time::sleep(poll_interval).await;
     }
 
     Ok(())

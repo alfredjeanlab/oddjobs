@@ -4,7 +4,6 @@
 //! `oj job wait` - Block until job(s) reach a terminal state
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use anyhow::Result;
 
@@ -12,6 +11,7 @@ use oj_core::ShortId;
 
 use crate::client::DaemonClient;
 use crate::exit_error::ExitError;
+use crate::poll::{Poller, Tick};
 
 enum JobOutcome {
     Done,
@@ -36,18 +36,12 @@ pub async fn handle(
     let timeout_dur = timeout
         .map(|s| super::job::parse_duration(&s))
         .transpose()?;
-    let poll_interval = crate::client::wait_poll_interval();
-    let start = Instant::now();
+    let mut poller = Poller::new(crate::client::wait_poll_interval(), timeout_dur);
 
     let mut finished: HashMap<String, JobOutcome> = HashMap::new();
     let mut canonical_ids: HashMap<String, String> = HashMap::new();
     let mut step_trackers: HashMap<String, StepTracker> = HashMap::new();
     let show_prefix = ids.len() > 1;
-
-    // Pin ctrl_c outside the loop so signals received between iterations
-    // (e.g. during get_job) are not lost when the future is re-created.
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
 
     loop {
         for input_id in &ids {
@@ -108,17 +102,14 @@ pub async fn handle(
             break;
         }
 
-        if let Some(t) = timeout_dur {
-            if start.elapsed() >= t {
+        match poller.tick().await {
+            Tick::Ready => {}
+            Tick::Timeout => {
                 return Err(ExitError::new(2, "Timeout waiting for job(s)".to_string()).into());
             }
-        }
-
-        tokio::select! {
-            _ = &mut ctrl_c => {
+            Tick::Interrupted => {
                 return Err(ExitError::new(130, String::new()).into());
             }
-            _ = tokio::time::sleep(poll_interval) => {}
         }
     }
 

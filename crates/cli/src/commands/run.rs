@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::io::IsTerminal;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Args;
@@ -268,28 +268,21 @@ async fn dispatch_job(
     println!();
 
     // Poll for job start
-    let poll_interval = Duration::from_millis(500);
-    let deadline = Instant::now() + crate::client::run_wait_timeout();
+    let mut poller = crate::poll::Poller::new(
+        Duration::from_millis(500),
+        Some(crate::client::run_wait_timeout()),
+    );
     let mut started = false;
 
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-
     loop {
-        tokio::select! {
-            _ = &mut ctrl_c => {
+        match poller.tick().await {
+            crate::poll::Tick::Ready => {}
+            _ => break,
+        }
+        if let Ok(Some(p)) = client.get_job(job_id).await {
+            if p.step_status != "pending" {
+                started = true;
                 break;
-            }
-            _ = tokio::time::sleep(poll_interval) => {
-                if Instant::now() >= deadline {
-                    break;
-                }
-                if let Ok(Some(p)) = client.get_job(job_id).await {
-                    if p.step_status != "pending" {
-                        started = true;
-                        break;
-                    }
-                }
             }
         }
     }
@@ -343,26 +336,19 @@ async fn dispatch_agent_run(
         color::muted("(Ctrl+C to skip)")
     );
 
-    let poll_interval = Duration::from_millis(300);
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut poller =
+        crate::poll::Poller::new(Duration::from_millis(300), Some(Duration::from_secs(15)));
     let mut session_id = None;
 
-    let ctrl_c = tokio::signal::ctrl_c();
-    tokio::pin!(ctrl_c);
-
     loop {
-        tokio::select! {
-            _ = &mut ctrl_c => break,
-            _ = tokio::time::sleep(poll_interval) => {
-                if Instant::now() >= deadline {
-                    break;
-                }
-                if let Ok(Some(detail)) = client.get_agent(agent_run_id).await {
-                    if let Some(ref sid) = detail.session_id {
-                        session_id = Some(sid.clone());
-                        break;
-                    }
-                }
+        match poller.tick().await {
+            crate::poll::Tick::Ready => {}
+            _ => break,
+        }
+        if let Ok(Some(detail)) = client.get_agent(agent_run_id).await {
+            if let Some(ref sid) = detail.session_id {
+                session_id = Some(sid.clone());
+                break;
             }
         }
     }
