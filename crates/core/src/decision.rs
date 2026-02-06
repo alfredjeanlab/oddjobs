@@ -55,6 +55,10 @@ pub struct Decision {
     pub created_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resolved_at_ms: Option<u64>,
+    /// Set when this decision was auto-dismissed because a newer decision
+    /// was created for the same owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<DecisionId>,
     #[serde(default)]
     pub namespace: String,
 }

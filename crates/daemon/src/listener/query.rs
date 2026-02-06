@@ -439,6 +439,7 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                     message: d.message.clone(),
                     created_at_ms: d.created_at_ms,
                     resolved_at_ms: d.resolved_at_ms,
+                    superseded_by: d.superseded_by.as_ref().map(|id| id.to_string()),
                     namespace: d.namespace.clone(),
                 })
             });

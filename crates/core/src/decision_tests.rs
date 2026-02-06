@@ -57,6 +57,7 @@ fn decision_serde_roundtrip() {
         message: None,
         created_at_ms: 1_000_000,
         resolved_at_ms: None,
+        superseded_by: None,
         namespace: "myproject".to_string(),
     };
     let json = serde_json::to_string(&decision).unwrap();
@@ -82,6 +83,7 @@ fn decision_is_resolved() {
         message: None,
         created_at_ms: 1_000_000,
         resolved_at_ms: None,
+        superseded_by: None,
         namespace: String::new(),
     };
     assert!(!decision.is_resolved());
