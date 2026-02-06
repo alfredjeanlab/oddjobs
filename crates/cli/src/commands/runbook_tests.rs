@@ -32,9 +32,9 @@ fn parse_search_with_query() {
 }
 
 #[test]
-fn parse_show_subcommand() {
-    let cli = Cli::try_parse_from(["test", "show", "oj/wok"]).unwrap();
-    assert!(matches!(cli.command, RunbookCommand::Show { path } if path == "oj/wok"));
+fn parse_info_subcommand() {
+    let cli = Cli::try_parse_from(["test", "info", "oj/wok"]).unwrap();
+    assert!(matches!(cli.command, RunbookCommand::Info { path } if path == "oj/wok"));
 }
 
 #[test]

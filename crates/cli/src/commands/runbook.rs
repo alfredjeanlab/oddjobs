@@ -26,7 +26,7 @@ pub enum RunbookCommand {
         query: Option<String>,
     },
     /// Show library contents and required parameters
-    Show {
+    Info {
         /// Library path (e.g. "oj/wok")
         path: String,
     },
@@ -36,7 +36,7 @@ pub fn handle(command: RunbookCommand, project_root: &Path, format: OutputFormat
     match command {
         RunbookCommand::List {} => handle_list(project_root, format),
         RunbookCommand::Search { query } => handle_search(query.as_deref(), format),
-        RunbookCommand::Show { path } => handle_show(&path, format),
+        RunbookCommand::Info { path } => handle_show(&path, format),
     }
 }
 
