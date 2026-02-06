@@ -206,11 +206,7 @@ pub async fn handle(
             }
         }
         WorkspaceCommand::Prune { all, dry_run } => {
-            let ns = if namespace.is_empty() {
-                None
-            } else {
-                Some(namespace)
-            };
+            let ns = oj_core::namespace_to_option(namespace);
             let (pruned, skipped) = client.workspace_prune(all, dry_run, ns).await?;
 
             print_prune_results(

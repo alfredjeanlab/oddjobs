@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use oj_core::{OwnerId, StepOutcome};
+use oj_core::{namespace_to_option, OwnerId, StepOutcome};
 use oj_storage::MaterializedState;
 
 use crate::protocol::{AgentDetail, AgentSummary, Response, StepRecordDetail};
@@ -21,11 +21,7 @@ pub(super) fn handle_get_agent(
         let steps: Vec<StepRecordDetail> =
             p.step_history.iter().map(StepRecordDetail::from).collect();
 
-        let namespace = if p.namespace.is_empty() {
-            None
-        } else {
-            Some(p.namespace.as_str())
-        };
+        let namespace = namespace_to_option(&p.namespace);
         let summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 
         // Find agent matching by exact ID or prefix
@@ -81,11 +77,7 @@ pub(super) fn handle_get_agent(
             {
                 return None;
             }
-            let namespace = if ar.namespace.is_empty() {
-                None
-            } else {
-                Some(ar.namespace.clone())
-            };
+            let namespace = namespace_to_option(&ar.namespace).map(str::to_string);
             Some(Box::new(AgentDetail {
                 agent_id: ar_agent_id.to_string(),
                 agent_name: Some(ar.agent_name.clone()),
@@ -223,11 +215,7 @@ pub(super) fn handle_list_agents(
             OwnerId::AgentRun(_) => (String::new(), String::new()),
         };
 
-        let namespace = if record.namespace.is_empty() {
-            None
-        } else {
-            Some(record.namespace.clone())
-        };
+        let namespace = namespace_to_option(&record.namespace).map(str::to_string);
 
         // Read agent log for file stats
         let (files_read, files_written, commands_run) =
@@ -280,12 +268,8 @@ pub(super) fn handle_list_agents(
         let steps: Vec<StepRecordDetail> =
             p.step_history.iter().map(StepRecordDetail::from).collect();
 
-        let namespace = if p.namespace.is_empty() {
-            None
-        } else {
-            Some(p.namespace.clone())
-        };
-        let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace.as_deref());
+        let namespace = namespace_to_option(&p.namespace);
+        let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 
         // Skip agents already tracked from the agents map
         summaries.retain(|a| !tracked_agent_ids.contains(&a.agent_id));
@@ -310,11 +294,7 @@ pub(super) fn handle_list_agents(
                 continue;
             }
         }
-        let namespace = if ar.namespace.is_empty() {
-            None
-        } else {
-            Some(ar.namespace.clone())
-        };
+        let namespace = namespace_to_option(&ar.namespace).map(str::to_string);
         agents.push(AgentSummary {
             job_id: String::new(),
             step_name: String::new(),
