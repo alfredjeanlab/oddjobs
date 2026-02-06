@@ -6,9 +6,8 @@
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use crate::client::{ClientKind, CronStartResult, DaemonClient};
-use crate::color;
-use crate::output::{display_log, print_prune_results, OutputFormat};
+use crate::client::{ClientKind, DaemonClient};
+use crate::output::{display_log, print_prune_results, print_start_results, OutputFormat};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -90,37 +89,10 @@ pub async fn handle(
                 anyhow::bail!("cron name required (or use --all)");
             }
             let cron_name = name.unwrap_or_default();
-            match client
+            let result = client
                 .cron_start(project_root, namespace, &cron_name, all)
-                .await?
-            {
-                CronStartResult::Single { cron_name } => {
-                    println!(
-                        "Cron '{}' started ({})",
-                        color::header(&cron_name),
-                        color::muted(namespace)
-                    );
-                }
-                CronStartResult::Multiple { started, skipped } => {
-                    for cron_name in &started {
-                        println!(
-                            "Cron '{}' started ({})",
-                            color::header(cron_name),
-                            color::muted(namespace)
-                        );
-                    }
-                    for (cron_name, reason) in &skipped {
-                        println!(
-                            "Cron '{}' skipped: {}",
-                            color::header(cron_name),
-                            color::muted(reason)
-                        );
-                    }
-                    if started.is_empty() && skipped.is_empty() {
-                        println!("No crons found in runbooks");
-                    }
-                }
-            }
+                .await?;
+            print_start_results(&result, "Cron", "crons", namespace);
         }
         CronCommand::Stop { name } => {
             client

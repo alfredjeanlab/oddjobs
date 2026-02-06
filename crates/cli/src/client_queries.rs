@@ -636,7 +636,7 @@ impl DaemonClient {
         namespace: &str,
         worker_name: &str,
         all: bool,
-    ) -> Result<WorkerStartResult, ClientError> {
+    ) -> Result<StartResult, ClientError> {
         let request = Request::WorkerStart {
             project_root: project_root.to_path_buf(),
             namespace: namespace.to_string(),
@@ -645,10 +645,10 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::WorkerStarted { worker_name } => {
-                Ok(WorkerStartResult::Single { worker_name })
+                Ok(StartResult::Single { name: worker_name })
             }
             Response::WorkersStarted { started, skipped } => {
-                Ok(WorkerStartResult::Multiple { started, skipped })
+                Ok(StartResult::Multiple { started, skipped })
             }
             other => Self::reject(other),
         }
@@ -729,7 +729,7 @@ impl DaemonClient {
         namespace: &str,
         cron_name: &str,
         all: bool,
-    ) -> Result<CronStartResult, ClientError> {
+    ) -> Result<StartResult, ClientError> {
         let request = Request::CronStart {
             project_root: project_root.to_path_buf(),
             namespace: namespace.to_string(),
@@ -737,9 +737,9 @@ impl DaemonClient {
             all,
         };
         match self.send(&request).await? {
-            Response::CronStarted { cron_name } => Ok(CronStartResult::Single { cron_name }),
+            Response::CronStarted { cron_name } => Ok(StartResult::Single { name: cron_name }),
             Response::CronsStarted { started, skipped } => {
-                Ok(CronStartResult::Multiple { started, skipped })
+                Ok(StartResult::Multiple { started, skipped })
             }
             other => Self::reject(other),
         }
@@ -1059,21 +1059,10 @@ pub struct SessionPruneResult {
     pub skipped: usize,
 }
 
-/// Result from worker start operation
-pub enum WorkerStartResult {
+/// Result from a start operation (worker or cron)
+pub enum StartResult {
     Single {
-        worker_name: String,
-    },
-    Multiple {
-        started: Vec<String>,
-        skipped: Vec<(String, String)>,
-    },
-}
-
-/// Result from cron start operation
-pub enum CronStartResult {
-    Single {
-        cron_name: String,
+        name: String,
     },
     Multiple {
         started: Vec<String>,
