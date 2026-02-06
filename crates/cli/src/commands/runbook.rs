@@ -3,9 +3,9 @@
 
 //! `oj runbook` — inspect runbooks and discover libraries.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::output::OutputFormat;
 use crate::table::{Column, Table};
@@ -30,18 +30,52 @@ pub enum RunbookCommand {
         /// Library path (e.g. "oj/wok")
         path: String,
     },
+    /// Install an HCL library for use in runbook imports
+    Add {
+        /// Path to an .hcl file or directory of .hcl files
+        path: String,
+        /// Library name (default: inferred from source path)
+        #[arg(long)]
+        name: Option<String>,
+        /// Install to project-level .oj/libraries/ instead of user-level
+        #[arg(long)]
+        project: bool,
+    },
 }
 
 pub fn handle(command: RunbookCommand, project_root: &Path, format: OutputFormat) -> Result<()> {
+    let lib_dirs = library_dirs(project_root);
     match command {
         RunbookCommand::List {} => handle_list(project_root, format),
-        RunbookCommand::Search { query } => handle_search(query.as_deref(), format),
-        RunbookCommand::Info { path } => handle_show(&path, format),
+        RunbookCommand::Search { query } => handle_search(query.as_deref(), &lib_dirs, format),
+        RunbookCommand::Info { path } => handle_show(&path, &lib_dirs, format),
+        RunbookCommand::Add {
+            path,
+            name,
+            project,
+        } => handle_add(&path, name.as_deref(), project, project_root),
     }
+}
+
+/// Compute library directories for resolution: project-level then user-level.
+fn library_dirs(project_root: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let project_libs = project_root.join(".oj/libraries");
+    if project_libs.is_dir() {
+        dirs.push(project_libs);
+    }
+    if let Ok(state_dir) = crate::env::state_dir() {
+        let user_libs = state_dir.join("libraries");
+        if user_libs.is_dir() {
+            dirs.push(user_libs);
+        }
+    }
+    dirs
 }
 
 fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
     let runbook_dir = project_root.join(".oj/runbooks");
+    let lib_dirs = library_dirs(project_root);
     let summaries = oj_runbook::collect_runbook_summaries(&runbook_dir)?;
 
     if summaries.is_empty() {
@@ -72,7 +106,7 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
 
                 let commands = if summary.commands.is_empty() {
                     // Show imported command names if no local commands
-                    let imported_cmds = imported_command_names(&summary.imports);
+                    let imported_cmds = imported_command_names(&summary.imports, &lib_dirs);
                     if imported_cmds.is_empty() {
                         "-".to_string()
                     } else {
@@ -121,14 +155,15 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
 /// Resolve command names from imports by parsing each library.
 fn imported_command_names(
     imports: &std::collections::HashMap<String, oj_runbook::ImportDef>,
+    library_dirs: &[PathBuf],
 ) -> Vec<String> {
     let mut names = Vec::new();
     for (source, import_def) in imports {
-        let files = match oj_runbook::resolve_library(source) {
+        let files = match oj_runbook::resolve_library(source, library_dirs) {
             Ok(f) => f,
             Err(_) => continue,
         };
-        for (_, content) in files {
+        for (_, content) in &files {
             let runbook =
                 match oj_runbook::parse_runbook_with_format(content, oj_runbook::Format::Hcl) {
                     Ok(rb) => rb,
@@ -148,8 +183,8 @@ fn imported_command_names(
     names
 }
 
-fn handle_search(query: Option<&str>, format: OutputFormat) -> Result<()> {
-    let libraries = oj_runbook::available_libraries();
+fn handle_search(query: Option<&str>, library_dirs: &[PathBuf], format: OutputFormat) -> Result<()> {
+    let libraries = oj_runbook::available_libraries(library_dirs);
 
     let filtered: Vec<_> = match query {
         Some(q) => {
@@ -183,9 +218,9 @@ fn handle_search(query: Option<&str>, format: OutputFormat) -> Result<()> {
             ]);
 
             for lib in &filtered {
-                let consts_display = format_const_summary(lib.files);
+                let consts_display = format_const_summary(&lib.files);
                 table.row(vec![
-                    lib.source.to_string(),
+                    lib.source.clone(),
                     consts_display,
                     lib.description.clone(),
                 ]);
@@ -197,7 +232,7 @@ fn handle_search(query: Option<&str>, format: OutputFormat) -> Result<()> {
             let entries: Vec<serde_json::Value> = filtered
                 .iter()
                 .map(|lib| {
-                    let consts_json = format_consts_json(lib.files);
+                    let consts_json = format_consts_json(&lib.files);
                     serde_json::json!({
                         "source": lib.source,
                         "description": lib.description,
@@ -212,8 +247,8 @@ fn handle_search(query: Option<&str>, format: OutputFormat) -> Result<()> {
     Ok(())
 }
 
-fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
-    let files = oj_runbook::resolve_library(path).map_err(|_| {
+fn handle_show(path: &str, library_dirs: &[PathBuf], format: OutputFormat) -> Result<()> {
+    let files = oj_runbook::resolve_library(path, library_dirs).map_err(|_| {
         anyhow::anyhow!(
             "unknown library '{}'; use 'oj runbook search' to see available libraries",
             path
@@ -227,8 +262,8 @@ fn handle_show(path: &str, format: OutputFormat) -> Result<()> {
         .unwrap_or_default();
 
     // Collect const definitions and merge all files into a single runbook
-    let const_defs = extract_const_defs(files);
-    let runbook = merge_library_files(files)?;
+    let const_defs = extract_const_defs(&files);
+    let runbook = merge_library_files(&files)?;
 
     match format {
         OutputFormat::Text => {
@@ -385,7 +420,7 @@ fn build_entity_map(runbook: &oj_runbook::Runbook) -> serde_json::Value {
 }
 
 /// Format const definitions as a JSON array.
-fn format_consts_json(files: &[(&str, &str)]) -> Vec<serde_json::Value> {
+fn format_consts_json(files: &[(String, String)]) -> Vec<serde_json::Value> {
     let consts = extract_const_defs(files);
     let mut result: Vec<serde_json::Value> = consts
         .iter()
@@ -403,7 +438,7 @@ fn format_consts_json(files: &[(&str, &str)]) -> Vec<serde_json::Value> {
 
 /// Extract const definitions from all library files.
 fn extract_const_defs(
-    files: &[(&str, &str)],
+    files: &[(String, String)],
 ) -> std::collections::HashMap<String, oj_runbook::ConstDef> {
     let mut all_consts = std::collections::HashMap::new();
     for (_, content) in files {
@@ -423,7 +458,7 @@ fn extract_const_defs(
 }
 
 /// Merge all library files into a single runbook for entity enumeration.
-fn merge_library_files(files: &[(&str, &str)]) -> Result<oj_runbook::Runbook> {
+fn merge_library_files(files: &[(String, String)]) -> Result<oj_runbook::Runbook> {
     let mut merged = oj_runbook::Runbook::default();
     for (_, content) in files {
         // Strip %{...} const directives before parsing to avoid shell validation
@@ -443,7 +478,7 @@ fn merge_library_files(files: &[(&str, &str)]) -> Result<oj_runbook::Runbook> {
 }
 
 /// Format const defs for the search table summary.
-fn format_const_summary(files: &[(&str, &str)]) -> String {
+fn format_const_summary(files: &[(String, String)]) -> String {
     let defs = extract_const_defs(files);
     if defs.is_empty() {
         return "-".to_string();
@@ -460,6 +495,135 @@ fn format_const_summary(files: &[(&str, &str)]) -> String {
         .collect();
     items.sort();
     items.join(", ")
+}
+
+fn handle_add(
+    source_path: &str,
+    name: Option<&str>,
+    project_level: bool,
+    project_root: &Path,
+) -> Result<()> {
+    // Resolve source path
+    let source = PathBuf::from(source_path);
+    let source = if source.is_absolute() {
+        source
+    } else {
+        std::env::current_dir()?.join(source)
+    };
+    let source = source
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("cannot resolve '{}': {}", source_path, e))?;
+
+    // Infer library name
+    let lib_name = match name {
+        Some(n) => n.to_string(),
+        None => {
+            if source.is_dir() {
+                source
+                    .file_name()
+                    .ok_or_else(|| anyhow::anyhow!("cannot infer library name from path"))?
+                    .to_string_lossy()
+                    .to_string()
+            } else {
+                source
+                    .file_stem()
+                    .ok_or_else(|| anyhow::anyhow!("cannot infer library name from path"))?
+                    .to_string_lossy()
+                    .to_string()
+            }
+        }
+    };
+
+    // Validate name
+    if lib_name.is_empty() || lib_name.contains("..") {
+        bail!("invalid library name '{}'", lib_name);
+    }
+    if !lib_name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/')
+    {
+        bail!(
+            "invalid library name '{}': only alphanumeric, '-', '_', '/' allowed",
+            lib_name
+        );
+    }
+
+    // Determine target directory
+    let target_dir = if project_level {
+        project_root.join(".oj/libraries").join(&lib_name)
+    } else {
+        let state_dir = crate::env::state_dir()
+            .map_err(|e| anyhow::anyhow!("cannot determine state directory: {}", e))?;
+        state_dir.join("libraries").join(&lib_name)
+    };
+
+    // Remove existing if present
+    if target_dir.exists() {
+        std::fs::remove_dir_all(&target_dir)?;
+    }
+    std::fs::create_dir_all(&target_dir)?;
+
+    // Copy .hcl files
+    let mut copied = 0;
+    if source.is_dir() {
+        for entry in std::fs::read_dir(&source)?.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "hcl") {
+                let filename = path.file_name().unwrap();
+                std::fs::copy(&path, target_dir.join(filename))?;
+                copied += 1;
+            }
+        }
+    } else if source.extension().is_some_and(|e| e == "hcl") {
+        let filename = source.file_name().unwrap();
+        std::fs::copy(&source, target_dir.join(filename))?;
+        copied = 1;
+    } else {
+        bail!(
+            "source must be an .hcl file or directory of .hcl files: {}",
+            source.display()
+        );
+    }
+
+    if copied == 0 {
+        // Clean up empty dir
+        let _ = std::fs::remove_dir(&target_dir);
+        bail!("no .hcl files found in {}", source.display());
+    }
+
+    // Validate the installed library parses
+    for entry in std::fs::read_dir(&target_dir)?.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "hcl") {
+            let content = std::fs::read_to_string(&path)?;
+            let stripped = oj_runbook::strip_const_directives(&content).unwrap_or(content.clone());
+            if let Err(e) = oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)
+            {
+                eprintln!(
+                    "warning: {} has parse errors: {}",
+                    path.file_name().unwrap().to_string_lossy(),
+                    e
+                );
+            }
+        }
+    }
+
+    let scope = if project_level {
+        "project"
+    } else {
+        "user"
+    };
+    println!(
+        "Installed library '{}' ({} file{}) to {} ({})",
+        lib_name,
+        copied,
+        if copied == 1 { "" } else { "s" },
+        target_dir.display(),
+        scope,
+    );
+    println!("  Usage: import \"{}\" {{}}", lib_name);
+
+    Ok(())
 }
 
 #[cfg(test)]

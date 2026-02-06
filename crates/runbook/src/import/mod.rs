@@ -16,13 +16,14 @@ mod merge;
 mod types;
 
 pub use consts::{interpolate_consts, strip_const_directives, validate_consts};
-pub use libraries::{available_libraries, resolve_library, LibraryInfo};
+pub use libraries::{available_libraries, resolve_library, LibraryFiles, LibraryInfo};
 pub use merge::merge_runbook;
 pub use types::{ConstDef, ImportConst, ImportDef, ImportWarning};
 
 use crate::parser::{Format, ParseError, Runbook};
 use consts::process_const_directives;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// Parse an HCL runbook with import resolution.
 ///
@@ -34,6 +35,7 @@ use std::collections::HashMap;
 pub fn parse_with_imports(
     content: &str,
     format: Format,
+    library_dirs: &[PathBuf],
 ) -> Result<(Runbook, Vec<ImportWarning>), ParseError> {
     // Parse full content — imports and consts are now regular Runbook fields
     let mut runbook = crate::parser::parse_runbook_no_xref(content, format)?;
@@ -53,12 +55,12 @@ pub fn parse_with_imports(
 
     // Resolve each import
     for (source, import_def) in &imports {
-        let library_files = resolve_library(source)?;
+        let library_files = resolve_library(source, library_dirs)?;
 
         // Collect const definitions from all files in the library
         let mut all_const_defs: HashMap<String, ConstDef> = HashMap::new();
         let empty_values = HashMap::new();
-        for (filename, content) in library_files {
+        for (filename, content) in &library_files {
             // Strip directives before parsing to avoid shell validation errors
             // on template content (const defs are never inside conditional blocks)
             let stripped = process_const_directives(content, &empty_values).map_err(|msg| {
@@ -92,7 +94,7 @@ pub fn parse_with_imports(
 
         // Parse each file, interpolate consts, and merge into a single library runbook
         let mut lib_runbook = Runbook::default();
-        for (filename, content) in library_files {
+        for (filename, content) in &library_files {
             let interpolated = interpolate_consts(content, &const_values).map_err(|msg| {
                 ParseError::InvalidFormat {
                     location: format!("import \"{}/{}\"", source, filename),

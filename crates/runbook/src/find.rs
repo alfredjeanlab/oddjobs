@@ -9,10 +9,26 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
+/// Derive project-level library dirs from a runbook directory.
+///
+/// The runbook dir is typically `.oj/runbooks/`, so the parent `.oj/` may
+/// contain a `libraries/` subdirectory for project-level library overrides.
+fn project_library_dirs(runbook_dir: &Path) -> Vec<PathBuf> {
+    runbook_dir
+        .parent()
+        .map(|p| vec![p.join("libraries")])
+        .unwrap_or_default()
+}
+
 /// Parse a runbook file, resolving imports for HCL files.
-fn parse_file_content(content: &str, format: Format) -> Result<Runbook, crate::ParseError> {
+fn parse_file_content(
+    content: &str,
+    format: Format,
+    library_dirs: &[PathBuf],
+) -> Result<Runbook, crate::ParseError> {
     if format == Format::Hcl {
-        let (runbook, warnings) = crate::import::parse_with_imports(content, format)?;
+        let (runbook, warnings) =
+            crate::import::parse_with_imports(content, format, library_dirs)?;
         for w in &warnings {
             tracing::warn!("{}", w);
         }
@@ -142,13 +158,14 @@ pub fn find_command_with_comment(
     if !runbook_dir.exists() {
         return Ok(None);
     }
+    let library_dirs = project_library_dirs(runbook_dir);
     let files = collect_runbook_files(runbook_dir)?;
     for (path, format) in files {
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let runbook = match parse_file_content(&content, format) {
+        let runbook = match parse_file_content(&content, format, &library_dirs) {
             Ok(rb) => rb,
             Err(_) => continue,
         };
@@ -223,6 +240,7 @@ fn collect_all<T>(
     if !runbook_dir.exists() {
         return Ok(Vec::new());
     }
+    let library_dirs = project_library_dirs(runbook_dir);
     let files = collect_runbook_files(runbook_dir)?;
     let mut items = Vec::new();
     for (path, format) in files {
@@ -233,7 +251,7 @@ fn collect_all<T>(
                 continue;
             }
         };
-        let runbook = match parse_file_content(&content, format) {
+        let runbook = match parse_file_content(&content, format, &library_dirs) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
@@ -408,6 +426,7 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
     if !runbook_dir.exists() {
         return Ok(());
     }
+    let library_dirs = project_library_dirs(runbook_dir);
     let files = collect_runbook_files(runbook_dir).map_err(|e| vec![FindError::Io(e)])?;
 
     // Track (entity_type, name) -> source file path
@@ -422,7 +441,7 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
                 continue;
             }
         };
-        let runbook = match parse_file_content(&content, format) {
+        let runbook = match parse_file_content(&content, format, &library_dirs) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");
@@ -477,6 +496,7 @@ pub fn runbook_parse_warnings(runbook_dir: &Path) -> Vec<String> {
         Ok(f) => f,
         Err(_) => return Vec::new(),
     };
+    let library_dirs = project_library_dirs(runbook_dir);
     let mut warnings = Vec::new();
     for (path, format) in files {
         let content = match std::fs::read_to_string(&path) {
@@ -486,7 +506,7 @@ pub fn runbook_parse_warnings(runbook_dir: &Path) -> Vec<String> {
                 continue;
             }
         };
-        if let Err(e) = parse_file_content(&content, format) {
+        if let Err(e) = parse_file_content(&content, format, &library_dirs) {
             warnings.push(format!("{}: {e}", path.display()));
         }
     }
@@ -501,6 +521,7 @@ fn find_runbook(
     if !runbook_dir.exists() {
         return Ok(None);
     }
+    let library_dirs = project_library_dirs(runbook_dir);
     let files = collect_runbook_files(runbook_dir)?;
     let mut found: Option<Runbook> = None;
     let mut skipped: Vec<(PathBuf, String)> = Vec::new();
@@ -513,7 +534,7 @@ fn find_runbook(
                 continue;
             }
         };
-        let runbook = match parse_file_content(&content, format) {
+        let runbook = match parse_file_content(&content, format, &library_dirs) {
             Ok(rb) => rb,
             Err(e) => {
                 tracing::warn!(path = %path.display(), error = %e, "skipping invalid runbook");

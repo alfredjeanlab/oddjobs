@@ -38,8 +38,35 @@ fn parse_info_subcommand() {
 }
 
 #[test]
+fn parse_add_subcommand() {
+    let cli = Cli::try_parse_from(["test", "add", "./my-lib"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        RunbookCommand::Add { path, name: None, project: false } if path == "./my-lib"
+    ));
+}
+
+#[test]
+fn parse_add_with_name() {
+    let cli = Cli::try_parse_from(["test", "add", "./path", "--name", "mylib"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        RunbookCommand::Add { path, name: Some(n), project: false } if path == "./path" && n == "mylib"
+    ));
+}
+
+#[test]
+fn parse_add_project_flag() {
+    let cli = Cli::try_parse_from(["test", "add", "./path", "--project"]).unwrap();
+    assert!(matches!(
+        cli.command,
+        RunbookCommand::Add { project: true, .. }
+    ));
+}
+
+#[test]
 fn search_filters_by_query() {
-    let libraries = oj_runbook::available_libraries();
+    let libraries = oj_runbook::available_libraries(&[]);
 
     let q = "wok";
     let q_lower = q.to_lowercase();

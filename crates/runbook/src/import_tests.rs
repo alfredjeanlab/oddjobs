@@ -136,15 +136,15 @@ fn validate_consts_unknown_warns() {
 
 #[test]
 fn resolve_known_libraries() {
-    let wok_files = resolve_library("oj/wok").unwrap();
+    let wok_files = resolve_library("oj/wok", &[]).unwrap();
     assert!(!wok_files.is_empty(), "oj/wok should have files");
-    let git_files = resolve_library("oj/git").unwrap();
+    let git_files = resolve_library("oj/git", &[]).unwrap();
     assert!(!git_files.is_empty(), "oj/git should have files");
 }
 
 #[test]
 fn resolve_unknown_library() {
-    let err = resolve_library("oj/unknown").unwrap_err();
+    let err = resolve_library("oj/unknown", &[]).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("unknown library"), "got: {msg}");
 }
@@ -230,7 +230,7 @@ fn parse_import_oj_wok() {
   const "prefix" { value = "oj" }
 }
 "#;
-    let (runbook, warnings) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, warnings) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
 
     // Check unknown const warnings only
     for w in &warnings {
@@ -290,7 +290,7 @@ fn parse_import_oj_wok_with_alias() {
   const "prefix" { value = "oj" }
 }
 "#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
 
     // All names should be prefixed with "wok:"
     assert!(
@@ -323,7 +323,7 @@ fn parse_import_oj_wok_with_alias() {
 fn parse_import_oj_git() {
     let content = r#"import "oj/git" {}
 "#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
 
     assert!(
         runbook.commands.contains_key("merge"),
@@ -355,7 +355,7 @@ fn parse_import_with_custom_check() {
   const "check" { value = "make check" }
 }
 "#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
 
     // The agent's on_dead gate should use "make check"
     let bugs_agent = runbook.agents.get("bugs").unwrap();
@@ -366,7 +366,7 @@ fn parse_import_with_custom_check() {
 fn parse_import_missing_required_const() {
     let content = r#"import "oj/wok" {}
 "#;
-    let err = parse_with_imports(content, Format::Hcl).unwrap_err();
+    let err = parse_with_imports(content, Format::Hcl, &[]).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("missing required const"), "got: {msg}");
 }
@@ -377,8 +377,8 @@ fn parse_import_missing_required_const() {
 
 #[test]
 fn available_libraries_returns_all() {
-    let libs = available_libraries();
-    let sources: Vec<&str> = libs.iter().map(|l| l.source).collect();
+    let libs = available_libraries(&[]);
+    let sources: Vec<&str> = libs.iter().map(|l| l.source.as_str()).collect();
     assert!(sources.contains(&"oj/wok"), "missing oj/wok");
     assert!(sources.contains(&"oj/git"), "missing oj/git");
     assert!(
@@ -390,7 +390,7 @@ fn available_libraries_returns_all() {
 
 #[test]
 fn available_libraries_have_descriptions() {
-    let libs = available_libraries();
+    let libs = available_libraries(&[]);
     for lib in &libs {
         assert!(
             !lib.description.is_empty(),
@@ -402,10 +402,10 @@ fn available_libraries_have_descriptions() {
 
 #[test]
 fn available_libraries_parse_successfully() {
-    let libs = available_libraries();
+    let libs = available_libraries(&[]);
     let empty_values = HashMap::new();
     for lib in &libs {
-        for (filename, content) in lib.files {
+        for (filename, content) in &lib.files {
             // Strip const directives before parsing (templates may contain %{ if } blocks)
             let processed = interpolate_consts(content, &empty_values).unwrap_or_else(|e| {
                 panic!(
@@ -430,7 +430,7 @@ command "test" {
   run = "echo test"
 }
 "#;
-    let (runbook, warnings) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, warnings) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
     assert!(warnings.is_empty());
     assert!(runbook.commands.contains_key("test"));
 }
@@ -511,7 +511,7 @@ fn parse_import_oj_wok_without_submit() {
   const "prefix" { value = "oj" }
 }
 "#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
     // Should still parse successfully with all entities
     assert!(runbook.jobs.contains_key("bug"), "missing 'bug' job");
     assert!(runbook.jobs.contains_key("chore"), "missing 'chore' job");
@@ -525,7 +525,7 @@ fn parse_import_oj_wok_with_submit() {
   const "submit" { value = "oj run merge \"$branch\" \"$title\"" }
 }
 "#;
-    let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
+    let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
     assert!(runbook.jobs.contains_key("bug"), "missing 'bug' job");
     assert!(runbook.jobs.contains_key("chore"), "missing 'chore' job");
     assert!(runbook.jobs.contains_key("epic"), "missing 'epic' job");
@@ -571,4 +571,61 @@ fn const_def_equal_both_none() {
     let a = ConstDef { default: None };
     let b = ConstDef { default: None };
     assert_eq!(a, b);
+}
+
+// =============================================================================
+// external library tests
+// =============================================================================
+
+#[test]
+fn resolve_library_from_external_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib_dir = dir.path().join("mylib");
+    std::fs::create_dir(&lib_dir).unwrap();
+    std::fs::write(
+        lib_dir.join("main.hcl"),
+        r#"command "hello" { run = "echo hello" }"#,
+    )
+    .unwrap();
+
+    let files = resolve_library("mylib", &[dir.path().to_path_buf()]).unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, "main.hcl");
+    assert!(files[0].1.contains("hello"));
+}
+
+#[test]
+fn external_library_shadows_builtin() {
+    let dir = tempfile::tempdir().unwrap();
+    // Create an external library with the same name as a built-in
+    let lib_dir = dir.path().join("oj/wok");
+    std::fs::create_dir_all(&lib_dir).unwrap();
+    std::fs::write(
+        lib_dir.join("custom.hcl"),
+        r#"command "custom-cmd" { run = "echo custom" }"#,
+    )
+    .unwrap();
+
+    let files = resolve_library("oj/wok", &[dir.path().to_path_buf()]).unwrap();
+    // Should get the external version, not the built-in
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].0, "custom.hcl");
+}
+
+#[test]
+fn available_libraries_includes_external() {
+    let dir = tempfile::tempdir().unwrap();
+    let lib_dir = dir.path().join("mylib");
+    std::fs::create_dir(&lib_dir).unwrap();
+    std::fs::write(
+        lib_dir.join("main.hcl"),
+        "# My external library\n",
+    )
+    .unwrap();
+
+    let libs = available_libraries(&[dir.path().to_path_buf()]);
+    let sources: Vec<&str> = libs.iter().map(|l| l.source.as_str()).collect();
+    assert!(sources.contains(&"mylib"), "missing external library 'mylib'");
+    // Built-ins should still be present
+    assert!(sources.contains(&"oj/wok"), "missing built-in oj/wok");
 }

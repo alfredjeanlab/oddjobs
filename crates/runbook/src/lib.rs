@@ -41,7 +41,7 @@ pub use find::{
 };
 pub use import::{
     available_libraries, parse_with_imports, resolve_library, strip_const_directives, ConstDef,
-    ImportConst, ImportDef, ImportWarning, LibraryInfo,
+    ImportConst, ImportDef, ImportWarning, LibraryFiles, LibraryInfo,
 };
 pub use job::{
     GitWorkspaceMode, JobDef, NotifyConfig, StepDef, StepTransition, WorkspaceBlock,
