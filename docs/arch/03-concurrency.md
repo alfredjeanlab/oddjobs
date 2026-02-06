@@ -12,11 +12,10 @@ count defaults to the number of CPU cores.
 OS Threads
 ──────────────────────────────────────────────────────────
   tokio workers       N (= CPU cores, default)
-  tokio blocking      0 active (spawn_blocking never used)
+  tokio blocking      transient (checkpoint wait, desktop notify)
   notify crate        1 shared (kqueue/inotify internal)
-  desktop notify      1 per Notify effect (unbounded, fire-and-forget)
 ──────────────────────────────────────────────────────────
-  Typical total       N + 1   (+ transient notification threads)
+  Typical total       N + 1   (+ transient blocking threads)
 ```
 
 ## Task Topology
@@ -111,7 +110,7 @@ two categories:
 │  │  TakeQueueItem  variable    │                                        │
 │  │                             │                                        │
 │  │  [1] fire-and-forget via    │                                        │
-│  │      std::thread::spawn     │                                        │
+│  │      spawn_blocking         │                                        │
 │  │  [2] prompt polling loops   │                                        │
 │  │  [3] git subprocess         │                                        │
 │  └─────────────────────────────┘                                        │
@@ -171,7 +170,7 @@ is idle.
 ## Synchronization Primitives
 
 All mutexes are `parking_lot::Mutex` (synchronous, non-async). No
-`tokio::sync::Mutex`, `RwLock`, or `spawn_blocking` is used.
+`tokio::sync::Mutex` or `RwLock` is used.
 
 ```diagram
 Shared State                        Protected By              Held Across .await?
@@ -202,6 +201,7 @@ EventBus → EventReader              tokio::sync::mpsc     1          wake sign
 Agent log entries                   tokio::sync::mpsc     256        log job
 Watcher shutdown                    tokio::sync::oneshot  —          per-agent
 Daemon shutdown                     tokio::sync::Notify   —          broadcast
+Watcher file events                 tokio::sync::mpsc     32         per-agent
 CLI output streaming                tokio::sync::mpsc     16         CLI display
 ```
 
@@ -210,8 +210,9 @@ ID generation.
 
 ## Blocking I/O on Worker Threads
 
-No `spawn_blocking` is used anywhere. All blocking file I/O runs directly on
-tokio worker threads:
+`spawn_blocking` is used in two places: checkpoint completion wait
+(`daemon/src/main.rs`) and desktop notifications (`adapters/src/notify/desktop.rs`).
+All other blocking file I/O runs directly on tokio worker threads:
 
 | Location | Operation |
 |----------|-----------|

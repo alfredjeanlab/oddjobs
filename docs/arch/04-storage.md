@@ -112,7 +112,7 @@ Agent signal and lifecycle events also update job/agent_run status during replay
 | `agent_run:status_changed` | AgentRunStatusChanged | id, status, reason? | Update status |
 | `agent_run:deleted` | AgentRunDeleted | id | Remove agent run |
 
-Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `AgentInput`, `JobResume`, `JobCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake`, `WorkerPollComplete`, `WorkerTakeComplete`, `CronOnce`, `AgentIdle`, `AgentStop`, and `AgentPrompt` are also signals that do not mutate state.
+`CommandRun` persists the namespace → project_root mapping but is otherwise a signal event. Action/signal events (`TimerStart`, `SessionInput`, `AgentInput`, `JobResume`, `JobCancel`, `AgentRunResume`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake`, `WorkerPollComplete`, `WorkerTakeComplete`, `CronOnce`, `AgentIdle`, `AgentStop`, and `AgentPrompt` are also signals that do not mutate state.
 
 ## Materialized State
 

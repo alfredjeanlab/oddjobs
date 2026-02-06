@@ -27,7 +27,7 @@ Adapters wrap **external tools and abstractions** with predictable behavior:
 | Trait | Wraps | Key Methods |
 |-------|-------|-------------|
 | `SessionAdapter` | tmux | spawn, send, send_literal, send_enter, kill, is_alive, capture_output, is_process_running, get_exit_code, configure |
-| `AgentAdapter` | Claude Code | spawn, reconnect, send, get_state, kill, session_log_size |
+| `AgentAdapter` | Claude Code | spawn, reconnect, send, get_state, kill, session_log_size, last_assistant_message |
 | `NotifyAdapter` | desktop | notify |
 
 ## AgentAdapter
@@ -66,6 +66,9 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
     /// Get the current size of the agent's session log file in bytes.
     /// Used by the idle grace timer to detect activity during the grace period.
     async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64>;
+
+    /// Get the last assistant message from the agent's session log.
+    async fn last_assistant_message(&self, agent_id: &AgentId) -> Option<String>;
 }
 
 pub enum AgentState {
@@ -82,9 +85,9 @@ pub enum AgentState {
 }
 ```
 
-`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, `workspace_path`, `cwd`, `prompt`, `job_name`, `job_id`, `project_root`.
+`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, `workspace_path`, `cwd`, `prompt`, `job_name`, `job_id`, `project_root`, `session_config`, `owner`.
 
-`AgentReconnectConfig` bundles reconnect parameters: `agent_id`, `session_id`, `workspace_path`, `process_name`.
+`AgentReconnectConfig` bundles reconnect parameters: `agent_id`, `session_id`, `workspace_path`, `process_name`, `owner`.
 
 Liveness is detected via the background watcher (file-watching + periodic process checks), not a separate `is_alive()` method.
 

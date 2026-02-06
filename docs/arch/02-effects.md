@@ -13,8 +13,7 @@ pub enum Effect {
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        job_id: JobId,
-        agent_run_id: Option<AgentRunId>,  // For standalone agents
+        owner: OwnerId,                    // Job or standalone agent run
         workspace_path: PathBuf,
         input: HashMap<String, String>,
         command: String,
@@ -33,7 +32,7 @@ pub enum Effect {
     CreateWorkspace {
         workspace_id: WorkspaceId,
         path: PathBuf,
-        owner: Option<String>,
+        owner: Option<OwnerId>,
         workspace_type: Option<String>,  // "folder" or "worktree"
         repo_root: Option<PathBuf>,      // For worktree: the repo root
         branch: Option<String>,          // For worktree: the branch name
@@ -47,7 +46,7 @@ pub enum Effect {
 
     // Shell effects
     Shell {
-        job_id: JobId,
+        owner: Option<OwnerId>,   // Job or agent_run
         step: String,
         command: String,
         cwd: PathBuf,
@@ -162,3 +161,16 @@ Timer IDs use structured constructors on `TimerId`:
 - `TimerId::liveness(job_id)` -- `"liveness:{job_id}"`
 - `TimerId::exit_deferred(job_id)` -- `"exit-deferred:{job_id}"`
 - `TimerId::cooldown(job_id, trigger, chain_pos)` -- `"cooldown:{job_id}:{trigger}:{chain_pos}"`
+- `TimerId::idle_grace(job_id)` -- `"idle-grace:{job_id}"`
+- `TimerId::queue_retry(queue_name, item_id)` -- `"queue-retry:{queue_name}:{item_id}"`
+- `TimerId::cron(cron_name, namespace)` -- `"cron:{scoped_name}"`
+- `TimerId::queue_poll(worker_name, namespace)` -- `"queue-poll:{scoped_name}"`
+
+Agent run variants mirror the job variants with an `ar:` infix:
+- `TimerId::liveness_agent_run(id)` -- `"liveness:ar:{id}"`
+- `TimerId::exit_deferred_agent_run(id)` -- `"exit-deferred:ar:{id}"`
+- `TimerId::cooldown_agent_run(id, trigger, chain_pos)` -- `"cooldown:ar:{id}:{trigger}:{chain_pos}"`
+- `TimerId::idle_grace_agent_run(id)` -- `"idle-grace:ar:{id}"`
+
+Unified constructors dispatch by `OwnerId`:
+- `TimerId::owner_liveness(owner)`, `owner_exit_deferred(owner)`, `owner_cooldown(owner, ..)`, `owner_idle_grace(owner)`

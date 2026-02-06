@@ -285,7 +285,7 @@ enum Response {
     DecisionResolved { id }
 
     // Overview responses
-    StatusOverview { uptime_secs, namespaces }
+    StatusOverview { uptime_secs, namespaces, metrics_health }
     Projects { projects }
     Orphans { orphans }
 }
