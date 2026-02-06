@@ -51,7 +51,7 @@ use tokio::sync::mpsc;
 
 /// Errors from agent operations
 #[derive(Debug, Error)]
-pub enum AgentError {
+pub enum AgentAdapterError {
     #[error("agent not found: {0}")]
     NotFound(String),
     #[error("spawn failed: {0}")]
@@ -131,15 +131,15 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
         &self,
         config: AgentSpawnConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError>;
+    ) -> Result<AgentHandle, AgentAdapterError>;
 
     /// Send input to an agent
-    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentError>;
+    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError>;
 
     /// Kill an agent
     ///
     /// This stops both the agent's session and its background watcher.
-    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentError>;
+    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError>;
 
     /// Reconnect to an existing agent session (after daemon restart).
     ///
@@ -149,13 +149,13 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
         &self,
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError>;
+    ) -> Result<AgentHandle, AgentAdapterError>;
 
     /// Get the current state of an agent
     ///
     /// This is a point-in-time check; for continuous monitoring, use the
     /// event channel from `spawn()`.
-    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError>;
+    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError>;
 
     /// Get the current size of the agent's session log file in bytes.
     ///

@@ -3,7 +3,9 @@
 
 //! Traced adapter wrappers for consistent observability
 
-use crate::agent::{AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
+use crate::agent::{
+    AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig,
+};
 use crate::session::{SessionAdapter, SessionError};
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event};
@@ -160,7 +162,7 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         &self,
         config: AgentSpawnConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         let span = tracing::info_span!(
             "agent.spawn",
             agent_id = %config.agent_id,
@@ -194,7 +196,7 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         &self,
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         let span = tracing::info_span!(
             "agent.reconnect",
             agent_id = %config.agent_id,
@@ -224,7 +226,7 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         result
     }
 
-    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentError> {
+    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
         let span = tracing::info_span!("agent.send", %agent_id);
         let _guard = span.enter();
 
@@ -239,7 +241,7 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         result
     }
 
-    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentError> {
+    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
         let span = tracing::info_span!("agent.kill", %agent_id);
         let _guard = span.enter();
 
@@ -253,7 +255,7 @@ impl<A: AgentAdapter> AgentAdapter for TracedAgent<A> {
         result
     }
 
-    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError> {
+    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
         let result = self.inner.get_state(agent_id).await;
         tracing::trace!(%agent_id, state = ?result.as_ref().ok(), "checked");
         result

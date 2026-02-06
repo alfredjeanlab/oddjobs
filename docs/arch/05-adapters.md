@@ -45,23 +45,23 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
         &self,
         config: AgentSpawnConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError>;
+    ) -> Result<AgentHandle, AgentAdapterError>;
 
     /// Send input to an agent (nudge, follow-up)
-    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentError>;
+    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError>;
 
     /// Kill an agent (stops session and background watcher)
-    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentError>;
+    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError>;
 
     /// Reconnect to an existing agent session (e.g. after daemon restart)
     async fn reconnect(
         &self,
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError>;
+    ) -> Result<AgentHandle, AgentAdapterError>;
 
     /// Get current agent state from session log (point-in-time check)
-    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError>;
+    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError>;
 
     /// Get the current size of the agent's session log file in bytes.
     /// Used by the idle grace timer to detect activity during the grace period.

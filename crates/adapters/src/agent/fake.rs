@@ -4,7 +4,7 @@
 //! Fake agent adapter for deterministic testing
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use super::{AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
+use super::{AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event};
 use parking_lot::Mutex;
@@ -46,9 +46,9 @@ pub struct FakeAgentAdapter {
 struct FakeAgentState {
     agents: HashMap<AgentId, FakeAgent>,
     calls: Vec<AgentCall>,
-    spawn_error: Option<AgentError>,
-    send_error: Option<AgentError>,
-    kill_error: Option<AgentError>,
+    spawn_error: Option<AgentAdapterError>,
+    send_error: Option<AgentAdapterError>,
+    kill_error: Option<AgentAdapterError>,
 }
 
 struct FakeAgent {
@@ -110,17 +110,17 @@ impl FakeAgentAdapter {
     }
 
     /// Set error to return on next spawn
-    pub fn set_spawn_error(&self, error: AgentError) {
+    pub fn set_spawn_error(&self, error: AgentAdapterError) {
         self.inner.lock().spawn_error = Some(error);
     }
 
     /// Set error to return on next send
-    pub fn set_send_error(&self, error: AgentError) {
+    pub fn set_send_error(&self, error: AgentAdapterError) {
         self.inner.lock().send_error = Some(error);
     }
 
     /// Set error to return on next kill
-    pub fn set_kill_error(&self, error: AgentError) {
+    pub fn set_kill_error(&self, error: AgentAdapterError) {
         self.inner.lock().kill_error = Some(error);
     }
 
@@ -149,7 +149,7 @@ impl AgentAdapter for FakeAgentAdapter {
         &self,
         config: AgentSpawnConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         let mut inner = self.inner.lock();
 
         inner.calls.push(AgentCall::Spawn {
@@ -181,7 +181,7 @@ impl AgentAdapter for FakeAgentAdapter {
         &self,
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         let mut inner = self.inner.lock();
 
         inner.calls.push(AgentCall::Reconnect {
@@ -209,7 +209,7 @@ impl AgentAdapter for FakeAgentAdapter {
         ))
     }
 
-    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentError> {
+    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
         let mut inner = self.inner.lock();
 
         inner.calls.push(AgentCall::Send {
@@ -222,13 +222,13 @@ impl AgentAdapter for FakeAgentAdapter {
         }
 
         if !inner.agents.contains_key(agent_id) {
-            return Err(AgentError::NotFound(agent_id.to_string()));
+            return Err(AgentAdapterError::NotFound(agent_id.to_string()));
         }
 
         Ok(())
     }
 
-    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentError> {
+    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
         let mut inner = self.inner.lock();
 
         inner.calls.push(AgentCall::Kill {
@@ -240,13 +240,13 @@ impl AgentAdapter for FakeAgentAdapter {
         }
 
         if inner.agents.remove(agent_id).is_none() {
-            return Err(AgentError::NotFound(agent_id.to_string()));
+            return Err(AgentAdapterError::NotFound(agent_id.to_string()));
         }
 
         Ok(())
     }
 
-    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError> {
+    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
         let mut inner = self.inner.lock();
 
         inner.calls.push(AgentCall::GetState {
@@ -257,7 +257,7 @@ impl AgentAdapter for FakeAgentAdapter {
             .agents
             .get(agent_id)
             .map(|a| a.state.clone())
-            .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))
+            .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))
     }
 
     async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
