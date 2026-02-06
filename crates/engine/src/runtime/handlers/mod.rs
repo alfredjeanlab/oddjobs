@@ -427,6 +427,13 @@ where
             | Event::AgentRunStatusChanged { .. }
             | Event::AgentRunDeleted { .. } => {}
 
+            Event::AgentRunResume { id, message, kill } => {
+                result_events.extend(
+                    self.handle_agent_run_resume(id, message.as_deref(), *kill)
+                        .await?,
+                );
+            }
+
             // Queue retry/dead: log lifecycle events
             Event::QueueItemRetry {
                 queue_name,

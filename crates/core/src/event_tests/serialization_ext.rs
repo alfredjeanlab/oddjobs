@@ -398,3 +398,54 @@ fn event_decision_name() {
         "decision:resolved"
     );
 }
+
+// =============================================================================
+// AgentRunResume Event Tests
+// =============================================================================
+
+#[test]
+fn event_agent_run_resume_roundtrip() {
+    use crate::agent_run::AgentRunId;
+    let event = Event::AgentRunResume {
+        id: AgentRunId::new("ar-1"),
+        message: Some("try again".to_string()),
+        kill: true,
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "agent_run:resume");
+    assert_eq!(json["id"], "ar-1");
+    assert_eq!(json["message"], "try again");
+    assert_eq!(json["kill"], true);
+
+    assert_roundtrip(&event);
+}
+
+#[test]
+fn event_agent_run_resume_no_message_roundtrip() {
+    use crate::agent_run::AgentRunId;
+    let event = Event::AgentRunResume {
+        id: AgentRunId::new("ar-2"),
+        message: None,
+        kill: false,
+    };
+    let json: serde_json::Value = serde_json::to_value(&event).unwrap();
+    assert_eq!(json["type"], "agent_run:resume");
+    assert!(json.get("message").is_none());
+    assert!(json.get("kill").is_none()); // skip_serializing_if = Not::not
+
+    assert_roundtrip(&event);
+}
+
+#[test]
+fn event_agent_run_resume_name() {
+    use crate::agent_run::AgentRunId;
+    assert_eq!(
+        Event::AgentRunResume {
+            id: AgentRunId::new("ar-1"),
+            message: None,
+            kill: false,
+        }
+        .name(),
+        "agent_run:resume"
+    );
+}

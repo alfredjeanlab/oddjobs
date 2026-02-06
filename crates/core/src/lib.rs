@@ -36,7 +36,7 @@ pub use effect::Effect;
 pub use event::{AgentSignalKind, Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
 pub use id::{IdGen, ShortId, UuidIdGen};
 pub use job::{Job, JobConfig, JobId, StepOutcome, StepRecord, StepStatus};
-pub use namespace::{scoped_name, split_scoped_name};
+pub use namespace::{namespace_to_option, scoped_name, split_scoped_name, Namespace};
 pub use owner::OwnerId;
 pub use session::SessionId;
 pub use time_fmt::{format_elapsed, format_elapsed_ms};

@@ -1,22 +1,13 @@
 //! AskUserQuestion decision tests using claudeless simulator.
 //!
-//! **STATUS: PARTIALLY BLOCKED** - PreToolUse hooks now fire in claudeless, but idle
-//! grace timer races the hook notification for "wait" scenarios.
-//!
 //! Tests the Question decision flow when an agent calls the AskUserQuestion tool:
 //! - Decision source shows as "question" (not "approval")
 //! - Decision context displays the actual question text and options
 //! - Resolving with an option number resumes the job
 //! - Resolving with the Cancel option (last) cancels the job
 //!
-//! ## Why most tests are still ignored
-//!
-//! The auto-answer scenario passes (`ask_user_question_creates_question_decision`)
-//! because the agent completes quickly before the idle grace timer fires. The "wait"
-//! scenarios fail because the idle grace timer (1s) expires before the PreToolUse
-//! hook's `oj agent hook pretooluse` command completes the IPC round-trip. The daemon
-//! creates an Idle decision, and by the time AgentPrompt arrives, the idempotency
-//! check (`step_status.is_waiting()`) skips it.
+//! The PreToolUse hook fires synchronously before claudeless pauses for TUI input,
+//! so the Question decision is created before the agent appears idle.
 
 use crate::prelude::*;
 
@@ -213,7 +204,6 @@ fn ask_user_question_creates_question_decision() {
 
 /// Tests that the decision context contains the actual question text.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn question_decision_shows_question_text() {
     let temp = Project::empty();
     temp.git_init();
@@ -263,7 +253,6 @@ fn question_decision_shows_question_text() {
 
 /// Tests that decision options match the AskUserQuestion options.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn question_decision_shows_options() {
     let temp = Project::empty();
     temp.git_init();
@@ -328,7 +317,6 @@ fn question_decision_shows_options() {
 /// Uses a scenario without auto-answer so the agent stays blocked at the
 /// question. When we resolve with Cancel, the job should be cancelled.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn resolve_question_with_cancel_cancels_job() {
     let temp = Project::empty();
     temp.git_init();
@@ -386,7 +374,6 @@ fn resolve_question_with_cancel_cancels_job() {
 /// by the time we resolve. This test verifies the decision resolution
 /// mechanics work, not that the agent receives the message.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn resolve_question_removes_from_pending_list() {
     let temp = Project::empty();
     temp.git_init();
@@ -423,18 +410,24 @@ fn resolve_question_removes_from_pending_list() {
         .args(&["decision", "resolve", &decision_id, "1"])
         .passes();
 
-    // Decision should no longer be in pending list
-    let decisions_after = temp.oj().args(&["decision", "list"]).passes().stdout();
+    // Decision should no longer be in pending list (poll for async processing)
+    let removed = wait_for(SPEC_WAIT_MAX_MS, || {
+        !temp
+            .oj()
+            .args(&["decision", "list"])
+            .passes()
+            .stdout()
+            .contains(short_id)
+    });
     assert!(
-        !decisions_after.contains(short_id),
+        removed,
         "decision should be removed from pending list after resolution, got:\n{}",
-        decisions_after
+        temp.oj().args(&["decision", "list"]).passes().stdout()
     );
 }
 
 /// Tests that resolving with a freeform message is accepted.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn resolve_question_with_freeform_message() {
     let temp = Project::empty();
     temp.git_init();
@@ -476,12 +469,20 @@ fn resolve_question_with_freeform_message() {
         ])
         .passes();
 
-    // Decision should be resolved (removed from list)
-    let decisions_after = temp.oj().args(&["decision", "list"]).passes().stdout();
+    // Decision should be resolved (removed from list, poll for async processing)
     let short_id = &decision_id[..8.min(decision_id.len())];
+    let removed = wait_for(SPEC_WAIT_MAX_MS, || {
+        !temp
+            .oj()
+            .args(&["decision", "list"])
+            .passes()
+            .stdout()
+            .contains(short_id)
+    });
     assert!(
-        !decisions_after.contains(short_id),
-        "decision should be resolved after freeform message"
+        removed,
+        "decision should be resolved after freeform message, got:\n{}",
+        temp.oj().args(&["decision", "list"]).passes().stdout()
     );
 }
 
@@ -491,7 +492,6 @@ fn resolve_question_with_freeform_message() {
 
 /// Tests that `oj status` shows the question source for escalated jobs.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn status_shows_question_source() {
     let temp = Project::empty();
     temp.git_init();
@@ -530,7 +530,6 @@ fn status_shows_question_source() {
 
 /// Tests that option descriptions are included in decision show output.
 #[test]
-#[ignore = "blocked: idle grace timer races PreToolUse hook — AgentPrompt arrives after Idle decision"]
 fn question_decision_shows_option_descriptions() {
     let temp = Project::empty();
     temp.git_init();

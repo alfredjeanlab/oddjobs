@@ -12,6 +12,7 @@ mod env;
 mod exit_error;
 mod help;
 mod output;
+mod poll;
 mod table;
 
 use output::OutputFormat;

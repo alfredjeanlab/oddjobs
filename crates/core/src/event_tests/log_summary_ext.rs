@@ -495,3 +495,36 @@ fn log_summary_agent_run_deleted() {
     };
     assert_eq!(event.log_summary(), "agent_run:deleted id=ar1");
 }
+
+#[test]
+fn log_summary_agent_run_resume_with_kill() {
+    use crate::agent_run::AgentRunId;
+    let event = Event::AgentRunResume {
+        id: AgentRunId::new("ar1"),
+        message: Some("retry".to_string()),
+        kill: true,
+    };
+    assert_eq!(event.log_summary(), "agent_run:resume id=ar1 kill=true");
+}
+
+#[test]
+fn log_summary_agent_run_resume_with_message() {
+    use crate::agent_run::AgentRunId;
+    let event = Event::AgentRunResume {
+        id: AgentRunId::new("ar1"),
+        message: Some("nudge".to_string()),
+        kill: false,
+    };
+    assert_eq!(event.log_summary(), "agent_run:resume id=ar1 msg=true");
+}
+
+#[test]
+fn log_summary_agent_run_resume_bare() {
+    use crate::agent_run::AgentRunId;
+    let event = Event::AgentRunResume {
+        id: AgentRunId::new("ar1"),
+        message: None,
+        kill: false,
+    };
+    assert_eq!(event.log_summary(), "agent_run:resume id=ar1");
+}

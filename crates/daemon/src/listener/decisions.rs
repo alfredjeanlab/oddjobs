@@ -281,7 +281,11 @@ fn map_decision_to_agent_run_action(
 
     match action {
         ResolvedAction::Freeform => message
-            .and_then(|msg| send_to_session(format!("{}\n", msg)))
+            .map(|msg| Event::AgentRunResume {
+                id: ar_id,
+                message: Some(msg.to_string()),
+                kill: false,
+            })
             .into_iter()
             .collect(),
         ResolvedAction::Cancel => vec![Event::AgentRunStatusChanged {
@@ -291,7 +295,11 @@ fn map_decision_to_agent_run_action(
         }],
         ResolvedAction::Nudge => {
             let msg = message.unwrap_or("Please continue with the task.");
-            send_to_session(format!("{}\n", msg)).into_iter().collect()
+            vec![Event::AgentRunResume {
+                id: ar_id,
+                message: Some(msg.to_string()),
+                kill: false,
+            }]
         }
         ResolvedAction::Complete => {
             let reason = match source {
@@ -306,10 +314,10 @@ fn map_decision_to_agent_run_action(
                 reason: Some(reason),
             }]
         }
-        ResolvedAction::Retry => vec![Event::AgentRunStatusChanged {
+        ResolvedAction::Retry => vec![Event::AgentRunResume {
             id: ar_id,
-            status: AgentRunStatus::Running,
-            reason: Some(format!("retry via decision {}", decision_id)),
+            message: Some(build_resume_message(chosen, message, decision_id)),
+            kill: true,
         }],
         ResolvedAction::Approve => send_to_session("y\n".to_string()).into_iter().collect(),
         ResolvedAction::Deny => send_to_session("n\n".to_string()).into_iter().collect(),

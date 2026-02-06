@@ -24,7 +24,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
-use oj_core::{scoped_name, split_scoped_name};
+use oj_core::{namespace_to_option, scoped_name, split_scoped_name};
 use oj_storage::MaterializedState;
 
 use oj_engine::breadcrumb::Breadcrumb;
@@ -91,11 +91,7 @@ pub(super) fn handle_query(
                     p.step_history.iter().map(StepRecordDetail::from).collect();
 
                 // Compute agent summaries from log files
-                let namespace = if p.namespace.is_empty() {
-                    None
-                } else {
-                    Some(p.namespace.as_str())
-                };
+                let namespace = namespace_to_option(&p.namespace);
                 let agents =
                     query_agents::compute_agent_summaries(&p.id, &steps, logs_path, namespace);
 

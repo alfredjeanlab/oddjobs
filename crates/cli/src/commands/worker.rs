@@ -187,11 +187,7 @@ pub async fn handle(
             }
         }
         WorkerCommand::Prune { all, dry_run } => {
-            let filter_namespace = if namespace.is_empty() {
-                None
-            } else {
-                Some(namespace)
-            };
+            let filter_namespace = oj_core::namespace_to_option(namespace);
             let (pruned, skipped) = client.worker_prune(all, dry_run, filter_namespace).await?;
 
             print_prune_results(
