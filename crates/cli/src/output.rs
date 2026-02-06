@@ -145,6 +145,52 @@ pub fn print_start_results(
     }
 }
 
+/// Print stop results for worker commands.
+///
+/// Handles single-stop and bulk-stop (`--all`) output.
+///
+/// - `label` — capitalized entity name, e.g. `"Worker"`.
+/// - `plural` — lowercase plural, e.g. `"workers"`.
+pub fn print_stop_results(
+    result: &crate::client::StopResult,
+    label: &str,
+    plural: &str,
+    namespace: &str,
+) {
+    use crate::client::StopResult;
+    match result {
+        StopResult::Single { name } => {
+            println!(
+                "{} '{}' stopped ({})",
+                label,
+                crate::color::header(name),
+                crate::color::muted(namespace)
+            );
+        }
+        StopResult::Multiple { stopped, skipped } => {
+            for name in stopped {
+                println!(
+                    "{} '{}' stopped ({})",
+                    label,
+                    crate::color::header(name),
+                    crate::color::muted(namespace)
+                );
+            }
+            for (name, reason) in skipped {
+                println!(
+                    "{} '{}' skipped: {}",
+                    label,
+                    crate::color::header(name),
+                    crate::color::muted(reason)
+                );
+            }
+            if stopped.is_empty() && skipped.is_empty() {
+                println!("No running {} found", plural);
+            }
+        }
+    }
+}
+
 /// Display log content with optional follow mode, handling text/json output.
 pub async fn display_log(
     log_path: &std::path::Path,

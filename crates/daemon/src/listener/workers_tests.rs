@@ -89,7 +89,7 @@ fn stop_unknown_worker_returns_error() {
     let dir = tempdir().unwrap();
     let ctx = super::super::test_ctx(dir.path());
 
-    let result = handle_worker_stop(&ctx, "nonexistent", "", None).unwrap();
+    let result = handle_worker_stop(&ctx, "nonexistent", "", None, false).unwrap();
 
     assert!(
         matches!(result, Response::Error { ref message } if message.contains("unknown worker")),
@@ -120,7 +120,7 @@ fn stop_suggests_similar_worker_from_state() {
         );
     }
 
-    let result = handle_worker_stop(&ctx, "processer", "", None).unwrap();
+    let result = handle_worker_stop(&ctx, "processer", "", None, false).unwrap();
 
     assert!(
         matches!(result, Response::Error { ref message } if message.contains("did you mean: processor?")),
@@ -151,7 +151,7 @@ fn stop_suggests_cross_namespace_worker() {
         );
     }
 
-    let result = handle_worker_stop(&ctx, "fix", "my-project", None).unwrap();
+    let result = handle_worker_stop(&ctx, "fix", "my-project", None, false).unwrap();
 
     assert!(
         matches!(result, Response::Error { ref message } if message.contains("--project other-project")),
@@ -485,4 +485,114 @@ job "build" {
             .any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
         "should NOT emit WorkerStarted for already-running worker"
     );
+}
+
+#[test]
+fn stop_all_stops_running_workers_in_namespace() {
+    let dir = tempdir().unwrap();
+    let (ctx, wal) = super::super::test_ctx_with_wal(dir.path());
+
+    // Insert two running workers and one stopped worker in namespace "proj"
+    {
+        let mut state = ctx.state.lock();
+        state.workers.insert(
+            "proj/alpha".to_string(),
+            oj_storage::WorkerRecord {
+                name: "alpha".to_string(),
+                project_root: PathBuf::from("/fake"),
+                runbook_hash: "hash".to_string(),
+                status: "running".to_string(),
+                active_job_ids: vec![],
+                queue_name: "q1".to_string(),
+                concurrency: 1,
+                namespace: "proj".to_string(),
+            },
+        );
+        state.workers.insert(
+            "proj/beta".to_string(),
+            oj_storage::WorkerRecord {
+                name: "beta".to_string(),
+                project_root: PathBuf::from("/fake"),
+                runbook_hash: "hash".to_string(),
+                status: "running".to_string(),
+                active_job_ids: vec![],
+                queue_name: "q2".to_string(),
+                concurrency: 1,
+                namespace: "proj".to_string(),
+            },
+        );
+        state.workers.insert(
+            "proj/gamma".to_string(),
+            oj_storage::WorkerRecord {
+                name: "gamma".to_string(),
+                project_root: PathBuf::from("/fake"),
+                runbook_hash: "hash".to_string(),
+                status: "stopped".to_string(),
+                active_job_ids: vec![],
+                queue_name: "q3".to_string(),
+                concurrency: 1,
+                namespace: "proj".to_string(),
+            },
+        );
+        // Worker in a different namespace — should not be stopped
+        state.workers.insert(
+            "other/delta".to_string(),
+            oj_storage::WorkerRecord {
+                name: "delta".to_string(),
+                project_root: PathBuf::from("/other"),
+                runbook_hash: "hash".to_string(),
+                status: "running".to_string(),
+                active_job_ids: vec![],
+                queue_name: "q4".to_string(),
+                concurrency: 1,
+                namespace: "other".to_string(),
+            },
+        );
+    }
+
+    let result = handle_worker_stop(&ctx, "", "proj", None, true).unwrap();
+
+    match result {
+        Response::WorkersStopped {
+            mut stopped,
+            skipped,
+        } => {
+            stopped.sort();
+            assert_eq!(stopped, vec!["alpha", "beta"]);
+            assert!(skipped.is_empty(), "expected no skipped, got {:?}", skipped);
+        }
+        other => panic!("expected WorkersStopped, got {:?}", other),
+    }
+
+    // Verify WorkerStopped events were emitted
+    let events = drain_events(&wal);
+    let stop_events: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            oj_core::Event::WorkerStopped { worker_name, .. } => Some(worker_name.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        stop_events.len(),
+        2,
+        "expected 2 stop events, got {:?}",
+        stop_events
+    );
+}
+
+#[test]
+fn stop_all_with_no_running_workers_returns_empty() {
+    let dir = tempdir().unwrap();
+    let ctx = super::super::test_ctx(dir.path());
+
+    let result = handle_worker_stop(&ctx, "", "proj", None, true).unwrap();
+
+    match result {
+        Response::WorkersStopped { stopped, skipped } => {
+            assert!(stopped.is_empty());
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected WorkersStopped, got {:?}", other),
+    }
 }

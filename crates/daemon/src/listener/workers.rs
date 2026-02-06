@@ -187,7 +187,12 @@ pub(super) fn handle_worker_stop(
     worker_name: &str,
     namespace: &str,
     project_root: Option<&Path>,
+    all: bool,
 ) -> Result<Response, ConnectionError> {
+    if all {
+        return handle_worker_stop_all(ctx, namespace);
+    }
+
     // Check if worker exists in state
     if let Err(resp) = super::require_scoped_resource(
         &ctx.state,
@@ -217,6 +222,38 @@ pub(super) fn handle_worker_stop(
     )?;
 
     Ok(Response::Ok)
+}
+
+/// Handle stopping all running workers in a namespace.
+fn handle_worker_stop_all(ctx: &ListenCtx, namespace: &str) -> Result<Response, ConnectionError> {
+    // Collect running workers in the namespace
+    let running_workers: Vec<String> = {
+        let state = ctx.state.lock();
+        state
+            .workers
+            .values()
+            .filter(|w| w.namespace == namespace && w.status == "running")
+            .map(|w| w.name.clone())
+            .collect()
+    };
+
+    let mut stopped = Vec::new();
+    let mut skipped = Vec::new();
+
+    for name in running_workers {
+        match emit(
+            &ctx.event_bus,
+            Event::WorkerStopped {
+                worker_name: name.clone(),
+                namespace: namespace.to_string(),
+            },
+        ) {
+            Ok(()) => stopped.push(name),
+            Err(e) => skipped.push((name, e.to_string())),
+        }
+    }
+
+    Ok(Response::WorkersStopped { stopped, skipped })
 }
 
 /// Handle a WorkerRestart request: stop (if running), reload runbook, start.

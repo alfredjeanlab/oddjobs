@@ -194,11 +194,15 @@ pub enum Request {
 
     /// Stop a running worker
     WorkerStop {
+        /// Worker name (empty string when `all` is true)
         worker_name: String,
         #[serde(default)]
         namespace: String,
         #[serde(default)]
         project_root: Option<PathBuf>,
+        /// Stop all running workers in the namespace
+        #[serde(default)]
+        all: bool,
     },
 
     /// Restart a worker (stop, reload runbook, start)
@@ -541,6 +545,14 @@ pub enum Response {
     WorkersStarted {
         /// Workers that were started
         started: Vec<String>,
+        /// Workers that were skipped with reasons
+        skipped: Vec<(String, String)>,
+    },
+
+    /// Multiple workers stopped (--all mode)
+    WorkersStopped {
+        /// Workers that were stopped
+        stopped: Vec<String>,
         /// Workers that were skipped with reasons
         skipped: Vec<(String, String)>,
     },

@@ -17,4 +17,4 @@ mod queue;
 
 pub use job::RunCommandResult;
 pub use queue::{QueuePushResult, QueueRetryResult};
-pub use worker::StartResult;
+pub use worker::{StartResult, StopResult};
