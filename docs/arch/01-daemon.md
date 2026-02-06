@@ -120,8 +120,12 @@ enum Request {
     AgentSend { agent_id, message }     // Send input to an agent
     AgentResume { agent_id, kill, all } // Resume dead agents
 
+    // Session operations
+    SessionPrune { all, dry_run, namespace }  // Prune orphaned sessions
+
     // Job operations
-    JobResume { id, message, vars }     // Resume escalated job
+    JobResume { id, message, vars, kill, all }  // Resume escalated job
+    JobResumeAll { kill }               // Resume all resumable jobs
     JobCancel { ids }                   // Cancel jobs by ID
     JobPrune { all, failed, orphans, dry_run, namespace }  // Prune terminal jobs
 
@@ -133,14 +137,15 @@ enum Request {
     AgentPrune { all, dry_run }         // Prune agent logs
 
     // Worker operations
-    WorkerStart { project_root, namespace, worker_name }
+    WorkerStart { project_root, namespace, worker_name, all }
     WorkerStop { worker_name, namespace, project_root }
     WorkerRestart { project_root, namespace, worker_name }
+    WorkerResize { worker_name, namespace, concurrency }
     WorkerWake { worker_name, namespace }
     WorkerPrune { all, dry_run, namespace }
 
     // Cron operations
-    CronStart { project_root, namespace, cron_name }
+    CronStart { project_root, namespace, cron_name, all }
     CronStop { cron_name, namespace, project_root }
     CronRestart { project_root, namespace, cron_name }
     CronOnce { project_root, namespace, cron_name }
@@ -149,7 +154,8 @@ enum Request {
     // Queue operations
     QueuePush { project_root, namespace, queue_name, data }
     QueueDrop { project_root, namespace, queue_name, item_id }
-    QueueRetry { project_root, namespace, queue_name, item_id }
+    QueueRetry { project_root, namespace, queue_name, item_ids, all_dead, status }
+    QueueRetryBulk { project_root, namespace, queue_name, item_ids, all_dead, status_filter }
     QueueDrain { project_root, namespace, queue_name }
     QueueFail { project_root, namespace, queue_name, item_id }
     QueueDone { project_root, namespace, queue_name, item_id }
@@ -230,10 +236,14 @@ enum Response {
     AgentsPruned { pruned, skipped }
     AgentResumed { resumed, skipped }
 
+    // Job resume responses
+    JobsResumed { resumed, skipped }
+
     // Session responses
     Sessions { sessions }
     Session { session }
     SessionPeek { output }
+    SessionsPruned { pruned, skipped }
 
     // Workspace responses
     Workspaces { workspaces }
@@ -244,12 +254,15 @@ enum Response {
     // Worker responses
     Workers { workers }
     WorkerStarted { worker_name }
+    WorkersStarted { started, skipped }
+    WorkerResized { worker_name, old_concurrency, new_concurrency }
     WorkerLogs { log_path, content }
     WorkersPruned { pruned, skipped }
 
     // Cron responses
     Crons { crons }
     CronStarted { cron_name }
+    CronsStarted { started, skipped }
     CronLogs { log_path, content }
     CronsPruned { pruned, skipped }
 
@@ -259,6 +272,7 @@ enum Response {
     QueuePushed { queue_name, item_id }
     QueueDropped { queue_name, item_id }
     QueueRetried { queue_name, item_id }
+    QueueItemsRetried { queue_name, item_ids, already_retried, not_found }
     QueueDrained { queue_name, items }
     QueueFailed { queue_name, item_id }
     QueueCompleted { queue_name, item_id }
@@ -358,10 +372,12 @@ in progress.
 
 ```
 1. Break event loop
-2. Remove socket file (stops new connections)
-3. Remove PID and version files
-4. Release lock file
-5. Exit (sessions left alive)
+2. Flush buffered WAL events to disk
+3. Save final snapshot (fast subsequent startup)
+4. Remove socket file (stops new connections)
+5. Remove PID and version files
+6. Release lock file
+7. Exit (sessions left alive)
 ```
 
 Use `oj daemon stop --kill` to terminate all sessions before stopping. This kills
@@ -376,9 +392,11 @@ On restart after crash (or normal restart with surviving sessions):
 ```
 1. Replay WAL to reconstruct state
 2. Reconcile:
-   - Check which tmux sessions are still alive
-   - Check which agent processes are running
-   - Identify in-progress jobs
+   - Prune orphaned sessions from terminal/missing jobs
+   - Resume running workers (re-emit WorkerStarted)
+   - Resume running crons (re-emit CronStarted)
+   - For standalone agent runs and jobs:
+     check tmux sessions and agent processes
 3. Reconnect watchers or trigger on_dead actions
 ```
 
@@ -514,9 +532,13 @@ flowchart LR
    - Spawn async tasks: listener, checkpoint, flush
    - No blocking—all work in separate tasks
 
-10. **Reconcile agents** (background)
+10. **Reconcile state** (background)
     - Spawned AFTER ready—doesn't block CLI
-    - For each non-terminal job, check agent state:
+    - **Sessions:** Prune orphaned sessions whose jobs are terminal or missing
+    - **Workers:** Re-emit `WorkerStarted` for each running worker (resumes queue polling)
+    - **Crons:** Re-emit `CronStarted` for each running cron (resumes scheduling)
+    - **Standalone agent runs:** Same 3-case check as jobs (below)
+    - **Jobs:** For each non-terminal job, check agent state:
 
     | Condition | Action |
     |-----------|--------|

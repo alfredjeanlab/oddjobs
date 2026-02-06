@@ -41,44 +41,48 @@ State mutations use typed `Event` variants emitted via `Effect::Emit`. These eve
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `job:created` | JobCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace | Insert job |
+| `job:created` | JobCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace, cron_name? | Insert job |
 | `job:advanced` | JobAdvanced | id, step | Finalize current step, advance job |
+| `job:cancelling` | JobCancelling | id | Set job.cancelling = true |
 | `job:deleted` | JobDeleted | id | Remove job |
 | `job:updated` | JobUpdated | id, vars | Merge new vars into job |
-| `step:started` | StepStarted | job_id, step, agent_id? | Mark step running, set agent_id |
-| `step:waiting` | StepWaiting | job_id, step, reason? | Mark step waiting for intervention |
+| `step:started` | StepStarted | job_id, step, agent_id?, agent_name? | Mark step running, set agent_id |
+| `step:waiting` | StepWaiting | job_id, step, reason?, decision_id? | Mark step waiting for intervention |
 | `step:completed` | StepCompleted | job_id, step | Mark step completed |
 | `step:failed` | StepFailed | job_id, step, error | Mark step failed with error |
 | `runbook:loaded` | RunbookLoaded | hash, version, runbook | Cache runbook by content hash (dedup) |
-| `session:created` | SessionCreated | id, job_id | Insert session, link to job |
+| `session:created` | SessionCreated | id, owner | Insert session, link to owner (job or agent_run) |
 | `session:deleted` | SessionDeleted | id | Remove session |
-| `workspace:created` | WorkspaceCreated | id, path, branch, owner, mode | Insert workspace (status=Creating), link to job |
+| `workspace:created` | WorkspaceCreated | id, path, branch, owner?, workspace_type? | Insert workspace (status=Creating) |
 | `workspace:ready` | WorkspaceReady | id | Set workspace status to Ready |
 | `workspace:failed` | WorkspaceFailed | id, reason | Set workspace status to Failed |
 | `workspace:deleted` | WorkspaceDeleted | id | Remove workspace |
 
-Agent signal and lifecycle events also update job status during replay:
+Agent signal and lifecycle events also update job/agent_run status during replay. All agent lifecycle events include an optional `owner` field (job or agent_run) for routing:
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `agent:working` | AgentWorking | agent_id | Set job step_status to Running |
-| `agent:waiting` | AgentWaiting | agent_id | No state change (agent idle but alive) |
-| `agent:exited` | AgentExited | agent_id, exit_code | Set job Completed (exit 0) or Failed |
-| `agent:failed` | AgentFailed | agent_id, error | Set job step_status to Failed |
-| `agent:gone` | AgentGone | agent_id | Set job Failed (session terminated) |
-| `agent:signal` | AgentSignal | agent_id, kind, message? | Set job agent_signal |
-| `shell:exited` | ShellExited | job_id, step, exit_code | Finalize step as Completed (0) or Failed |
+| `agent:working` | AgentWorking | agent_id, owner? | Set step_status to Running |
+| `agent:waiting` | AgentWaiting | agent_id, owner? | No state change (agent idle but alive) |
+| `agent:exited` | AgentExited | agent_id, exit_code, owner? | Set Completed (exit 0) or Failed |
+| `agent:failed` | AgentFailed | agent_id, error, owner? | Set step_status to Failed |
+| `agent:gone` | AgentGone | agent_id, owner? | Set Failed (session terminated) |
+| `agent:signal` | AgentSignal | agent_id, kind, message? | Set agent_signal |
+| `shell:exited` | ShellExited | job_id, step, exit_code, stdout?, stderr? | Finalize step as Completed (0) or Failed |
 
 ### Worker and queue lifecycle
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
 | `worker:started` | WorkerStarted | worker_name, project_root, runbook_hash, queue_name, concurrency, namespace | Insert or update worker record |
-| `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, job_id | Track dispatched item on worker |
-| `worker:stopped` | WorkerStopped | worker_name | Remove worker record |
+| `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, job_id, namespace | Track dispatched item on worker |
+| `worker:resized` | WorkerResized | worker_name, concurrency, namespace | Update worker concurrency |
+| `worker:stopped` | WorkerStopped | worker_name, namespace | Remove worker record |
+| `worker:deleted` | WorkerDeleted | worker_name, namespace | Remove worker record |
 | `queue:pushed` | QueuePushed | queue_name, item_id, data, pushed_at_epoch_ms, namespace | Insert queue item (status=Pending) |
 | `queue:taken` | QueueTaken | queue_name, item_id, worker_name, namespace | Set queue item status to Taken |
 | `queue:completed` | QueueCompleted | queue_name, item_id, namespace | Remove queue item |
+| `queue:dropped` | QueueDropped | queue_name, item_id, namespace | Remove queue item |
 | `queue:failed` | QueueFailed | queue_name, item_id, error, namespace | Set queue item status to Failed, increment failure_count |
 | `queue:item_retry` | QueueItemRetry | queue_name, item_id, namespace | Reset item to Pending, clear failure_count |
 | `queue:item_dead` | QueueItemDead | queue_name, item_id, namespace | Set queue item status to Dead (terminal) |
@@ -87,17 +91,17 @@ Agent signal and lifecycle events also update job status during replay:
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `cron:started` | CronStarted | cron_name, project_root, runbook_hash, interval, job_name, run_target, namespace | Insert or update cron record |
+| `cron:started` | CronStarted | cron_name, project_root, runbook_hash, interval, run_target, namespace | Insert or update cron record |
 | `cron:stopped` | CronStopped | cron_name, namespace | Set cron status to stopped |
-| `cron:fired` | CronFired | cron_name, namespace, job_id? | Update last_fired_at_ms |
+| `cron:fired` | CronFired | cron_name, namespace, job_id?, agent_run_id? | Update last_fired_at_ms |
 | `cron:deleted` | CronDeleted | cron_name, namespace | Remove cron record |
 
 ### Decision lifecycle
 
 | Type Tag | Variant | Fields | Effect |
 |---|---|---|---|
-| `decision:created` | DecisionCreated | id, job_id, agent_id?, source, context, options, created_at_ms, namespace | Insert decision, set job to Waiting |
-| `decision:resolved` | DecisionResolved | id, chosen?, message?, resolved_at_ms | Update decision resolution |
+| `decision:created` | DecisionCreated | id, job_id, agent_id?, owner?, source, context, options, created_at_ms, namespace | Insert decision, set job to Waiting |
+| `decision:resolved` | DecisionResolved | id, chosen?, message?, resolved_at_ms, namespace | Update decision resolution |
 
 ### Standalone agent runs
 
@@ -108,7 +112,7 @@ Agent signal and lifecycle events also update job status during replay:
 | `agent_run:status_changed` | AgentRunStatusChanged | id, status, reason? | Update status |
 | `agent_run:deleted` | AgentRunDeleted | id | Remove agent run |
 
-Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `JobResume`, `JobCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake` and `WorkerPollComplete` are also signals that do not mutate state.
+Action/signal events (`CommandRun`, `TimerStart`, `SessionInput`, `AgentInput`, `JobResume`, `JobCancel`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake`, `WorkerPollComplete`, `WorkerTakeComplete`, `CronOnce`, `AgentIdle`, `AgentStop`, and `AgentPrompt` are also signals that do not mutate state.
 
 ## Materialized State
 
@@ -125,6 +129,8 @@ pub struct MaterializedState {
     pub crons: HashMap<String, CronRecord>,
     pub decisions: HashMap<String, Decision>,
     pub agent_runs: HashMap<String, AgentRun>,
+    pub agents: HashMap<String, AgentRecord>,      // Unified agent index (agent_id → record)
+    pub project_roots: HashMap<String, PathBuf>,   // Namespace → project root mapping
 }
 ```
 
