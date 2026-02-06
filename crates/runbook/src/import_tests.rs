@@ -229,6 +229,7 @@ fn merge_with_alias_prefixes_names() {
 fn parse_import_oj_wok() {
     let content = r#"import "oj/wok" {
   const "prefix" { value = "oj" }
+  const "submit" { value = "echo done" }
 }
 "#;
     let (runbook, warnings) = parse_with_imports(content, Format::Hcl).unwrap();
@@ -289,6 +290,7 @@ fn parse_import_oj_wok_with_alias() {
     let content = r#"import "oj/wok" {
   alias = "wok"
   const "prefix" { value = "oj" }
+  const "submit" { value = "echo done" }
 }
 "#;
     let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
@@ -354,6 +356,7 @@ fn parse_import_with_custom_check() {
     let content = r#"import "oj/wok" {
   const "prefix" { value = "oj" }
   const "check" { value = "make check" }
+  const "submit" { value = "echo done" }
 }
 "#;
     let (runbook, _) = parse_with_imports(content, Format::Hcl).unwrap();
@@ -370,7 +373,7 @@ fn parse_import_missing_required_const() {
     let err = parse_with_imports(content, Format::Hcl).unwrap_err();
     let msg = err.to_string();
     assert!(
-        msg.contains("missing required const 'prefix'"),
+        msg.contains("missing required const"),
         "got: {msg}"
     );
 }

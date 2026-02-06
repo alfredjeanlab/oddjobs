@@ -57,9 +57,10 @@ job "chore" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        git push origin "${workspace.branch}"
+        branch="${workspace.branch}" title="${local.title}"
+        git push origin "$branch"
         wok done ${var.task.id}
-        oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
+        ${raw(const.submit)}
       elif wok show ${var.task.id} -o json | grep -q '"status":"done"'; then
         echo "Issue already resolved, no changes needed"
       else

@@ -2,7 +2,7 @@
 #
 # Creates an epic issue, then workers handle planning and implementation:
 # 1. Plan worker explores codebase and writes plan to issue notes
-# 2. Epic worker implements the plan and submits to merge queue (build:needed)
+# 2. Epic worker implements the plan and runs submit command (build:needed)
 #    -- or draft worker implements without merging (draft:needed)
 
 # Create a new wok epic with 'plan:needed' and 'build:needed' (or 'draft:needed').
@@ -57,7 +57,7 @@ command "plan" {
 }
 
 # Queue existing feature/epic for building, adding the 'build:needed' label.
-# Submits to merge queue on completion.
+# Runs submit command on completion.
 #
 # Examples:
 #   oj run build oj-abc123
@@ -184,9 +184,10 @@ job "epic" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        git push origin "${workspace.branch}"
+        branch="${workspace.branch}" title="${local.title}"
+        git push origin "$branch"
         wok done ${var.epic.id}
-        oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
+        ${raw(const.submit)}
       else
         echo "No changes" >&2
         exit 1
