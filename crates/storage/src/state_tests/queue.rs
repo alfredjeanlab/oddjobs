@@ -68,10 +68,7 @@ fn failed_marks_failed() {
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
     state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
 
-    assert_eq!(
-        state.queue_items["bugs"][0].status,
-        QueueItemStatus::Failed
-    );
+    assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
 }
 
 #[test]
