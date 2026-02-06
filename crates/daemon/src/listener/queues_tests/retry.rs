@@ -13,8 +13,8 @@ use crate::protocol::Response;
 
 use super::super::{handle_queue_retry, RetryFilter};
 use super::{
-    drain_events, make_ctx, project_with_queue_only, push_and_mark_dead, push_and_mark_failed,
-    test_event_bus,
+    drain_events, make_ctx, project_with_queue_only, project_without_queue, push_and_mark_dead,
+    push_and_mark_failed, test_event_bus,
 };
 
 // ── Single-item retry tests ───────────────────────────────────────────
@@ -520,4 +520,118 @@ fn retry_with_wrong_project_root_falls_back_to_namespace() {
         "expected QueueRetried from namespace fallback, got {:?}",
         result
     );
+}
+
+// ── No-runbook fallback tests ─────────────────────────────────────────
+
+#[test]
+fn retry_works_without_runbook_definition() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let ctx = make_ctx(event_bus, Arc::clone(&state));
+
+    // Pre-populate state with a dead item in a queue that has no runbook definition
+    let data_map = [("task".to_string(), "orphan".to_string())]
+        .into_iter()
+        .collect();
+    ctx.state.lock().apply_event(&Event::QueuePushed {
+        queue_name: "removed-queue".to_string(),
+        item_id: "dead-orphan-1".to_string(),
+        data: data_map,
+        pushed_at_epoch_ms: 1_000_000,
+        namespace: String::new(),
+    });
+    ctx.state.lock().apply_event(&Event::QueueItemDead {
+        queue_name: "removed-queue".to_string(),
+        item_id: "dead-orphan-1".to_string(),
+        namespace: String::new(),
+    });
+
+    let result = handle_queue_retry(
+        &ctx,
+        project.path(),
+        "",
+        "removed-queue",
+        RetryFilter {
+            item_ids: &["dead-orphan-1".to_string()],
+            all_dead: false,
+            status_filter: None,
+        },
+    )
+    .unwrap();
+
+    assert!(
+        matches!(
+            result,
+            Response::QueueRetried { ref queue_name, ref item_id }
+            if queue_name == "removed-queue" && item_id == "dead-orphan-1"
+        ),
+        "expected QueueRetried for queue without runbook, got {:?}",
+        result
+    );
+
+    let events = drain_events(&wal);
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, Event::QueueItemRetry { item_id, .. } if item_id == "dead-orphan-1")));
+}
+
+#[test]
+fn retry_all_dead_works_without_runbook_definition() {
+    let project = project_without_queue();
+    let wal_dir = tempdir().unwrap();
+    let (event_bus, wal, _) = test_event_bus(wal_dir.path());
+    let state = Arc::new(Mutex::new(MaterializedState::default()));
+    let ctx = make_ctx(event_bus, Arc::clone(&state));
+
+    for i in 1..=2 {
+        let data_map = [("task".to_string(), format!("d{}", i))]
+            .into_iter()
+            .collect();
+        ctx.state.lock().apply_event(&Event::QueuePushed {
+            queue_name: "removed-queue".to_string(),
+            item_id: format!("dead-{}", i),
+            data: data_map,
+            pushed_at_epoch_ms: 1_000_000,
+            namespace: String::new(),
+        });
+        ctx.state.lock().apply_event(&Event::QueueItemDead {
+            queue_name: "removed-queue".to_string(),
+            item_id: format!("dead-{}", i),
+            namespace: String::new(),
+        });
+    }
+
+    let result = handle_queue_retry(
+        &ctx,
+        project.path(),
+        "",
+        "removed-queue",
+        RetryFilter {
+            item_ids: &[],
+            all_dead: true,
+            status_filter: None,
+        },
+    )
+    .unwrap();
+
+    match result {
+        Response::QueueItemsRetried {
+            ref queue_name,
+            ref item_ids,
+            ..
+        } => {
+            assert_eq!(queue_name, "removed-queue");
+            assert_eq!(item_ids.len(), 2);
+        }
+        other => panic!(
+            "expected QueueItemsRetried for queue without runbook, got {:?}",
+            other
+        ),
+    }
+
+    let events = drain_events(&wal);
+    assert_eq!(events.len(), 2);
 }

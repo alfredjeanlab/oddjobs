@@ -3,7 +3,7 @@
 
 //! Queue request handlers.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -294,41 +294,21 @@ pub(super) fn handle_queue_drop(
     queue_name: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (runbook, _effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue drop",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue drop",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
 
-    // Validate queue exists
-    let queue_def = match runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-
-    // Validate queue is persisted
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     // Resolve item ID (exact or prefix match)
@@ -371,42 +351,21 @@ pub(super) fn handle_queue_retry(
         all_dead,
         status_filter,
     } = filter;
-    // Load runbook containing the queue.
-    let (runbook, effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue retry",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue retry",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
-    let project_root = &effective_root;
 
-    // Validate queue exists
-    let queue_def = match runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-
-    // Validate queue is persisted
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     // Determine which items to retry
@@ -489,8 +448,10 @@ pub(super) fn handle_queue_retry(
         };
         emit(&ctx.event_bus, event)?;
 
-        // Wake workers attached to this queue
-        wake_attached_workers(ctx, project_root, namespace, queue_name, &runbook)?;
+        // Wake workers attached to this queue (if runbook is available)
+        if let Some((ref runbook, ref effective_root)) = runbook_info {
+            wake_attached_workers(ctx, effective_root, namespace, queue_name, runbook)?;
+        }
 
         return Ok(Response::QueueRetried {
             queue_name: queue_name.to_string(),
@@ -543,9 +504,11 @@ pub(super) fn handle_queue_retry(
         }
     }
 
-    // Wake workers if any items were retried
+    // Wake workers if any items were retried (and runbook is available)
     if !retried.is_empty() {
-        wake_attached_workers(ctx, project_root, namespace, queue_name, &runbook)?;
+        if let Some((ref runbook, ref effective_root)) = runbook_info {
+            wake_attached_workers(ctx, effective_root, namespace, queue_name, runbook)?;
+        }
     }
 
     Ok(Response::QueueItemsRetried {
@@ -565,41 +528,21 @@ pub(super) fn handle_queue_drain(
     namespace: &str,
     queue_name: &str,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (runbook, _effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue drain",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue drain",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
 
-    // Validate queue exists
-    let queue_def = match runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-
-    // Validate queue is persisted
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     // Collect pending item IDs and build response summaries
@@ -650,39 +593,21 @@ pub(super) fn handle_queue_fail(
     queue_name: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (_runbook, _effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue fail",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue fail",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
 
-    // Validate queue exists and is persisted
-    let queue_def = match _runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     // Resolve item ID (exact or prefix match)
@@ -735,39 +660,21 @@ pub(super) fn handle_queue_done(
     queue_name: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (_runbook, _effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue done",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue done",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
 
-    // Validate queue exists and is persisted
-    let queue_def = match _runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     // Resolve item ID (exact or prefix match)
@@ -824,41 +731,21 @@ pub(super) fn handle_queue_prune(
     all: bool,
     dry_run: bool,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook containing the queue.
-    let (runbook, _effective_root) = match super::load_runbook_with_fallback(
+    // Load runbook (optional — queue may exist only in persisted state).
+    let runbook_info = match load_runbook_for_queue_or_state(
+        ctx,
         project_root,
         namespace,
-        &ctx.state,
-        |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                "oj queue prune",
-                &ctx.state,
-            )
-        },
+        queue_name,
+        "oj queue prune",
     ) {
-        Ok(result) => result,
+        Ok(info) => info,
         Err(resp) => return Ok(resp),
     };
 
-    // Validate queue exists
-    let queue_def = match runbook.get_queue(queue_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown queue: {}", queue_name),
-            })
-        }
-    };
-
-    // Validate queue is persisted
-    if queue_def.queue_type != QueueType::Persisted {
-        return Ok(Response::Error {
-            message: format!("queue '{}' is not a persisted queue", queue_name),
-        });
+    // Validate queue is persisted (if runbook is available)
+    if let Err(resp) = validate_persisted_queue(&runbook_info, queue_name) {
+        return Ok(resp);
     }
 
     let now_ms = SystemTime::now()
@@ -917,6 +804,74 @@ pub(super) fn handle_queue_prune(
 #[cfg(test)]
 #[path = "queues_tests/mod.rs"]
 mod tests;
+
+/// Try to load a runbook for a queue, falling back to persisted state.
+///
+/// Management operations (drop, retry, prune, drain, fail, done) should work on
+/// persisted queues even when the runbook definition has been removed or renamed.
+/// Returns `Ok(None)` when no runbook is found but the queue exists in state.
+fn load_runbook_for_queue_or_state(
+    ctx: &ListenCtx,
+    project_root: &Path,
+    namespace: &str,
+    queue_name: &str,
+    command_prefix: &str,
+) -> Result<Option<(oj_runbook::Runbook, PathBuf)>, Response> {
+    match super::load_runbook_with_fallback(
+        project_root,
+        namespace,
+        &ctx.state,
+        |root| load_runbook_for_queue(root, queue_name),
+        || {
+            suggest_for_queue(
+                project_root,
+                queue_name,
+                namespace,
+                command_prefix,
+                &ctx.state,
+            )
+        },
+    ) {
+        Ok(result) => Ok(Some(result)),
+        Err(error_resp) => {
+            // No runbook found — check if queue exists in persisted state
+            let key = scoped_name(namespace, queue_name);
+            let exists = ctx.state.lock().queue_items.contains_key(&key);
+            if exists {
+                Ok(None)
+            } else {
+                Err(error_resp)
+            }
+        }
+    }
+}
+
+/// Validate that a runbook's queue definition is persisted, if present.
+///
+/// When `runbook_info` is `Some`, checks that the queue exists in the runbook and
+/// is of type `Persisted`. When `None` (queue only in state), validation is skipped
+/// since presence in state implies a persisted queue.
+fn validate_persisted_queue(
+    runbook_info: &Option<(oj_runbook::Runbook, PathBuf)>,
+    queue_name: &str,
+) -> Result<(), Response> {
+    if let Some((ref runbook, _)) = runbook_info {
+        match runbook.get_queue(queue_name) {
+            Some(def) if def.queue_type != QueueType::Persisted => {
+                return Err(Response::Error {
+                    message: format!("queue '{}' is not a persisted queue", queue_name),
+                });
+            }
+            None => {
+                return Err(Response::Error {
+                    message: format!("unknown queue: {}", queue_name),
+                });
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
 
 /// Load a runbook that contains the given queue name.
 fn load_runbook_for_queue(
