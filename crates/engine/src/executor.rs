@@ -22,7 +22,7 @@ pub enum ExecuteError {
     #[error("session error: {0}")]
     Session(#[from] oj_adapters::session::SessionError),
     #[error("agent error: {0}")]
-    Agent(#[from] oj_adapters::AgentError),
+    Agent(#[from] oj_adapters::AgentAdapterError),
     #[error("storage error: {0}")]
     Storage(#[from] oj_storage::WalError),
     #[error("workspace not found: {0}")]

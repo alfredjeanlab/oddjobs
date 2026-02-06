@@ -5,7 +5,7 @@
 
 use super::log_entry::AgentLogMessage;
 use super::watcher::{parse_session_log, start_watcher, WatcherConfig};
-use super::{AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
+use super::{AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
 use crate::session::SessionAdapter;
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event};
@@ -129,7 +129,7 @@ async fn handle_bypass_permissions_prompt<S: SessionAdapter>(
     sessions: &S,
     session_id: &str,
     max_attempts: usize,
-) -> Result<BypassPromptResult, AgentError> {
+) -> Result<BypassPromptResult, AgentAdapterError> {
     // Poll for the prompt with a timeout
     // The prompt should appear within a second or two of spawn
     let check_interval = Duration::from_millis(200);
@@ -161,7 +161,7 @@ async fn handle_bypass_permissions_prompt<S: SessionAdapter>(
             sessions
                 .send(session_id, "2")
                 .await
-                .map_err(|e| AgentError::SendFailed(e.to_string()))?;
+                .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))?;
 
             return Ok(BypassPromptResult::Accepted);
         }
@@ -203,7 +203,7 @@ async fn handle_workspace_trust_prompt<S: SessionAdapter>(
     sessions: &S,
     session_id: &str,
     max_attempts: usize,
-) -> Result<WorkspaceTrustResult, AgentError> {
+) -> Result<WorkspaceTrustResult, AgentAdapterError> {
     // Poll for the prompt with a timeout
     // The prompt should appear within a second or two of spawn
     let check_interval = Duration::from_millis(200);
@@ -235,7 +235,7 @@ async fn handle_workspace_trust_prompt<S: SessionAdapter>(
             sessions
                 .send(session_id, "1")
                 .await
-                .map_err(|e| AgentError::SendFailed(e.to_string()))?;
+                .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))?;
 
             return Ok(WorkspaceTrustResult::Accepted);
         }
@@ -268,7 +268,7 @@ async fn handle_login_prompt<S: SessionAdapter>(
     sessions: &S,
     session_id: &str,
     max_attempts: usize,
-) -> Result<LoginPromptResult, AgentError> {
+) -> Result<LoginPromptResult, AgentAdapterError> {
     let check_interval = Duration::from_millis(200);
 
     for attempt in 0..max_attempts {
@@ -343,7 +343,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         &self,
         config: AgentSpawnConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         tracing::debug!(
             agent_id = %config.agent_id,
             workspace_path = %config.workspace_path.display(),
@@ -353,7 +353,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         // Precondition: cwd must exist if specified
         if let Some(ref cwd) = config.cwd {
             if !cwd.exists() {
-                return Err(AgentError::SpawnFailed(format!(
+                return Err(AgentAdapterError::SpawnFailed(format!(
                     "working directory does not exist: {}",
                     cwd.display()
                 )));
@@ -363,7 +363,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         // 1. Prepare workspace (directory and settings)
         prepare_workspace(&config.workspace_path, &config.project_root)
             .await
-            .map_err(|e| AgentError::WorkspaceError(e.to_string()))?;
+            .map_err(|e| AgentAdapterError::WorkspaceError(e.to_string()))?;
 
         // 2. Determine effective working directory
         let cwd = config
@@ -383,7 +383,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             .sessions
             .spawn(&session_name, &cwd, &command, &env)
             .await
-            .map_err(|e| AgentError::SessionError(e.to_string()))?;
+            .map_err(|e| AgentAdapterError::SessionError(e.to_string()))?;
 
         tracing::info!(
             agent_id = %config.agent_id,
@@ -458,7 +458,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             );
             // Kill the session since the agent can't proceed
             let _ = self.sessions.kill(&spawned_id).await;
-            return Err(AgentError::SpawnFailed(
+            return Err(AgentAdapterError::SpawnFailed(
                 "Claude Code is not authenticated. Run `claude` once manually to complete setup."
                     .to_string(),
             ));
@@ -506,7 +506,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         &self,
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
-    ) -> Result<AgentHandle, AgentError> {
+    ) -> Result<AgentHandle, AgentAdapterError> {
         tracing::debug!(
             agent_id = %config.agent_id,
             session_id = %config.session_id,
@@ -552,13 +552,13 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         ))
     }
 
-    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentError> {
+    async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
         let session_id = {
             let agents = self.agents.lock();
             agents
                 .get(agent_id)
                 .map(|info| info.session_id.clone())
-                .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))?
+                .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))?
         };
 
         let key_pause = Duration::from_millis(50);
@@ -567,14 +567,14 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         self.sessions
             .send(&session_id, "Escape")
             .await
-            .map_err(|e| AgentError::SendFailed(e.to_string()))?;
+            .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))?;
 
         tokio::time::sleep(key_pause).await;
 
         self.sessions
             .send(&session_id, "Escape")
             .await
-            .map_err(|e| AgentError::SendFailed(e.to_string()))?;
+            .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))?;
 
         tokio::time::sleep(key_pause).await;
 
@@ -582,7 +582,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         self.sessions
             .send_literal(&session_id, input)
             .await
-            .map_err(|e| AgentError::SendFailed(e.to_string()))?;
+            .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))?;
 
         // Wait for the TUI to process all characters before pressing Enter.
         // Scale the delay with input length: the TUI re-renders per keystroke,
@@ -594,15 +594,15 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         self.sessions
             .send_enter(&session_id)
             .await
-            .map_err(|e| AgentError::SendFailed(e.to_string()))
+            .map_err(|e| AgentAdapterError::SendFailed(e.to_string()))
     }
 
-    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentError> {
+    async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
         let (session_id, shutdown_tx) = {
             let mut agents = self.agents.lock();
             let info = agents
                 .remove(agent_id)
-                .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))?;
+                .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))?;
             (info.session_id, info.shutdown_tx)
         };
 
@@ -615,15 +615,15 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         self.sessions
             .kill(&session_id)
             .await
-            .map_err(|e| AgentError::KillFailed(e.to_string()))
+            .map_err(|e| AgentAdapterError::KillFailed(e.to_string()))
     }
 
-    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentError> {
+    async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
         let (session_id, workspace_path) = {
             let agents = self.agents.lock();
             let info = agents
                 .get(agent_id)
-                .ok_or_else(|| AgentError::NotFound(agent_id.to_string()))?;
+                .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))?;
             (info.session_id.clone(), info.workspace_path.clone())
         };
 

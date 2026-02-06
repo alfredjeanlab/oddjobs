@@ -89,7 +89,7 @@ async fn error_injection() {
     let adapter = FakeAgentAdapter::new();
     let (tx, _rx) = mpsc::channel(10);
 
-    adapter.set_spawn_error(AgentError::SpawnFailed("test error".to_string()));
+    adapter.set_spawn_error(AgentAdapterError::SpawnFailed("test error".to_string()));
 
     let config = AgentSpawnConfig {
         agent_id: AgentId::new("agent-1"),

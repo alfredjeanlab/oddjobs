@@ -32,7 +32,7 @@ Claude Code shows interactive prompts that require acknowledgement:
 | Bypass permissions prompt | `--dangerously-skip-permissions` in command | Sends "2" to accept |
 | Workspace trust prompt (spawn) | "Accessing workspace" + "1. Yes" / "2. No" text detected | Sends "1" to trust folder |
 | Workspace trust prompt (watcher) | "Do you trust the files in this folder?" text detected during log wait | Sends "y" to trust folder |
-| Login/onboarding prompt | Unauthenticated Claude Code detected | Kills session, returns `AgentError` |
+| Login/onboarding prompt | Unauthenticated Claude Code detected | Kills session, returns `AgentAdapterError` |
 
 The `ClaudeAgentAdapter` detects spawn-time prompts via `capture_output()` polling (configurable via `OJ_PROMPT_POLL_MS`, default 3000ms = 15 attempts at 200ms intervals) and automatically sends the appropriate response, allowing agents to start without manual intervention. The watcher handles trust prompts that appear later during session log initialization.
 

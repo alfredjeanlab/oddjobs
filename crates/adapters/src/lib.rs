@@ -18,7 +18,7 @@ pub mod subprocess;
 pub mod traced;
 
 pub use agent::{
-    extract_process_name, AgentAdapter, AgentError, AgentHandle, AgentReconnectConfig,
+    extract_process_name, AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig,
     AgentSpawnConfig, ClaudeAgentAdapter,
 };
 pub use notify::{DesktopNotifyAdapter, NoOpNotifyAdapter, NotifyAdapter};
