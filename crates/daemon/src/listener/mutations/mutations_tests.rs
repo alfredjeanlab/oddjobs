@@ -14,9 +14,10 @@ use oj_storage::{MaterializedState, Workspace, WorkspaceType};
 use crate::protocol::Response;
 
 use super::super::test_ctx;
+use super::workspaces::workspace_prune_inner;
 use super::{
     handle_agent_prune, handle_agent_send, handle_job_cancel, handle_job_prune, handle_job_resume,
-    handle_job_resume_all, handle_session_kill, workspace_prune_inner, PruneFlags,
+    handle_job_resume_all, handle_session_kill, PruneFlags,
 };
 
 fn make_job(id: &str, step: &str) -> Job {
@@ -617,7 +618,7 @@ fn cleanup_job_files_removes_log_and_breadcrumb() {
     std::fs::create_dir_all(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("session.log"), "session").unwrap();
 
-    super::cleanup_job_files(&logs_path, "pipe-cleanup");
+    super::prune_helpers::cleanup_job_files(&logs_path, "pipe-cleanup");
 
     assert!(!log_file.exists(), "job log should be removed");
     assert!(!crumb_file.exists(), "breadcrumb should be removed");
@@ -637,7 +638,7 @@ fn cleanup_agent_files_removes_log_and_dir() {
     let agent_dir = logs_path.join("agent").join("agent-42");
     std::fs::create_dir_all(&agent_dir).unwrap();
 
-    super::cleanup_agent_files(&logs_path, "agent-42");
+    super::prune_helpers::cleanup_agent_files(&logs_path, "agent-42");
 
     assert!(!agent_log.exists(), "agent log should be removed");
     assert!(!agent_dir.exists(), "agent dir should be removed");
