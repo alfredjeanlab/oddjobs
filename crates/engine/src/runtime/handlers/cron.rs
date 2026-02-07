@@ -4,107 +4,17 @@
 //! Cron event handling
 
 use super::super::Runtime;
+use super::cron_types::append_cron_log;
 use super::CreateJobParams;
 use crate::error::RuntimeError;
-use crate::log_paths::cron_log_path;
 use crate::runtime::agent_run::SpawnAgentParams;
-use crate::time_fmt::format_utc_now;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, JobId, ShortId, TimerId, UuidIdGen};
+use oj_core::{Clock, Effect, Event, IdGen, JobId, ShortId, TimerId, UuidIdGen};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 
-/// What a cron targets when it fires.
-#[derive(Debug, Clone)]
-pub(crate) enum CronRunTarget {
-    Job(String),
-    Agent(String),
-}
-
-impl CronRunTarget {
-    /// Parse a "job:name" or "agent:name" string.
-    pub(crate) fn from_run_target_str(s: &str) -> Self {
-        if let Some(name) = s.strip_prefix("agent:") {
-            CronRunTarget::Agent(name.to_string())
-        } else if let Some(name) = s.strip_prefix("job:") {
-            CronRunTarget::Job(name.to_string())
-        } else {
-            // Backward compat: bare name = job
-            CronRunTarget::Job(s.to_string())
-        }
-    }
-
-    /// Get the display name for logging.
-    pub(crate) fn display_name(&self) -> String {
-        match self {
-            CronRunTarget::Job(name) => format!("job={}", name),
-            CronRunTarget::Agent(name) => format!("agent={}", name),
-        }
-    }
-}
-
-/// In-memory state for a running cron
-pub(crate) struct CronState {
-    pub project_root: PathBuf,
-    pub runbook_hash: String,
-    pub interval: String,
-    pub run_target: CronRunTarget,
-    pub status: CronStatus,
-    pub namespace: String,
-    /// Maximum concurrent jobs this cron can have running. Default 1.
-    pub concurrency: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CronStatus {
-    Running,
-    Stopped,
-}
-
-/// Append a timestamped line to the cron log file.
-///
-/// Creates the `{logs_dir}/cron/` directory on first write.
-/// Errors are silently ignored — logging must not break the cron.
-fn append_cron_log(logs_dir: &Path, cron_name: &str, namespace: &str, message: &str) {
-    let scoped = scoped_name(namespace, cron_name);
-    let path = cron_log_path(logs_dir, &scoped);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        use std::io::Write;
-        let ts = format_utc_now();
-        let _ = writeln!(f, "[{}] {}", ts, message);
-    }
-}
-
-/// Parameters for handling a cron started event.
-pub(crate) struct CronStartedParams<'a> {
-    pub cron_name: &'a str,
-    pub project_root: &'a Path,
-    pub runbook_hash: &'a str,
-    pub interval: &'a str,
-    pub run_target: &'a str,
-    pub namespace: &'a str,
-}
-
-/// Parameters for handling a one-shot cron execution.
-pub(crate) struct CronOnceParams<'a> {
-    pub cron_name: &'a str,
-    pub job_id: &'a JobId,
-    pub job_name: &'a str,
-    pub job_kind: &'a str,
-    pub agent_run_id: &'a Option<String>,
-    pub agent_name: &'a Option<String>,
-    pub runbook_hash: &'a str,
-    pub run_target: &'a str,
-    pub namespace: &'a str,
-    pub project_root: &'a Path,
-}
+pub(crate) use super::cron_types::{
+    CronOnceParams, CronRunTarget, CronShellJobParams, CronStartedParams, CronState, CronStatus,
+};
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -220,14 +130,40 @@ where
         let runbook = self.cached_runbook(runbook_hash)?;
         let mut result_events = Vec::new();
 
-        // Determine target: prefer run_target, fall back to job fields
+        // Determine target type from run_target string
         let is_agent = if !run_target.is_empty() {
             run_target.starts_with("agent:")
         } else {
             agent_name.is_some()
         };
+        let is_shell = run_target.starts_with("shell:");
 
-        if is_agent {
+        if is_shell {
+            let cmd = run_target.strip_prefix("shell:").unwrap_or("");
+
+            // Idempotency guard
+            if self.get_job(job_id.as_str()).is_some() {
+                tracing::debug!(
+                    job_id = %job_id,
+                    "job already exists, skipping duplicate cron shell creation"
+                );
+                return Ok(vec![]);
+            }
+
+            let display = oj_runbook::job_display_name(cron_name, job_id.short(8), namespace);
+            result_events.extend(
+                self.create_cron_shell_job(CronShellJobParams {
+                    job_id: job_id.clone(),
+                    cron_name,
+                    job_display: &display,
+                    cmd,
+                    runbook_hash,
+                    namespace,
+                    cwd: project_root,
+                })
+                .await?,
+            );
+        } else if is_agent {
             let agent_name = agent_name
                 .as_deref()
                 .unwrap_or_else(|| run_target.strip_prefix("agent:").unwrap_or(""));
@@ -559,6 +495,60 @@ where
                         .await?,
                 );
             }
+            CronRunTarget::Shell(cmd) => {
+                // Check concurrency before spawning
+                let active = self.count_active_cron_jobs(cron_name, &namespace);
+                if active >= concurrency as usize {
+                    append_cron_log(
+                        self.logger.log_dir(),
+                        cron_name,
+                        &namespace,
+                        &format!(
+                            "skip: shell at max concurrency ({}/{})",
+                            active, concurrency
+                        ),
+                    );
+                    // Reschedule timer but don't spawn
+                    let duration = crate::monitor::parse_duration(&interval).map_err(|e| {
+                        RuntimeError::InvalidFormat(format!(
+                            "invalid cron interval '{}': {}",
+                            interval, e
+                        ))
+                    })?;
+                    let timer_id = TimerId::cron(cron_name, &namespace);
+                    self.executor
+                        .execute(Effect::SetTimer {
+                            id: timer_id,
+                            duration,
+                        })
+                        .await?;
+                    return Ok(result_events);
+                }
+
+                let job_id = JobId::new(UuidIdGen.next());
+                let display_name =
+                    oj_runbook::job_display_name(cron_name, job_id.short(8), &namespace);
+
+                result_events.extend(
+                    self.create_cron_shell_job(CronShellJobParams {
+                        job_id: job_id.clone(),
+                        cron_name,
+                        job_display: &display_name,
+                        cmd,
+                        runbook_hash: &runbook_hash,
+                        namespace: &namespace,
+                        cwd: &project_root,
+                    })
+                    .await?,
+                );
+
+                append_cron_log(
+                    self.logger.log_dir(),
+                    cron_name,
+                    &namespace,
+                    &format!("tick: triggered shell ({})", job_id.short(8)),
+                );
+            }
         }
 
         // Reschedule timer for next interval
@@ -572,6 +562,87 @@ where
                 duration,
             })
             .await?;
+
+        Ok(result_events)
+    }
+
+    /// Create an inline job with a single shell step for a cron target.
+    async fn create_cron_shell_job(
+        &self,
+        params: CronShellJobParams<'_>,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let CronShellJobParams {
+            job_id,
+            cron_name,
+            job_display,
+            cmd,
+            runbook_hash,
+            namespace,
+            cwd,
+        } = params;
+        let step_name = "run";
+        let execution_path = cwd.to_path_buf();
+
+        let creation_effects = vec![Effect::Emit {
+            event: Event::JobCreated {
+                id: job_id.clone(),
+                kind: cron_name.to_string(),
+                name: job_display.to_string(),
+                runbook_hash: runbook_hash.to_string(),
+                cwd: execution_path.clone(),
+                vars: HashMap::new(),
+                initial_step: step_name.to_string(),
+                created_at_epoch_ms: self.clock().epoch_ms(),
+                namespace: namespace.to_string(),
+                cron_name: Some(cron_name.to_string()),
+            },
+        }];
+        let mut result_events = self.executor.execute_all(creation_effects).await?;
+
+        let mut vars = HashMap::new();
+        vars.insert("job_id".to_string(), job_id.to_string());
+        vars.insert(
+            "workspace".to_string(),
+            execution_path.display().to_string(),
+        );
+        let interpolated = oj_runbook::interpolate_shell(cmd, &vars);
+
+        let shell_effects = vec![
+            Effect::Emit {
+                event: Event::StepStarted {
+                    job_id: job_id.clone(),
+                    step: step_name.to_string(),
+                    agent_id: None,
+                    agent_name: None,
+                },
+            },
+            Effect::Shell {
+                owner: Some(oj_core::OwnerId::Job(job_id.clone())),
+                step: step_name.to_string(),
+                command: interpolated,
+                cwd: execution_path,
+                env: if namespace.is_empty() {
+                    HashMap::new()
+                } else {
+                    HashMap::from([("OJ_NAMESPACE".to_string(), namespace.to_string())])
+                },
+            },
+        ];
+        result_events.extend(self.executor.execute_all(shell_effects).await?);
+
+        // Emit CronFired tracking event
+        result_events.extend(
+            self.executor
+                .execute_all(vec![Effect::Emit {
+                    event: Event::CronFired {
+                        cron_name: cron_name.to_string(),
+                        job_id,
+                        agent_run_id: None,
+                        namespace: namespace.to_string(),
+                    },
+                }])
+                .await?,
+        );
 
         Ok(result_events)
     }

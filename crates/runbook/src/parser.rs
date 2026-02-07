@@ -626,10 +626,8 @@ pub(crate) fn validate_cross_refs(runbook: &Runbook) -> Result<(), ParseError> {
                 }
             }
             RunDirective::Shell(_) => {
-                return Err(ParseError::InvalidFormat {
-                    location: format!("cron.{}.run", name),
-                    message: "cron run must reference a job or agent".to_string(),
-                });
+                // Shell commands are allowed — they create an inline job at
+                // execution time, just like command blocks do.
             }
         }
     }

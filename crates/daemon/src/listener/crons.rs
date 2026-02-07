@@ -66,7 +66,7 @@ pub(super) fn handle_cron_start(
         }
     };
 
-    // Validate run is a job or agent reference
+    // Validate run target references
     let run_target = match &cron_def.run {
         oj_runbook::RunDirective::Job { job } => {
             if runbook.get_job(job).is_none() {
@@ -84,10 +84,8 @@ pub(super) fn handle_cron_start(
             }
             format!("agent:{}", agent)
         }
-        _ => {
-            return Ok(Response::Error {
-                message: format!("cron '{}' run must reference a job or agent", cron_name),
-            })
+        oj_runbook::RunDirective::Shell(cmd) => {
+            format!("shell:{}", cmd)
         }
     };
 
@@ -225,7 +223,7 @@ pub(super) async fn handle_cron_once(
         }
     };
 
-    // Validate run is a job or agent reference and build event
+    // Validate run target references and build event
     let (job_kind, run_target) = match &cron_def.run {
         oj_runbook::RunDirective::Job { job } => {
             if runbook.get_job(job).is_none() {
@@ -243,11 +241,7 @@ pub(super) async fn handle_cron_once(
             }
             (String::new(), format!("agent:{}", agent))
         }
-        _ => {
-            return Ok(Response::Error {
-                message: format!("cron '{}' run must reference a job or agent", cron_name),
-            })
-        }
+        oj_runbook::RunDirective::Shell(cmd) => (cron_name.to_string(), format!("shell:{}", cmd)),
     };
 
     // Hash runbook and emit RunbookLoaded for WAL persistence

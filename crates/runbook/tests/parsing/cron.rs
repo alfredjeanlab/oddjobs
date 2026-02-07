@@ -55,11 +55,17 @@ cron "janitor" {
 }
 
 #[test]
-fn error_cron_non_job_run() {
-    super::assert_hcl_err(
-        "cron \"janitor\" {\n  interval = \"30m\"\n  run = \"echo cleanup\"\n}",
-        &["cron run must reference a job or agent"],
-    );
+fn hcl_cron_shell_run() {
+    let hcl = r#"
+cron "janitor" {
+  interval = "30m"
+  run      = "echo cleanup"
+}
+"#;
+    let cron = &super::parse_hcl(hcl).crons["janitor"];
+    assert_eq!(cron.name, "janitor");
+    assert_eq!(cron.interval, "30m");
+    assert!(cron.run.is_shell());
 }
 
 #[test]
