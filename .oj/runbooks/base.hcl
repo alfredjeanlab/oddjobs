@@ -3,13 +3,13 @@
 import "oj/claude" { alias = "claude" }
 
 import "oj/git" {
-  alias = "git"
+  # alias = "git"
 
   const "check" { value = "make check" }
 }
 
 import "oj/wok" {
-  alias = "wok"
+  # alias = "wok"
 
   const "prefix" { value = "oj" }
   const "check"  { value = "make check" }
