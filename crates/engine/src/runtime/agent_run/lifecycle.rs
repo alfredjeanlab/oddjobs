@@ -60,7 +60,9 @@ where
                     }
                 });
 
-                if agent_run.status == AgentRunStatus::Escalated {
+                if agent_run.status == AgentRunStatus::Escalated
+                    || agent_run.status == AgentRunStatus::Waiting
+                {
                     // Don't auto-resume within 60s of nudge
                     if let Some(nudge_at) = agent_run.last_nudge_at {
                         let now = self.clock().epoch_ms();
@@ -78,13 +80,36 @@ where
                         "standalone agent active, auto-resuming from escalation"
                     );
 
-                    let effects = vec![Effect::Emit {
+                    let mut effects = vec![Effect::Emit {
                         event: Event::AgentRunStatusChanged {
                             id: agent_run_id.clone(),
                             status: AgentRunStatus::Running,
                             reason: Some("agent active".to_string()),
                         },
                     }];
+
+                    // Auto-dismiss pending decision for this agent run
+                    let owner = oj_core::OwnerId::AgentRun(agent_run_id.clone());
+                    let pending_decision_id = self.lock_state(|state| {
+                        state
+                            .decisions
+                            .values()
+                            .find(|d| d.owner == owner && !d.is_resolved())
+                            .map(|d| (d.id.as_str().to_string(), d.namespace.clone()))
+                    });
+                    if let Some((decision_id, namespace)) = pending_decision_id {
+                        let resolved_at_ms = self.clock().epoch_ms();
+                        effects.push(Effect::Emit {
+                            event: Event::DecisionResolved {
+                                id: decision_id,
+                                chosen: None,
+                                choices: vec![],
+                                message: Some("auto-dismissed: agent became active".to_string()),
+                                resolved_at_ms,
+                                namespace,
+                            },
+                        });
+                    }
 
                     // Reset action attempts — agent demonstrated progress
                     self.lock_state_mut(|state| {

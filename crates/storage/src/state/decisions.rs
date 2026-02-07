@@ -26,6 +26,16 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
         } => {
             // Idempotency: skip if already exists
             if !state.decisions.contains_key(id) {
+                // Don't create if a more-specific decision already exists for this owner.
+                // Prevents a generic `permission_prompt` (Approval) from overriding
+                // a more-specific AskUserQuestion (Question) or ExitPlanMode (Plan).
+                let dominated = state.decisions.values().any(|d| {
+                    d.owner == *owner && !d.is_resolved() && !source.should_supersede(&d.source)
+                });
+                if dominated {
+                    return;
+                }
+
                 // Auto-dismiss previous unresolved decisions for the same owner
                 let new_decision_id = DecisionId::new(id.clone());
                 for existing in state.decisions.values_mut() {

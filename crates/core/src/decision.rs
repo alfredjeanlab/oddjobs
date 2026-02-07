@@ -92,6 +92,23 @@ impl DecisionOption {
     }
 }
 
+impl DecisionSource {
+    /// Whether a new decision with this source should supersede an existing one.
+    ///
+    /// Prevents less-specific prompt types from overriding more-specific ones.
+    /// For example, a `permission_prompt` notification (Approval) should not
+    /// supersede an AskUserQuestion decision (Question) that was created by
+    /// the more-specific PreToolUse hook.
+    pub fn should_supersede(&self, existing: &DecisionSource) -> bool {
+        match (self, existing) {
+            // Approval (generic permission prompt) cannot supersede Question or Plan
+            (DecisionSource::Approval, DecisionSource::Question) => false,
+            (DecisionSource::Approval, DecisionSource::Plan) => false,
+            _ => true,
+        }
+    }
+}
+
 impl Decision {
     pub fn is_resolved(&self) -> bool {
         self.resolved_at_ms.is_some()

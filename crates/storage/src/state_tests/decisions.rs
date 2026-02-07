@@ -302,6 +302,107 @@ fn new_decision_does_not_affect_already_resolved() {
     assert!(dec1.superseded_by.is_none());
 }
 
+// ── Dominated decisions (less-specific cannot override more-specific) ─────────
+
+#[test]
+fn approval_cannot_supersede_question_decision() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    // Create a Question decision first
+    state.apply_event(&Event::DecisionCreated {
+        id: "dec-question".to_string(),
+        job_id: JobId::new("pipe-1"),
+        agent_id: Some("agent-1".to_string()),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+        source: oj_core::DecisionSource::Question,
+        context: "Which framework?".to_string(),
+        options: vec![
+            oj_core::DecisionOption::new("React"),
+            oj_core::DecisionOption::new("Vue"),
+        ],
+        question_data: None,
+        created_at_ms: 2_000_000,
+        namespace: "testns".to_string(),
+    });
+    assert!(!state.decisions["dec-question"].is_resolved());
+
+    // Try to create an Approval decision for the same owner
+    state.apply_event(&Event::DecisionCreated {
+        id: "dec-approval".to_string(),
+        job_id: JobId::new("pipe-1"),
+        agent_id: Some("agent-1".to_string()),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+        source: oj_core::DecisionSource::Approval,
+        context: "Permission prompt".to_string(),
+        options: vec![
+            oj_core::DecisionOption::new("Approve"),
+            oj_core::DecisionOption::new("Deny"),
+        ],
+        question_data: None,
+        created_at_ms: 3_000_000,
+        namespace: "testns".to_string(),
+    });
+
+    // Approval decision should NOT be created (dominated by Question)
+    assert!(!state.decisions.contains_key("dec-approval"));
+
+    // Question decision should remain unresolved and NOT superseded
+    let dec = &state.decisions["dec-question"];
+    assert!(!dec.is_resolved());
+    assert!(dec.superseded_by.is_none());
+}
+
+#[test]
+fn question_can_supersede_approval_decision() {
+    let mut state = MaterializedState::default();
+    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+
+    // Create an Approval decision first
+    state.apply_event(&Event::DecisionCreated {
+        id: "dec-approval".to_string(),
+        job_id: JobId::new("pipe-1"),
+        agent_id: Some("agent-1".to_string()),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+        source: oj_core::DecisionSource::Approval,
+        context: "Permission prompt".to_string(),
+        options: vec![
+            oj_core::DecisionOption::new("Approve"),
+            oj_core::DecisionOption::new("Deny"),
+        ],
+        question_data: None,
+        created_at_ms: 2_000_000,
+        namespace: "testns".to_string(),
+    });
+    assert!(!state.decisions["dec-approval"].is_resolved());
+
+    // Create a Question decision for the same owner
+    state.apply_event(&Event::DecisionCreated {
+        id: "dec-question".to_string(),
+        job_id: JobId::new("pipe-1"),
+        agent_id: Some("agent-1".to_string()),
+        owner: OwnerId::Job(JobId::new("pipe-1")),
+        source: oj_core::DecisionSource::Question,
+        context: "Which framework?".to_string(),
+        options: vec![oj_core::DecisionOption::new("React")],
+        question_data: None,
+        created_at_ms: 3_000_000,
+        namespace: "testns".to_string(),
+    });
+
+    // Question decision should be created, superseding the Approval
+    assert!(state.decisions.contains_key("dec-question"));
+    assert!(!state.decisions["dec-question"].is_resolved());
+
+    // Approval decision should be superseded
+    let dec_approval = &state.decisions["dec-approval"];
+    assert!(dec_approval.is_resolved());
+    assert_eq!(
+        dec_approval.superseded_by.as_ref().unwrap().as_str(),
+        "dec-question"
+    );
+}
+
 #[test]
 fn superseded_decision_cannot_be_resolved() {
     let mut state = MaterializedState::default();

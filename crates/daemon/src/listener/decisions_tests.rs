@@ -71,13 +71,14 @@ fn make_question_options() -> Vec<DecisionOption> {
         DecisionOption::new("Option A").description("First option"),
         DecisionOption::new("Option B").description("Second option"),
         DecisionOption::new("Cancel").description("Cancel the job"),
+        DecisionOption::new("Dismiss").description("Dismiss this notification"),
     ]
 }
 
 #[test]
-fn question_cancel_is_last_option() {
+fn question_cancel_is_second_to_last_option() {
     let options = make_question_options();
-    // Cancel is option 3 (last)
+    // Cancel is option 3 (second-to-last, before Dismiss)
     let c = DecisionResolveCtx {
         chosen: Some(3),
         options: &options,
@@ -89,6 +90,19 @@ fn question_cancel_is_last_option() {
         Event::JobCancel { .. } => {}
         other => panic!("expected JobCancel, got {:?}", other),
     }
+}
+
+#[test]
+fn question_dismiss_is_last_option() {
+    let options = make_question_options();
+    // Dismiss is option 4 (last)
+    let c = DecisionResolveCtx {
+        chosen: Some(4),
+        options: &options,
+        ..ctx(&DecisionSource::Question, "dec-q1")
+    };
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert!(result.is_empty(), "Dismiss should produce no action events");
 }
 
 #[test]
@@ -342,9 +356,9 @@ fn agent_run_question_sends_option_number() {
 #[test]
 fn agent_run_question_cancel_marks_failed() {
     let ar_id = AgentRunId::new("ar-qcancel");
-    let options = make_question_options(); // 3 options, Cancel is last
+    let options = make_question_options(); // 4 options, Cancel is second-to-last
     let c = DecisionResolveCtx {
-        chosen: Some(3), // Cancel (last option)
+        chosen: Some(3), // Cancel (second-to-last option)
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-qcancel")
     };
@@ -358,6 +372,19 @@ fn agent_run_question_cancel_marks_failed() {
         }
         other => panic!("expected AgentRunStatusChanged(Failed), got {:?}", other),
     }
+}
+
+#[test]
+fn agent_run_question_dismiss_returns_empty() {
+    let ar_id = AgentRunId::new("ar-qdismiss");
+    let options = make_question_options(); // 4 options, Dismiss is last
+    let c = DecisionResolveCtx {
+        chosen: Some(4), // Dismiss (last option)
+        options: &options,
+        ..ctx(&DecisionSource::Question, "dec-qdismiss")
+    };
+    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-qdismiss"));
+    assert!(events.is_empty());
 }
 
 #[test]
@@ -514,11 +541,15 @@ fn resolve_approval_choices() {
         resolve_decision_action(&DecisionSource::Approval, Some(3), opts),
         ResolvedAction::Cancel
     );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Approval, Some(4), opts),
+        ResolvedAction::Dismiss
+    );
 }
 
 #[test]
-fn resolve_question_cancel_is_last_option() {
-    let options = make_question_options(); // 3 options
+fn resolve_question_cancel_is_second_to_last() {
+    let options = make_question_options(); // 4 options: A, B, Cancel, Dismiss
     assert_eq!(
         resolve_decision_action(&DecisionSource::Question, Some(3), &options),
         ResolvedAction::Cancel
@@ -526,8 +557,17 @@ fn resolve_question_cancel_is_last_option() {
 }
 
 #[test]
+fn resolve_question_dismiss_is_last() {
+    let options = make_question_options(); // 4 options: A, B, Cancel, Dismiss
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(4), &options),
+        ResolvedAction::Dismiss
+    );
+}
+
+#[test]
 fn resolve_question_non_cancel_is_answer() {
-    let options = make_question_options(); // 3 options
+    let options = make_question_options(); // 4 options: A, B, Cancel, Dismiss
     assert_eq!(
         resolve_decision_action(&DecisionSource::Question, Some(1), &options),
         ResolvedAction::Answer
@@ -540,13 +580,14 @@ fn resolve_question_non_cancel_is_answer() {
 
 #[test]
 fn resolve_question_option_3_is_not_cancel_when_more_options() {
-    // 4 user options + Cancel = 5 total; option 3 should be Answer, not Cancel
+    // 4 user options + Cancel + Dismiss = 6 total; option 3 should be Answer
     let options = vec![
         DecisionOption::new("A"),
         DecisionOption::new("B"),
         DecisionOption::new("C"),
         DecisionOption::new("D"),
         DecisionOption::new("Cancel"),
+        DecisionOption::new("Dismiss"),
     ];
     assert_eq!(
         resolve_decision_action(&DecisionSource::Question, Some(3), &options),
@@ -555,6 +596,10 @@ fn resolve_question_option_3_is_not_cancel_when_more_options() {
     assert_eq!(
         resolve_decision_action(&DecisionSource::Question, Some(5), &options),
         ResolvedAction::Cancel,
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Question, Some(6), &options),
+        ResolvedAction::Dismiss,
     );
 }
 
@@ -672,57 +717,18 @@ fn build_multi_question_resume_message_without_data() {
 
 // ===================== Tests for Plan decision resolution =====================
 
-#[test]
-fn resolve_plan_accept_clear_context() {
-    let opts = &[];
+#[yare::parameterized(
+    accept_clear_context = { Some(1), ResolvedAction::Approve },
+    accept_auto_edits    = { Some(2), ResolvedAction::Approve },
+    accept_manual_edits  = { Some(3), ResolvedAction::Approve },
+    revise               = { Some(4), ResolvedAction::Freeform },
+    cancel               = { Some(5), ResolvedAction::Cancel },
+    freeform_no_choice   = { None,    ResolvedAction::Freeform },
+)]
+fn resolve_plan_choices(choice: Option<usize>, expected: ResolvedAction) {
     assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, Some(1), opts),
-        ResolvedAction::Approve
-    );
-}
-
-#[test]
-fn resolve_plan_accept_auto_edits() {
-    let opts = &[];
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, Some(2), opts),
-        ResolvedAction::Approve
-    );
-}
-
-#[test]
-fn resolve_plan_accept_manual_edits() {
-    let opts = &[];
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, Some(3), opts),
-        ResolvedAction::Approve
-    );
-}
-
-#[test]
-fn resolve_plan_revise() {
-    let opts = &[];
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, Some(4), opts),
-        ResolvedAction::Freeform
-    );
-}
-
-#[test]
-fn resolve_plan_cancel() {
-    let opts = &[];
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, Some(5), opts),
-        ResolvedAction::Cancel
-    );
-}
-
-#[test]
-fn resolve_plan_freeform_no_choice() {
-    let opts = &[];
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, None, opts),
-        ResolvedAction::Freeform
+        resolve_decision_action(&DecisionSource::Plan, choice, &[]),
+        expected
     );
 }
 

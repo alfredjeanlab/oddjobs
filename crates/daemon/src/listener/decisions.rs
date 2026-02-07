@@ -204,8 +204,8 @@ enum ResolvedAction {
 /// - Idle: 1=Nudge, 2=Done, 3=Cancel, 4=Dismiss
 /// - Error/Dead: 1=Retry, 2=Skip, 3=Cancel, 4=Dismiss
 /// - Gate: 1=Retry, 2=Skip, 3=Cancel
-/// - Approval: 1=Approve, 2=Deny, 3=Cancel
-/// - Question: 1..N=user options, N+1=Cancel (dynamic position)
+/// - Approval: 1=Approve, 2=Deny, 3=Cancel, 4=Dismiss
+/// - Question: 1..N=user options, N+1=Cancel, N+2=Dismiss (dynamic positions)
 /// - Plan: 1=Accept(clear), 2=Accept(auto), 3=Accept(manual), 4=Revise, 5=Cancel
 fn resolve_decision_action(
     source: &DecisionSource,
@@ -217,9 +217,11 @@ fn resolve_decision_action(
         None => return ResolvedAction::Freeform,
     };
 
-    // For Question decisions, Cancel is the last option (dynamic position).
+    // For Question decisions: Cancel is second-to-last, Dismiss is last (dynamic positions).
     if matches!(source, DecisionSource::Question) {
         return if choice == options.len() {
+            ResolvedAction::Dismiss
+        } else if choice == options.len() - 1 {
             ResolvedAction::Cancel
         } else {
             ResolvedAction::Answer
@@ -251,6 +253,7 @@ fn resolve_decision_action(
             1 => ResolvedAction::Approve,
             2 => ResolvedAction::Deny,
             3 => ResolvedAction::Cancel,
+            4 => ResolvedAction::Dismiss,
             _ => ResolvedAction::Dismiss,
         },
         DecisionSource::Plan => match choice {

@@ -300,10 +300,15 @@ fn question_decision_shows_options() {
         "decision should show 'Option B' option, got:\n{}",
         show_output
     );
-    // Cancel should always be appended as last option
+    // Cancel and Dismiss should always be appended after user options
     assert!(
         show_output.contains("Cancel"),
         "decision should show 'Cancel' option, got:\n{}",
+        show_output
+    );
+    assert!(
+        show_output.contains("Dismiss"),
+        "decision should show 'Dismiss' option, got:\n{}",
         show_output
     );
 }
@@ -347,7 +352,7 @@ fn resolve_question_with_cancel_cancels_job() {
     let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
-    // With 2 user options + Cancel, Cancel is option 3
+    // With 2 user options + Cancel + Dismiss, Cancel is option 3
     temp.oj()
         .args(&["decision", "resolve", &decision_id, "3"])
         .passes();
