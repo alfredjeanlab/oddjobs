@@ -357,7 +357,7 @@ where
             MonitorState::Prompting {
                 ref prompt_type,
                 ref question_data,
-                ..
+                ref assistant_context,
             } => {
                 tracing::info!(
                     agent_run_id = %agent_run.id,
@@ -369,7 +369,26 @@ where
                     oj_core::PromptType::PlanApproval => "prompt:plan",
                     _ => "prompt",
                 };
-                (&agent_def.on_prompt, trigger_str, question_data.clone())
+                // Prompt actions fire once per occurrence — no attempt tracking.
+                // The handle_agent_prompt_hook guard already prevents re-firing
+                // while a decision is pending.
+                return self
+                    .execute_standalone_action_effects(
+                        agent_run,
+                        agent_def,
+                        monitor::build_action_effects_for_agent_run(
+                            &ActionContext {
+                                agent_def,
+                                action_config: &agent_def.on_prompt,
+                                trigger: trigger_str,
+                                chain_pos: 0,
+                                question_data: question_data.as_ref(),
+                                assistant_context: assistant_context.as_deref(),
+                            },
+                            agent_run,
+                        )?,
+                    )
+                    .await;
             }
             MonitorState::Failed {
                 ref message,
@@ -458,7 +477,7 @@ where
             );
             let escalate_config =
                 oj_runbook::ActionConfig::simple(oj_runbook::AgentAction::Escalate);
-            let exhausted_trigger = format!("{}_exhausted", ctx.trigger);
+            let exhausted_trigger = format!("{}:exhausted", ctx.trigger);
             return self
                 .execute_standalone_action_effects(
                     agent_run,

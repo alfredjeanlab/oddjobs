@@ -831,7 +831,7 @@ fn escalate_idle_exhausted_trigger_emits_idle_source() {
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
-    let result = build_action_effects(&test_ctx(&agent, &config, "idle_exhausted"), &job).unwrap();
+    let result = build_action_effects(&test_ctx(&agent, &config, "idle:exhausted"), &job).unwrap();
     if let ActionEffects::Escalate { effects } = result {
         let source = effects.iter().find_map(|e| match e {
             oj_core::Effect::Emit {
@@ -851,7 +851,7 @@ fn escalate_error_exhausted_trigger_emits_error_source() {
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
-    let result = build_action_effects(&test_ctx(&agent, &config, "error_exhausted"), &job).unwrap();
+    let result = build_action_effects(&test_ctx(&agent, &config, "error:exhausted"), &job).unwrap();
     if let ActionEffects::Escalate { effects } = result {
         let source = effects.iter().find_map(|e| match e {
             oj_core::Effect::Emit {

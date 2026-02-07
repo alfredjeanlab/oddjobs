@@ -242,19 +242,13 @@ pub fn build_action_effects(
                     prompt_type: "permission".to_string(),
                     assistant_context: ac,
                 },
-                t if t.ends_with("_exhausted") => {
-                    // Handle "idle_exhausted", "error_exhausted",
-                    // "prompt:question_exhausted" etc.
-                    let base = t.trim_end_matches("_exhausted");
+                t if t.ends_with(":exhausted") => {
+                    // Handle "idle:exhausted", "error:exhausted" etc.
+                    // (Prompt triggers bypass attempt tracking so never
+                    // generate *:exhausted variants.)
+                    let base = t.trim_end_matches(":exhausted");
                     match base {
                         "idle" => EscalationTrigger::Idle {
-                            assistant_context: ac,
-                        },
-                        "prompt:question" => EscalationTrigger::Question {
-                            question_data: ctx.question_data.cloned(),
-                            assistant_context: ac,
-                        },
-                        "prompt:plan" => EscalationTrigger::Plan {
                             assistant_context: ac,
                         },
                         "error" => EscalationTrigger::Error {
@@ -412,17 +406,13 @@ pub fn build_action_effects_for_agent_run(
                     prompt_type: "permission".to_string(),
                     assistant_context: ac,
                 },
-                t if t.ends_with("_exhausted") => {
-                    let base = t.trim_end_matches("_exhausted");
+                t if t.ends_with(":exhausted") => {
+                    // Handle "idle:exhausted", "error:exhausted" etc.
+                    // (Prompt triggers bypass attempt tracking so never
+                    // generate *:exhausted variants.)
+                    let base = t.trim_end_matches(":exhausted");
                     match base {
                         "idle" => EscalationTrigger::Idle {
-                            assistant_context: ac,
-                        },
-                        "prompt:question" => EscalationTrigger::Question {
-                            question_data: ctx.question_data.cloned(),
-                            assistant_context: ac,
-                        },
-                        "prompt:plan" => EscalationTrigger::Plan {
                             assistant_context: ac,
                         },
                         "error" => EscalationTrigger::Error {

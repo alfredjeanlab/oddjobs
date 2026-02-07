@@ -287,6 +287,78 @@ async fn standalone_prompt_noop_when_agent_escalated() {
     );
 }
 
+#[tokio::test]
+async fn prompt_fires_without_exhaustion_after_resolution() {
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
+
+    // First prompt -> escalate -> creates decision, step Waiting
+    ctx.runtime
+        .handle_event(Event::AgentPrompt {
+            agent_id: agent_id.clone(),
+            prompt_type: oj_core::PromptType::PlanApproval,
+            question_data: None,
+            assistant_context: None,
+        })
+        .await
+        .unwrap();
+
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(
+        job.step_status.is_waiting(),
+        "step should be waiting after first prompt"
+    );
+    let decisions_after_first = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(decisions_after_first, 1);
+
+    // Simulate decision resolution + job resume: set step back to Running
+    ctx.runtime.lock_state_mut(|state| {
+        if let Some(j) = state.jobs.get_mut(&job_id) {
+            j.step_status = StepStatus::Running;
+        }
+    });
+
+    // Second prompt -> should create a new decision (not exhaust)
+    let result = ctx
+        .runtime
+        .handle_event(Event::AgentPrompt {
+            agent_id: agent_id.clone(),
+            prompt_type: oj_core::PromptType::PlanApproval,
+            question_data: None,
+            assistant_context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(!result.is_empty(), "second prompt should produce events");
+
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(
+        job.step_status.is_waiting(),
+        "step should be waiting after second prompt"
+    );
+    let decisions_after_second = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(
+        decisions_after_second, 2,
+        "should have 2 decisions (one per prompt occurrence)"
+    );
+}
+
 // =============================================================================
 // Stale agent event filtering
 // =============================================================================
