@@ -89,33 +89,56 @@ pub struct Runbook {
 impl Runbook {
     /// Get a command definition by name
     pub fn get_command(&self, name: &str) -> Option<&CommandDef> {
-        self.commands.get(name)
+        get_by_name_or_suffix(&self.commands, name)
     }
 
     /// Get a job definition by name
     pub fn get_job(&self, name: &str) -> Option<&JobDef> {
-        self.jobs.get(name)
+        get_by_name_or_suffix(&self.jobs, name)
     }
 
     /// Get an agent definition by name
     pub fn get_agent(&self, name: &str) -> Option<&AgentDef> {
-        self.agents.get(name)
+        get_by_name_or_suffix(&self.agents, name)
     }
 
     /// Get a queue definition by name
     pub fn get_queue(&self, name: &str) -> Option<&QueueDef> {
-        self.queues.get(name)
+        get_by_name_or_suffix(&self.queues, name)
     }
 
     /// Get a worker definition by name
     pub fn get_worker(&self, name: &str) -> Option<&WorkerDef> {
-        self.workers.get(name)
+        get_by_name_or_suffix(&self.workers, name)
     }
 
     /// Get a cron definition by name
     pub fn get_cron(&self, name: &str) -> Option<&CronDef> {
-        self.crons.get(name)
+        get_by_name_or_suffix(&self.crons, name)
     }
+}
+
+/// Look up a value by exact name, falling back to alias-suffix matching.
+///
+/// When imports use aliases (e.g., `import "lib" { alias = "x" }`), entity keys
+/// are prefixed as `x:name`. This helper allows lookup by the unaliased name,
+/// returning the value if exactly one key matches the suffix `:name`.
+/// Returns `None` if zero or multiple keys match (ambiguous).
+fn get_by_name_or_suffix<'a, V>(map: &'a HashMap<String, V>, name: &str) -> Option<&'a V> {
+    if let Some(v) = map.get(name) {
+        return Some(v);
+    }
+    let suffix = format!(":{}", name);
+    let mut found = None;
+    for (key, val) in map {
+        if key.ends_with(&suffix) {
+            if found.is_some() {
+                return None; // ambiguous — multiple aliases match
+            }
+            found = Some(val);
+        }
+    }
+    found
 }
 
 /// Format a shell parse error as a diagnostic with source snippet.
