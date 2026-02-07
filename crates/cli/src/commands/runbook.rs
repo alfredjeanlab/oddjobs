@@ -183,7 +183,11 @@ fn imported_command_names(
     names
 }
 
-fn handle_search(query: Option<&str>, library_dirs: &[PathBuf], format: OutputFormat) -> Result<()> {
+fn handle_search(
+    query: Option<&str>,
+    library_dirs: &[PathBuf],
+    format: OutputFormat,
+) -> Result<()> {
     let libraries = oj_runbook::available_libraries(library_dirs);
 
     let filtered: Vec<_> = match query {
@@ -569,13 +573,17 @@ fn handle_add(
         for entry in std::fs::read_dir(&source)?.flatten() {
             let path = entry.path();
             if path.extension().is_some_and(|e| e == "hcl") {
-                let filename = path.file_name().unwrap();
+                let Some(filename) = path.file_name() else {
+                    continue;
+                };
                 std::fs::copy(&path, target_dir.join(filename))?;
                 copied += 1;
             }
         }
     } else if source.extension().is_some_and(|e| e == "hcl") {
-        let filename = source.file_name().unwrap();
+        let Some(filename) = source.file_name() else {
+            bail!("invalid source path: {}", source.display());
+        };
         std::fs::copy(&source, target_dir.join(filename))?;
         copied = 1;
     } else {
@@ -597,22 +605,19 @@ fn handle_add(
         if path.extension().is_some_and(|e| e == "hcl") {
             let content = std::fs::read_to_string(&path)?;
             let stripped = oj_runbook::strip_const_directives(&content).unwrap_or(content.clone());
-            if let Err(e) = oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)
+            if let Err(e) =
+                oj_runbook::parse_runbook_with_format(&stripped, oj_runbook::Format::Hcl)
             {
                 eprintln!(
                     "warning: {} has parse errors: {}",
-                    path.file_name().unwrap().to_string_lossy(),
+                    path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default(),
                     e
                 );
             }
         }
     }
 
-    let scope = if project_level {
-        "project"
-    } else {
-        "user"
-    };
+    let scope = if project_level { "project" } else { "user" };
     println!(
         "Installed library '{}' ({} file{}) to {} ({})",
         lib_name,

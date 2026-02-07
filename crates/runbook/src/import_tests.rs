@@ -617,15 +617,14 @@ fn available_libraries_includes_external() {
     let dir = tempfile::tempdir().unwrap();
     let lib_dir = dir.path().join("mylib");
     std::fs::create_dir(&lib_dir).unwrap();
-    std::fs::write(
-        lib_dir.join("main.hcl"),
-        "# My external library\n",
-    )
-    .unwrap();
+    std::fs::write(lib_dir.join("main.hcl"), "# My external library\n").unwrap();
 
     let libs = available_libraries(&[dir.path().to_path_buf()]);
     let sources: Vec<&str> = libs.iter().map(|l| l.source.as_str()).collect();
-    assert!(sources.contains(&"mylib"), "missing external library 'mylib'");
+    assert!(
+        sources.contains(&"mylib"),
+        "missing external library 'mylib'"
+    );
     // Built-ins should still be present
     assert!(sources.contains(&"oj/wok"), "missing built-in oj/wok");
 }

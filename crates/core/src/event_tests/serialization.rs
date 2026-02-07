@@ -6,6 +6,7 @@
 //! `from_agent_state`, `as_agent_state`).
 
 use super::*;
+use crate::AgentState;
 
 #[test]
 fn event_serialization_roundtrip() {

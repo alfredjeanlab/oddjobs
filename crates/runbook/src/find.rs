@@ -27,8 +27,7 @@ fn parse_file_content(
     library_dirs: &[PathBuf],
 ) -> Result<Runbook, crate::ParseError> {
     if format == Format::Hcl {
-        let (runbook, warnings) =
-            crate::import::parse_with_imports(content, format, library_dirs)?;
+        let (runbook, warnings) = crate::import::parse_with_imports(content, format, library_dirs)?;
         for w in &warnings {
             tracing::warn!("{}", w);
         }

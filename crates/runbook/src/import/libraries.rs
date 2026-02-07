@@ -57,10 +57,7 @@ pub fn available_libraries(library_dirs: &[PathBuf]) -> Vec<LibraryInfo> {
     // External libraries from library_dirs
     for dir in library_dirs {
         if let Ok(entries) = std::fs::read_dir(dir) {
-            let mut subdirs: Vec<_> = entries
-                .flatten()
-                .filter(|e| e.path().is_dir())
-                .collect();
+            let mut subdirs: Vec<_> = entries.flatten().filter(|e| e.path().is_dir()).collect();
             subdirs.sort_by_key(|e| e.file_name());
             for entry in subdirs {
                 let source = entry.file_name().to_string_lossy().to_string();
@@ -117,10 +114,7 @@ pub fn available_libraries(library_dirs: &[PathBuf]) -> Vec<LibraryInfo> {
 ///
 /// Checks `library_dirs` in order for a `<dir>/<source>/` subdirectory,
 /// then falls back to built-in libraries.
-pub fn resolve_library(
-    source: &str,
-    library_dirs: &[PathBuf],
-) -> Result<LibraryFiles, ParseError> {
+pub fn resolve_library(source: &str, library_dirs: &[PathBuf]) -> Result<LibraryFiles, ParseError> {
     // Check external library dirs
     for dir in library_dirs {
         let lib_dir = dir.join(source);
