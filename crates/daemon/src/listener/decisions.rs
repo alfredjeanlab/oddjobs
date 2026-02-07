@@ -157,11 +157,9 @@ pub(super) fn handle_decision_resolve(
                 .as_deref()
                 .or(decision_session_id.as_deref()),
         ),
-        OwnerId::Job(_) => {
-            map_decision_to_job_action(&resolve_ctx, &job_id, job_step.as_deref())
-                .into_iter()
-                .collect()
-        }
+        OwnerId::Job(_) => map_decision_to_job_action(&resolve_ctx, &job_id, job_step.as_deref())
+            .into_iter()
+            .collect(),
     };
 
     for action in action_events {
