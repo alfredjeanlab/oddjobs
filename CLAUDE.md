@@ -70,8 +70,23 @@ oddjobs/
   ```
 - Integration tests in `tests/` directory
 - Use `FakeClock`, `FakeAdapters` for deterministic tests
+- Use `yare::parameterized` for parameterized tests when ≥3 cases share the same assertion logic
 - Property tests for state machine transitions
 - Coverage reports via `scripts/coverage` (uses llvm-cov)
+
+### Struct Construction Patterns
+
+**`FooCtx` — context structs**: Group related dependencies into a context struct
+when a function or subsystem needs 3+ collaborators passed together. Name it
+`FooCtx` (e.g., `SpawnCtx`, `ListenCtx`, `ReconcileCtx`). Context structs are
+plain data — they hold references or owned values, not behavior.
+
+**Builders**: Introduce a `FooBuilder` when struct construction sites grow past
+~12–15 usages or the struct has many optional fields. The builder owns the same
+fields as the target struct, provides chainable setters, and a `.build()` that
+returns the target. Required parameters go in `Foo::builder(required, ...)`;
+optional ones are set via setters with sensible defaults. Gate test-only
+builders with `#[cfg(any(test, feature = "test-support"))]`.
 
 ### API Surface Policy
 - Proactively avoid unnecessary exports or re-exports
