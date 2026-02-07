@@ -67,6 +67,72 @@ fn valid_on_idle_actions() {
     }
 }
 
+// ============================================================================
+// Ask Action Validation
+// ============================================================================
+
+#[test]
+fn on_idle_ask_with_message_accepted() {
+    let toml = r#"
+[agent.test]
+run = "claude"
+on_idle = { action = "ask", message = "What should I work on next?" }
+"#;
+    assert!(parse_runbook(toml).is_ok());
+}
+
+#[test]
+fn on_idle_simple_ask_rejected_no_message() {
+    super::assert_toml_err(
+        "[agent.test]\nrun = \"claude\"\non_idle = \"ask\"",
+        &["ask", "message"],
+    );
+}
+
+#[test]
+fn on_idle_ask_object_without_message_rejected() {
+    super::assert_toml_err(
+        "[agent.test]\nrun = \"claude\"\non_idle = { action = \"ask\" }",
+        &["ask", "message"],
+    );
+}
+
+#[test]
+fn on_dead_rejects_ask() {
+    // ask can't be parsed as a simple AgentAction for on_dead since it's not valid
+    // for the OnDead trigger (serde will parse it, but trigger validation rejects it)
+    super::assert_toml_err(
+        "[agent.test]\nrun = \"claude\"\non_dead = { action = \"ask\", message = \"test\" }",
+        &["ask", "on_dead"],
+    );
+}
+
+#[test]
+fn on_stop_ask_with_message_accepted() {
+    let toml = r#"
+[agent.test]
+run = "claude"
+on_stop = { action = "ask", message = "What should I do next?" }
+"#;
+    assert!(parse_runbook(toml).is_ok());
+}
+
+#[test]
+fn on_stop_simple_ask_rejected_no_message() {
+    super::assert_toml_err(
+        "[agent.test]\nrun = \"claude\"\non_stop = \"ask\"",
+        &["ask", "message"],
+    );
+}
+
+#[test]
+fn on_stop_ask_object_without_message_rejected() {
+    super::assert_toml_err(
+        "[agent.test]\nrun = \"claude\"\non_stop = { action = \"ask\" }",
+        &["ask", "message"],
+    );
+}
+
 #[test]
 fn valid_on_dead_actions() {
     for action in ["done", "resume", "escalate", "fail", "gate"] {

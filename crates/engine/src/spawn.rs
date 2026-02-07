@@ -193,25 +193,28 @@ pub fn build_spawn_effects(
     })?;
 
     // Write on_stop config: resolve from agent def or context-dependent default
-    let on_stop_action = agent_def
-        .on_stop
-        .as_ref()
-        .map(|c| c.action())
-        .cloned()
-        .unwrap_or(if ctx.is_standalone() {
-            StopAction::Escalate
-        } else {
-            StopAction::Signal
-        });
+    let on_stop_config = agent_def.on_stop.as_ref();
+    let on_stop_action =
+        on_stop_config
+            .map(|c| c.action())
+            .cloned()
+            .unwrap_or(if ctx.is_standalone() {
+                StopAction::Escalate
+            } else {
+                StopAction::Signal
+            });
     let on_stop_str = match on_stop_action {
         StopAction::Signal => "signal",
         StopAction::Idle => "idle",
         StopAction::Escalate => "escalate",
+        StopAction::Ask => "ask",
     };
-    crate::workspace::write_agent_config(&agent_id, on_stop_str, state_dir).map_err(|e| {
-        tracing::error!(error = %e, "agent config write failed");
-        RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-    })?;
+    let on_stop_message = on_stop_config.and_then(|c| c.message());
+    crate::workspace::write_agent_config(&agent_id, on_stop_str, on_stop_message, state_dir)
+        .map_err(|e| {
+            tracing::error!(error = %e, "agent config write failed");
+            RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
+        })?;
 
     // Build base command and append session-id, settings, and prompt (if not inline)
     // Trim trailing whitespace (including newlines from heredocs) so appended args stay on same line

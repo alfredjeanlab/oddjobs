@@ -351,3 +351,70 @@ fn on_stop_invalid_object_value_rejected() {
         "on_stop = {{ action = 'done' }} should be rejected as invalid"
     );
 }
+
+// =============================================================================
+// on_stop = "ask" Tests
+// =============================================================================
+
+#[test]
+fn on_stop_simple_ask_parses() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+        on_stop = "ask"
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    let config = agent.on_stop.unwrap();
+    assert_eq!(config.action(), &StopAction::Ask);
+    assert!(config.message().is_none());
+}
+
+#[test]
+fn on_stop_ask_with_message() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+        on_stop = { action = "ask", message = "What should I do next?" }
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    let config = agent.on_stop.unwrap();
+    assert_eq!(config.action(), &StopAction::Ask);
+    assert_eq!(config.message(), Some("What should I do next?"));
+}
+
+#[test]
+fn on_stop_ask_object_without_message() {
+    let toml = r#"
+        name = "worker"
+        run = "claude"
+        on_stop = { action = "ask" }
+    "#;
+    let agent: AgentDef = toml::from_str(toml).unwrap();
+    let config = agent.on_stop.unwrap();
+    assert_eq!(config.action(), &StopAction::Ask);
+    assert!(config.message().is_none());
+}
+
+// =============================================================================
+// on_idle = "ask" Trigger Validation Tests
+// =============================================================================
+
+#[test]
+fn ask_is_valid_for_on_idle() {
+    assert!(AgentAction::Ask.is_valid_for_trigger(ActionTrigger::OnIdle));
+}
+
+#[test]
+fn ask_is_invalid_for_on_dead() {
+    assert!(!AgentAction::Ask.is_valid_for_trigger(ActionTrigger::OnDead));
+}
+
+#[test]
+fn ask_is_invalid_for_on_error() {
+    assert!(!AgentAction::Ask.is_valid_for_trigger(ActionTrigger::OnError));
+}
+
+#[test]
+fn ask_is_invalid_for_on_prompt() {
+    assert!(!AgentAction::Ask.is_valid_for_trigger(ActionTrigger::OnPrompt));
+}

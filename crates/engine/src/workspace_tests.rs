@@ -449,6 +449,38 @@ fn prepare_agent_settings_empty_prime_paths_no_session_start() {
 }
 
 #[test]
+fn write_agent_config_without_message() {
+    let state_dir = TempDir::new().unwrap();
+    write_agent_config("test-agent-1", "signal", None, state_dir.path()).unwrap();
+
+    let config_path = state_dir.path().join("agents/test-agent-1/config.json");
+    let content = fs::read_to_string(&config_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    assert_eq!(parsed["on_stop"], "signal");
+    assert!(parsed.get("message").is_none());
+}
+
+#[test]
+fn write_agent_config_with_message() {
+    let state_dir = TempDir::new().unwrap();
+    write_agent_config(
+        "test-agent-2",
+        "ask",
+        Some("What should I do next?"),
+        state_dir.path(),
+    )
+    .unwrap();
+
+    let config_path = state_dir.path().join("agents/test-agent-2/config.json");
+    let content = fs::read_to_string(&config_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    assert_eq!(parsed["on_stop"], "ask");
+    assert_eq!(parsed["message"], "What should I do next?");
+}
+
+#[test]
 fn prepare_agent_prime_backward_compat_single_script() {
     let state_dir = TempDir::new().unwrap();
 

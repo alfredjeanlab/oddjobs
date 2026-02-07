@@ -382,6 +382,7 @@ pub enum AgentAction {
     #[default]
     Escalate, // Notify human
     Gate,   // Run a shell command; advance if it passes, escalate if it fails
+    Ask,    // Nudge agent to use AskUserQuestion with a specific topic
 }
 
 impl AgentAction {
@@ -394,6 +395,7 @@ impl AgentAction {
             AgentAction::Resume => "resume",
             AgentAction::Escalate => "escalate",
             AgentAction::Gate => "gate",
+            AgentAction::Ask => "ask",
         }
     }
 
@@ -408,6 +410,7 @@ impl AgentAction {
                     | AgentAction::Escalate
                     | AgentAction::Fail
                     | AgentAction::Gate
+                    | AgentAction::Ask
             ),
             // on_dead: agent exited, can't nudge a dead process
             ActionTrigger::OnDead => matches!(
@@ -437,17 +440,17 @@ impl AgentAction {
             (AgentAction::Resume, ActionTrigger::OnIdle) => {
                 "resume is for re-spawning after exit; agent is still running"
             }
-            (AgentAction::Nudge, ActionTrigger::OnDead) => {
-                "nudge sends a message to a running agent; agent has exited"
+            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnDead) => {
+                "ask/nudge sends a message to a running agent; agent has exited"
             }
-            (AgentAction::Nudge, ActionTrigger::OnError) => {
-                "nudge sends a message to a running agent; use escalate instead"
+            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnError) => {
+                "ask/nudge sends a message to a running agent; use escalate instead"
             }
             (AgentAction::Done, ActionTrigger::OnError) => {
                 "done marks success; API errors are not success states"
             }
-            (AgentAction::Nudge, ActionTrigger::OnPrompt) => {
-                "nudge sends a message; agent is at a prompt, not idle"
+            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnPrompt) => {
+                "ask/nudge sends a message; agent is at a prompt, not idle"
             }
             (AgentAction::Resume, ActionTrigger::OnPrompt) => {
                 "resume is for re-spawning after exit; agent is still running"
@@ -545,6 +548,8 @@ pub enum StopAction {
     Idle,
     /// Block exit and escalate to human (standalone default)
     Escalate,
+    /// Block exit and ask agent to use AskUserQuestion with a specific topic
+    Ask,
 }
 
 /// Configuration for the on_stop lifecycle handler
@@ -552,14 +557,25 @@ pub enum StopAction {
 #[serde(untagged)]
 pub enum StopActionConfig {
     Simple(StopAction),
-    WithOptions { action: StopAction },
+    WithOptions {
+        action: StopAction,
+        #[serde(default)]
+        message: Option<String>,
+    },
 }
 
 impl StopActionConfig {
     pub fn action(&self) -> &StopAction {
         match self {
             StopActionConfig::Simple(a) => a,
-            StopActionConfig::WithOptions { action } => action,
+            StopActionConfig::WithOptions { action, .. } => action,
+        }
+    }
+
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            StopActionConfig::Simple(_) => None,
+            StopActionConfig::WithOptions { message, .. } => message.as_deref(),
         }
     }
 }

@@ -182,6 +182,16 @@ pub(super) async fn handle_stop(agent_id: &str, client: &DaemonClient) -> Result
             let _ = client.emit_event(event).await;
             block_exit("A human has been notified. Wait for instructions.");
         }
+        "ask" => {
+            // Read topic from config, then block with AskUserQuestion instruction
+            let topic = read_config_message(agent_id)
+                .unwrap_or_else(|| "What should I do next?".to_string());
+            block_exit(&format!(
+                "Use the AskUserQuestion tool to ask the user: '{}'\n\n\
+                 Do not proceed without asking this question first.",
+                topic
+            ));
+        }
         _ => {
             // "signal" (default) — current behavior
             block_exit(&format!(
@@ -203,6 +213,15 @@ fn read_on_stop_config(agent_id: &str) -> String {
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("on_stop")?.as_str().map(String::from))
         .unwrap_or_else(|| "signal".to_string())
+}
+
+fn read_config_message(agent_id: &str) -> Option<String> {
+    let state_dir = get_state_dir();
+    let config_path = state_dir.join("agents").join(agent_id).join("config.json");
+    std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("message")?.as_str().map(String::from))
 }
 
 /// Extract the last assistant text message from a Claude JSONL session log.

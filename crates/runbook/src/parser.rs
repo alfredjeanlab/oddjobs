@@ -454,6 +454,28 @@ fn parse_runbook_inner(
                 });
             }
         }
+
+        // Validate 'ask' action requires 'message' field
+        if matches!(agent.on_idle.action(), crate::AgentAction::Ask)
+            && agent.on_idle.message().is_none()
+        {
+            return Err(ParseError::InvalidFormat {
+                location: format!("agent.{}.on_idle", agent_name),
+                message: "ask action requires a 'message' field with the question topic"
+                    .to_string(),
+            });
+        }
+        if let Some(ref stop_config) = agent.on_stop {
+            if matches!(stop_config.action(), crate::StopAction::Ask)
+                && stop_config.message().is_none()
+            {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("agent.{}.on_stop", agent_name),
+                    message: "ask action requires a 'message' field with the question topic"
+                        .to_string(),
+                });
+            }
+        }
     }
 
     // 8. Detect duplicate step names within jobs

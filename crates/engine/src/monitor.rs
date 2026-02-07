@@ -295,6 +295,26 @@ pub fn build_action_effects(
             Ok(ActionEffects::Escalate { effects })
         }
 
+        AgentAction::Ask => {
+            let session_id = job
+                .session_id
+                .as_ref()
+                .ok_or_else(|| RuntimeError::JobNotFound("no session".into()))?;
+
+            let topic = message.unwrap_or("What should I do next?");
+            let nudge_message = format!(
+                "Use the AskUserQuestion tool to ask the user: '{}'\n\n\
+                 Do not proceed without asking this question first.",
+                topic
+            );
+            Ok(ActionEffects::Nudge {
+                effects: vec![Effect::SendToSession {
+                    session_id: SessionId::new(session_id),
+                    input: format!("{}\n", nudge_message),
+                }],
+            })
+        }
+
         AgentAction::Gate => {
             let command = ctx
                 .action_config
@@ -467,6 +487,26 @@ pub fn build_action_effects_for_agent_run(
             Ok(ActionEffects::EscalateAgentRun { effects })
         }
 
+        AgentAction::Ask => {
+            let session_id = agent_run
+                .session_id
+                .as_ref()
+                .ok_or_else(|| RuntimeError::InvalidRequest("no session for ask".into()))?;
+
+            let topic = message.unwrap_or("What should I do next?");
+            let nudge_message = format!(
+                "Use the AskUserQuestion tool to ask the user: '{}'\n\n\
+                 Do not proceed without asking this question first.",
+                topic
+            );
+            Ok(ActionEffects::Nudge {
+                effects: vec![Effect::SendToSession {
+                    session_id: SessionId::new(session_id),
+                    input: format!("{}\n", nudge_message),
+                }],
+            })
+        }
+
         AgentAction::Gate => {
             let command = ctx
                 .action_config
@@ -558,5 +598,5 @@ pub enum ActionEffects {
 }
 
 #[cfg(test)]
-#[path = "monitor_tests.rs"]
+#[path = "monitor_tests/mod.rs"]
 mod tests;

@@ -74,9 +74,19 @@ pub fn prepare_agent_prime(
 /// Write agent runtime config (on_stop action) to the agent state directory.
 ///
 /// The CLI stop hook reads this file to determine behavior.
-pub fn write_agent_config(agent_id: &str, on_stop: &str, state_dir: &Path) -> io::Result<()> {
+/// When `message` is `Some`, it is included in the config for the stop hook to use.
+pub fn write_agent_config(
+    agent_id: &str,
+    on_stop: &str,
+    message: Option<&str>,
+    state_dir: &Path,
+) -> io::Result<()> {
     let agent_dir = agent_state_dir(agent_id, state_dir)?;
-    let config = serde_json::json!({ "on_stop": on_stop });
+    let config = if let Some(msg) = message {
+        serde_json::json!({ "on_stop": on_stop, "message": msg })
+    } else {
+        serde_json::json!({ "on_stop": on_stop })
+    };
     fs::write(
         agent_dir.join("config.json"),
         serde_json::to_string(&config).unwrap_or_default(),
