@@ -613,8 +613,8 @@ fn multi_question_agent_run_sends_concatenated_digits() {
     match &events[0] {
         Event::SessionInput { id, input } => {
             assert_eq!(id.as_str(), "session-multi");
-            // Concatenated digits: "12" (handler appends \n)
-            assert_eq!(input, "12");
+            // Concatenated digits: "12\n"
+            assert_eq!(input, "12\n");
         }
         other => panic!("expected SessionInput, got {:?}", other),
     }
@@ -658,4 +658,273 @@ fn build_multi_question_resume_message_without_data() {
     let msg = build_multi_question_resume_message(&[1, 2], None, "dec-1");
     assert!(msg.contains("dec-1"));
     assert!(msg.contains("1, 2"));
+}
+
+// ===================== Tests for Plan decision resolution =====================
+
+#[test]
+fn resolve_plan_accept_clear_context() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, Some(1), opts),
+        ResolvedAction::Approve
+    );
+}
+
+#[test]
+fn resolve_plan_accept_auto_edits() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, Some(2), opts),
+        ResolvedAction::Approve
+    );
+}
+
+#[test]
+fn resolve_plan_accept_manual_edits() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, Some(3), opts),
+        ResolvedAction::Approve
+    );
+}
+
+#[test]
+fn resolve_plan_revise() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, Some(4), opts),
+        ResolvedAction::Freeform
+    );
+}
+
+#[test]
+fn resolve_plan_cancel() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, Some(5), opts),
+        ResolvedAction::Cancel
+    );
+}
+
+#[test]
+fn resolve_plan_freeform_no_choice() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Plan, None, opts),
+        ResolvedAction::Freeform
+    );
+}
+
+#[test]
+fn agent_run_plan_accept_sends_enter() {
+    let ar_id = AgentRunId::new("ar-plan1");
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Plan,
+        Some(1), // Accept (clear context) — already selected, just Enter
+        &[],
+        None,
+        "dec-plan1",
+        &ar_id,
+        Some("session-plan"),
+        &[],
+        None,
+    );
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            // Option 1 is already selected, so just "Enter"
+            assert_eq!(input, "Enter");
+        }
+        other => panic!("expected SessionInput(Enter), got {:?}", other),
+    }
+}
+
+#[test]
+fn agent_run_plan_accept_option2_sends_down_enter() {
+    let ar_id = AgentRunId::new("ar-plan2");
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Plan,
+        Some(2), // Accept (auto edits) — 1 Down + Enter
+        &[],
+        None,
+        "dec-plan2",
+        &ar_id,
+        Some("session-plan"),
+        &[],
+        None,
+    );
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Down Enter");
+        }
+        other => panic!("expected SessionInput(Down Enter), got {:?}", other),
+    }
+}
+
+#[test]
+fn agent_run_plan_accept_option3_sends_down_down_enter() {
+    let ar_id = AgentRunId::new("ar-plan3");
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Plan,
+        Some(3), // Accept (manual edits) — 2 Downs + Enter
+        &[],
+        None,
+        "dec-plan3",
+        &ar_id,
+        Some("session-plan"),
+        &[],
+        None,
+    );
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Down Down Enter");
+        }
+        other => panic!("expected SessionInput(Down Down Enter), got {:?}", other),
+    }
+}
+
+#[test]
+fn agent_run_plan_revise_sends_escape_then_resume() {
+    let ar_id = AgentRunId::new("ar-plan-rev");
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Plan,
+        Some(4), // Revise
+        &[],
+        Some("Please also add rate limiting"),
+        "dec-plan-rev",
+        &ar_id,
+        Some("session-plan"),
+        &[],
+        None,
+    );
+
+    assert_eq!(events.len(), 2);
+    // First: Escape to cancel the plan dialog
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Escape");
+        }
+        other => panic!("expected SessionInput(Escape), got {:?}", other),
+    }
+    // Second: AgentRunResume with revision feedback
+    match &events[1] {
+        Event::AgentRunResume { id, message, kill } => {
+            assert_eq!(id.as_str(), "ar-plan-rev");
+            assert_eq!(message.as_deref(), Some("Please also add rate limiting"));
+            assert!(!kill);
+        }
+        other => panic!("expected AgentRunResume, got {:?}", other),
+    }
+}
+
+#[test]
+fn agent_run_plan_cancel_sends_escape_then_fail() {
+    let ar_id = AgentRunId::new("ar-plan-cancel");
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Plan,
+        Some(5), // Cancel
+        &[],
+        None,
+        "dec-plan-cancel",
+        &ar_id,
+        Some("session-plan"),
+        &[],
+        None,
+    );
+
+    assert_eq!(events.len(), 2);
+    // First: Escape to cancel the plan dialog
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Escape");
+        }
+        other => panic!("expected SessionInput(Escape), got {:?}", other),
+    }
+    // Second: Fail the agent run
+    match &events[1] {
+        Event::AgentRunStatusChanged { id, status, reason } => {
+            assert_eq!(id.as_str(), "ar-plan-cancel");
+            assert_eq!(*status, AgentRunStatus::Failed);
+            assert!(reason.as_ref().unwrap().contains("plan rejected"));
+        }
+        other => panic!("expected AgentRunStatusChanged(Failed), got {:?}", other),
+    }
+}
+
+#[test]
+fn plan_job_approve_emits_resume() {
+    let result = map_decision_to_job_action(
+        &DecisionSource::Plan,
+        Some(1), // Accept
+        &[],
+        None,
+        "dec-plan-job",
+        "pipe-1",
+        Some("step-1"),
+        &[],
+        None,
+    );
+
+    match result {
+        Some(Event::JobResume { message, .. }) => {
+            let msg = message.unwrap();
+            assert!(msg.contains("plan approved"), "got: {}", msg);
+        }
+        other => panic!("expected JobResume, got {:?}", other),
+    }
+}
+
+#[test]
+fn plan_job_revise_emits_resume_with_revision() {
+    let result = map_decision_to_job_action(
+        &DecisionSource::Plan,
+        Some(4), // Revise
+        &[],
+        Some("Add error handling"),
+        "dec-plan-job",
+        "pipe-1",
+        Some("step-1"),
+        &[],
+        None,
+    );
+
+    match result {
+        Some(Event::JobResume { message, .. }) => {
+            let msg = message.unwrap();
+            assert!(msg.contains("plan revision"), "got: {}", msg);
+            assert!(msg.contains("Add error handling"), "got: {}", msg);
+        }
+        other => panic!("expected JobResume, got {:?}", other),
+    }
+}
+
+#[test]
+fn plan_job_cancel_emits_cancel() {
+    let result = map_decision_to_job_action(
+        &DecisionSource::Plan,
+        Some(5), // Cancel
+        &[],
+        None,
+        "dec-plan-job",
+        "pipe-1",
+        Some("step-1"),
+        &[],
+        None,
+    );
+
+    match result {
+        Some(Event::JobCancel { .. }) => {}
+        other => panic!("expected JobCancel, got {:?}", other),
+    }
 }

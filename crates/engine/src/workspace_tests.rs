@@ -84,9 +84,12 @@ fn prepare_agent_settings_injects_stop_hook() {
     let inner_hooks = stop_hooks[0]["hooks"].as_array().unwrap();
     assert_eq!(inner_hooks.len(), 1);
     assert_eq!(inner_hooks[0]["type"], "command");
-    assert_eq!(
-        inner_hooks[0]["command"],
-        format!("oj agent hook stop {}", agent_id)
+    let cmd = inner_hooks[0]["command"].as_str().unwrap();
+    assert!(
+        cmd.ends_with(&format!("oj agent hook stop {}", agent_id)),
+        "stop hook command should end with 'oj agent hook stop {}', got: {}",
+        agent_id,
+        cmd
     );
 }
 
@@ -272,7 +275,12 @@ fn prepare_agent_settings_injects_notification_hooks() {
     assert_eq!(inner_hooks.len(), 1);
     assert_eq!(inner_hooks[0]["type"], "command");
     let cmd = inner_hooks[0]["command"].as_str().unwrap();
-    assert_eq!(cmd, format!("oj agent hook notify --agent-id {}", agent_id));
+    assert!(
+        cmd.ends_with(&format!("oj agent hook notify --agent-id {}", agent_id)),
+        "notify hook command should end with 'oj agent hook notify --agent-id {}', got: {}",
+        agent_id,
+        cmd
+    );
 
     // Stop hook is still present
     assert!(parsed["hooks"]["Stop"].is_array());
@@ -306,9 +314,12 @@ fn prepare_agent_settings_injects_pretooluse_hook() {
     let inner = hooks[0]["hooks"].as_array().unwrap();
     assert_eq!(inner.len(), 1);
     assert_eq!(inner[0]["type"], "command");
-    assert_eq!(
-        inner[0]["command"],
-        format!("oj agent hook pretooluse {}", agent_id)
+    let cmd = inner[0]["command"].as_str().unwrap();
+    assert!(
+        cmd.ends_with(&format!("oj agent hook pretooluse {}", agent_id)),
+        "pretooluse hook command should end with 'oj agent hook pretooluse {}', got: {}",
+        agent_id,
+        cmd
     );
 
     // Other hooks are still present

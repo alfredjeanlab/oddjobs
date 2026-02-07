@@ -12,6 +12,7 @@ fn decision_source_serde_roundtrip() {
         DecisionSource::Gate,
         DecisionSource::Error,
         DecisionSource::Idle,
+        DecisionSource::Plan,
     ];
     for source in sources {
         let json = serde_json::to_string(&source).unwrap();

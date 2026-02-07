@@ -21,6 +21,7 @@ pub enum DecisionSource {
     Gate,
     Error,
     Idle,
+    Plan,
 }
 
 /// A single option the user can choose.

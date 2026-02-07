@@ -30,7 +30,7 @@ pub(crate) fn handle_session_send(
                 &ctx.event_bus,
                 Event::SessionInput {
                     id: SessionId::new(sid),
-                    input,
+                    input: format!("{}\n", input),
                 },
             )?;
             Ok(Response::Ok)

@@ -118,14 +118,39 @@ pub fn prepare_agent_settings(
     Ok(settings_path)
 }
 
+/// Resolve the full path to the `oj` binary.
+///
+/// Looks for `oj` in the same directory as the current executable (the daemon),
+/// falling back to bare `oj` (PATH lookup) if not found.
+fn resolve_oj_binary() -> String {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let oj = dir.join("oj");
+            if oj.exists() {
+                return oj.to_string_lossy().into_owned();
+            }
+            // Test binaries live in target/debug/deps/ — check parent
+            if let Some(parent) = dir.parent() {
+                let oj = parent.join("oj");
+                if oj.exists() {
+                    return oj.to_string_lossy().into_owned();
+                }
+            }
+        }
+    }
+    "oj".to_string()
+}
+
 /// Inject hooks into settings: Stop hook (always) and SessionStart hooks (one per prime source)
 fn inject_hooks(settings: &mut Value, agent_id: &str, prime_paths: &HashMap<String, PathBuf>) {
+    let oj = resolve_oj_binary();
+
     // Claude Code hooks require nested structure with matcher and hooks fields
     let stop_hook_entry = json!({
         "matcher": "",
         "hooks": [{
             "type": "command",
-            "command": format!("oj agent hook stop {}", agent_id)
+            "command": format!("{} agent hook stop {}", oj, agent_id)
         }]
     });
 
@@ -158,7 +183,7 @@ fn inject_hooks(settings: &mut Value, agent_id: &str, prime_paths: &HashMap<Stri
         "matcher": "idle_prompt|permission_prompt",
         "hooks": [{
             "type": "command",
-            "command": format!("oj agent hook notify --agent-id {}", agent_id)
+            "command": format!("{} agent hook notify --agent-id {}", oj, agent_id)
         }]
     });
 
@@ -169,7 +194,7 @@ fn inject_hooks(settings: &mut Value, agent_id: &str, prime_paths: &HashMap<Stri
         "matcher": "ExitPlanMode|AskUserQuestion|EnterPlanMode",
         "hooks": [{
             "type": "command",
-            "command": format!("oj agent hook pretooluse {}", agent_id)
+            "command": format!("{} agent hook pretooluse {}", oj, agent_id)
         }]
     });
     hooks_obj.insert("PreToolUse".to_string(), json!([pretooluse_hook_entry]));

@@ -253,7 +253,16 @@ pub(crate) fn format_decision_detail(
         color::muted(short_id)
     );
     let _ = writeln!(out, "{} {}", color::context("Job:"), job_display);
-    let _ = writeln!(out, "{} {}", color::context("Source:  "), d.source);
+    let source_display = match d.source.as_str() {
+        "plan" => "Plan Approval",
+        "approval" => "Permission Approval",
+        "question" => "Question",
+        "idle" => "Idle",
+        "error" => "Error",
+        "gate" => "Gate",
+        other => other,
+    };
+    let _ = writeln!(out, "{} {}", color::context("Source:  "), source_display);
     let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
     if let Some(ref aid) = d.agent_id {
         let _ = writeln!(

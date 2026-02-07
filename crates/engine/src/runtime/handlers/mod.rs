@@ -141,7 +141,7 @@ where
                 self.executor
                     .execute(Effect::SendToSession {
                         session_id: id.clone(),
-                        input: format!("{}\n", input),
+                        input: input.clone(),
                     })
                     .await?;
             }

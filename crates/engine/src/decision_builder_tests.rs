@@ -580,3 +580,109 @@ fn test_for_agent_run_with_agent_id() {
         _ => panic!("expected DecisionCreated"),
     }
 }
+
+// ===================== Tests for Plan trigger =====================
+
+#[test]
+fn test_plan_trigger_builds_correct_options() {
+    let (_, event) = EscalationDecisionBuilder::for_job(
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
+        EscalationTrigger::Plan {
+            assistant_context: Some("# My Plan\n\n## Steps\n1. Do thing".to_string()),
+        },
+    )
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            options,
+            source,
+            context,
+            ..
+        } => {
+            assert_eq!(source, DecisionSource::Plan);
+            assert_eq!(options.len(), 5);
+            assert_eq!(options[0].label, "Accept (clear context)");
+            assert!(options[0].recommended);
+            assert_eq!(options[1].label, "Accept (auto edits)");
+            assert!(!options[1].recommended);
+            assert_eq!(options[2].label, "Accept (manual edits)");
+            assert_eq!(options[3].label, "Revise");
+            assert_eq!(options[4].label, "Cancel");
+            // Context should include plan content under "Plan" label
+            assert!(context.contains("requesting plan approval"));
+            assert!(context.contains("--- Plan ---"));
+            assert!(context.contains("# My Plan"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_plan_trigger_maps_to_plan_source() {
+    let trigger = EscalationTrigger::Plan {
+        assistant_context: None,
+    };
+    assert_eq!(trigger.to_source(), DecisionSource::Plan);
+}
+
+#[test]
+fn test_plan_trigger_without_context() {
+    let (_, event) = EscalationDecisionBuilder::for_job(
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
+        EscalationTrigger::Plan {
+            assistant_context: None,
+        },
+    )
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            options,
+            source,
+            context,
+            ..
+        } => {
+            assert_eq!(source, DecisionSource::Plan);
+            assert_eq!(options.len(), 5);
+            assert!(context.contains("requesting plan approval"));
+            // No plan content section when assistant_context is None
+            assert!(!context.contains("--- Plan ---"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_plan_trigger_for_agent_run() {
+    let (_, event) = EscalationDecisionBuilder::for_agent_run(
+        AgentRunId::new("ar-plan"),
+        "my-planner".to_string(),
+        EscalationTrigger::Plan {
+            assistant_context: Some("Plan content here".to_string()),
+        },
+    )
+    .namespace("test-ns")
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            owner,
+            source,
+            options,
+            context,
+            namespace,
+            ..
+        } => {
+            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-plan")));
+            assert_eq!(source, DecisionSource::Plan);
+            assert_eq!(options.len(), 5);
+            assert_eq!(namespace, "test-ns");
+            assert!(context.contains("my-planner"));
+            assert!(context.contains("Plan content here"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}

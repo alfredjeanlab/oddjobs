@@ -194,6 +194,7 @@ enum ResolvedAction {
 /// - Error/Gate: 1=Retry, 2=Skip, 3=Cancel
 /// - Approval: 1=Approve, 2=Deny, 3=Cancel
 /// - Question: 1..N=user options, N+1=Cancel (dynamic position)
+/// - Plan: 1=Accept(clear), 2=Accept(auto), 3=Accept(manual), 4=Revise, 5=Cancel
 fn resolve_decision_action(
     source: &DecisionSource,
     chosen: Option<usize>,
@@ -205,7 +206,6 @@ fn resolve_decision_action(
     };
 
     // For Question decisions, Cancel is the last option (dynamic position).
-    // For all other decision types, Cancel is always option 3.
     if matches!(source, DecisionSource::Question) {
         return if choice == options.len() {
             ResolvedAction::Cancel
@@ -213,25 +213,31 @@ fn resolve_decision_action(
             ResolvedAction::Answer
         };
     }
-    if choice == 3 {
-        return ResolvedAction::Cancel;
-    }
 
     match source {
         DecisionSource::Idle => match choice {
             1 => ResolvedAction::Nudge,
             2 => ResolvedAction::Complete,
+            3 => ResolvedAction::Cancel,
             4 => ResolvedAction::Dismiss,
             _ => ResolvedAction::Dismiss,
         },
         DecisionSource::Error | DecisionSource::Gate => match choice {
             1 => ResolvedAction::Retry,
             2 => ResolvedAction::Complete,
+            3 => ResolvedAction::Cancel,
             _ => ResolvedAction::Dismiss,
         },
         DecisionSource::Approval => match choice {
             1 => ResolvedAction::Approve,
             2 => ResolvedAction::Deny,
+            3 => ResolvedAction::Cancel,
+            _ => ResolvedAction::Dismiss,
+        },
+        DecisionSource::Plan => match choice {
+            1..=3 => ResolvedAction::Approve,
+            4 => ResolvedAction::Freeform,
+            5 => ResolvedAction::Cancel,
             _ => ResolvedAction::Dismiss,
         },
         DecisionSource::Question => unreachable!(),
@@ -239,6 +245,7 @@ fn resolve_decision_action(
 }
 
 /// Map a decision resolution to the appropriate job action event.
+// TODO(refactor): group decision resolution params into a struct
 #[allow(clippy::too_many_arguments)]
 fn map_decision_to_job_action(
     source: &DecisionSource,
@@ -265,6 +272,26 @@ fn map_decision_to_job_action(
     }
 
     let action = resolve_decision_action(source, chosen, options);
+
+    // Plan decisions for jobs route similarly to other approval types
+    if matches!(source, DecisionSource::Plan) {
+        return match action {
+            ResolvedAction::Approve => Some(Event::JobResume {
+                id: pid,
+                message: Some(format!("decision {} plan approved", decision_id)),
+                vars: HashMap::new(),
+                kill: false,
+            }),
+            ResolvedAction::Freeform => message.map(|msg| Event::JobResume {
+                id: pid,
+                message: Some(format!("decision {} plan revision: {}", decision_id, msg)),
+                vars: HashMap::new(),
+                kill: false,
+            }),
+            ResolvedAction::Cancel => Some(Event::JobCancel { id: pid }),
+            _ => None,
+        };
+    }
 
     match action {
         ResolvedAction::Freeform => message.map(|msg| Event::JobResume {
@@ -307,6 +334,7 @@ fn map_decision_to_job_action(
 }
 
 /// Map a decision resolution to the appropriate agent run action events.
+// TODO(refactor): group decision resolution params into a struct
 #[allow(clippy::too_many_arguments)]
 fn map_decision_to_agent_run_action(
     source: &DecisionSource,
@@ -329,28 +357,61 @@ fn map_decision_to_agent_run_action(
     };
 
     // Multi-question path: send concatenated per-question digits
-    // e.g., choices [1, 2] → SessionInput "12" (handler appends \n)
+    // e.g., choices [1, 2] → SessionInput "12\n"
     if !choices.is_empty() {
         let input: String = choices.iter().map(|c| c.to_string()).collect();
-        return send_to_session(input).into_iter().collect();
+        return send_to_session(format!("{}\n", input))
+            .into_iter()
+            .collect();
     }
 
     let action = resolve_decision_action(source, chosen, options);
 
     match action {
-        ResolvedAction::Freeform => message
-            .map(|msg| Event::AgentRunResume {
-                id: ar_id,
-                message: Some(msg.to_string()),
-                kill: false,
-            })
-            .into_iter()
-            .collect(),
-        ResolvedAction::Cancel => vec![Event::AgentRunStatusChanged {
-            id: ar_id,
-            status: AgentRunStatus::Failed,
-            reason: Some(format!("cancelled via decision {}", decision_id)),
-        }],
+        ResolvedAction::Freeform => {
+            if matches!(source, DecisionSource::Plan) {
+                // Plan revision: send Escape to cancel the plan dialog, then
+                // send revision feedback as a new user message via AgentRunResume.
+                let mut events: Vec<Event> =
+                    send_to_session("Escape".to_string()).into_iter().collect();
+                if let Some(msg) = message {
+                    events.push(Event::AgentRunResume {
+                        id: ar_id,
+                        message: Some(msg.to_string()),
+                        kill: false,
+                    });
+                }
+                events
+            } else {
+                message
+                    .map(|msg| Event::AgentRunResume {
+                        id: ar_id,
+                        message: Some(msg.to_string()),
+                        kill: false,
+                    })
+                    .into_iter()
+                    .collect()
+            }
+        }
+        ResolvedAction::Cancel => {
+            if matches!(source, DecisionSource::Plan) {
+                // Plan cancel: send Escape to dismiss the dialog, then fail
+                let mut events: Vec<Event> =
+                    send_to_session("Escape".to_string()).into_iter().collect();
+                events.push(Event::AgentRunStatusChanged {
+                    id: ar_id,
+                    status: AgentRunStatus::Failed,
+                    reason: Some(format!("plan rejected via decision {}", decision_id)),
+                });
+                events
+            } else {
+                vec![Event::AgentRunStatusChanged {
+                    id: ar_id,
+                    status: AgentRunStatus::Failed,
+                    reason: Some(format!("cancelled via decision {}", decision_id)),
+                }]
+            }
+        }
         ResolvedAction::Nudge => {
             let msg = message.unwrap_or("Please continue with the task.");
             vec![Event::AgentRunResume {
@@ -377,7 +438,21 @@ fn map_decision_to_agent_run_action(
             message: Some(build_resume_message(chosen, message, decision_id)),
             kill: true,
         }],
-        ResolvedAction::Approve => send_to_session("y\n".to_string()).into_iter().collect(),
+        ResolvedAction::Approve => {
+            if matches!(source, DecisionSource::Plan) {
+                // Plan approval: navigate with arrow keys (Down * N + Enter).
+                // Option 1 = cursor already on it → just Enter
+                // Option 2 = Down Enter
+                // Option 3 = Down Down Enter
+                let downs = chosen.unwrap_or(1) - 1;
+                let mut keys = "Down ".repeat(downs);
+                keys.push_str("Enter");
+                send_to_session(keys).into_iter().collect()
+            } else {
+                // Permission prompt: send "y" + Enter
+                send_to_session("y\n".to_string()).into_iter().collect()
+            }
+        }
         ResolvedAction::Deny => send_to_session("n\n".to_string()).into_iter().collect(),
         ResolvedAction::Answer => {
             if let Some(c) = chosen {

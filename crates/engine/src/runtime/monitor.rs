@@ -285,6 +285,7 @@ where
                 // Use distinct trigger strings so escalation can differentiate
                 let trigger_str = match prompt_type {
                     PromptType::Question => "prompt:question",
+                    PromptType::PlanApproval => "prompt:plan",
                     _ => "prompt",
                 };
                 (&agent_def.on_prompt, trigger_str, question_data.clone())

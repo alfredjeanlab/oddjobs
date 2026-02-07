@@ -235,6 +235,9 @@ pub fn build_action_effects(
                     question_data: ctx.question_data.cloned(),
                     assistant_context: ac,
                 },
+                "prompt:plan" => EscalationTrigger::Plan {
+                    assistant_context: ac,
+                },
                 "prompt" | "on_prompt" => EscalationTrigger::Prompt {
                     prompt_type: "permission".to_string(),
                     assistant_context: ac,
@@ -249,6 +252,9 @@ pub fn build_action_effects(
                         },
                         "prompt:question" => EscalationTrigger::Question {
                             question_data: ctx.question_data.cloned(),
+                            assistant_context: ac,
+                        },
+                        "prompt:plan" => EscalationTrigger::Plan {
                             assistant_context: ac,
                         },
                         "error" => EscalationTrigger::Error {
@@ -399,6 +405,9 @@ pub fn build_action_effects_for_agent_run(
                     question_data: ctx.question_data.cloned(),
                     assistant_context: ac,
                 },
+                "prompt:plan" => EscalationTrigger::Plan {
+                    assistant_context: ac,
+                },
                 "prompt" | "on_prompt" => EscalationTrigger::Prompt {
                     prompt_type: "permission".to_string(),
                     assistant_context: ac,
@@ -411,6 +420,9 @@ pub fn build_action_effects_for_agent_run(
                         },
                         "prompt:question" => EscalationTrigger::Question {
                             question_data: ctx.question_data.cloned(),
+                            assistant_context: ac,
+                        },
+                        "prompt:plan" => EscalationTrigger::Plan {
                             assistant_context: ac,
                         },
                         "error" => EscalationTrigger::Error {

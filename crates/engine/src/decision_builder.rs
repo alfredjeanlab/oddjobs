@@ -42,6 +42,8 @@ pub enum EscalationTrigger {
         question_data: Option<QuestionData>,
         assistant_context: Option<String>,
     },
+    /// Agent called ExitPlanMode — carries the plan content
+    Plan { assistant_context: Option<String> },
 }
 
 impl EscalationTrigger {
@@ -53,6 +55,7 @@ impl EscalationTrigger {
             EscalationTrigger::GateFailed { .. } => DecisionSource::Gate,
             EscalationTrigger::Prompt { .. } => DecisionSource::Approval,
             EscalationTrigger::Question { .. } => DecisionSource::Question,
+            EscalationTrigger::Plan { .. } => DecisionSource::Plan,
         }
     }
 }
@@ -248,6 +251,13 @@ impl EscalationDecisionBuilder {
                 }
                 assistant_context.as_deref()
             }
+            EscalationTrigger::Plan { assistant_context } => {
+                parts.push(format!(
+                    "Agent in job \"{}\" is requesting plan approval.",
+                    self.display_name
+                ));
+                assistant_context.as_deref()
+            }
         };
 
         // Assistant context from session transcript
@@ -256,6 +266,7 @@ impl EscalationDecisionBuilder {
                 // Truncate to ~2000 chars
                 let truncated = if ctx.len() > 2000 { &ctx[..2000] } else { ctx };
                 let label = match &self.trigger {
+                    EscalationTrigger::Plan { .. } => "Plan",
                     EscalationTrigger::Question { .. } | EscalationTrigger::Prompt { .. } => {
                         "Agent Context"
                     }
@@ -327,6 +338,17 @@ impl EscalationDecisionBuilder {
 
                 options
             }
+            EscalationTrigger::Plan { .. } => vec![
+                DecisionOption::new("Accept (clear context)")
+                    .description("Approve and auto-accept edits, clearing context")
+                    .recommended(),
+                DecisionOption::new("Accept (auto edits)")
+                    .description("Approve and auto-accept edits"),
+                DecisionOption::new("Accept (manual edits)")
+                    .description("Approve with manual edit approval"),
+                DecisionOption::new("Revise").description("Send feedback for plan revision"),
+                DecisionOption::new("Cancel").description("Cancel and fail"),
+            ],
         }
     }
 }

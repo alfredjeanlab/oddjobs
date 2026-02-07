@@ -77,6 +77,8 @@ mod agent_gates;
 mod agent_hooks;
 #[path = "specs/agent/logs.rs"]
 mod agent_logs;
+#[path = "specs/agent/plan.rs"]
+mod agent_plan;
 #[path = "specs/agent/questions.rs"]
 mod agent_questions;
 #[path = "specs/agent/spawn.rs"]

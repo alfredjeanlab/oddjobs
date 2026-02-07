@@ -345,14 +345,11 @@ where
                 let trigger = EscalationTrigger::Idle {
                     assistant_context: None,
                 };
-                let (decision_id, decision_event) = EscalationDecisionBuilder::for_job(
-                    job_id.clone(),
-                    job.name.clone(),
-                    trigger,
-                )
-                .agent_id(job.session_id.clone().unwrap_or_default())
-                .namespace(job.namespace.clone())
-                .build();
+                let (decision_id, decision_event) =
+                    EscalationDecisionBuilder::for_job(job_id.clone(), job.name.clone(), trigger)
+                        .agent_id(job.session_id.clone().unwrap_or_default())
+                        .namespace(job.namespace.clone())
+                        .build();
 
                 let effects = vec![
                     Effect::Emit {
@@ -388,15 +385,14 @@ where
                 let trigger = EscalationTrigger::Idle {
                     assistant_context: None,
                 };
-                let (_decision_id, decision_event) =
-                    EscalationDecisionBuilder::for_agent_run(
-                        agent_run_id.clone(),
-                        agent_run.command_name.clone(),
-                        trigger,
-                    )
-                    .agent_id(agent_run.agent_id.clone().unwrap_or_default())
-                    .namespace(agent_run.namespace.clone())
-                    .build();
+                let (_decision_id, decision_event) = EscalationDecisionBuilder::for_agent_run(
+                    agent_run_id.clone(),
+                    agent_run.command_name.clone(),
+                    trigger,
+                )
+                .agent_id(agent_run.agent_id.clone().unwrap_or_default())
+                .namespace(agent_run.namespace.clone())
+                .build();
 
                 // Fire standalone escalation with decision
                 let effects = vec![

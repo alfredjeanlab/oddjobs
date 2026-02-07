@@ -363,3 +363,79 @@ fn parse_resolve_multi_question() {
         panic!("expected Resolve");
     }
 }
+
+// --- plan approval display tests ---
+
+#[test]
+fn format_plan_decision_detail() {
+    let d = DecisionDetail {
+        id: "abcdef1234567890".to_string(),
+        job_id: "pipe-1234567890".to_string(),
+        job_name: "epic-auth".to_string(),
+        agent_id: Some("agent-abc12345".to_string()),
+        source: "plan".to_string(),
+        context: "Agent in job \"epic-auth\" is requesting plan approval.\n\n--- Plan ---\n# Auth Plan\n\n## Steps\n1. Add JWT module\n2. Write tests".to_string(),
+        options: vec![
+            DecisionOptionDetail {
+                number: 1,
+                label: "Accept (clear context)".to_string(),
+                description: Some("Approve and auto-accept edits, clearing context".to_string()),
+                recommended: true,
+            },
+            DecisionOptionDetail {
+                number: 2,
+                label: "Accept (auto edits)".to_string(),
+                description: Some("Approve and auto-accept edits".to_string()),
+                recommended: false,
+            },
+            DecisionOptionDetail {
+                number: 3,
+                label: "Accept (manual edits)".to_string(),
+                description: Some("Approve with manual edit approval".to_string()),
+                recommended: false,
+            },
+            DecisionOptionDetail {
+                number: 4,
+                label: "Revise".to_string(),
+                description: Some("Send feedback for plan revision".to_string()),
+                recommended: false,
+            },
+            DecisionOptionDetail {
+                number: 5,
+                label: "Cancel".to_string(),
+                description: Some("Cancel and fail".to_string()),
+                recommended: false,
+            },
+        ],
+        question_groups: vec![],
+        chosen: None,
+        choices: vec![],
+        message: None,
+        created_at_ms: 0,
+        resolved_at_ms: None,
+        superseded_by: None,
+        namespace: "myproject".to_string(),
+    };
+
+    let mut buf = Vec::new();
+    super::format_decision_detail(&mut buf, &d, true);
+    let out = output_string(&buf);
+
+    // Source should display as "Plan Approval"
+    assert!(
+        out.contains("Plan Approval"),
+        "missing Plan Approval source label, got:\n{}",
+        out
+    );
+    // Plan content should appear in context
+    assert!(out.contains("# Auth Plan"), "missing plan content");
+    assert!(out.contains("Add JWT module"), "missing plan step");
+    // All 5 options should be shown
+    assert!(out.contains("1. Accept (clear context) (recommended)"));
+    assert!(out.contains("2. Accept (auto edits)"));
+    assert!(out.contains("3. Accept (manual edits)"));
+    assert!(out.contains("4. Revise"));
+    assert!(out.contains("5. Cancel"));
+    // Resolve hint
+    assert!(out.contains("oj decision resolve abcdef12 <number>"));
+}

@@ -610,7 +610,9 @@ fn handle_add(
             {
                 eprintln!(
                     "warning: {} has parse errors: {}",
-                    path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default(),
+                    path.file_name()
+                        .map(|f| f.to_string_lossy())
+                        .unwrap_or_default(),
                     e
                 );
             }

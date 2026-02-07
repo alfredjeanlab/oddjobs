@@ -366,6 +366,7 @@ where
                 );
                 let trigger_str = match prompt_type {
                     oj_core::PromptType::Question => "prompt:question",
+                    oj_core::PromptType::PlanApproval => "prompt:plan",
                     _ => "prompt",
                 };
                 (&agent_def.on_prompt, trigger_str, question_data.clone())

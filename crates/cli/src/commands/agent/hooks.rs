@@ -70,12 +70,30 @@ pub(super) async fn handle_pretooluse(agent_id: &str, client: &DaemonClient) -> 
         None
     };
 
-    // Extract last assistant message from transcript for decision context
-    let assistant_context = input
-        .transcript_path
-        .as_deref()
-        .map(std::path::Path::new)
-        .and_then(extract_last_assistant_text);
+    // Extract context for decision display.
+    // For PlanApproval, extract plan content from tool_input.plan (where Claude sends it).
+    // For other prompts, fall back to the last assistant message from the transcript.
+    let assistant_context = if prompt_type == PromptType::PlanApproval {
+        input
+            .tool_input
+            .as_ref()
+            .and_then(|v| v.get("plan"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| {
+                input
+                    .transcript_path
+                    .as_deref()
+                    .map(std::path::Path::new)
+                    .and_then(extract_last_assistant_text)
+            })
+    } else {
+        input
+            .transcript_path
+            .as_deref()
+            .map(std::path::Path::new)
+            .and_then(extract_last_assistant_text)
+    };
 
     let event = Event::AgentPrompt {
         agent_id: AgentId::new(agent_id),

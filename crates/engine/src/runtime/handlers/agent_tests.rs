@@ -133,7 +133,9 @@ async fn stop_hook_standalone_creates_decision() {
         .await
         .unwrap();
 
-    let decision = events.iter().find(|e| matches!(e, Event::DecisionCreated { .. }));
+    let decision = events
+        .iter()
+        .find(|e| matches!(e, Event::DecisionCreated { .. }));
     assert!(
         decision.is_some(),
         "expected DecisionCreated event, got: {:?}",
@@ -197,7 +199,10 @@ async fn stop_hook_standalone_idempotent_when_already_escalated() {
         .await
         .unwrap();
 
-    assert!(events.is_empty(), "expected no-op for already-escalated agent run");
+    assert!(
+        events.is_empty(),
+        "expected no-op for already-escalated agent run"
+    );
 }
 
 #[tokio::test]
@@ -232,7 +237,9 @@ async fn stop_hook_job_creates_decision() {
         .await
         .unwrap();
 
-    let decision = events.iter().find(|e| matches!(e, Event::DecisionCreated { .. }));
+    let decision = events
+        .iter()
+        .find(|e| matches!(e, Event::DecisionCreated { .. }));
     assert!(
         decision.is_some(),
         "expected DecisionCreated event for job, got: {:?}",
@@ -257,7 +264,9 @@ async fn stop_hook_job_sets_step_waiting_with_decision_id() {
         .await
         .unwrap();
 
-    let waiting = events.iter().find(|e| matches!(e, Event::StepWaiting { .. }));
+    let waiting = events
+        .iter()
+        .find(|e| matches!(e, Event::StepWaiting { .. }));
     assert!(
         waiting.is_some(),
         "expected StepWaiting event, got: {:?}",
@@ -295,5 +304,8 @@ async fn stop_hook_job_idempotent_when_already_waiting() {
         .await
         .unwrap();
 
-    assert!(events.is_empty(), "expected no-op for already-waiting job step");
+    assert!(
+        events.is_empty(),
+        "expected no-op for already-waiting job step"
+    );
 }
