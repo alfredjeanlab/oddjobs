@@ -1,4 +1,6 @@
-# Shared libraries: wok issue tracking and git merge queue.
+# Shared libraries: wok issue tracking, git merge queue, and claude agents.
+
+import "oj/claude" { alias = "claude" }
 
 import "oj/wok" {
   const "prefix" { value = "oj" }

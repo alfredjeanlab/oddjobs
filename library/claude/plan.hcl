@@ -1,59 +1,60 @@
-# Plan and implement a feature using Claude's native planning mode.
+# Interactive planning agent with human-in-the-loop decisions.
 #
-# Claude will create a plan, request approval, then implement.
+# Claude explores the codebase, creates a plan for approval, then implements.
+# Uses AskUserQuestion frequently to clarify requirements.
 #
 # Examples:
-#   oj run plan auth "Add user authentication with JWT tokens"
-#   oj run plan dark-mode "Implement dark mode theme"
+#   oj run plan "Implement user authentication with OAuth"
+#   oj run plan "Add dark mode theme support"
 
 command "plan" {
-  args = "<name> <instructions>"
+  args = "<instructions>"
   run  = { job = "plan" }
 }
 
 job "plan" {
-  name = "${var.name}"
-  vars = ["name", "instructions"]
+  name = "${var.instructions}"
+  vars = ["instructions"]
 
-  workspace {
-    git    = "worktree"
-    branch = "feature/${var.name}-${workspace.nonce}"
-  }
-
-  locals {
-    title = "$(printf 'feat(${var.name}): %.72s' \"${var.instructions}\")"
-  }
-
-  notify {
-    on_start = "Building: ${var.name}"
-    on_done  = "Build landed: ${var.name}"
-    on_fail  = "Build failed: ${var.name}"
-  }
-
-  step "build" {
-    run     = { agent = "claude" }
-    on_done = { step = "submit" }
-  }
-
-  step "submit" {
-    run = <<-SHELL
-      git add -A
-      git diff --cached --quiet || git commit -m "${local.title}"
-      test "$(git rev-list --count HEAD ^origin/main)" -gt 0 || { echo "No changes to submit" >&2; exit 1; }
-      git push origin "${workspace.branch}"
-      oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
-    SHELL
+  step "work" {
+    run = { agent = "planner" }
   }
 }
 
-agent "claude" {
-  run      = "claude --model opus --permission-mode plan"
-  on_idle  = { action = "nudge", message = "Keep working. Implement the feature, run make check, and commit." }
-  on_dead  = { action = "gate", run = "make check" }
+agent "planner" {
+  run     = "claude --model opus --dangerously-skip-permissions"
+  on_idle = "done"
+  on_dead = "done"
+
+  session "tmux" {
+    color = "green"
+    title = "Claude"
+  }
+
+  prime = {
+    startup = <<-SHELL
+      echo '## Reminders'
+      echo '- Use AskUserQuestion frequently to clarify requirements and get user input'
+    SHELL
+    clear = <<-SHELL
+      echo '## Reminders'
+      echo '- Use AskUserQuestion frequently to clarify requirements and get user input'
+      echo '- Even now that the plan is approved, continue asking questions when uncertain'
+    SHELL
+  }
 
   prompt = <<-PROMPT
-    Implement: ${var.instructions}
+    ${var.instructions}
 
-    Create a plan, then implement it. Run `make check` to verify everything passes.
+    IMPORTANT: Before implementing anything, create a thorough plan:
+    1. Use EnterPlanMode to switch to planning mode
+    2. Explore the codebase to understand the current state
+    3. Design your approach, using AskUserQuestion to clarify ambiguities
+    4. Call ExitPlanMode to present your plan for approval
+
+    Throughout your work, use AskUserQuestion frequently to:
+    - Clarify ambiguous requirements
+    - Confirm design decisions before implementing
+    - Get input on trade-offs
   PROMPT
 }

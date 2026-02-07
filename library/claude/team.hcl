@@ -16,11 +16,11 @@ job "team" {
   vars = ["instructions"]
 
   step "work" {
-    run = { agent = "team-lead" }
+    run = { agent = "leader" }
   }
 }
 
-agent "team-lead" {
+agent "leader" {
   run     = "claude --model opus --dangerously-skip-permissions"
   on_idle = "done"
   on_dead = "done"
