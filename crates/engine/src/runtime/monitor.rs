@@ -238,7 +238,7 @@ where
                         "agent active, auto-resuming from escalation",
                     );
 
-                    let effects = vec![Effect::Emit {
+                    let mut effects = vec![Effect::Emit {
                         event: Event::StepStarted {
                             job_id: job_id.clone(),
                             step: job.step.clone(),
@@ -246,6 +246,21 @@ where
                             agent_name: None,
                         },
                     }];
+
+                    // Auto-dismiss pending decision for this job
+                    if let oj_core::StepStatus::Waiting(Some(ref decision_id)) = job.step_status {
+                        let resolved_at_ms = self.clock().epoch_ms();
+                        effects.push(Effect::Emit {
+                            event: Event::DecisionResolved {
+                                id: decision_id.clone(),
+                                chosen: None,
+                                choices: vec![],
+                                message: Some("auto-dismissed: agent became active".to_string()),
+                                resolved_at_ms,
+                                namespace: job.namespace.clone(),
+                            },
+                        });
+                    }
 
                     // Reset action attempts — agent demonstrated progress
                     self.lock_state_mut(|state| {

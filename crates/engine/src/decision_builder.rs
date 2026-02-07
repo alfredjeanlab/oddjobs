@@ -317,6 +317,8 @@ impl EscalationDecisionBuilder {
                 DecisionOption::new("Approve").description("Approve the pending action"),
                 DecisionOption::new("Deny").description("Deny the pending action"),
                 DecisionOption::new("Cancel").description("Cancel and fail"),
+                DecisionOption::new("Dismiss")
+                    .description("Dismiss this notification without taking action"),
             ],
             EscalationTrigger::Question {
                 ref question_data, ..
@@ -335,8 +337,12 @@ impl EscalationDecisionBuilder {
                     }
                 }
 
-                // Always add Cancel as the last option
+                // Always add Cancel and Dismiss as the last options
                 options.push(DecisionOption::new("Cancel").description("Cancel and fail"));
+                options.push(
+                    DecisionOption::new("Dismiss")
+                        .description("Dismiss this notification without taking action"),
+                );
 
                 options
             }

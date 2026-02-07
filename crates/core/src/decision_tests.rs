@@ -112,3 +112,32 @@ fn decision_id_from_conversions() {
     assert_eq!(id1, id2);
     assert_eq!(id1, *"test");
 }
+
+#[test]
+fn approval_cannot_supersede_question() {
+    assert!(!DecisionSource::Approval.should_supersede(&DecisionSource::Question));
+}
+
+#[test]
+fn approval_cannot_supersede_plan() {
+    assert!(!DecisionSource::Approval.should_supersede(&DecisionSource::Plan));
+}
+
+#[test]
+fn question_can_supersede_approval() {
+    assert!(DecisionSource::Question.should_supersede(&DecisionSource::Approval));
+}
+
+#[test]
+fn same_source_can_supersede() {
+    assert!(DecisionSource::Approval.should_supersede(&DecisionSource::Approval));
+    assert!(DecisionSource::Question.should_supersede(&DecisionSource::Question));
+    assert!(DecisionSource::Idle.should_supersede(&DecisionSource::Idle));
+}
+
+#[test]
+fn idle_can_supersede_anything() {
+    assert!(DecisionSource::Idle.should_supersede(&DecisionSource::Question));
+    assert!(DecisionSource::Idle.should_supersede(&DecisionSource::Approval));
+    assert!(DecisionSource::Idle.should_supersede(&DecisionSource::Plan));
+}
