@@ -432,6 +432,57 @@ fn resolve_error_choices() {
 }
 
 #[test]
+fn resolve_dead_choices() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Dead, Some(1), opts),
+        ResolvedAction::Retry
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Dead, Some(2), opts),
+        ResolvedAction::Complete
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Dead, Some(3), opts),
+        ResolvedAction::Cancel
+    );
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Dead, Some(4), opts),
+        ResolvedAction::Dismiss
+    );
+}
+
+#[test]
+fn resolve_error_dismiss() {
+    let opts = &[];
+    assert_eq!(
+        resolve_decision_action(&DecisionSource::Error, Some(4), opts),
+        ResolvedAction::Dismiss
+    );
+}
+
+#[test]
+fn error_dismiss_returns_no_action() {
+    let c = DecisionResolveCtx {
+        chosen: Some(4),
+        ..ctx(&DecisionSource::Error, "dec-err-dismiss")
+    };
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert!(result.is_empty());
+}
+
+#[test]
+fn agent_run_dead_dismiss_returns_empty() {
+    let ar_id = AgentRunId::new("ar-dead-dismiss");
+    let c = DecisionResolveCtx {
+        chosen: Some(4), // Dismiss
+        ..ctx(&DecisionSource::Dead, "dec-dead-dismiss")
+    };
+    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-dead"));
+    assert!(events.is_empty());
+}
+
+#[test]
 fn resolve_gate_choices() {
     let opts = &[];
     assert_eq!(

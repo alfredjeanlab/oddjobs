@@ -11,6 +11,7 @@ fn decision_source_serde_roundtrip() {
         DecisionSource::Approval,
         DecisionSource::Gate,
         DecisionSource::Error,
+        DecisionSource::Dead,
         DecisionSource::Idle,
         DecisionSource::Plan,
     ];

@@ -20,6 +20,7 @@ pub enum DecisionSource {
     Approval,
     Gate,
     Error,
+    Dead,
     Idle,
     Plan,
 }

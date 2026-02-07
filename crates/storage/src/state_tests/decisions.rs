@@ -328,3 +328,25 @@ fn superseded_decision_cannot_be_resolved() {
     assert!(dec1.is_resolved());
     assert!(dec1.superseded_by.is_some());
 }
+
+#[test]
+fn decision_resolved_with_no_chosen_auto_dismiss() {
+    let mut state = state_with_job_and_decision("pipe-1", "dec-1");
+    assert!(!state.decisions["dec-1"].is_resolved());
+
+    // Simulate auto-dismiss pattern: chosen=None, message="auto-dismissed by job resume"
+    state.apply_event(&Event::DecisionResolved {
+        id: "dec-1".to_string(),
+        chosen: None,
+        choices: vec![],
+        message: Some("auto-dismissed by job resume".to_string()),
+        resolved_at_ms: 3_000_000,
+        namespace: "testns".to_string(),
+    });
+
+    let dec = &state.decisions["dec-1"];
+    assert!(dec.is_resolved());
+    assert!(dec.chosen.is_none());
+    assert_eq!(dec.message.as_deref(), Some("auto-dismissed by job resume"));
+    assert_eq!(dec.resolved_at_ms, Some(3_000_000));
+}

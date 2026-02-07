@@ -50,7 +50,7 @@ impl EscalationTrigger {
     pub fn to_source(&self) -> DecisionSource {
         match self {
             EscalationTrigger::Idle { .. } => DecisionSource::Idle,
-            EscalationTrigger::Dead { .. } => DecisionSource::Error,
+            EscalationTrigger::Dead { .. } => DecisionSource::Dead,
             EscalationTrigger::Error { .. } => DecisionSource::Error,
             EscalationTrigger::GateFailed { .. } => DecisionSource::Gate,
             EscalationTrigger::Prompt { .. } => DecisionSource::Approval,
@@ -303,6 +303,8 @@ impl EscalationDecisionBuilder {
                     .recommended(),
                 DecisionOption::new("Skip").description("Skip and mark as complete"),
                 DecisionOption::new("Cancel").description("Cancel and fail"),
+                DecisionOption::new("Dismiss")
+                    .description("Dismiss this notification without taking action"),
             ],
             EscalationTrigger::GateFailed { .. } => vec![
                 DecisionOption::new("Retry")

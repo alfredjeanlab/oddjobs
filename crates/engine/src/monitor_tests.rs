@@ -614,7 +614,7 @@ fn extract_escalation_source(effects: &ActionEffects) -> oj_core::DecisionSource
 
 #[yare::parameterized(
     idle              = { "idle",               oj_core::DecisionSource::Idle },
-    exit              = { "exit",               oj_core::DecisionSource::Error },
+    exit              = { "exit",               oj_core::DecisionSource::Dead },
     error             = { "error",              oj_core::DecisionSource::Error },
     prompt            = { "prompt",             oj_core::DecisionSource::Approval },
     prompt_question   = { "prompt:question",    oj_core::DecisionSource::Question },
@@ -893,7 +893,7 @@ fn agent_run_escalate_trigger_mapping() {
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
 
-    // Test "exit" trigger maps to Error source
+    // Test "exit" trigger maps to Dead source
     let result =
         build_action_effects_for_agent_run(&test_ctx(&agent, &config, "exit"), &ar).unwrap();
     if let ActionEffects::EscalateAgentRun { effects } = result {
@@ -903,7 +903,7 @@ fn agent_run_escalate_trigger_mapping() {
             } => Some(source.clone()),
             _ => None,
         });
-        assert_eq!(source, Some(oj_core::DecisionSource::Error));
+        assert_eq!(source, Some(oj_core::DecisionSource::Dead));
     }
 }
 
