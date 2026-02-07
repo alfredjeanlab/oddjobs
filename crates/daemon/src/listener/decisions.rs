@@ -16,6 +16,20 @@ use super::mutations::emit;
 use super::ConnectionError;
 use super::ListenCtx;
 
+/// Shared context for decision resolution mapping.
+///
+/// Groups the common parameters needed by both job and agent-run
+/// decision resolution paths, avoiding prop-drilling through helpers.
+struct DecisionResolveCtx<'a> {
+    source: &'a DecisionSource,
+    chosen: Option<usize>,
+    choices: &'a [usize],
+    message: Option<&'a str>,
+    decision_id: &'a str,
+    options: &'a [DecisionOption],
+    question_data: Option<&'a QuestionData>,
+}
+
 pub(super) fn handle_decision_resolve(
     ctx: &ListenCtx,
     id: &str,
@@ -124,34 +138,30 @@ pub(super) fn handle_decision_resolve(
     };
     emit(&ctx.event_bus, event)?;
 
+    let resolve_ctx = DecisionResolveCtx {
+        source: &decision_source,
+        chosen,
+        choices: &choices,
+        message: message.as_deref(),
+        decision_id: &full_id,
+        options: &decision_options,
+        question_data: decision_question_data.as_ref(),
+    };
+
     // Map chosen option to action based on owner type
     let action_events = match &decision_owner {
         OwnerId::AgentRun(ar_id) => map_decision_to_agent_run_action(
-            &decision_source,
-            chosen,
-            &choices,
-            message.as_deref(),
-            &full_id,
+            &resolve_ctx,
             ar_id,
             agent_run_session_id
                 .as_deref()
                 .or(decision_session_id.as_deref()),
-            &decision_options,
-            decision_question_data.as_ref(),
         ),
-        OwnerId::Job(_) => map_decision_to_job_action(
-            &decision_source,
-            chosen,
-            &choices,
-            message.as_deref(),
-            &full_id,
-            &job_id,
-            job_step.as_deref(),
-            &decision_options,
-            decision_question_data.as_ref(),
-        )
-        .into_iter()
-        .collect(),
+        OwnerId::Job(_) => {
+            map_decision_to_job_action(&resolve_ctx, &job_id, job_step.as_deref())
+                .into_iter()
+                .collect()
+        }
     };
 
     for action in action_events {
@@ -245,24 +255,16 @@ fn resolve_decision_action(
 }
 
 /// Map a decision resolution to the appropriate job action event.
-// TODO(refactor): group decision resolution params into a struct
-#[allow(clippy::too_many_arguments)]
 fn map_decision_to_job_action(
-    source: &DecisionSource,
-    chosen: Option<usize>,
-    choices: &[usize],
-    message: Option<&str>,
-    decision_id: &str,
+    ctx: &DecisionResolveCtx,
     job_id: &str,
     job_step: Option<&str>,
-    options: &[DecisionOption],
-    question_data: Option<&QuestionData>,
 ) -> Option<Event> {
     let pid = JobId::new(job_id);
 
     // Multi-question path: choices non-empty means multi-question answer
-    if !choices.is_empty() {
-        let resume_msg = build_multi_question_resume_message(choices, question_data, decision_id);
+    if !ctx.choices.is_empty() {
+        let resume_msg = build_multi_question_resume_message(ctx);
         return Some(Event::JobResume {
             id: pid,
             message: Some(resume_msg),
@@ -271,20 +273,23 @@ fn map_decision_to_job_action(
         });
     }
 
-    let action = resolve_decision_action(source, chosen, options);
+    let action = resolve_decision_action(ctx.source, ctx.chosen, ctx.options);
 
     // Plan decisions for jobs route similarly to other approval types
-    if matches!(source, DecisionSource::Plan) {
+    if matches!(ctx.source, DecisionSource::Plan) {
         return match action {
             ResolvedAction::Approve => Some(Event::JobResume {
                 id: pid,
-                message: Some(format!("decision {} plan approved", decision_id)),
+                message: Some(format!("decision {} plan approved", ctx.decision_id)),
                 vars: HashMap::new(),
                 kill: false,
             }),
-            ResolvedAction::Freeform => message.map(|msg| Event::JobResume {
+            ResolvedAction::Freeform => ctx.message.map(|msg| Event::JobResume {
                 id: pid,
-                message: Some(format!("decision {} plan revision: {}", decision_id, msg)),
+                message: Some(format!(
+                    "decision {} plan revision: {}",
+                    ctx.decision_id, msg
+                )),
                 vars: HashMap::new(),
                 kill: false,
             }),
@@ -294,16 +299,16 @@ fn map_decision_to_job_action(
     }
 
     match action {
-        ResolvedAction::Freeform => message.map(|msg| Event::JobResume {
+        ResolvedAction::Freeform => ctx.message.map(|msg| Event::JobResume {
             id: pid,
-            message: Some(format!("decision {} freeform: {}", decision_id, msg)),
+            message: Some(format!("decision {} freeform: {}", ctx.decision_id, msg)),
             vars: HashMap::new(),
             kill: false,
         }),
         ResolvedAction::Cancel => Some(Event::JobCancel { id: pid }),
         ResolvedAction::Nudge | ResolvedAction::Retry => Some(Event::JobResume {
             id: pid,
-            message: Some(build_resume_message(chosen, message, decision_id)),
+            message: Some(build_resume_message(ctx)),
             vars: HashMap::new(),
             kill: false,
         }),
@@ -313,19 +318,14 @@ fn map_decision_to_job_action(
         }),
         ResolvedAction::Approve => Some(Event::JobResume {
             id: pid,
-            message: Some(format!("decision {} approved", decision_id)),
+            message: Some(format!("decision {} approved", ctx.decision_id)),
             vars: HashMap::new(),
             kill: false,
         }),
         ResolvedAction::Deny => Some(Event::JobCancel { id: pid }),
         ResolvedAction::Answer => Some(Event::JobResume {
             id: pid,
-            message: Some(build_question_resume_message(
-                chosen,
-                message,
-                decision_id,
-                options,
-            )),
+            message: Some(build_question_resume_message(ctx)),
             vars: HashMap::new(),
             kill: false,
         }),
@@ -334,18 +334,10 @@ fn map_decision_to_job_action(
 }
 
 /// Map a decision resolution to the appropriate agent run action events.
-// TODO(refactor): group decision resolution params into a struct
-#[allow(clippy::too_many_arguments)]
 fn map_decision_to_agent_run_action(
-    source: &DecisionSource,
-    chosen: Option<usize>,
-    choices: &[usize],
-    message: Option<&str>,
-    decision_id: &str,
+    ctx: &DecisionResolveCtx,
     agent_run_id: &AgentRunId,
     session_id: Option<&str>,
-    options: &[DecisionOption],
-    _question_data: Option<&QuestionData>,
 ) -> Vec<Event> {
     let ar_id = agent_run_id.clone();
 
@@ -358,23 +350,23 @@ fn map_decision_to_agent_run_action(
 
     // Multi-question path: send concatenated per-question digits
     // e.g., choices [1, 2] → SessionInput "12\n"
-    if !choices.is_empty() {
-        let input: String = choices.iter().map(|c| c.to_string()).collect();
+    if !ctx.choices.is_empty() {
+        let input: String = ctx.choices.iter().map(|c| c.to_string()).collect();
         return send_to_session(format!("{}\n", input))
             .into_iter()
             .collect();
     }
 
-    let action = resolve_decision_action(source, chosen, options);
+    let action = resolve_decision_action(ctx.source, ctx.chosen, ctx.options);
 
     match action {
         ResolvedAction::Freeform => {
-            if matches!(source, DecisionSource::Plan) {
+            if matches!(ctx.source, DecisionSource::Plan) {
                 // Plan revision: send Escape to cancel the plan dialog, then
                 // send revision feedback as a new user message via AgentRunResume.
                 let mut events: Vec<Event> =
                     send_to_session("Escape".to_string()).into_iter().collect();
-                if let Some(msg) = message {
+                if let Some(msg) = ctx.message {
                     events.push(Event::AgentRunResume {
                         id: ar_id,
                         message: Some(msg.to_string()),
@@ -383,7 +375,7 @@ fn map_decision_to_agent_run_action(
                 }
                 events
             } else {
-                message
+                ctx.message
                     .map(|msg| Event::AgentRunResume {
                         id: ar_id,
                         message: Some(msg.to_string()),
@@ -394,26 +386,26 @@ fn map_decision_to_agent_run_action(
             }
         }
         ResolvedAction::Cancel => {
-            if matches!(source, DecisionSource::Plan) {
+            if matches!(ctx.source, DecisionSource::Plan) {
                 // Plan cancel: send Escape to dismiss the dialog, then fail
                 let mut events: Vec<Event> =
                     send_to_session("Escape".to_string()).into_iter().collect();
                 events.push(Event::AgentRunStatusChanged {
                     id: ar_id,
                     status: AgentRunStatus::Failed,
-                    reason: Some(format!("plan rejected via decision {}", decision_id)),
+                    reason: Some(format!("plan rejected via decision {}", ctx.decision_id)),
                 });
                 events
             } else {
                 vec![Event::AgentRunStatusChanged {
                     id: ar_id,
                     status: AgentRunStatus::Failed,
-                    reason: Some(format!("cancelled via decision {}", decision_id)),
+                    reason: Some(format!("cancelled via decision {}", ctx.decision_id)),
                 }]
             }
         }
         ResolvedAction::Nudge => {
-            let msg = message.unwrap_or("Please continue with the task.");
+            let msg = ctx.message.unwrap_or("Please continue with the task.");
             vec![Event::AgentRunResume {
                 id: ar_id,
                 message: Some(msg.to_string()),
@@ -421,11 +413,11 @@ fn map_decision_to_agent_run_action(
             }]
         }
         ResolvedAction::Complete => {
-            let reason = match source {
+            let reason = match ctx.source {
                 DecisionSource::Error | DecisionSource::Gate => {
-                    format!("skipped via decision {}", decision_id)
+                    format!("skipped via decision {}", ctx.decision_id)
                 }
-                _ => format!("marked done via decision {}", decision_id),
+                _ => format!("marked done via decision {}", ctx.decision_id),
             };
             vec![Event::AgentRunStatusChanged {
                 id: ar_id,
@@ -435,16 +427,16 @@ fn map_decision_to_agent_run_action(
         }
         ResolvedAction::Retry => vec![Event::AgentRunResume {
             id: ar_id,
-            message: Some(build_resume_message(chosen, message, decision_id)),
+            message: Some(build_resume_message(ctx)),
             kill: true,
         }],
         ResolvedAction::Approve => {
-            if matches!(source, DecisionSource::Plan) {
+            if matches!(ctx.source, DecisionSource::Plan) {
                 // Plan approval: navigate with arrow keys (Down * N + Enter).
                 // Option 1 = cursor already on it → just Enter
                 // Option 2 = Down Enter
                 // Option 3 = Down Down Enter
-                let downs = chosen.unwrap_or(1) - 1;
+                let downs = ctx.chosen.unwrap_or(1) - 1;
                 let mut keys = "Down ".repeat(downs);
                 keys.push_str("Enter");
                 send_to_session(keys).into_iter().collect()
@@ -455,9 +447,9 @@ fn map_decision_to_agent_run_action(
         }
         ResolvedAction::Deny => send_to_session("n\n".to_string()).into_iter().collect(),
         ResolvedAction::Answer => {
-            if let Some(c) = chosen {
+            if let Some(c) = ctx.chosen {
                 send_to_session(format!("{}\n", c)).into_iter().collect()
-            } else if let Some(msg) = message {
+            } else if let Some(msg) = ctx.message {
                 send_to_session(format!("{}\n", msg)).into_iter().collect()
             } else {
                 vec![]
@@ -468,39 +460,32 @@ fn map_decision_to_agent_run_action(
 }
 
 /// Build a resume message for Question decisions, including the selected option label.
-fn build_question_resume_message(
-    chosen: Option<usize>,
-    message: Option<&str>,
-    decision_id: &str,
-    options: &[DecisionOption],
-) -> String {
+fn build_question_resume_message(ctx: &DecisionResolveCtx) -> String {
     let mut parts = Vec::new();
 
-    if let Some(c) = chosen {
-        let label = options
+    if let Some(c) = ctx.chosen {
+        let label = ctx
+            .options
             .get(c - 1) // 1-indexed to 0-indexed
             .map(|o| o.label.as_str())
             .unwrap_or("unknown");
         parts.push(format!("Selected: {} (option {})", label, c));
     }
-    if let Some(m) = message {
+    if let Some(m) = ctx.message {
         parts.push(m.to_string());
     }
     if parts.is_empty() {
-        parts.push(format!("decision {} resolved", decision_id));
+        parts.push(format!("decision {} resolved", ctx.decision_id));
     }
 
     parts.join("; ")
 }
 
 /// Build a human-readable resume message for multi-question decisions.
-fn build_multi_question_resume_message(
-    choices: &[usize],
-    question_data: Option<&QuestionData>,
-    decision_id: &str,
-) -> String {
-    if let Some(qd) = question_data {
-        let parts: Vec<String> = choices
+fn build_multi_question_resume_message(ctx: &DecisionResolveCtx) -> String {
+    if let Some(qd) = ctx.question_data {
+        let parts: Vec<String> = ctx
+            .choices
             .iter()
             .enumerate()
             .map(|(i, &c)| {
@@ -522,8 +507,8 @@ fn build_multi_question_resume_message(
     } else {
         format!(
             "decision {} resolved: choices [{}]",
-            decision_id,
-            choices
+            ctx.decision_id,
+            ctx.choices
                 .iter()
                 .map(|c| c.to_string())
                 .collect::<Vec<_>>()
@@ -533,14 +518,17 @@ fn build_multi_question_resume_message(
 }
 
 /// Build a human-readable resume message from the decision resolution.
-fn build_resume_message(chosen: Option<usize>, message: Option<&str>, decision_id: &str) -> String {
+fn build_resume_message(ctx: &DecisionResolveCtx) -> String {
     let mut parts = Vec::new();
-    if let Some(c) = chosen {
-        parts.push(format!("decision {} resolved: option {}", decision_id, c));
+    if let Some(c) = ctx.chosen {
+        parts.push(format!(
+            "decision {} resolved: option {}",
+            ctx.decision_id, c
+        ));
     }
-    if let Some(m) = message {
+    if let Some(m) = ctx.message {
         if parts.is_empty() {
-            parts.push(format!("decision {} resolved: {}", decision_id, m));
+            parts.push(format!("decision {} resolved: {}", ctx.decision_id, m));
         } else {
             parts.push(format!("message: {}", m));
         }
