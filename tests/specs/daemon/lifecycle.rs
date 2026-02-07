@@ -378,9 +378,10 @@ fn ojd_starts_after_previous_daemon_stopped() {
 // Session Kill Tests
 // =============================================================================
 
-/// Check if any tmux session with the given prefix exists.
-fn tmux_session_exists(prefix: &str) -> bool {
+/// Check if any tmux session with the given prefix exists in the given tmux dir.
+fn tmux_session_exists(prefix: &str, tmux_tmpdir: &std::path::Path) -> bool {
     let output = std::process::Command::new("tmux")
+        .env("TMUX_TMPDIR", tmux_tmpdir)
         .args(["list-sessions", "-F", "#{session_name}"])
         .output()
         .unwrap_or_else(|_| {
@@ -414,8 +415,9 @@ fn daemon_stop_kill_terminates_sessions() {
 
     // Wait for agent to be spawned (tmux session exists).
     // Use extended timeout — tmux session creation is slow under load.
+    let tmux_dir = temp.state_path().join("tmux");
     let running = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        tmux_session_exists("oj-kill-test-worker-")
+        tmux_session_exists("oj-kill-test-worker-", &tmux_dir)
     });
     assert!(
         running,
@@ -428,7 +430,7 @@ fn daemon_stop_kill_terminates_sessions() {
 
     // Verify tmux session is gone
     let gone = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        !tmux_session_exists("oj-kill-test-worker-")
+        !tmux_session_exists("oj-kill-test-worker-", &tmux_dir)
     });
     assert!(
         gone,
@@ -483,8 +485,9 @@ fn sessions_survive_normal_shutdown() {
 
     // Wait for agent to be spawned.
     // Use extended timeout — tmux session creation is slow under load.
+    let tmux_dir = temp.state_path().join("tmux");
     let running = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        tmux_session_exists("oj-survive-test-worker-")
+        tmux_session_exists("oj-survive-test-worker-", &tmux_dir)
     });
     assert!(
         running,
@@ -508,23 +511,11 @@ fn sessions_survive_normal_shutdown() {
     assert!(stopped, "daemon should stop");
 
     assert!(
-        tmux_session_exists("oj-survive-test-worker-"),
+        tmux_session_exists("oj-survive-test-worker-", &tmux_dir),
         "tmux session should survive normal daemon shutdown"
     );
 
-    // Clean up: kill the surviving session manually so it doesn't leak
-    let output = std::process::Command::new("tmux")
-        .args(["list-sessions", "-F", "#{session_name}"])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if line.starts_with("oj-survive-test-worker-") {
-            let _ = std::process::Command::new("tmux")
-                .args(["kill-session", "-t", line])
-                .status();
-        }
-    }
+    // Clean up is handled by Project::drop which kills the isolated tmux server
 }
 
 // =============================================================================

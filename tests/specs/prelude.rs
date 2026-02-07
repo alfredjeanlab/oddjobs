@@ -325,9 +325,13 @@ pub struct Project {
 impl Project {
     /// Create an empty project
     pub fn empty() -> Self {
+        let state_dir = tempfile::tempdir().unwrap();
+        // Isolate tmux sessions per test so leaked sessions don't pollute
+        // the user's global tmux server (and appear as ghosts to the daemon).
+        std::fs::create_dir_all(state_dir.path().join("tmux")).unwrap();
         Self {
             dir: tempfile::tempdir().unwrap(),
-            state_dir: tempfile::tempdir().unwrap(),
+            state_dir,
         }
     }
 
@@ -366,6 +370,8 @@ impl Project {
         cli()
             .pwd(self.path())
             .env("OJ_STATE_DIR", self.state_path())
+            // Isolate tmux sessions per test project
+            .env("TMUX_TMPDIR", self.state_path().join("tmux"))
             // Set CLAUDE_CONFIG_DIR so claudeless writes JSONL where the watcher
             // expects it. Without this, claudeless defaults to a temp dir while
             // the watcher defaults to ~/.claude, and they never find each other.
@@ -404,6 +410,13 @@ impl Project {
 
 impl Drop for Project {
     fn drop(&mut self) {
+        // Kill isolated tmux server (cleanup any leaked test sessions)
+        let tmux_dir = self.state_path().join("tmux");
+        let _ = std::process::Command::new("tmux")
+            .env("TMUX_TMPDIR", &tmux_dir)
+            .args(["kill-server"])
+            .output();
+
         // Always try to stop daemon (no-op if not running)
         let mut cmd = self.oj().args(&["daemon", "stop", "--kill"]).command();
         cmd.stdout(std::process::Stdio::null())

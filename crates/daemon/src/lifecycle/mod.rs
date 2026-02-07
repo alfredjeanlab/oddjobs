@@ -150,6 +150,18 @@ impl DaemonState {
     /// WAL entry exactly once, so processing here as well would cause handlers
     /// to fire twice (e.g. duplicate job creation from WorkerPollComplete).
     pub async fn process_event(&mut self, event: Event) -> Result<(), LifecycleError> {
+        // For deletion events, run the handler BEFORE state mutation so
+        // cleanup code can read the data that's about to be removed.
+        // handle_job_deleted needs job.session_id, step_history, workspace_id.
+        let pre_delete_events = if matches!(&event, Event::JobDeleted { .. }) {
+            self.runtime
+                .handle_event(event.clone())
+                .await
+                .map_err(|e| LifecycleError::Runtime(e.to_string()))?
+        } else {
+            vec![]
+        };
+
         // Apply the incoming event to materialized state so queries see it.
         // (Effect::Emit events are also applied in the executor for immediate
         // visibility; apply_event is idempotent so the second apply when those
@@ -159,15 +171,19 @@ impl DaemonState {
             state.apply_event(&event);
         }
 
-        let result_events = self
-            .runtime
-            .handle_event(event)
-            .await
-            .map_err(|e| LifecycleError::Runtime(e.to_string()))?;
+        // Handle non-deletion events normally (deletion already handled above)
+        let result_events = if matches!(&event, Event::JobDeleted { .. }) {
+            vec![]
+        } else {
+            self.runtime
+                .handle_event(event)
+                .await
+                .map_err(|e| LifecycleError::Runtime(e.to_string()))?
+        };
 
-        // Persist result events to WAL — the engine loop will read and process
+        // Persist all result events to WAL — the engine loop will read and process
         // them on the next iteration, ensuring single delivery.
-        for result_event in result_events {
+        for result_event in pre_delete_events.into_iter().chain(result_events) {
             if let Err(e) = self.event_bus.send(result_event) {
                 warn!("Failed to persist runtime result event to WAL: {}", e);
             }

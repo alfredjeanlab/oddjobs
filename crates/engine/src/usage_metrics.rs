@@ -252,10 +252,15 @@ impl UsageMetricsCollector {
     fn collect_once(&mut self) {
         self.cycle_count += 1;
 
-        // Snapshot agents and jobs from state (brief lock)
-        let (agents, jobs) = {
+        // Snapshot agents, jobs, agent_runs, and sessions from state (brief lock)
+        let (agents, jobs, agent_runs, sessions) = {
             let state = self.state.lock();
-            (state.agents.clone(), state.jobs.clone())
+            (
+                state.agents.clone(),
+                state.jobs.clone(),
+                state.agent_runs.clone(),
+                state.sessions.clone(),
+            )
         };
 
         // Update metadata and discover session logs
@@ -315,7 +320,7 @@ impl UsageMetricsCollector {
 
         // Ghost detection (every N cycles)
         let ghost_sessions = if self.cycle_count.is_multiple_of(GHOST_CHECK_EVERY_N) {
-            detect_ghost_sessions(&agents)
+            detect_ghost_sessions(&agents, &agent_runs, &sessions)
         } else {
             // Preserve previous ghost list
             self.health.lock().ghost_sessions.clone()
@@ -450,7 +455,11 @@ impl UsageMetricsCollector {
 }
 
 /// Detect tmux sessions with `oj-` prefix that are not tracked in state.
-fn detect_ghost_sessions(agents: &HashMap<String, oj_core::AgentRecord>) -> Vec<String> {
+fn detect_ghost_sessions(
+    agents: &HashMap<String, oj_core::AgentRecord>,
+    agent_runs: &HashMap<String, oj_core::AgentRun>,
+    sessions: &HashMap<String, oj_storage::Session>,
+) -> Vec<String> {
     let output = match std::process::Command::new("tmux")
         .args(["list-sessions", "-F", "#{session_name}"])
         .output()
@@ -464,10 +473,20 @@ fn detect_ghost_sessions(agents: &HashMap<String, oj_core::AgentRecord>) -> Vec<
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let known_sessions: std::collections::HashSet<&str> = agents
-        .values()
-        .filter_map(|r| r.session_id.as_deref())
-        .collect();
+    let mut known_sessions: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for r in agents.values() {
+        if let Some(sid) = &r.session_id {
+            known_sessions.insert(sid);
+        }
+    }
+    for ar in agent_runs.values() {
+        if let Some(sid) = &ar.session_id {
+            known_sessions.insert(sid);
+        }
+    }
+    for s in sessions.values() {
+        known_sessions.insert(&s.id);
+    }
 
     stdout
         .lines()
