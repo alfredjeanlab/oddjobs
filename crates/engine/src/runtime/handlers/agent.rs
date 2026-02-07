@@ -4,6 +4,7 @@
 //! Agent state change handling
 
 use super::super::Runtime;
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use oj_adapters::agent::find_session_log;
@@ -341,7 +342,22 @@ where
                     return Ok(vec![]); // Already escalated — no-op
                 }
 
+                let trigger = EscalationTrigger::Idle {
+                    assistant_context: None,
+                };
+                let (decision_id, decision_event) = EscalationDecisionBuilder::for_job(
+                    job_id.clone(),
+                    job.name.clone(),
+                    trigger,
+                )
+                .agent_id(job.session_id.clone().unwrap_or_default())
+                .namespace(job.namespace.clone())
+                .build();
+
                 let effects = vec![
+                    Effect::Emit {
+                        event: decision_event,
+                    },
                     Effect::Notify {
                         title: format!("Job needs attention: {}", job.name),
                         message: "Agent tried to stop without signaling completion".to_string(),
@@ -351,7 +367,7 @@ where
                             job_id: job_id.clone(),
                             step: job.step.clone(),
                             reason: Some("on_stop: escalate".to_string()),
-                            decision_id: None,
+                            decision_id: Some(decision_id),
                         },
                     },
                     Effect::CancelTimer {
@@ -368,18 +384,38 @@ where
                 if agent_run.status == AgentRunStatus::Escalated {
                     return Ok(vec![]);
                 }
-                // Fire standalone escalation
+
+                let trigger = EscalationTrigger::Idle {
+                    assistant_context: None,
+                };
+                let (_decision_id, decision_event) =
+                    EscalationDecisionBuilder::for_agent_run(
+                        agent_run_id.clone(),
+                        agent_run.command_name.clone(),
+                        trigger,
+                    )
+                    .agent_id(agent_run.agent_id.clone().unwrap_or_default())
+                    .namespace(agent_run.namespace.clone())
+                    .build();
+
+                // Fire standalone escalation with decision
                 let effects = vec![
+                    Effect::Emit {
+                        event: decision_event,
+                    },
                     Effect::Notify {
                         title: format!("Agent needs attention: {}", agent_run.command_name),
                         message: "Agent tried to stop without signaling completion".to_string(),
                     },
                     Effect::Emit {
                         event: Event::AgentRunStatusChanged {
-                            id: agent_run_id,
+                            id: agent_run_id.clone(),
                             status: AgentRunStatus::Escalated,
                             reason: Some("on_stop: escalate".to_string()),
                         },
+                    },
+                    Effect::CancelTimer {
+                        id: TimerId::exit_deferred_agent_run(&agent_run_id),
                     },
                 ];
                 Ok(self.executor.execute_all(effects).await?)
