@@ -29,6 +29,9 @@ where
             return Ok(vec![]);
         };
 
+        // Capture terminal snapshot before processing the signal
+        self.capture_agent_terminal(agent_id).await;
+
         match owner {
             OwnerId::AgentRun(agent_run_id) => {
                 let agent_run =
@@ -132,6 +135,40 @@ where
                     },
                 ];
                 Ok(self.executor.execute_all(effects).await?)
+            }
+        }
+    }
+
+    /// Capture agent terminal output and save to the agent's log directory.
+    ///
+    /// Best-effort: failures are logged but do not interrupt signal handling.
+    async fn capture_agent_terminal(&self, agent_id: &AgentId) {
+        // Look up the agent's tmux session_id from state
+        let session_id = self.lock_state(|s| {
+            s.agents
+                .get(agent_id.as_str())
+                .and_then(|r| r.session_id.clone())
+        });
+
+        let Some(session_id) = session_id else {
+            tracing::debug!(
+                agent_id = %agent_id,
+                "no session_id for agent, skipping terminal capture"
+            );
+            return;
+        };
+
+        match self.executor.capture_session_output(&session_id, 200).await {
+            Ok(output) => {
+                self.logger.write_agent_capture(agent_id.as_str(), &output);
+            }
+            Err(e) => {
+                tracing::debug!(
+                    agent_id = %agent_id,
+                    session_id,
+                    error = %e,
+                    "failed to capture agent terminal"
+                );
             }
         }
     }

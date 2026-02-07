@@ -679,6 +679,15 @@ where
         Arc::clone(&self.scheduler)
     }
 
+    /// Capture recent output from a tmux session (plain text, no ANSI escapes).
+    pub async fn capture_session_output(
+        &self,
+        session_id: &str,
+        lines: u32,
+    ) -> Result<String, ExecuteError> {
+        Ok(self.sessions.capture_output(session_id, lines).await?)
+    }
+
     /// Check if a tmux session is still alive
     pub async fn check_session_alive(&self, session_id: &str) -> bool {
         self.sessions.is_alive(session_id).await.unwrap_or(false)

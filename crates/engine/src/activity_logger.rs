@@ -209,6 +209,35 @@ impl ActivityLogger<JobLog> {
         }
     }
 
+    /// Write a terminal capture snapshot to the agent's log directory.
+    ///
+    /// Saves plain-text terminal content to `{logs_dir}/agent/{agent_id}/capture.latest.txt`.
+    /// Failures are logged via tracing but do not propagate.
+    pub fn write_agent_capture(&self, agent_id: &str, content: &str) {
+        let path = log_paths::agent_capture_path(&self.log_dir, agent_id);
+        if let Err(e) = self.write_capture_file(&path, content) {
+            tracing::warn!(
+                agent_id,
+                error = %e,
+                "failed to write agent terminal capture"
+            );
+        } else {
+            tracing::debug!(
+                agent_id,
+                path = %path.display(),
+                "wrote agent terminal capture"
+            );
+        }
+    }
+
+    fn write_capture_file(&self, path: &Path, content: &str) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, content)?;
+        Ok(())
+    }
+
     fn write_agent_error(&self, path: &Path, message: &str) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;

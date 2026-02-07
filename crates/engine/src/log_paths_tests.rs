@@ -67,6 +67,15 @@ fn queue_log_path_with_namespace() {
 }
 
 #[test]
+fn agent_capture_path_builds_expected_path() {
+    let result = agent_capture_path(Path::new("/state/logs"), "abc-123-def");
+    assert_eq!(
+        result,
+        PathBuf::from("/state/logs/agent/abc-123-def/capture.latest.txt")
+    );
+}
+
+#[test]
 fn breadcrumb_path_builds_expected_path() {
     let result = breadcrumb_path(Path::new("/state/logs"), "job-001");
     assert_eq!(result, PathBuf::from("/state/logs/job-001.crumb.json"));
