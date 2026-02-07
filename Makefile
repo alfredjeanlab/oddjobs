@@ -13,7 +13,7 @@
 check:
 	cargo fmt --all
 	cargo clippy --all -- -D warnings
-	quench check --fix --no-cloc
+	quench check --fix
 	cargo build --all
 	cargo test -q --workspace
 
