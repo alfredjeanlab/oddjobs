@@ -28,6 +28,24 @@ where
         runbook_hash: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        // Defense in depth: if this worker is already Running in memory, a second
+        // WorkerStarted would replace the WorkerState and clear inflight_items /
+        // pending_takes, allowing duplicate dispatches.  Delegate to wake instead
+        // so in-flight tracking is preserved.
+        let already_running = {
+            let workers = self.worker_states.lock();
+            workers
+                .get(worker_name)
+                .is_some_and(|s| s.status == WorkerStatus::Running)
+        };
+        if already_running {
+            tracing::warn!(
+                worker = worker_name,
+                "duplicate WorkerStarted for running worker, delegating to wake"
+            );
+            return self.handle_worker_wake(worker_name).await;
+        }
+
         // Load runbook to get worker definition
         let runbook = self.cached_runbook(runbook_hash)?;
         let worker_def = runbook
