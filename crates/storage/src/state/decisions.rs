@@ -20,6 +20,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             source,
             context,
             options,
+            question_data,
             created_at_ms,
             namespace,
         } => {
@@ -44,7 +45,9 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                         source: source.clone(),
                         context: context.clone(),
                         options: options.clone(),
+                        question_data: question_data.clone(),
                         chosen: None,
+                        choices: Vec::new(),
                         message: None,
                         created_at_ms: *created_at_ms,
                         resolved_at_ms: None,
@@ -72,12 +75,14 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
         Event::DecisionResolved {
             id,
             chosen,
+            choices,
             message,
             resolved_at_ms,
             ..
         } => {
             if let Some(decision) = state.decisions.get_mut(id) {
                 decision.chosen = *chosen;
+                decision.choices.clone_from(choices);
                 decision.message.clone_from(message);
                 decision.resolved_at_ms = Some(*resolved_at_ms);
             }

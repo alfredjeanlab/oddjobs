@@ -27,8 +27,8 @@ pub use status::{
 mod types;
 pub use types::{
     AgentDetail, AgentSummary, DecisionDetail, DecisionOptionDetail, DecisionSummary, JobDetail,
-    JobSummary, QueueItemSummary, QueueSummary, SessionSummary, StepRecordDetail, WorkerSummary,
-    WorkspaceDetail, WorkspaceEntry, WorkspaceSummary,
+    JobSummary, QuestionGroupDetail, QueueItemSummary, QueueSummary, SessionSummary,
+    StepRecordDetail, WorkerSummary, WorkspaceDetail, WorkspaceEntry, WorkspaceSummary,
 };
 
 #[path = "protocol_wire.rs"]
@@ -362,6 +362,9 @@ pub enum Request {
         /// 1-indexed option choice
         #[serde(default, skip_serializing_if = "Option::is_none")]
         chosen: Option<usize>,
+        /// Per-question 1-indexed answers for multi-question decisions
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        choices: Vec<usize>,
         /// Freeform message
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,

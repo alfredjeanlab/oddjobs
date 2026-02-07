@@ -130,6 +130,12 @@ impl EscalationDecisionBuilder {
             OwnerId::AgentRun(_) => JobId::default(),
         };
 
+        // Extract question_data from Question triggers
+        let question_data = match &self.trigger {
+            EscalationTrigger::Question { question_data, .. } => question_data.clone(),
+            _ => None,
+        };
+
         let event = Event::DecisionCreated {
             id: decision_id.clone(),
             job_id,
@@ -138,6 +144,7 @@ impl EscalationDecisionBuilder {
             source: self.trigger.to_source(),
             context,
             options,
+            question_data,
             created_at_ms,
             namespace: self.namespace,
         };
@@ -304,7 +311,7 @@ impl EscalationDecisionBuilder {
                 let mut options = Vec::new();
 
                 if let Some(qd) = question_data {
-                    if let Some(entry) = qd.questions.first() {
+                    for entry in &qd.questions {
                         for opt in &entry.options {
                             let mut o = DecisionOption::new(opt.label.clone());
                             if let Some(ref desc) = opt.description {

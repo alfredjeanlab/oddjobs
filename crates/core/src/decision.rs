@@ -3,6 +3,7 @@
 
 //! Decision types for human-in-the-loop job control.
 
+use crate::event::QuestionData;
 use crate::owner::OwnerId;
 use serde::{Deserialize, Serialize};
 
@@ -46,9 +47,15 @@ pub struct Decision {
     pub context: String,
     #[serde(default)]
     pub options: Vec<DecisionOption>,
+    /// Structured question data for multi-question decisions
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_data: Option<QuestionData>,
     /// 1-indexed choice (None = unresolved or freeform-only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chosen: Option<usize>,
+    /// Per-question 1-indexed answers for multi-question decisions
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<usize>,
     /// Freeform message from the resolver
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,

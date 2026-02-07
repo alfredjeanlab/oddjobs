@@ -2,7 +2,9 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use clap::Parser;
-use oj_daemon::protocol::{DecisionDetail, DecisionOptionDetail, DecisionSummary};
+use oj_daemon::protocol::{
+    DecisionDetail, DecisionOptionDetail, DecisionSummary, QuestionGroupDetail,
+};
 
 use super::*;
 
@@ -45,7 +47,7 @@ fn parse_resolve_with_choice() {
     } = cli.command
     {
         assert_eq!(id, "abc123");
-        assert_eq!(choice, Some(2));
+        assert_eq!(choice, vec![2]);
         assert_eq!(message, None);
     } else {
         panic!("expected Resolve");
@@ -62,7 +64,7 @@ fn parse_resolve_with_message() {
     } = cli.command
     {
         assert_eq!(id, "abc123");
-        assert_eq!(choice, None);
+        assert!(choice.is_empty());
         assert_eq!(message, Some("looks good".to_string()));
     } else {
         panic!("expected Resolve");
@@ -79,7 +81,7 @@ fn parse_resolve_with_choice_and_message() {
     } = cli.command
     {
         assert_eq!(id, "abc123");
-        assert_eq!(choice, Some(1));
+        assert_eq!(choice, vec![1]);
         assert_eq!(message, Some("approved".to_string()));
     } else {
         panic!("expected Resolve");
@@ -120,7 +122,9 @@ fn make_detail(resolved: bool) -> DecisionDetail {
                 recommended: false,
             },
         ],
+        question_groups: vec![],
         chosen: if resolved { Some(1) } else { None },
+        choices: vec![],
         message: if resolved {
             Some("approved".to_string())
         } else {
@@ -264,4 +268,98 @@ fn review_input_invalid() {
     assert_eq!(parse_review_input("abc", 3), ReviewAction::Invalid);
     assert_eq!(parse_review_input("-1", 3), ReviewAction::Invalid);
     assert_eq!(parse_review_input("pick", 3), ReviewAction::Invalid);
+}
+
+// --- multi-question display tests ---
+
+#[test]
+fn format_decision_detail_grouped_questions() {
+    let d = DecisionDetail {
+        id: "abcdef1234567890".to_string(),
+        job_id: "pipe-1234567890".to_string(),
+        job_name: "build".to_string(),
+        agent_id: None,
+        source: "question".to_string(),
+        context: "Agent is asking questions".to_string(),
+        options: vec![], // flat options empty for multi-question
+        question_groups: vec![
+            QuestionGroupDetail {
+                question: "Which framework?".to_string(),
+                header: Some("Framework".to_string()),
+                options: vec![
+                    DecisionOptionDetail {
+                        number: 1,
+                        label: "React".to_string(),
+                        description: Some("Component-based".to_string()),
+                        recommended: false,
+                    },
+                    DecisionOptionDetail {
+                        number: 2,
+                        label: "Vue".to_string(),
+                        description: None,
+                        recommended: false,
+                    },
+                ],
+            },
+            QuestionGroupDetail {
+                question: "Which database?".to_string(),
+                header: Some("Database".to_string()),
+                options: vec![
+                    DecisionOptionDetail {
+                        number: 1,
+                        label: "PostgreSQL".to_string(),
+                        description: None,
+                        recommended: false,
+                    },
+                    DecisionOptionDetail {
+                        number: 2,
+                        label: "MySQL".to_string(),
+                        description: None,
+                        recommended: false,
+                    },
+                ],
+            },
+        ],
+        chosen: None,
+        choices: vec![],
+        message: None,
+        created_at_ms: 0,
+        resolved_at_ms: None,
+        superseded_by: None,
+        namespace: "myproject".to_string(),
+    };
+
+    let mut buf = Vec::new();
+    super::format_decision_detail(&mut buf, &d, true);
+    let out = output_string(&buf);
+
+    // Should display grouped questions
+    assert!(out.contains("[Framework]"), "missing Framework header");
+    assert!(out.contains("Which framework?"), "missing question text");
+    assert!(out.contains("1. React - Component-based"));
+    assert!(out.contains("2. Vue"));
+    assert!(out.contains("[Database]"), "missing Database header");
+    assert!(out.contains("Which database?"), "missing question text");
+    assert!(out.contains("1. PostgreSQL"));
+    assert!(out.contains("2. MySQL"));
+    assert!(out.contains("Cancel"), "missing Cancel option");
+    // Resolve hint for multi-question
+    assert!(out.contains("oj decision resolve abcdef12 <q1> <q2>"));
+}
+
+#[test]
+fn parse_resolve_multi_question() {
+    let cli = TestCli::parse_from(["test", "resolve", "abc123", "1", "2"]);
+    if let DecisionCommand::Resolve {
+        id,
+        choice,
+        message,
+    } = cli.command
+    {
+        assert_eq!(id, "abc123");
+        assert_eq!(choice, vec![1, 2]);
+        assert_eq!(message, None);
+    } else {
+        panic!("expected Resolve");
+    }
 }

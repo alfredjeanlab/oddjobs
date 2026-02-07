@@ -374,14 +374,92 @@ fn test_question_trigger_multi_question_context() {
 
     match event {
         Event::DecisionCreated {
-            context, options, ..
+            context,
+            options,
+            question_data,
+            ..
         } => {
             assert!(context.contains("[Q1] First question?"));
             assert!(context.contains("[Q2] Second question?"));
-            // Options come from first question only
-            assert_eq!(options.len(), 2); // "Yes" + "Cancel"
+            // Options come from ALL questions
+            assert_eq!(options.len(), 2); // "Yes" (from Q1) + "Cancel"
             assert_eq!(options[0].label, "Yes");
             assert_eq!(options[1].label, "Cancel");
+            // question_data is passed through
+            assert!(question_data.is_some());
+            assert_eq!(question_data.unwrap().questions.len(), 2);
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_multi_question_options_from_all_questions() {
+    let question_data = QuestionData {
+        questions: vec![
+            QuestionEntry {
+                question: "Which framework?".to_string(),
+                header: Some("Framework".to_string()),
+                options: vec![
+                    QuestionOption {
+                        label: "React".to_string(),
+                        description: Some("Component-based".to_string()),
+                    },
+                    QuestionOption {
+                        label: "Vue".to_string(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            },
+            QuestionEntry {
+                question: "Which database?".to_string(),
+                header: Some("Database".to_string()),
+                options: vec![
+                    QuestionOption {
+                        label: "PostgreSQL".to_string(),
+                        description: None,
+                    },
+                    QuestionOption {
+                        label: "MySQL".to_string(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            },
+        ],
+    };
+
+    let (_, event) = EscalationDecisionBuilder::for_job(
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
+        EscalationTrigger::Question {
+            question_data: Some(question_data),
+            assistant_context: None,
+        },
+    )
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            options,
+            question_data,
+            ..
+        } => {
+            // Options from ALL questions: React, Vue, PostgreSQL, MySQL + Cancel
+            assert_eq!(options.len(), 5);
+            assert_eq!(options[0].label, "React");
+            assert_eq!(options[0].description, Some("Component-based".to_string()));
+            assert_eq!(options[1].label, "Vue");
+            assert_eq!(options[2].label, "PostgreSQL");
+            assert_eq!(options[3].label, "MySQL");
+            assert_eq!(options[4].label, "Cancel");
+
+            // question_data preserved
+            let qd = question_data.unwrap();
+            assert_eq!(qd.questions.len(), 2);
+            assert_eq!(qd.questions[0].question, "Which framework?");
+            assert_eq!(qd.questions[1].question, "Which database?");
         }
         _ => panic!("expected DecisionCreated"),
     }

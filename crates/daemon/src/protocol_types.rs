@@ -224,7 +224,13 @@ pub struct DecisionDetail {
     pub source: String,
     pub context: String,
     pub options: Vec<DecisionOptionDetail>,
+    /// Grouped question data for multi-question decisions
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub question_groups: Vec<QuestionGroupDetail>,
     pub chosen: Option<usize>,
+    /// Per-question 1-indexed answers for multi-question decisions
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<usize>,
     pub message: Option<String>,
     pub created_at_ms: u64,
     pub resolved_at_ms: Option<u64>,
@@ -232,6 +238,15 @@ pub struct DecisionDetail {
     pub superseded_by: Option<String>,
     #[serde(default)]
     pub namespace: String,
+}
+
+/// A question group for multi-question decisions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QuestionGroupDetail {
+    pub question: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
+    pub options: Vec<DecisionOptionDetail>,
 }
 
 /// A single decision option for display

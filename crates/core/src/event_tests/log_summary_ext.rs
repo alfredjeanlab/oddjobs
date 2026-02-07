@@ -357,6 +357,7 @@ fn log_summary_decision_created_job_owner() {
         source: DecisionSource::Gate,
         context: "ctx".to_string(),
         options: vec![],
+        question_data: None,
         created_at_ms: 0,
         namespace: String::new(),
     };
@@ -378,6 +379,7 @@ fn log_summary_decision_created_agent_run_owner() {
         source: DecisionSource::Question,
         context: "ctx".to_string(),
         options: vec![],
+        question_data: None,
         created_at_ms: 0,
         namespace: String::new(),
     };
@@ -392,6 +394,7 @@ fn log_summary_decision_resolved_with_chosen() {
     let event = Event::DecisionResolved {
         id: "d1".to_string(),
         chosen: Some(2),
+        choices: vec![],
         message: None,
         resolved_at_ms: 0,
         namespace: String::new(),
@@ -404,6 +407,7 @@ fn log_summary_decision_resolved_no_chosen() {
     let event = Event::DecisionResolved {
         id: "d1".to_string(),
         chosen: None,
+        choices: vec![],
         message: Some("custom".to_string()),
         resolved_at_ms: 0,
         namespace: String::new(),

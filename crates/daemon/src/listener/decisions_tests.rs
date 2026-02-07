@@ -12,11 +12,13 @@ fn idle_dismiss_returns_no_action() {
     let result = map_decision_to_job_action(
         &DecisionSource::Idle,
         Some(4),
+        &[],
         None,
         "dec-123",
         "pipe-1",
         Some("step-1"),
         &[],
+        None,
     );
     assert!(result.is_none());
 }
@@ -58,11 +60,13 @@ fn question_cancel_is_last_option() {
     let result = map_decision_to_job_action(
         &DecisionSource::Question,
         Some(3),
+        &[],
         None,
         "dec-q1",
         "pipe-1",
         Some("step-1"),
         &options,
+        None,
     );
     match result {
         Some(Event::JobCancel { .. }) => {}
@@ -77,11 +81,13 @@ fn question_non_cancel_choice_resumes_with_label() {
     let result = map_decision_to_job_action(
         &DecisionSource::Question,
         Some(1),
+        &[],
         None,
         "dec-q1",
         "pipe-1",
         Some("step-1"),
         &options,
+        None,
     );
     match result {
         Some(Event::JobResume { message, .. }) => {
@@ -104,11 +110,13 @@ fn question_freeform_message_only() {
     let result = map_decision_to_job_action(
         &DecisionSource::Question,
         None,
+        &[],
         Some("custom answer"),
         "dec-q1",
         "pipe-1",
         Some("step-1"),
         &options,
+        None,
     );
     match result {
         Some(Event::JobResume { message, .. }) => {
@@ -150,11 +158,13 @@ fn agent_run_idle_nudge_emits_resume() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
         Some(1), // Nudge
+        &[],
         Some("please continue"),
         "dec-ar1",
         &ar_id,
         Some("session-abc"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -174,11 +184,13 @@ fn agent_run_idle_done_marks_completed() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
         Some(2), // Done
+        &[],
         None,
         "dec-ar2",
         &ar_id,
         Some("session-xyz"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -197,11 +209,13 @@ fn agent_run_idle_cancel_marks_failed() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
         Some(3), // Cancel
+        &[],
         None,
         "dec-ar3",
         &ar_id,
         Some("session-123"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -221,11 +235,13 @@ fn agent_run_idle_dismiss_returns_empty() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
         Some(4), // Dismiss
+        &[],
         None,
         "dec-ar4",
         &ar_id,
         Some("session-456"),
         &[],
+        None,
     );
 
     assert!(events.is_empty());
@@ -237,11 +253,13 @@ fn agent_run_error_retry_emits_resume_with_kill() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Error,
         Some(1), // Retry
+        &[],
         None,
         "dec-err1",
         &ar_id,
         Some("session-err"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -261,11 +279,13 @@ fn agent_run_error_skip_marks_completed() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Error,
         Some(2), // Skip
+        &[],
         None,
         "dec-err2",
         &ar_id,
         Some("session-err2"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -284,11 +304,13 @@ fn agent_run_approval_approve_sends_y() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Approval,
         Some(1), // Approve
+        &[],
         None,
         "dec-approve",
         &ar_id,
         Some("session-approve"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -307,11 +329,13 @@ fn agent_run_approval_deny_sends_n() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Approval,
         Some(2), // Deny
+        &[],
         None,
         "dec-deny",
         &ar_id,
         Some("session-deny"),
         &[],
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -331,11 +355,13 @@ fn agent_run_question_sends_option_number() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Question,
         Some(2), // Option B
+        &[],
         None,
         "dec-q1",
         &ar_id,
         Some("session-q1"),
         &options,
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -355,11 +381,13 @@ fn agent_run_question_cancel_marks_failed() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Question,
         Some(3), // Cancel (last option)
+        &[],
         None,
         "dec-qcancel",
         &ar_id,
         Some("session-qcancel"),
         &options,
+        None,
     );
 
     assert_eq!(events.len(), 1);
@@ -378,11 +406,13 @@ fn agent_run_no_session_nudge_still_emits_resume() {
     let events = map_decision_to_agent_run_action(
         &DecisionSource::Idle,
         Some(1), // Nudge
+        &[],
         Some("continue"),
         "dec-nosession",
         &ar_id,
         None, // No session — AgentRunResume handles liveness check in engine
         &[],
+        None,
     );
 
     // AgentRunResume is emitted regardless of session; the engine handles liveness
@@ -519,4 +549,113 @@ fn resolve_question_option_3_is_not_cancel_when_more_options() {
         resolve_decision_action(&DecisionSource::Question, Some(5), &options),
         ResolvedAction::Cancel,
     );
+}
+
+// ===================== Tests for multi-question routing =====================
+
+use super::build_multi_question_resume_message;
+use oj_core::{QuestionData, QuestionEntry, QuestionOption};
+
+fn make_multi_question_data() -> QuestionData {
+    QuestionData {
+        questions: vec![
+            QuestionEntry {
+                question: "Which framework?".to_string(),
+                header: Some("Framework".to_string()),
+                options: vec![
+                    QuestionOption {
+                        label: "React".to_string(),
+                        description: None,
+                    },
+                    QuestionOption {
+                        label: "Vue".to_string(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            },
+            QuestionEntry {
+                question: "Which database?".to_string(),
+                header: Some("Database".to_string()),
+                options: vec![
+                    QuestionOption {
+                        label: "PostgreSQL".to_string(),
+                        description: None,
+                    },
+                    QuestionOption {
+                        label: "MySQL".to_string(),
+                        description: None,
+                    },
+                ],
+                multi_select: false,
+            },
+        ],
+    }
+}
+
+#[test]
+fn multi_question_agent_run_sends_concatenated_digits() {
+    let ar_id = AgentRunId::new("ar-multi");
+    let qd = make_multi_question_data();
+    let events = map_decision_to_agent_run_action(
+        &DecisionSource::Question,
+        None,
+        &[1, 2], // Q1: React, Q2: MySQL
+        None,
+        "dec-multi",
+        &ar_id,
+        Some("session-multi"),
+        &[],
+        Some(&qd),
+    );
+
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-multi");
+            // Concatenated digits: "12" (handler appends \n)
+            assert_eq!(input, "12");
+        }
+        other => panic!("expected SessionInput, got {:?}", other),
+    }
+}
+
+#[test]
+fn multi_question_job_sends_resume_with_labels() {
+    let qd = make_multi_question_data();
+    let result = map_decision_to_job_action(
+        &DecisionSource::Question,
+        None,
+        &[1, 2],
+        None,
+        "dec-multi",
+        "pipe-1",
+        Some("step-1"),
+        &[],
+        Some(&qd),
+    );
+
+    match result {
+        Some(Event::JobResume { message, .. }) => {
+            let msg = message.unwrap();
+            assert!(msg.contains("React"), "expected React label, got: {}", msg);
+            assert!(msg.contains("MySQL"), "expected MySQL label, got: {}", msg);
+        }
+        other => panic!("expected JobResume, got {:?}", other),
+    }
+}
+
+#[test]
+fn build_multi_question_resume_message_with_data() {
+    let qd = make_multi_question_data();
+    let msg = build_multi_question_resume_message(&[1, 2], Some(&qd), "dec-1");
+    assert!(msg.contains("Framework: React (1)"));
+    assert!(msg.contains("Database: MySQL (2)"));
+}
+
+#[test]
+fn build_multi_question_resume_message_without_data() {
+    let msg = build_multi_question_resume_message(&[1, 2], None, "dec-1");
+    assert!(msg.contains("dec-1"));
+    assert!(msg.contains("1, 2"));
 }

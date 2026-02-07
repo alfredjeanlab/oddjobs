@@ -319,6 +319,7 @@ fn event_decision_created_roundtrip() {
             DecisionOption::new("Approve").recommended(),
             DecisionOption::new("Reject").description("Stop job"),
         ],
+        question_data: None,
         created_at_ms: 2_000_000,
         namespace: "myns".to_string(),
     };
@@ -338,6 +339,7 @@ fn event_decision_resolved_roundtrip() {
     let event = Event::DecisionResolved {
         id: "dec-abc123".to_string(),
         chosen: Some(1),
+        choices: vec![],
         message: Some("Approved".to_string()),
         resolved_at_ms: 3_000_000,
         namespace: "myns".to_string(),
@@ -357,6 +359,7 @@ fn event_decision_resolved_freeform_only_roundtrip() {
     let event = Event::DecisionResolved {
         id: "dec-xyz".to_string(),
         chosen: None,
+        choices: vec![],
         message: Some("Custom response".to_string()),
         resolved_at_ms: 4_000_000,
         namespace: String::new(),
@@ -375,6 +378,7 @@ fn event_decision_name() {
             source: DecisionSource::Question,
             context: "ctx".to_string(),
             options: vec![],
+            question_data: None,
             created_at_ms: 0,
             namespace: String::new(),
         }
@@ -385,6 +389,7 @@ fn event_decision_name() {
         Event::DecisionResolved {
             id: "d".to_string(),
             chosen: None,
+            choices: vec![],
             message: None,
             resolved_at_ms: 0,
             namespace: String::new(),

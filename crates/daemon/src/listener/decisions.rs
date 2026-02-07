@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use oj_core::{AgentRunId, AgentRunStatus, DecisionOption, DecisionSource, Event, JobId, OwnerId};
+use oj_core::{
+    AgentRunId, AgentRunStatus, DecisionOption, DecisionSource, Event, JobId, OwnerId, QuestionData,
+};
 
 use crate::protocol::Response;
 
@@ -18,6 +20,7 @@ pub(super) fn handle_decision_resolve(
     ctx: &ListenCtx,
     id: &str,
     chosen: Option<usize>,
+    choices: Vec<usize>,
     message: Option<String>,
 ) -> Result<Response, ConnectionError> {
     let state_guard = ctx.state.lock();
@@ -47,8 +50,36 @@ pub(super) fn handle_decision_resolve(
         }
     }
 
-    // Validate: at least one of chosen or message must be provided
-    if chosen.is_none() && message.is_none() {
+    // Validate: choices must match question count and be in range
+    if !choices.is_empty() {
+        if let Some(ref qd) = decision.question_data {
+            if choices.len() != qd.questions.len() {
+                return Ok(Response::Error {
+                    message: format!(
+                        "expected {} choices (one per question), got {}",
+                        qd.questions.len(),
+                        choices.len()
+                    ),
+                });
+            }
+            for (i, &c) in choices.iter().enumerate() {
+                let opt_count = qd.questions[i].options.len();
+                if c == 0 || c > opt_count {
+                    return Ok(Response::Error {
+                        message: format!(
+                            "choice {} for question {} out of range (1..{})",
+                            c,
+                            i + 1,
+                            opt_count
+                        ),
+                    });
+                }
+            }
+        }
+    }
+
+    // Validate: at least one of chosen, choices, or message must be provided
+    if chosen.is_none() && choices.is_empty() && message.is_none() {
         return Ok(Response::Error {
             message: "must provide either a choice or a message (-m)".to_string(),
         });
@@ -59,6 +90,7 @@ pub(super) fn handle_decision_resolve(
     let decision_namespace = decision.namespace.clone();
     let decision_source = decision.source.clone();
     let decision_options = decision.options.clone();
+    let decision_question_data = decision.question_data.clone();
     let decision_owner = decision.owner.clone();
     let decision_session_id = decision.agent_id.clone();
 
@@ -85,6 +117,7 @@ pub(super) fn handle_decision_resolve(
     let event = Event::DecisionResolved {
         id: full_id.clone(),
         chosen,
+        choices: choices.clone(),
         message: message.clone(),
         resolved_at_ms,
         namespace: decision_namespace,
@@ -96,6 +129,7 @@ pub(super) fn handle_decision_resolve(
         OwnerId::AgentRun(ar_id) => map_decision_to_agent_run_action(
             &decision_source,
             chosen,
+            &choices,
             message.as_deref(),
             &full_id,
             ar_id,
@@ -103,15 +137,18 @@ pub(super) fn handle_decision_resolve(
                 .as_deref()
                 .or(decision_session_id.as_deref()),
             &decision_options,
+            decision_question_data.as_ref(),
         ),
         OwnerId::Job(_) => map_decision_to_job_action(
             &decision_source,
             chosen,
+            &choices,
             message.as_deref(),
             &full_id,
             &job_id,
             job_step.as_deref(),
             &decision_options,
+            decision_question_data.as_ref(),
         )
         .into_iter()
         .collect(),
@@ -202,16 +239,31 @@ fn resolve_decision_action(
 }
 
 /// Map a decision resolution to the appropriate job action event.
+#[allow(clippy::too_many_arguments)]
 fn map_decision_to_job_action(
     source: &DecisionSource,
     chosen: Option<usize>,
+    choices: &[usize],
     message: Option<&str>,
     decision_id: &str,
     job_id: &str,
     job_step: Option<&str>,
     options: &[DecisionOption],
+    question_data: Option<&QuestionData>,
 ) -> Option<Event> {
     let pid = JobId::new(job_id);
+
+    // Multi-question path: choices non-empty means multi-question answer
+    if !choices.is_empty() {
+        let resume_msg = build_multi_question_resume_message(choices, question_data, decision_id);
+        return Some(Event::JobResume {
+            id: pid,
+            message: Some(resume_msg),
+            vars: HashMap::new(),
+            kill: false,
+        });
+    }
+
     let action = resolve_decision_action(source, chosen, options);
 
     match action {
@@ -255,17 +307,19 @@ fn map_decision_to_job_action(
 }
 
 /// Map a decision resolution to the appropriate agent run action events.
+#[allow(clippy::too_many_arguments)]
 fn map_decision_to_agent_run_action(
     source: &DecisionSource,
     chosen: Option<usize>,
+    choices: &[usize],
     message: Option<&str>,
     decision_id: &str,
     agent_run_id: &AgentRunId,
     session_id: Option<&str>,
     options: &[DecisionOption],
+    _question_data: Option<&QuestionData>,
 ) -> Vec<Event> {
     let ar_id = agent_run_id.clone();
-    let action = resolve_decision_action(source, chosen, options);
 
     let send_to_session = |input: String| -> Option<Event> {
         session_id.map(|sid| Event::SessionInput {
@@ -273,6 +327,15 @@ fn map_decision_to_agent_run_action(
             input,
         })
     };
+
+    // Multi-question path: send concatenated per-question digits
+    // e.g., choices [1, 2] → SessionInput "12" (handler appends \n)
+    if !choices.is_empty() {
+        let input: String = choices.iter().map(|c| c.to_string()).collect();
+        return send_to_session(input).into_iter().collect();
+    }
+
+    let action = resolve_decision_action(source, chosen, options);
 
     match action {
         ResolvedAction::Freeform => message
@@ -353,6 +416,45 @@ fn build_question_resume_message(
     }
 
     parts.join("; ")
+}
+
+/// Build a human-readable resume message for multi-question decisions.
+fn build_multi_question_resume_message(
+    choices: &[usize],
+    question_data: Option<&QuestionData>,
+    decision_id: &str,
+) -> String {
+    if let Some(qd) = question_data {
+        let parts: Vec<String> = choices
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| {
+                let label = qd
+                    .questions
+                    .get(i)
+                    .and_then(|q| q.options.get(c - 1))
+                    .map(|o| o.label.as_str())
+                    .unwrap_or("?");
+                let header = qd
+                    .questions
+                    .get(i)
+                    .and_then(|q| q.header.as_deref())
+                    .unwrap_or("Q");
+                format!("{}: {} ({})", header, label, c)
+            })
+            .collect();
+        parts.join("; ")
+    } else {
+        format!(
+            "decision {} resolved: choices [{}]",
+            decision_id,
+            choices
+                .iter()
+                .map(|c| c.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 /// Build a human-readable resume message from the decision resolution.

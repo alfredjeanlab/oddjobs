@@ -424,8 +424,9 @@ async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, C
         Request::DecisionResolve {
             id,
             chosen,
+            choices,
             message,
-        } => decisions::handle_decision_resolve(ctx, &id, chosen, message),
+        } => decisions::handle_decision_resolve(ctx, &id, chosen, choices, message),
 
         Request::AgentResume {
             agent_id,

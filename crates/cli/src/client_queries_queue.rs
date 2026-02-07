@@ -284,11 +284,13 @@ impl DaemonClient {
         &self,
         id: &str,
         chosen: Option<usize>,
+        choices: Vec<usize>,
         message: Option<String>,
     ) -> Result<String, ClientError> {
         let request = Request::DecisionResolve {
             id: id.to_string(),
             chosen,
+            choices,
             message,
         };
         match self.send(&request).await? {

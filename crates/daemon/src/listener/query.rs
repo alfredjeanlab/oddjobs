@@ -25,8 +25,8 @@ use oj_storage::MaterializedState;
 
 use crate::protocol::{
     CronSummary, DecisionDetail, DecisionOptionDetail, DecisionSummary, JobDetail, JobSummary,
-    Query, QueueItemSummary, Response, SessionSummary, StepRecordDetail, WorkerSummary,
-    WorkspaceDetail, WorkspaceSummary,
+    Query, QuestionGroupDetail, QueueItemSummary, Response, SessionSummary, StepRecordDetail,
+    WorkerSummary, WorkspaceDetail, WorkspaceSummary,
 };
 
 use super::ListenCtx;
@@ -427,6 +427,36 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                         recommended: opt.recommended,
                     })
                     .collect();
+
+                // Build question groups from structured question data
+                let question_groups = d
+                    .question_data
+                    .as_ref()
+                    .map(|qd| {
+                        qd.questions
+                            .iter()
+                            .map(|entry| {
+                                let opts = entry
+                                    .options
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, opt)| DecisionOptionDetail {
+                                        number: i + 1,
+                                        label: opt.label.clone(),
+                                        description: opt.description.clone(),
+                                        recommended: false,
+                                    })
+                                    .collect();
+                                QuestionGroupDetail {
+                                    question: entry.question.clone(),
+                                    header: entry.header.clone(),
+                                    options: opts,
+                                }
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
                 Box::new(DecisionDetail {
                     id: d.id.to_string(),
                     job_id: d.job_id.clone(),
@@ -435,7 +465,9 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                     source: format!("{:?}", d.source).to_lowercase(),
                     context: d.context.clone(),
                     options,
+                    question_groups,
                     chosen: d.chosen,
+                    choices: d.choices.clone(),
                     message: d.message.clone(),
                     created_at_ms: d.created_at_ms,
                     resolved_at_ms: d.resolved_at_ms,

@@ -16,6 +16,7 @@ fn decision_created_event(id: &str, job_id: &str) -> Event {
             oj_core::DecisionOption::new("Approve").recommended(),
             oj_core::DecisionOption::new("Reject").description("Stop the job"),
         ],
+        question_data: None,
         created_at_ms: 2_000_000,
         namespace: "testns".to_string(),
     }
@@ -33,6 +34,7 @@ fn decision_for_agent_run(id: &str, ar_id: &str, created_at_ms: u64) -> Event {
             oj_core::DecisionOption::new("Continue"),
             oj_core::DecisionOption::new("Stop"),
         ],
+        question_data: None,
         created_at_ms,
         namespace: "testns".to_string(),
     }
@@ -50,6 +52,7 @@ fn decision_for_job_at(id: &str, job_id: &str, created_at_ms: u64) -> Event {
             oj_core::DecisionOption::new("Continue"),
             oj_core::DecisionOption::new("Stop"),
         ],
+        question_data: None,
         created_at_ms,
         namespace: "testns".to_string(),
     }
@@ -98,6 +101,7 @@ fn decision_resolved() {
     state.apply_event(&Event::DecisionResolved {
         id: "dec-abc123".to_string(),
         chosen: Some(1),
+        choices: vec![],
         message: Some("Looks good".to_string()),
         resolved_at_ms: 3_000_000,
         namespace: "testns".to_string(),
@@ -146,6 +150,7 @@ fn job_terminal_preserves_resolved_decisions() {
     state.apply_event(&Event::DecisionResolved {
         id: "dec-1".to_string(),
         chosen: Some(1),
+        choices: vec![],
         message: None,
         resolved_at_ms: 3_000_000,
         namespace: "testns".to_string(),
@@ -164,6 +169,7 @@ fn job_deleted_removes_all_decisions() {
     state.apply_event(&Event::DecisionResolved {
         id: "dec-2".to_string(),
         chosen: Some(1),
+        choices: vec![],
         message: None,
         resolved_at_ms: 3_000_000,
         namespace: "testns".to_string(),
@@ -278,6 +284,7 @@ fn new_decision_does_not_affect_already_resolved() {
     state.apply_event(&Event::DecisionResolved {
         id: "dec-1".to_string(),
         chosen: Some(1),
+        choices: vec![],
         message: Some("approved".to_string()),
         resolved_at_ms: 2_500_000,
         namespace: "testns".to_string(),
@@ -310,6 +317,7 @@ fn superseded_decision_cannot_be_resolved() {
     state.apply_event(&Event::DecisionResolved {
         id: "dec-1".to_string(),
         chosen: Some(2),
+        choices: vec![],
         message: None,
         resolved_at_ms: 4_000_000,
         namespace: "testns".to_string(),

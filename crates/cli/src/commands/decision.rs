@@ -37,8 +37,8 @@ pub enum DecisionCommand {
     Resolve {
         /// Decision ID (or prefix)
         id: String,
-        /// Pick a numbered option (1-indexed)
-        choice: Option<usize>,
+        /// Pick option(s) — one per question for multi-question decisions
+        choice: Vec<usize>,
         /// Freeform message or answer
         #[arg(short = 'm', long)]
         message: Option<String>,
@@ -173,7 +173,10 @@ pub async fn handle(
                             Some(msg_line.trim().to_string())
                         };
 
-                        match client.decision_resolve(&detail.id, Some(n), message).await {
+                        match client
+                            .decision_resolve(&detail.id, Some(n), vec![], message)
+                            .await
+                        {
                             Ok(_) => {
                                 let label = detail
                                     .options
@@ -213,7 +216,17 @@ pub async fn handle(
             choice,
             message,
         } => {
-            let resolved_id = client.decision_resolve(&id, choice, message).await?;
+            // Map CLI args: single choice → chosen (backward compat), multiple → choices
+            let (chosen, choices) = if choice.len() == 1 {
+                (Some(choice[0]), vec![])
+            } else if choice.len() > 1 {
+                (None, choice)
+            } else {
+                (None, vec![])
+            };
+            let resolved_id = client
+                .decision_resolve(&id, chosen, choices, message)
+                .await?;
             println!("Resolved decision {}", resolved_id.short(8));
         }
     }
@@ -291,7 +304,42 @@ pub(crate) fn format_decision_detail(
         let _ = writeln!(out, "  {}", line);
     }
 
-    if !d.options.is_empty() {
+    if !d.question_groups.is_empty() {
+        // Multi-question grouped display
+        let _ = writeln!(out);
+        for (i, group) in d.question_groups.iter().enumerate() {
+            let header = group.header.as_deref().unwrap_or("Question");
+            let _ = writeln!(
+                out,
+                "{} [{}]: {}",
+                color::header(&format!("Question {}", i + 1)),
+                header,
+                group.question
+            );
+            for opt in &group.options {
+                let _ = write!(out, "  {}. {}", opt.number, opt.label);
+                if let Some(ref desc) = opt.description {
+                    let _ = write!(out, " - {}", desc);
+                }
+                let _ = writeln!(out);
+            }
+            let _ = writeln!(out);
+        }
+        let _ = writeln!(out, "  C. Cancel - Cancel and fail");
+
+        if show_resolve_hint && d.resolved_at_ms.is_none() {
+            let _ = writeln!(out);
+            let placeholders: Vec<String> = (1..=d.question_groups.len())
+                .map(|i| format!("<q{}>", i))
+                .collect();
+            let _ = writeln!(
+                out,
+                "Use: oj decision resolve {} {}",
+                short_id,
+                placeholders.join(" ")
+            );
+        }
+    } else if !d.options.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "{}", color::header("Options:"));
         for opt in &d.options {
@@ -306,15 +354,15 @@ pub(crate) fn format_decision_detail(
             }
             let _ = writeln!(out);
         }
-    }
 
-    if show_resolve_hint && d.resolved_at_ms.is_none() {
-        let _ = writeln!(out);
-        let _ = writeln!(
-            out,
-            "Use: oj decision resolve {} <number> [-m message]",
-            short_id
-        );
+        if show_resolve_hint && d.resolved_at_ms.is_none() {
+            let _ = writeln!(out);
+            let _ = writeln!(
+                out,
+                "Use: oj decision resolve {} <number> [-m message]",
+                short_id
+            );
+        }
     }
 }
 
