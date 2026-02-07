@@ -159,6 +159,8 @@ async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, C
             mutations::handle_agent_send(ctx, agent_id, message).await
         }
 
+        Request::AgentKill { agent_id } => mutations::handle_agent_kill(ctx, agent_id).await,
+
         Request::JobResume {
             id,
             message,

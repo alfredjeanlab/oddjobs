@@ -389,6 +389,9 @@ pub enum Request {
         all: bool,
     },
 
+    /// Kill an agent's session (triggers on_dead lifecycle)
+    AgentKill { agent_id: String },
+
     /// Prune orphaned sessions from daemon state
     SessionPrune {
         /// Prune all orphaned sessions regardless of age

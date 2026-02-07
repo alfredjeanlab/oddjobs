@@ -84,6 +84,11 @@ pub enum AgentCommand {
         /// Agent ID (or prefix)
         id: String,
     },
+    /// Kill an agent's session (triggers on_dead lifecycle)
+    Kill {
+        /// Agent ID or job ID (or prefix)
+        id: String,
+    },
     /// Remove agent logs from completed/failed/cancelled jobs
     Prune {
         /// Remove all agent logs from terminal jobs regardless of age
@@ -114,7 +119,9 @@ pub enum AgentCommand {
 impl AgentCommand {
     pub fn client_kind(&self) -> ClientKind {
         match self {
-            Self::Send { .. } | Self::Resume { .. } | Self::Prune { .. } => ClientKind::Action,
+            Self::Send { .. } | Self::Kill { .. } | Self::Resume { .. } | Self::Prune { .. } => {
+                ClientKind::Action
+            }
             Self::Hook { .. } => ClientKind::Signal,
             _ => ClientKind::Query,
         }
@@ -166,6 +173,9 @@ pub async fn handle(
         }
         AgentCommand::Attach { id } => {
             display::handle_attach(client, &id).await?;
+        }
+        AgentCommand::Kill { id } => {
+            display::handle_kill(client, &id).await?;
         }
         AgentCommand::Send { agent_id, message } => {
             display::handle_send(client, &agent_id, &message).await?;

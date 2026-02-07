@@ -231,6 +231,12 @@ pub(super) async fn handle_attach(client: &DaemonClient, id: &str) -> Result<()>
     Ok(())
 }
 
+pub(super) async fn handle_kill(client: &DaemonClient, id: &str) -> Result<()> {
+    client.agent_kill(id).await?;
+    println!("Killed agent {}", id);
+    Ok(())
+}
+
 pub(super) async fn handle_send(
     client: &DaemonClient,
     agent_id: &str,

@@ -10,7 +10,9 @@ mod resources;
 mod sessions;
 mod workspaces;
 
-pub(super) use self::agents::{handle_agent_prune, handle_agent_resume, handle_agent_send};
+pub(super) use self::agents::{
+    handle_agent_kill, handle_agent_prune, handle_agent_resume, handle_agent_send,
+};
 pub(super) use self::jobs::{
     handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all, handle_status,
 };

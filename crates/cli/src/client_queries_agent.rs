@@ -64,6 +64,14 @@ impl DaemonClient {
         self.send_simple(&request).await
     }
 
+    /// Kill an agent's session (triggers on_dead lifecycle handling)
+    pub async fn agent_kill(&self, agent_id: &str) -> Result<(), ClientError> {
+        let request = Request::AgentKill {
+            agent_id: agent_id.to_string(),
+        };
+        self.send_simple(&request).await
+    }
+
     /// Kill a session
     pub async fn session_kill(&self, id: &str) -> Result<(), ClientError> {
         let request = Request::SessionKill { id: id.to_string() };

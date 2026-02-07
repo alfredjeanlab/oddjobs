@@ -9,6 +9,106 @@ use crate::protocol::{AgentEntry, Response};
 use super::super::{ConnectionError, ListenCtx};
 use super::{emit, PruneFlags};
 
+/// Handle an agent kill request.
+///
+/// Resolves agent_id to a session ID via (in order, first match wins):
+/// 1. Exact agent_id match across ALL step_history entries → job.session_id
+/// 2. Job ID lookup → job.session_id
+/// 3. Prefix match on agent_id across ALL step_history entries → job.session_id
+/// 4. Standalone agent_runs match → agent_run.session_id
+///
+/// Then kills the tmux session and emits SessionDeleted. The agent watcher
+/// polling loop will detect the session is gone and trigger on_dead lifecycle.
+pub(crate) async fn handle_agent_kill(
+    ctx: &ListenCtx,
+    agent_id: String,
+) -> Result<Response, ConnectionError> {
+    let resolved_session = {
+        let state_guard = ctx.state.lock();
+
+        let mut found: Option<String> = None;
+
+        // (1) Exact agent_id match across ALL step history → job.session_id
+        for job in state_guard.jobs.values() {
+            for record in job.step_history.iter().rev() {
+                if let Some(aid) = &record.agent_id {
+                    if aid == &agent_id {
+                        found = job.session_id.clone();
+                        break;
+                    }
+                }
+            }
+            if found.is_some() {
+                break;
+            }
+        }
+
+        // (2) Job ID lookup → job.session_id
+        if found.is_none() {
+            if let Some(job) = state_guard.get_job(&agent_id) {
+                if job.step_history.iter().any(|r| r.agent_id.is_some()) {
+                    found = job.session_id.clone();
+                }
+            }
+        }
+
+        // (3) Prefix match across ALL step history entries → job.session_id
+        if found.is_none() {
+            for job in state_guard.jobs.values() {
+                for record in job.step_history.iter().rev() {
+                    if let Some(aid) = &record.agent_id {
+                        if aid.starts_with(&agent_id) {
+                            found = job.session_id.clone();
+                            break;
+                        }
+                    }
+                }
+                if found.is_some() {
+                    break;
+                }
+            }
+        }
+
+        // (4) Standalone agent_runs match → agent_run.session_id
+        if found.is_none() {
+            for ar in state_guard.agent_runs.values() {
+                let ar_agent_id = ar.agent_id.as_deref().unwrap_or(&ar.id);
+                if ar_agent_id == agent_id
+                    || ar.id == agent_id
+                    || ar_agent_id.starts_with(&agent_id)
+                    || ar.id.starts_with(&agent_id)
+                {
+                    found = ar.session_id.clone();
+                    break;
+                }
+            }
+        }
+
+        found
+    };
+
+    match resolved_session {
+        Some(session_id) => {
+            // Kill the tmux session (ignore errors — session may already be dead)
+            let mut cmd = tokio::process::Command::new("tmux");
+            cmd.args(["kill-session", "-t", &session_id]);
+            let _ = run_with_timeout(cmd, TMUX_TIMEOUT, "tmux kill-session").await;
+
+            // Emit SessionDeleted to clean up state
+            emit(
+                &ctx.event_bus,
+                Event::SessionDeleted {
+                    id: SessionId::new(&session_id),
+                },
+            )?;
+            Ok(Response::Ok)
+        }
+        None => Ok(Response::Error {
+            message: format!("Agent not found or has no session: {}", agent_id),
+        }),
+    }
+}
+
 /// Handle an agent send request.
 ///
 /// Resolves agent_id via (in order, first match wins):
