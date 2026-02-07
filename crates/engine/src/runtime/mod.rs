@@ -7,6 +7,7 @@ pub(crate) mod agent_run;
 mod handlers;
 mod job;
 mod monitor;
+mod signal;
 
 use crate::{
     activity_logger::{JobLogger, QueueLogger, WorkerLogger},

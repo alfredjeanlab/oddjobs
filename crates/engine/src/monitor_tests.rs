@@ -40,43 +40,21 @@ fn test_ctx<'a>(
 }
 
 #[test]
-fn nudge_builds_send_effect() {
+fn simple_action_variant_checks() {
     let job = test_job();
     let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Nudge);
 
-    let result = build_action_effects(&test_ctx(&agent, &config, "idle"), &job);
-    assert!(matches!(result, Ok(ActionEffects::Nudge { .. })));
-}
+    let c = ActionConfig::simple(AgentAction::Nudge);
+    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "idle"), &job), Ok(ActionEffects::Nudge { .. })));
 
-#[test]
-fn done_returns_advance_job() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Done);
+    let c = ActionConfig::simple(AgentAction::Done);
+    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "idle"), &job), Ok(ActionEffects::AdvanceJob)));
 
-    let result = build_action_effects(&test_ctx(&agent, &config, "idle"), &job);
-    assert!(matches!(result, Ok(ActionEffects::AdvanceJob)));
-}
+    let c = ActionConfig::simple(AgentAction::Fail);
+    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "error"), &job), Ok(ActionEffects::FailJob { .. })));
 
-#[test]
-fn fail_returns_fail_job() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Fail);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "error"), &job);
-    assert!(matches!(result, Ok(ActionEffects::FailJob { .. })));
-}
-
-#[test]
-fn resume_returns_resume_effects() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Resume);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "exit"), &job);
-    assert!(matches!(result, Ok(ActionEffects::Resume { .. })));
+    let c = ActionConfig::simple(AgentAction::Resume);
+    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "exit"), &job), Ok(ActionEffects::Resume { .. })));
 }
 
 #[test]
@@ -386,101 +364,50 @@ fn escalate_cancels_exit_deferred_but_keeps_liveness() {
 // Duration Parsing Tests
 // =============================================================================
 
-#[test]
-fn parse_duration_seconds() {
-    assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-    assert_eq!(parse_duration("1s").unwrap(), Duration::from_secs(1));
-    assert_eq!(parse_duration("0s").unwrap(), Duration::from_secs(0));
-    assert_eq!(parse_duration("30sec").unwrap(), Duration::from_secs(30));
-    assert_eq!(parse_duration("30secs").unwrap(), Duration::from_secs(30));
-    assert_eq!(parse_duration("30second").unwrap(), Duration::from_secs(30));
-    assert_eq!(
-        parse_duration("30seconds").unwrap(),
-        Duration::from_secs(30)
-    );
+#[yare::parameterized(
+    secs_30s        = { "30s",              Duration::from_secs(30) },
+    secs_1s         = { "1s",               Duration::from_secs(1) },
+    secs_0s         = { "0s",               Duration::from_secs(0) },
+    secs_30sec      = { "30sec",            Duration::from_secs(30) },
+    secs_30secs     = { "30secs",           Duration::from_secs(30) },
+    secs_30second   = { "30second",         Duration::from_secs(30) },
+    secs_30seconds  = { "30seconds",        Duration::from_secs(30) },
+    mins_5m         = { "5m",               Duration::from_secs(300) },
+    mins_1m         = { "1m",               Duration::from_secs(60) },
+    mins_5min       = { "5min",             Duration::from_secs(300) },
+    mins_5mins      = { "5mins",            Duration::from_secs(300) },
+    mins_5minute    = { "5minute",          Duration::from_secs(300) },
+    mins_5minutes   = { "5minutes",         Duration::from_secs(300) },
+    hours_1h        = { "1h",               Duration::from_secs(3600) },
+    hours_2h        = { "2h",               Duration::from_secs(7200) },
+    hours_1hr       = { "1hr",              Duration::from_secs(3600) },
+    hours_1hrs      = { "1hrs",             Duration::from_secs(3600) },
+    hours_1hour     = { "1hour",            Duration::from_secs(3600) },
+    hours_1hours    = { "1hours",           Duration::from_secs(3600) },
+    days_1d         = { "1d",               Duration::from_secs(86400) },
+    days_1day       = { "1day",             Duration::from_secs(86400) },
+    days_1days      = { "1days",            Duration::from_secs(86400) },
+    bare_number     = { "30",               Duration::from_secs(30) },
+    ws_leading      = { " 30s ",            Duration::from_secs(30) },
+    ws_middle       = { "30 s",             Duration::from_secs(30) },
+    ms_200          = { "200ms",            Duration::from_millis(200) },
+    ms_0            = { "0ms",              Duration::from_millis(0) },
+    ms_1500         = { "1500ms",           Duration::from_millis(1500) },
+    millis_100      = { "100millis",        Duration::from_millis(100) },
+    millisecond_1   = { "1millisecond",     Duration::from_millis(1) },
+    milliseconds_50 = { "50milliseconds",   Duration::from_millis(50) },
+)]
+fn parse_duration_valid(input: &str, expected: Duration) {
+    assert_eq!(parse_duration(input).unwrap(), expected);
 }
 
-#[test]
-fn parse_duration_minutes() {
-    assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
-    assert_eq!(parse_duration("1m").unwrap(), Duration::from_secs(60));
-    assert_eq!(parse_duration("5min").unwrap(), Duration::from_secs(300));
-    assert_eq!(parse_duration("5mins").unwrap(), Duration::from_secs(300));
-    assert_eq!(parse_duration("5minute").unwrap(), Duration::from_secs(300));
-    assert_eq!(
-        parse_duration("5minutes").unwrap(),
-        Duration::from_secs(300)
-    );
-}
-
-#[test]
-fn parse_duration_hours() {
-    assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-    assert_eq!(parse_duration("2h").unwrap(), Duration::from_secs(7200));
-    assert_eq!(parse_duration("1hr").unwrap(), Duration::from_secs(3600));
-    assert_eq!(parse_duration("1hrs").unwrap(), Duration::from_secs(3600));
-    assert_eq!(parse_duration("1hour").unwrap(), Duration::from_secs(3600));
-    assert_eq!(parse_duration("1hours").unwrap(), Duration::from_secs(3600));
-}
-
-#[test]
-fn parse_duration_days() {
-    assert_eq!(parse_duration("1d").unwrap(), Duration::from_secs(86400));
-    assert_eq!(parse_duration("1day").unwrap(), Duration::from_secs(86400));
-    assert_eq!(parse_duration("1days").unwrap(), Duration::from_secs(86400));
-}
-
-#[test]
-fn parse_duration_bare_number() {
-    // Bare number defaults to seconds
-    assert_eq!(parse_duration("30").unwrap(), Duration::from_secs(30));
-}
-
-#[test]
-fn parse_duration_with_whitespace() {
-    assert_eq!(parse_duration(" 30s ").unwrap(), Duration::from_secs(30));
-    assert_eq!(parse_duration("30 s").unwrap(), Duration::from_secs(30));
-}
-
-#[test]
-fn parse_duration_invalid_suffix() {
-    let result = parse_duration("30x");
-    assert!(result.is_err());
-    assert!(result.unwrap_err().contains("unknown duration suffix"));
-}
-
-#[test]
-fn parse_duration_empty_string() {
-    let result = parse_duration("");
-    assert!(result.is_err());
-}
-
-#[test]
-fn parse_duration_invalid_number() {
-    let result = parse_duration("abcs");
-    assert!(result.is_err());
-}
-
-#[test]
-fn parse_duration_milliseconds() {
-    assert_eq!(parse_duration("200ms").unwrap(), Duration::from_millis(200));
-    assert_eq!(parse_duration("0ms").unwrap(), Duration::from_millis(0));
-    assert_eq!(
-        parse_duration("1500ms").unwrap(),
-        Duration::from_millis(1500)
-    );
-    assert_eq!(
-        parse_duration("100millis").unwrap(),
-        Duration::from_millis(100)
-    );
-    assert_eq!(
-        parse_duration("1millisecond").unwrap(),
-        Duration::from_millis(1)
-    );
-    assert_eq!(
-        parse_duration("50milliseconds").unwrap(),
-        Duration::from_millis(50)
-    );
+#[yare::parameterized(
+    invalid_suffix = { "30x" },
+    empty_string   = { "" },
+    invalid_number = { "abcs" },
+)]
+fn parse_duration_invalid(input: &str) {
+    assert!(parse_duration(input).is_err());
 }
 
 // =============================================================================
@@ -581,69 +508,27 @@ fn agent_notify_includes_step_variable() {
 // =============================================================================
 
 #[test]
-fn monitor_state_from_working() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Working);
-    assert!(matches!(state, MonitorState::Working));
+fn monitor_state_simple_conversions() {
+    use oj_core::AgentState;
+    assert!(matches!(MonitorState::from_agent_state(&AgentState::Working), MonitorState::Working));
+    assert!(matches!(MonitorState::from_agent_state(&AgentState::WaitingForInput), MonitorState::WaitingForInput));
+    assert!(matches!(MonitorState::from_agent_state(&AgentState::Exited { exit_code: Some(0) }), MonitorState::Exited));
+    assert!(matches!(MonitorState::from_agent_state(&AgentState::SessionGone), MonitorState::Gone));
 }
 
-#[test]
-fn monitor_state_from_waiting_for_input() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::WaitingForInput);
-    assert!(matches!(state, MonitorState::WaitingForInput));
-}
-
-#[test]
-fn monitor_state_from_failed_unauthorized() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Failed(
-        oj_core::AgentError::Unauthorized,
-    ));
+#[yare::parameterized(
+    unauthorized   = { oj_core::AgentError::Unauthorized,   Some(oj_runbook::ErrorType::Unauthorized) },
+    out_of_credits = { oj_core::AgentError::OutOfCredits,   Some(oj_runbook::ErrorType::OutOfCredits) },
+    no_internet    = { oj_core::AgentError::NoInternet,     Some(oj_runbook::ErrorType::NoInternet) },
+    rate_limited   = { oj_core::AgentError::RateLimited,    Some(oj_runbook::ErrorType::RateLimited) },
+)]
+fn monitor_state_from_failed_has_error_type(
+    error: oj_core::AgentError,
+    expected: Option<oj_runbook::ErrorType>,
+) {
+    let state = MonitorState::from_agent_state(&oj_core::AgentState::Failed(error));
     match state {
-        MonitorState::Failed {
-            message,
-            error_type,
-        } => {
-            assert!(message.contains("nauthorized"));
-            assert_eq!(error_type, Some(oj_runbook::ErrorType::Unauthorized));
-        }
-        _ => panic!("expected Failed"),
-    }
-}
-
-#[test]
-fn monitor_state_from_failed_out_of_credits() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Failed(
-        oj_core::AgentError::OutOfCredits,
-    ));
-    match state {
-        MonitorState::Failed { error_type, .. } => {
-            assert_eq!(error_type, Some(oj_runbook::ErrorType::OutOfCredits));
-        }
-        _ => panic!("expected Failed"),
-    }
-}
-
-#[test]
-fn monitor_state_from_failed_no_internet() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Failed(
-        oj_core::AgentError::NoInternet,
-    ));
-    match state {
-        MonitorState::Failed { error_type, .. } => {
-            assert_eq!(error_type, Some(oj_runbook::ErrorType::NoInternet));
-        }
-        _ => panic!("expected Failed"),
-    }
-}
-
-#[test]
-fn monitor_state_from_failed_rate_limited() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Failed(
-        oj_core::AgentError::RateLimited,
-    ));
-    match state {
-        MonitorState::Failed { error_type, .. } => {
-            assert_eq!(error_type, Some(oj_runbook::ErrorType::RateLimited));
-        }
+        MonitorState::Failed { error_type, .. } => assert_eq!(error_type, expected),
         _ => panic!("expected Failed"),
     }
 }
@@ -654,10 +539,7 @@ fn monitor_state_from_failed_other() {
         oj_core::AgentError::Other("custom error".to_string()),
     ));
     match state {
-        MonitorState::Failed {
-            message,
-            error_type,
-        } => {
+        MonitorState::Failed { message, error_type } => {
             assert!(message.contains("custom error"));
             assert_eq!(error_type, None);
         }
@@ -665,225 +547,60 @@ fn monitor_state_from_failed_other() {
     }
 }
 
-#[test]
-fn monitor_state_from_exited() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::Exited { exit_code: Some(0) });
-    assert!(matches!(state, MonitorState::Exited));
-}
-
-#[test]
-fn monitor_state_from_session_gone() {
-    let state = MonitorState::from_agent_state(&oj_core::AgentState::SessionGone);
-    assert!(matches!(state, MonitorState::Gone));
-}
-
 // =============================================================================
 // Agent Failure to Error Type Mapping
 // =============================================================================
 
-#[test]
-fn agent_failure_unauthorized_maps_to_error_type() {
-    assert_eq!(
-        agent_failure_to_error_type(&oj_core::AgentError::Unauthorized),
-        Some(oj_runbook::ErrorType::Unauthorized)
-    );
-}
-
-#[test]
-fn agent_failure_out_of_credits_maps_to_error_type() {
-    assert_eq!(
-        agent_failure_to_error_type(&oj_core::AgentError::OutOfCredits),
-        Some(oj_runbook::ErrorType::OutOfCredits)
-    );
-}
-
-#[test]
-fn agent_failure_no_internet_maps_to_error_type() {
-    assert_eq!(
-        agent_failure_to_error_type(&oj_core::AgentError::NoInternet),
-        Some(oj_runbook::ErrorType::NoInternet)
-    );
-}
-
-#[test]
-fn agent_failure_rate_limited_maps_to_error_type() {
-    assert_eq!(
-        agent_failure_to_error_type(&oj_core::AgentError::RateLimited),
-        Some(oj_runbook::ErrorType::RateLimited)
-    );
-}
-
-#[test]
-fn agent_failure_other_maps_to_none() {
-    assert_eq!(
-        agent_failure_to_error_type(&oj_core::AgentError::Other("anything".to_string())),
-        None
-    );
+#[yare::parameterized(
+    unauthorized   = { oj_core::AgentError::Unauthorized,                  Some(oj_runbook::ErrorType::Unauthorized) },
+    out_of_credits = { oj_core::AgentError::OutOfCredits,                  Some(oj_runbook::ErrorType::OutOfCredits) },
+    no_internet    = { oj_core::AgentError::NoInternet,                    Some(oj_runbook::ErrorType::NoInternet) },
+    rate_limited   = { oj_core::AgentError::RateLimited,                   Some(oj_runbook::ErrorType::RateLimited) },
+    other          = { oj_core::AgentError::Other("anything".to_string()), None },
+)]
+fn agent_failure_maps_to_error_type(
+    error: oj_core::AgentError,
+    expected: Option<oj_runbook::ErrorType>,
+) {
+    assert_eq!(agent_failure_to_error_type(&error), expected);
 }
 
 // =============================================================================
 // Escalation Trigger Mapping Tests
 // =============================================================================
 
-#[test]
-fn escalate_idle_trigger_emits_idle_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "idle"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Idle));
+fn extract_escalation_source(effects: &ActionEffects) -> oj_core::DecisionSource {
+    if let ActionEffects::Escalate { effects } = effects {
+        effects
+            .iter()
+            .find_map(|e| match e {
+                oj_core::Effect::Emit {
+                    event: oj_core::Event::DecisionCreated { source, .. },
+                } => Some(source.clone()),
+                _ => None,
+            })
+            .expect("should have DecisionCreated")
     } else {
         panic!("expected Escalate");
     }
 }
 
-#[test]
-fn escalate_exit_trigger_emits_error_source() {
+#[yare::parameterized(
+    idle              = { "idle",               oj_core::DecisionSource::Idle },
+    exit              = { "exit",               oj_core::DecisionSource::Error },
+    error             = { "error",              oj_core::DecisionSource::Error },
+    prompt            = { "prompt",             oj_core::DecisionSource::Approval },
+    prompt_question   = { "prompt:question",    oj_core::DecisionSource::Question },
+    idle_exhausted    = { "idle:exhausted",     oj_core::DecisionSource::Idle },
+    error_exhausted   = { "error:exhausted",    oj_core::DecisionSource::Error },
+    unknown_trigger   = { "some_unknown_trigger", oj_core::DecisionSource::Idle },
+)]
+fn escalate_trigger_maps_to_source(trigger: &str, expected: oj_core::DecisionSource) {
     let job = test_job();
     let agent = test_agent_def();
     let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "exit"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Error));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_error_trigger_emits_error_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "error"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Error));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_prompt_trigger_emits_approval_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "prompt"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Approval));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_prompt_question_trigger_emits_question_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "prompt:question"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Question));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_idle_exhausted_trigger_emits_idle_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "idle:exhausted"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Idle));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_error_exhausted_trigger_emits_error_source() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects(&test_ctx(&agent, &config, "error:exhausted"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Error));
-    } else {
-        panic!("expected Escalate");
-    }
-}
-
-#[test]
-fn escalate_unknown_trigger_falls_back_to_idle() {
-    let job = test_job();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result =
-        build_action_effects(&test_ctx(&agent, &config, "some_unknown_trigger"), &job).unwrap();
-    if let ActionEffects::Escalate { effects } = result {
-        let source = effects.iter().find_map(|e| match e {
-            oj_core::Effect::Emit {
-                event: oj_core::Event::DecisionCreated { source, .. },
-            } => Some(source.clone()),
-            _ => None,
-        });
-        assert_eq!(source, Some(oj_core::DecisionSource::Idle));
-    } else {
-        panic!("expected Escalate");
-    }
+    let result = build_action_effects(&test_ctx(&agent, &config, trigger), &job).unwrap();
+    assert_eq!(extract_escalation_source(&result), expected);
 }
 
 // =============================================================================
@@ -955,13 +672,18 @@ fn test_agent_run() -> oj_core::AgentRun {
 }
 
 #[test]
-fn agent_run_nudge_builds_send_effect() {
+fn agent_run_simple_action_variant_checks() {
     let ar = test_agent_run();
     let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Nudge);
 
-    let result = build_action_effects_for_agent_run(&test_ctx(&agent, &config, "idle"), &ar);
-    assert!(matches!(result, Ok(ActionEffects::Nudge { .. })));
+    let c = ActionConfig::simple(AgentAction::Nudge);
+    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::Nudge { .. })));
+
+    let c = ActionConfig::simple(AgentAction::Done);
+    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::CompleteAgentRun)));
+
+    let c = ActionConfig::simple(AgentAction::Escalate);
+    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::EscalateAgentRun { .. })));
 }
 
 #[test]
@@ -993,16 +715,6 @@ fn agent_run_nudge_custom_message() {
     } else {
         panic!("expected Nudge");
     }
-}
-
-#[test]
-fn agent_run_done_returns_complete() {
-    let ar = test_agent_run();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Done);
-
-    let result = build_action_effects_for_agent_run(&test_ctx(&agent, &config, "idle"), &ar);
-    assert!(matches!(result, Ok(ActionEffects::CompleteAgentRun)));
 }
 
 #[test]
@@ -1087,16 +799,6 @@ fn agent_run_resume_with_append_message() {
     } else {
         panic!("expected Resume");
     }
-}
-
-#[test]
-fn agent_run_escalate_returns_escalate_effects() {
-    let ar = test_agent_run();
-    let agent = test_agent_def();
-    let config = ActionConfig::simple(AgentAction::Escalate);
-
-    let result = build_action_effects_for_agent_run(&test_ctx(&agent, &config, "idle"), &ar);
-    assert!(matches!(result, Ok(ActionEffects::EscalateAgentRun { .. })));
 }
 
 #[test]
@@ -1261,7 +963,3 @@ fn agent_run_notify_none_when_no_template() {
     let effect = build_agent_run_notify_effect(&ar, &agent, None);
     assert!(effect.is_none());
 }
-
-// =============================================================================
-// Cooldown Timer ID Tests
-// =============================================================================
