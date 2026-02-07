@@ -76,11 +76,7 @@ where
                 break;
             }
 
-            let item_id = item
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("unknown")
-                .to_string();
+            let item_id = json_item_id(item);
 
             match queue_type {
                 QueueType::External => {
@@ -254,11 +250,7 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         let mut result_events = Vec::new();
 
-        let item_id = item
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string();
+        let item_id = json_item_id(item);
 
         let (job_kind, runbook_hash, cwd, worker_namespace) = {
             let workers = self.worker_states.lock();
@@ -359,5 +351,15 @@ where
         );
 
         Ok(result_events)
+    }
+}
+
+/// Extract an item's `id` field as a string, handling both string and numeric
+/// JSON values. Falls back to `"unknown"` when the field is missing.
+fn json_item_id(item: &serde_json::Value) -> String {
+    match item.get("id") {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(v) => v.to_string(),
+        None => "unknown".to_string(),
     }
 }

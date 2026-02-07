@@ -510,6 +510,57 @@ async fn duplicate_worker_started_preserves_inflight() {
     }
 }
 
+/// External queue items with numeric IDs (e.g. GitHub issue numbers) should all
+/// be dispatched independently. Before the fix, `as_str()` returned None for
+/// numeric JSON values, collapsing every item to "unknown" and causing the
+/// inflight guard to skip all but the first item.
+#[tokio::test]
+async fn external_queue_numeric_ids_dispatched_independently() {
+    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
+    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+
+    ctx.runtime
+        .handle_event(Event::WorkerStarted {
+            worker_name: "fixer".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: hash,
+            queue_name: "bugs".to_string(),
+            concurrency: 3,
+            namespace: String::new(),
+        })
+        .await
+        .unwrap();
+
+    // Items with numeric IDs (as returned by e.g. `gh issue list --json number`)
+    let items = vec![
+        serde_json::json!({"id": 6, "title": "issue six"}),
+        serde_json::json!({"id": 7, "title": "issue seven"}),
+    ];
+
+    ctx.runtime
+        .handle_event(Event::WorkerPollComplete {
+            worker_name: "fixer".to_string(),
+            items,
+        })
+        .await
+        .unwrap();
+
+    let workers = ctx.runtime.worker_states.lock();
+    let state = workers.get("fixer").unwrap();
+    assert_eq!(
+        state.pending_takes, 2,
+        "both items with numeric IDs should be dispatched"
+    );
+    assert!(
+        state.inflight_items.contains("6"),
+        "numeric id 6 should be in-flight"
+    );
+    assert!(
+        state.inflight_items.contains("7"),
+        "numeric id 7 should be in-flight"
+    );
+}
+
 /// The WORKER_RUNBOOK constant from the parent module (used by pending_takes tests).
 const WORKER_RUNBOOK: &str = r#"
 [command.build]
