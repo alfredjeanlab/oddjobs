@@ -541,3 +541,7 @@ where
         Ok(result)
     }
 }
+
+#[cfg(test)]
+#[path = "agent_tests.rs"]
+mod tests;
