@@ -35,11 +35,19 @@ agent "planner" {
     startup = <<-SHELL
       echo '## Reminders'
       echo '- Use AskUserQuestion frequently to clarify requirements and get user input'
+      echo '- When done, commit your changes (do NOT stash, reset, or discard — other agents may be editing concurrently)'
     SHELL
     clear = <<-SHELL
       echo '## Reminders'
       echo '- Use AskUserQuestion frequently to clarify requirements and get user input'
       echo '- Even now that the plan is approved, continue asking questions when uncertain'
+      echo '- When done, commit your changes (do NOT stash, reset, or discard — other agents may be editing concurrently)'
+    SHELL
+    compact = <<-SHELL
+      echo '## Reminders'
+      echo '- Use AskUserQuestion frequently to clarify requirements and get user input'
+      echo '- Even now that the plan is approved, continue asking questions when uncertain'
+      echo '- When done, commit your changes (do NOT stash, reset, or discard — other agents may be editing concurrently)'
     SHELL
   }
 
@@ -56,5 +64,7 @@ agent "planner" {
     - Clarify ambiguous requirements
     - Confirm design decisions before implementing
     - Get input on trade-offs
+
+    When finished, commit your changes. Do NOT use git stash, git reset, or discard changes — other agents may be editing the repository concurrently.
   PROMPT
 }
