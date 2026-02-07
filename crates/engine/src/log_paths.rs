@@ -76,6 +76,20 @@ pub fn queue_log_path(logs_dir: &Path, queue_name: &str) -> PathBuf {
     logs_dir.join("queue").join(format!("{}.log", queue_name))
 }
 
+/// Build the path to an agent's terminal capture file.
+///
+/// Structure: `{logs_dir}/agent/{agent_id}/capture.latest.txt`
+///
+/// # Arguments
+/// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
+/// * `agent_id` - Agent UUID
+pub fn agent_capture_path(logs_dir: &Path, agent_id: &str) -> PathBuf {
+    logs_dir
+        .join("agent")
+        .join(agent_id)
+        .join("capture.latest.txt")
+}
+
 /// Build the path to a job breadcrumb file.
 ///
 /// Structure: `{logs_dir}/{job_id}.crumb.json`
