@@ -157,9 +157,12 @@ pub(super) fn handle_decision_resolve(
                 .as_deref()
                 .or(decision_session_id.as_deref()),
         ),
-        OwnerId::Job(_) => map_decision_to_job_action(&resolve_ctx, &job_id, job_step.as_deref())
-            .into_iter()
-            .collect(),
+        OwnerId::Job(_) => map_decision_to_job_action(
+            &resolve_ctx,
+            &job_id,
+            job_step.as_deref(),
+            decision_session_id.as_deref(),
+        ),
     };
 
     for action in action_events {
@@ -252,82 +255,117 @@ fn resolve_decision_action(
     }
 }
 
-/// Map a decision resolution to the appropriate job action event.
+/// Map a decision resolution to the appropriate job action event(s).
 fn map_decision_to_job_action(
     ctx: &DecisionResolveCtx,
     job_id: &str,
     job_step: Option<&str>,
-) -> Option<Event> {
+    session_id: Option<&str>,
+) -> Vec<Event> {
     let pid = JobId::new(job_id);
+
+    let send_to_session = |input: String| -> Option<Event> {
+        session_id.map(|sid| Event::SessionInput {
+            id: oj_core::SessionId::new(sid),
+            input,
+        })
+    };
 
     // Multi-question path: choices non-empty means multi-question answer
     if !ctx.choices.is_empty() {
         let resume_msg = build_multi_question_resume_message(ctx);
-        return Some(Event::JobResume {
+        return vec![Event::JobResume {
             id: pid,
             message: Some(resume_msg),
             vars: HashMap::new(),
             kill: false,
-        });
+        }];
     }
 
     let action = resolve_decision_action(ctx.source, ctx.chosen, ctx.options);
 
-    // Plan decisions for jobs route similarly to other approval types
+    // Plan decisions send key presses to the agent's interactive plan dialog,
+    // just like agent-run plan decisions do.
     if matches!(ctx.source, DecisionSource::Plan) {
         return match action {
-            ResolvedAction::Approve => Some(Event::JobResume {
-                id: pid,
-                message: Some(format!("decision {} plan approved", ctx.decision_id)),
-                vars: HashMap::new(),
-                kill: false,
-            }),
-            ResolvedAction::Freeform => ctx.message.map(|msg| Event::JobResume {
-                id: pid,
-                message: Some(format!(
-                    "decision {} plan revision: {}",
-                    ctx.decision_id, msg
-                )),
-                vars: HashMap::new(),
-                kill: false,
-            }),
-            ResolvedAction::Cancel => Some(Event::JobCancel { id: pid }),
-            _ => None,
+            ResolvedAction::Approve => {
+                // Navigate with arrow keys (Down * N + Enter).
+                // Option 1 = cursor already on it → just Enter
+                // Option 2 = Down Enter
+                // Option 3 = Down Down Enter
+                let downs = ctx.chosen.unwrap_or(1) - 1;
+                let mut keys = "Down ".repeat(downs);
+                keys.push_str("Enter");
+                send_to_session(keys).into_iter().collect()
+            }
+            ResolvedAction::Freeform => {
+                // Plan revision: send Escape to cancel the plan dialog, then
+                // resume the job with the revision feedback.
+                let mut events: Vec<Event> =
+                    send_to_session("Escape".to_string()).into_iter().collect();
+                if let Some(msg) = ctx.message {
+                    events.push(Event::JobResume {
+                        id: pid,
+                        message: Some(format!(
+                            "decision {} plan revision: {}",
+                            ctx.decision_id, msg
+                        )),
+                        vars: HashMap::new(),
+                        kill: false,
+                    });
+                }
+                events
+            }
+            ResolvedAction::Cancel => {
+                // Plan cancel: send Escape to dismiss the dialog, then cancel
+                let mut events: Vec<Event> =
+                    send_to_session("Escape".to_string()).into_iter().collect();
+                events.push(Event::JobCancel { id: pid });
+                events
+            }
+            _ => vec![],
         };
     }
 
     match action {
-        ResolvedAction::Freeform => ctx.message.map(|msg| Event::JobResume {
-            id: pid,
-            message: Some(format!("decision {} freeform: {}", ctx.decision_id, msg)),
-            vars: HashMap::new(),
-            kill: false,
-        }),
-        ResolvedAction::Cancel => Some(Event::JobCancel { id: pid }),
-        ResolvedAction::Nudge | ResolvedAction::Retry => Some(Event::JobResume {
+        ResolvedAction::Freeform => ctx
+            .message
+            .map(|msg| Event::JobResume {
+                id: pid,
+                message: Some(format!("decision {} freeform: {}", ctx.decision_id, msg)),
+                vars: HashMap::new(),
+                kill: false,
+            })
+            .into_iter()
+            .collect(),
+        ResolvedAction::Cancel => vec![Event::JobCancel { id: pid }],
+        ResolvedAction::Nudge | ResolvedAction::Retry => vec![Event::JobResume {
             id: pid,
             message: Some(build_resume_message(ctx)),
             vars: HashMap::new(),
             kill: false,
-        }),
-        ResolvedAction::Complete => job_step.map(|step| Event::StepCompleted {
-            job_id: pid,
-            step: step.to_string(),
-        }),
-        ResolvedAction::Approve => Some(Event::JobResume {
+        }],
+        ResolvedAction::Complete => job_step
+            .map(|step| Event::StepCompleted {
+                job_id: pid,
+                step: step.to_string(),
+            })
+            .into_iter()
+            .collect(),
+        ResolvedAction::Approve => vec![Event::JobResume {
             id: pid,
             message: Some(format!("decision {} approved", ctx.decision_id)),
             vars: HashMap::new(),
             kill: false,
-        }),
-        ResolvedAction::Deny => Some(Event::JobCancel { id: pid }),
-        ResolvedAction::Answer => Some(Event::JobResume {
+        }],
+        ResolvedAction::Deny => vec![Event::JobCancel { id: pid }],
+        ResolvedAction::Answer => vec![Event::JobResume {
             id: pid,
             message: Some(build_question_resume_message(ctx)),
             vars: HashMap::new(),
             kill: false,
-        }),
-        ResolvedAction::Dismiss => None,
+        }],
+        ResolvedAction::Dismiss => vec![],
     }
 }
 

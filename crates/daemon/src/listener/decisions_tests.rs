@@ -28,8 +28,8 @@ fn idle_dismiss_returns_no_action() {
         chosen: Some(4),
         ..ctx(&DecisionSource::Idle, "dec-123")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
-    assert!(result.is_none());
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert!(result.is_empty());
 }
 
 #[test]
@@ -83,9 +83,10 @@ fn question_cancel_is_last_option() {
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
-    match result {
-        Some(Event::JobCancel { .. }) => {}
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::JobCancel { .. } => {}
         other => panic!("expected JobCancel, got {:?}", other),
     }
 }
@@ -98,10 +99,11 @@ fn question_non_cancel_choice_resumes_with_label() {
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
-    match result {
-        Some(Event::JobResume { message, .. }) => {
-            let msg = message.unwrap();
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::JobResume { message, .. } => {
+            let msg = message.as_ref().unwrap();
             assert!(msg.contains("Option A"), "expected label, got: {}", msg);
             assert!(
                 msg.contains("option 1"),
@@ -121,10 +123,11 @@ fn question_freeform_message_only() {
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
-    match result {
-        Some(Event::JobResume { message, .. }) => {
-            let msg = message.unwrap();
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::JobResume { message, .. } => {
+            let msg = message.as_ref().unwrap();
             assert!(
                 msg.contains("custom answer"),
                 "expected freeform message, got: {}",
@@ -577,11 +580,12 @@ fn multi_question_job_sends_resume_with_labels() {
         question_data: Some(&qd),
         ..ctx(&DecisionSource::Question, "dec-multi")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
 
-    match result {
-        Some(Event::JobResume { message, .. }) => {
-            let msg = message.unwrap();
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::JobResume { message, .. } => {
+            let msg = message.as_ref().unwrap();
             assert!(msg.contains("React"), "expected React label, got: {}", msg);
             assert!(msg.contains("MySQL"), "expected MySQL label, got: {}", msg);
         }
@@ -789,34 +793,93 @@ fn agent_run_plan_cancel_sends_escape_then_fail() {
 }
 
 #[test]
-fn plan_job_approve_emits_resume() {
+fn plan_job_accept_sends_enter() {
     let c = DecisionResolveCtx {
-        chosen: Some(1), // Accept
+        chosen: Some(1), // Accept (clear context) — already selected, just Enter
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    match result {
-        Some(Event::JobResume { message, .. }) => {
-            let msg = message.unwrap();
-            assert!(msg.contains("plan approved"), "got: {}", msg);
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Enter");
         }
-        other => panic!("expected JobResume, got {:?}", other),
+        other => panic!("expected SessionInput(Enter), got {:?}", other),
     }
 }
 
 #[test]
-fn plan_job_revise_emits_resume_with_revision() {
+fn plan_job_accept_option2_sends_down_enter() {
+    let c = DecisionResolveCtx {
+        chosen: Some(2), // Accept (auto edits) — 1 Down + Enter
+        ..ctx(&DecisionSource::Plan, "dec-plan-job")
+    };
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
+
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Down Enter");
+        }
+        other => panic!("expected SessionInput(Down Enter), got {:?}", other),
+    }
+}
+
+#[test]
+fn plan_job_accept_option3_sends_down_down_enter() {
+    let c = DecisionResolveCtx {
+        chosen: Some(3), // Accept (manual edits) — 2 Downs + Enter
+        ..ctx(&DecisionSource::Plan, "dec-plan-job")
+    };
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
+
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Down Down Enter");
+        }
+        other => panic!("expected SessionInput(Down Down Enter), got {:?}", other),
+    }
+}
+
+#[test]
+fn plan_job_accept_no_session_emits_nothing() {
+    let c = DecisionResolveCtx {
+        chosen: Some(1), // Accept
+        ..ctx(&DecisionSource::Plan, "dec-plan-job")
+    };
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+
+    // Without a session, we can't send key presses
+    assert!(result.is_empty());
+}
+
+#[test]
+fn plan_job_revise_sends_escape_then_resume() {
     let c = DecisionResolveCtx {
         chosen: Some(4), // Revise
         message: Some("Add error handling"),
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    match result {
-        Some(Event::JobResume { message, .. }) => {
-            let msg = message.unwrap();
+    assert_eq!(result.len(), 2);
+    // First: Escape to cancel the plan dialog
+    match &result[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Escape");
+        }
+        other => panic!("expected SessionInput(Escape), got {:?}", other),
+    }
+    // Second: JobResume with revision feedback
+    match &result[1] {
+        Event::JobResume { message, .. } => {
+            let msg = message.as_ref().unwrap();
             assert!(msg.contains("plan revision"), "got: {}", msg);
             assert!(msg.contains("Add error handling"), "got: {}", msg);
         }
@@ -825,15 +888,25 @@ fn plan_job_revise_emits_resume_with_revision() {
 }
 
 #[test]
-fn plan_job_cancel_emits_cancel() {
+fn plan_job_cancel_sends_escape_then_cancel() {
     let c = DecisionResolveCtx {
         chosen: Some(5), // Cancel
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"));
+    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    match result {
-        Some(Event::JobCancel { .. }) => {}
+    assert_eq!(result.len(), 2);
+    // First: Escape to cancel the plan dialog
+    match &result[0] {
+        Event::SessionInput { id, input } => {
+            assert_eq!(id.as_str(), "session-plan");
+            assert_eq!(input, "Escape");
+        }
+        other => panic!("expected SessionInput(Escape), got {:?}", other),
+    }
+    // Second: JobCancel
+    match &result[1] {
+        Event::JobCancel { .. } => {}
         other => panic!("expected JobCancel, got {:?}", other),
     }
 }
