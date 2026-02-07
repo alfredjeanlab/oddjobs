@@ -678,84 +678,32 @@ command "beta" {
 // Alias suffix-matching tests (find entities from aliased imports)
 // ============================================================================
 
-/// Helper: set up a project-like structure with a library and a runbook that imports it.
-///
-/// Returns the runbooks dir path.
+/// Set up .oj/{runbooks,libraries/<lib_name>} with an aliased import.
 fn setup_aliased_import(tmp: &TempDir, alias: &str, lib_name: &str, lib_hcl: &str) -> PathBuf {
-    // Structure: tmp/.oj/runbooks/ + tmp/.oj/libraries/<lib_name>/
     let oj_dir = tmp.path().join(".oj");
     let runbooks_dir = oj_dir.join("runbooks");
     let lib_dir = oj_dir.join("libraries").join(lib_name);
     fs::create_dir_all(&runbooks_dir).unwrap();
     fs::create_dir_all(&lib_dir).unwrap();
-
-    // Write library content
     fs::write(lib_dir.join("lib.hcl"), lib_hcl).unwrap();
-
-    // Write runbook that imports the library with an alias
     let import_hcl = format!(r#"import "{lib_name}" {{ alias = "{alias}" }}"#);
     fs::write(runbooks_dir.join("main.hcl"), import_hcl).unwrap();
-
     runbooks_dir
 }
 
 #[test]
-fn find_worker_by_unaliased_name() {
+fn find_worker_by_aliased_and_unaliased_name() {
     let tmp = TempDir::new().unwrap();
-    let lib_hcl = r#"
-queue "tasks" {
-  type = "external"
-  list = "echo []"
-  take = "echo ok"
-}
+    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", WORKER_RUNBOOK);
 
-worker "builder" {
-  source  = { queue = "tasks" }
-  handler = { job = "build" }
-}
-
-job "build" {
-  step "run" {
-    run = "echo build"
-  }
-}
-"#;
-    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
-
-    // Should find "builder" even though it's stored as "ci:builder"
-    let result = find_runbook_by_worker(&runbooks_dir, "builder").unwrap();
-    assert!(result.is_some(), "should find worker by unaliased name");
-    let rb = result.unwrap();
+    let rb = find_runbook_by_worker(&runbooks_dir, "builder")
+        .unwrap()
+        .unwrap();
     assert!(
         rb.get_worker("builder").is_some(),
-        "get_worker should resolve unaliased name"
+        "should resolve unaliased name"
     );
-}
 
-#[test]
-fn find_worker_by_aliased_name() {
-    let tmp = TempDir::new().unwrap();
-    let lib_hcl = r#"
-queue "tasks" {
-  type = "external"
-  list = "echo []"
-  take = "echo ok"
-}
-
-worker "builder" {
-  source  = { queue = "tasks" }
-  handler = { job = "build" }
-}
-
-job "build" {
-  step "run" {
-    run = "echo build"
-  }
-}
-"#;
-    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
-
-    // Should also find by the full aliased name
     let result = find_runbook_by_worker(&runbooks_dir, "ci:builder").unwrap();
     assert!(result.is_some(), "should find worker by aliased name");
 }
@@ -763,66 +711,31 @@ job "build" {
 #[test]
 fn find_queue_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
-    let lib_hcl = r#"
-queue "tasks" {
-  type = "persisted"
-  vars = ["title"]
-}
-"#;
-    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
-
-    let result = find_runbook_by_queue(&runbooks_dir, "tasks").unwrap();
-    assert!(result.is_some(), "should find queue by unaliased name");
-    let rb = result.unwrap();
-    assert!(
-        rb.get_queue("tasks").is_some(),
-        "get_queue should resolve unaliased name"
-    );
+    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", QUEUE_RUNBOOK);
+    let rb = find_runbook_by_queue(&runbooks_dir, "tasks")
+        .unwrap()
+        .unwrap();
+    assert!(rb.get_queue("tasks").is_some());
 }
 
 #[test]
 fn find_command_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
-    let lib_hcl = r#"
-command "deploy" {
-  run = "echo deploy"
-}
-"#;
-    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", lib_hcl);
-
-    let result = find_runbook_by_command(&runbooks_dir, "deploy").unwrap();
-    assert!(result.is_some(), "should find command by unaliased name");
-    let rb = result.unwrap();
-    assert!(
-        rb.get_command("deploy").is_some(),
-        "get_command should resolve unaliased name"
-    );
+    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", CMD_RUNBOOK);
+    let rb = find_runbook_by_command(&runbooks_dir, "deploy")
+        .unwrap()
+        .unwrap();
+    assert!(rb.get_command("deploy").is_some());
 }
 
 #[test]
 fn find_cron_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
-    let lib_hcl = r#"
-cron "daily-backup" {
-  interval = "24h"
-  run      = { job = "backup" }
-}
-
-job "backup" {
-  step "run" {
-    run = "echo backup"
-  }
-}
-"#;
-    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", lib_hcl);
-
-    let result = find_runbook_by_cron(&runbooks_dir, "daily-backup").unwrap();
-    assert!(result.is_some(), "should find cron by unaliased name");
-    let rb = result.unwrap();
-    assert!(
-        rb.get_cron("daily-backup").is_some(),
-        "get_cron should resolve unaliased name"
-    );
+    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", CRON_RUNBOOK);
+    let rb = find_runbook_by_cron(&runbooks_dir, "daily-backup")
+        .unwrap()
+        .unwrap();
+    assert!(rb.get_cron("daily-backup").is_some());
 }
 
 // ============================================================================
@@ -830,14 +743,12 @@ job "backup" {
 // ============================================================================
 
 /// Set up a project dir with runbooks/ and libraries/ for import tests.
-/// Returns (runbooks_dir, project_dir).
 fn setup_import_project(
     base_hcl: &str,
     library_name: &str,
     library_files: &[(&str, &str)],
 ) -> (TempDir, PathBuf) {
     let tmp = TempDir::new().unwrap();
-    // runbooks/ lives inside a project dir (e.g., .oj/)
     let project = tmp.path().join("project");
     let runbooks = project.join("runbooks");
     let libraries = project.join("libraries").join(library_name);
@@ -852,20 +763,14 @@ fn setup_import_project(
 
 #[test]
 fn imported_commands_use_library_comment_not_importer_comment() {
-    let base = r#"# Shared imports for the project
-import "mylib" {}
-"#;
-    let lib_cmd = r#"# Library command description
-command "deploy" {
-  run = "echo deploy"
-}
-"#;
+    let base = "# Shared imports for the project\nimport \"mylib\" {}\n";
+    let lib_cmd =
+        "# Library command description\ncommand \"deploy\" {\n  run = \"echo deploy\"\n}\n";
     let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", lib_cmd)]);
 
     let commands = collect_all_commands(&runbooks).unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0, "deploy");
-    // Should use the library's comment, not the importer's "Shared imports" comment
     assert_eq!(
         commands[0].2.as_deref(),
         Some("Library command description")
@@ -874,9 +779,7 @@ command "deploy" {
 
 #[test]
 fn imported_commands_with_alias_use_library_comment() {
-    let base = r#"# Shared imports for the project
-import "mylib" { alias = "ml" }
-"#;
+    let base = "# Shared imports for the project\nimport \"mylib\" { alias = \"ml\" }\n";
     let lib_cmd = r#"# Aliased library command
 #
 # Long description for the aliased command.
@@ -894,9 +797,7 @@ command "deploy" {
 
 #[test]
 fn find_command_with_comment_imported_uses_library_comment() {
-    let base = r#"# Shared imports
-import "mylib" {}
-"#;
+    let base = "# Shared imports\nimport \"mylib\" {}\n";
     let lib_cmd = r#"# Build artifacts
 #
 # Usage:
@@ -909,7 +810,6 @@ command "build" {
     let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("build.hcl", lib_cmd)]);
 
     let result = find_command_with_comment(&runbooks, "build").unwrap();
-    assert!(result.is_some());
     let (cmd, comment) = result.unwrap();
     assert_eq!(cmd.name, "build");
     let comment = comment.unwrap();
@@ -919,36 +819,25 @@ command "build" {
 
 #[test]
 fn find_command_with_comment_aliased_import_uses_library_comment() {
-    let base = r#"# Shared imports
-import "mylib" { alias = "ml" }
-"#;
-    let lib_cmd = r#"# Plan work interactively
-command "plan" {
-  run = "echo plan"
-}
-"#;
+    let base = "# Shared imports\nimport \"mylib\" { alias = \"ml\" }\n";
+    let lib_cmd = "# Plan work interactively\ncommand \"plan\" {\n  run = \"echo plan\"\n}\n";
     let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("plan.hcl", lib_cmd)]);
 
     let result = find_command_with_comment(&runbooks, "ml:plan").unwrap();
-    assert!(result.is_some());
     let (cmd, comment) = result.unwrap();
     assert_eq!(cmd.name, "ml:plan");
-    let comment = comment.unwrap();
-    assert_eq!(comment.short, "Plan work interactively");
+    assert_eq!(comment.unwrap().short, "Plan work interactively");
 }
 
 #[test]
 fn local_commands_still_use_file_comment_as_fallback() {
     let tmp = TempDir::new().unwrap();
-    let content = r#"# File-level description
-command "test" {
-  run = "echo test"
-}
-"#;
-    write_hcl(tmp.path(), "test.hcl", content);
-
+    write_hcl(
+        tmp.path(),
+        "test.hcl",
+        "# File-level description\ncommand \"test\" {\n  run = \"echo test\"\n}\n",
+    );
     let commands = collect_all_commands(tmp.path()).unwrap();
-    assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].2.as_deref(), Some("File-level description"));
 }
 
@@ -962,21 +851,105 @@ command "test" {
   run = "echo test"
 }
 "#;
-    let lib_cmd = r#"# Deploy to production
-command "deploy" {
-  run = "echo deploy"
-}
-"#;
+    let lib_cmd = "# Deploy to production\ncommand \"deploy\" {\n  run = \"echo deploy\"\n}\n";
     let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("deploy.hcl", lib_cmd)]);
 
     let commands = collect_all_commands(&runbooks).unwrap();
     assert_eq!(commands.len(), 2);
-
     let deploy = commands.iter().find(|(n, _, _)| n == "lib:deploy").unwrap();
     let test = commands.iter().find(|(n, _, _)| n == "test").unwrap();
-
-    // Imported command gets library comment
     assert_eq!(deploy.2.as_deref(), Some("Deploy to production"));
-    // Local command gets its block comment
     assert_eq!(test.2.as_deref(), Some("Run local tests"));
+}
+
+// ============================================================================
+// Aliased import duplicate detection (exact vs suffix matching)
+// ============================================================================
+
+/// Shorthand: set up aliased import with "wok" alias from "woklib" library.
+fn setup_wok_import(lib_hcl: &str) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let dir = setup_aliased_import(&tmp, "wok", "woklib", lib_hcl);
+    (tmp, dir)
+}
+
+const CMD_LIB_BUG: &str = r#"
+command "bug" {
+  run = "echo lib-bug"
+}
+"#;
+
+#[test]
+fn aliased_import_plus_local_same_name_prefers_local() {
+    let (_tmp, dir) = setup_wok_import(CMD_LIB_BUG);
+    write_hcl(&dir, "b.hcl", r#"command "bug" { run = "echo local-bug" }"#);
+
+    let rb = find_runbook_by_command(&dir, "bug").unwrap().unwrap();
+    assert_eq!(
+        rb.commands.get("bug").unwrap().run.shell_command(),
+        Some("echo local-bug")
+    );
+}
+
+#[test]
+fn aliased_import_only_falls_back_to_suffix_match() {
+    let (_tmp, dir) = setup_wok_import(CMD_LIB_BUG);
+    let rb = find_runbook_by_command(&dir, "bug").unwrap().unwrap();
+    assert!(rb.get_command("bug").is_some());
+}
+
+#[test]
+fn same_aliased_name_in_two_files_is_duplicate() {
+    let (_tmp, dir) = setup_wok_import(CMD_LIB_BUG);
+    write_hcl(&dir, "b.hcl", r#"import "woklib" { alias = "wok" }"#);
+    assert!(matches!(
+        find_runbook_by_command(&dir, "bug"),
+        Err(FindError::Duplicate(_))
+    ));
+}
+
+const WORKER_LIB_CHORE: &str = r#"
+queue "tasks" {
+  type = "external"
+  list = "echo []"
+  take = "echo ok"
+}
+
+worker "chore" {
+  source  = { queue = "tasks" }
+  handler = { job = "do-chore" }
+}
+
+job "do-chore" {
+  step "run" {
+    run = "echo lib-chore"
+  }
+}
+"#;
+
+const LOCAL_WORKER_CHORE: &str = r#"
+queue "local-tasks" {
+  type = "external"
+  list = "echo []"
+  take = "echo ok"
+}
+
+worker "chore" {
+  source  = { queue = "local-tasks" }
+  handler = { job = "local-chore" }
+}
+
+job "local-chore" {
+  step "run" {
+    run = "echo local-chore"
+  }
+}
+"#;
+
+#[test]
+fn aliased_import_plus_local_worker_prefers_local() {
+    let (_tmp, dir) = setup_wok_import(WORKER_LIB_CHORE);
+    write_hcl(&dir, "b.hcl", LOCAL_WORKER_CHORE);
+    let rb = find_runbook_by_worker(&dir, "chore").unwrap().unwrap();
+    assert_eq!(rb.workers.get("chore").unwrap().source.queue, "local-tasks");
 }

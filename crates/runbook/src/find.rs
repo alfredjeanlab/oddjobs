@@ -269,7 +269,12 @@ pub fn find_runbook_by_command(
     runbook_dir: &Path,
     name: &str,
 ) -> Result<Option<Runbook>, FindError> {
-    find_runbook(runbook_dir, name, |rb| rb.get_command(name).is_some())
+    find_runbook(
+        runbook_dir,
+        name,
+        |rb| rb.commands.contains_key(name),
+        |rb| rb.get_command(name).is_some(),
+    )
 }
 
 /// Scan `.oj/runbooks/` recursively for the file defining worker `name`.
@@ -277,17 +282,32 @@ pub fn find_runbook_by_worker(
     runbook_dir: &Path,
     name: &str,
 ) -> Result<Option<Runbook>, FindError> {
-    find_runbook(runbook_dir, name, |rb| rb.get_worker(name).is_some())
+    find_runbook(
+        runbook_dir,
+        name,
+        |rb| rb.workers.contains_key(name),
+        |rb| rb.get_worker(name).is_some(),
+    )
 }
 
 /// Scan `.oj/runbooks/` recursively for the file defining queue `name`.
 pub fn find_runbook_by_queue(runbook_dir: &Path, name: &str) -> Result<Option<Runbook>, FindError> {
-    find_runbook(runbook_dir, name, |rb| rb.get_queue(name).is_some())
+    find_runbook(
+        runbook_dir,
+        name,
+        |rb| rb.queues.contains_key(name),
+        |rb| rb.get_queue(name).is_some(),
+    )
 }
 
 /// Scan `.oj/runbooks/` recursively for the file defining cron `name`.
 pub fn find_runbook_by_cron(runbook_dir: &Path, name: &str) -> Result<Option<Runbook>, FindError> {
-    find_runbook(runbook_dir, name, |rb| rb.get_cron(name).is_some())
+    find_runbook(
+        runbook_dir,
+        name,
+        |rb| rb.crons.contains_key(name),
+        |rb| rb.get_cron(name).is_some(),
+    )
 }
 
 /// Generic helper to collect items from all runbooks in a directory.
@@ -595,14 +615,16 @@ pub fn runbook_parse_warnings(runbook_dir: &Path) -> Vec<String> {
 fn find_runbook(
     runbook_dir: &Path,
     name: &str,
-    matches: impl Fn(&Runbook) -> bool,
+    exact_match: impl Fn(&Runbook) -> bool,
+    suffix_match: impl Fn(&Runbook) -> bool,
 ) -> Result<Option<Runbook>, FindError> {
     if !runbook_dir.exists() {
         return Ok(None);
     }
     let library_dirs = project_library_dirs(runbook_dir);
     let files = collect_runbook_files(runbook_dir)?;
-    let mut found: Option<Runbook> = None;
+    let mut exact_found: Option<Runbook> = None;
+    let mut suffix_found: Option<Runbook> = None;
     let mut skipped: Vec<(PathBuf, String)> = Vec::new();
     for (path, format) in files {
         let content = match std::fs::read_to_string(&path) {
@@ -621,13 +643,20 @@ fn find_runbook(
                 continue;
             }
         };
-        if matches(&runbook) {
-            if found.is_some() {
+        if exact_match(&runbook) {
+            if exact_found.is_some() {
                 return Err(FindError::Duplicate(name.to_string()));
             }
-            found = Some(runbook);
+            exact_found = Some(runbook);
+        } else if suffix_match(&runbook) {
+            if suffix_found.is_some() {
+                return Err(FindError::Duplicate(name.to_string()));
+            }
+            suffix_found = Some(runbook);
         }
     }
+    // Prefer exact matches; fall back to suffix matches only when no exact match exists
+    let found = exact_found.or(suffix_found);
     if found.is_none() && !skipped.is_empty() {
         let details = skipped
             .iter()
