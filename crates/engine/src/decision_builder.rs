@@ -337,7 +337,8 @@ impl EscalationDecisionBuilder {
                     }
                 }
 
-                // Always add Cancel and Dismiss as the last options
+                // Always add Other, Cancel, and Dismiss as the last options
+                options.push(DecisionOption::new("Other").description("Write a custom response"));
                 options.push(DecisionOption::new("Cancel").description("Cancel and fail"));
                 options.push(
                     DecisionOption::new("Dismiss")

@@ -277,6 +277,7 @@ fn follow_up_message_for_interactive_options() {
     assert!(needs_follow_up_message("Nudge"));
     assert!(needs_follow_up_message("Retry"));
     assert!(needs_follow_up_message("Revise"));
+    assert!(needs_follow_up_message("Other"));
 }
 
 #[test]
@@ -321,6 +322,12 @@ fn format_decision_detail_grouped_questions() {
                         description: None,
                         recommended: false,
                     },
+                    DecisionOptionDetail {
+                        number: 3,
+                        label: "Other".to_string(),
+                        description: Some("Write a custom response".to_string()),
+                        recommended: false,
+                    },
                 ],
             },
             QuestionGroupDetail {
@@ -337,6 +344,12 @@ fn format_decision_detail_grouped_questions() {
                         number: 2,
                         label: "MySQL".to_string(),
                         description: None,
+                        recommended: false,
+                    },
+                    DecisionOptionDetail {
+                        number: 3,
+                        label: "Other".to_string(),
+                        description: Some("Write a custom response".to_string()),
                         recommended: false,
                     },
                 ],
@@ -360,10 +373,18 @@ fn format_decision_detail_grouped_questions() {
     assert!(out.contains("Which framework?"), "missing question text");
     assert!(out.contains("1. React - Component-based"));
     assert!(out.contains("2. Vue"));
+    assert!(
+        out.contains("3. Other - Write a custom response"),
+        "missing Other option in Framework group"
+    );
     assert!(out.contains("[Database]"), "missing Database header");
     assert!(out.contains("Which database?"), "missing question text");
     assert!(out.contains("1. PostgreSQL"));
     assert!(out.contains("2. MySQL"));
+    assert!(
+        out.contains("3. Other - Write a custom response"),
+        "missing Other option in Database group"
+    );
     assert!(out.contains("Cancel"), "missing Cancel option");
     // Resolve hint for multi-question
     assert!(out.contains("oj decision resolve abcdef12 <q1> <q2>"));
