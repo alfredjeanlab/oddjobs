@@ -824,3 +824,159 @@ job "backup" {
         "get_cron should resolve unaliased name"
     );
 }
+
+// ============================================================================
+// Imported command comment tests (bug: oj-92dbf159)
+// ============================================================================
+
+/// Set up a project dir with runbooks/ and libraries/ for import tests.
+/// Returns (runbooks_dir, project_dir).
+fn setup_import_project(
+    base_hcl: &str,
+    library_name: &str,
+    library_files: &[(&str, &str)],
+) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    // runbooks/ lives inside a project dir (e.g., .oj/)
+    let project = tmp.path().join("project");
+    let runbooks = project.join("runbooks");
+    let libraries = project.join("libraries").join(library_name);
+    fs::create_dir_all(&runbooks).unwrap();
+    fs::create_dir_all(&libraries).unwrap();
+    fs::write(runbooks.join("base.hcl"), base_hcl).unwrap();
+    for (name, content) in library_files {
+        fs::write(libraries.join(name), content).unwrap();
+    }
+    (tmp, runbooks)
+}
+
+#[test]
+fn imported_commands_use_library_comment_not_importer_comment() {
+    let base = r#"# Shared imports for the project
+import "mylib" {}
+"#;
+    let lib_cmd = r#"# Library command description
+command "deploy" {
+  run = "echo deploy"
+}
+"#;
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", lib_cmd)]);
+
+    let commands = collect_all_commands(&runbooks).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "deploy");
+    // Should use the library's comment, not the importer's "Shared imports" comment
+    assert_eq!(
+        commands[0].2.as_deref(),
+        Some("Library command description")
+    );
+}
+
+#[test]
+fn imported_commands_with_alias_use_library_comment() {
+    let base = r#"# Shared imports for the project
+import "mylib" { alias = "ml" }
+"#;
+    let lib_cmd = r#"# Aliased library command
+#
+# Long description for the aliased command.
+command "deploy" {
+  run = "echo deploy"
+}
+"#;
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", lib_cmd)]);
+
+    let commands = collect_all_commands(&runbooks).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "ml:deploy");
+    assert_eq!(commands[0].2.as_deref(), Some("Aliased library command"));
+}
+
+#[test]
+fn find_command_with_comment_imported_uses_library_comment() {
+    let base = r#"# Shared imports
+import "mylib" {}
+"#;
+    let lib_cmd = r#"# Build artifacts
+#
+# Usage:
+#   oj run build <target>
+command "build" {
+  args = "<target>"
+  run  = "echo build"
+}
+"#;
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("build.hcl", lib_cmd)]);
+
+    let result = find_command_with_comment(&runbooks, "build").unwrap();
+    assert!(result.is_some());
+    let (cmd, comment) = result.unwrap();
+    assert_eq!(cmd.name, "build");
+    let comment = comment.unwrap();
+    assert_eq!(comment.short, "Build artifacts");
+    assert!(comment.long.contains("Usage:"));
+}
+
+#[test]
+fn find_command_with_comment_aliased_import_uses_library_comment() {
+    let base = r#"# Shared imports
+import "mylib" { alias = "ml" }
+"#;
+    let lib_cmd = r#"# Plan work interactively
+command "plan" {
+  run = "echo plan"
+}
+"#;
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("plan.hcl", lib_cmd)]);
+
+    let result = find_command_with_comment(&runbooks, "ml:plan").unwrap();
+    assert!(result.is_some());
+    let (cmd, comment) = result.unwrap();
+    assert_eq!(cmd.name, "ml:plan");
+    let comment = comment.unwrap();
+    assert_eq!(comment.short, "Plan work interactively");
+}
+
+#[test]
+fn local_commands_still_use_file_comment_as_fallback() {
+    let tmp = TempDir::new().unwrap();
+    let content = r#"# File-level description
+command "test" {
+  run = "echo test"
+}
+"#;
+    write_hcl(tmp.path(), "test.hcl", content);
+
+    let commands = collect_all_commands(tmp.path()).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].2.as_deref(), Some("File-level description"));
+}
+
+#[test]
+fn mixed_local_and_imported_commands_get_correct_comments() {
+    let base = r#"# Local project commands
+import "mylib" { alias = "lib" }
+
+# Run local tests
+command "test" {
+  run = "echo test"
+}
+"#;
+    let lib_cmd = r#"# Deploy to production
+command "deploy" {
+  run = "echo deploy"
+}
+"#;
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("deploy.hcl", lib_cmd)]);
+
+    let commands = collect_all_commands(&runbooks).unwrap();
+    assert_eq!(commands.len(), 2);
+
+    let deploy = commands.iter().find(|(n, _, _)| n == "lib:deploy").unwrap();
+    let test = commands.iter().find(|(n, _, _)| n == "test").unwrap();
+
+    // Imported command gets library comment
+    assert_eq!(deploy.2.as_deref(), Some("Deploy to production"));
+    // Local command gets its block comment
+    assert_eq!(test.2.as_deref(), Some("Run local tests"));
+}

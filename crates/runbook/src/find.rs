@@ -5,7 +5,7 @@
 
 use crate::parser::Format;
 use crate::{parse_runbook_with_format, CommandDef, Runbook};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -149,6 +149,58 @@ pub fn extract_block_comments(content: &str) -> HashMap<String, FileComment> {
     result
 }
 
+/// Extract comments for commands introduced via imports.
+///
+/// Parses the raw content to get import definitions, resolves each library,
+/// and extracts block/file comments from the library files. Returns a map of
+/// aliased command names to their `FileComment`.
+fn extract_import_command_comments(
+    content: &str,
+    format: Format,
+    library_dirs: &[PathBuf],
+) -> HashMap<String, FileComment> {
+    let mut result = HashMap::new();
+    if format != Format::Hcl {
+        return result;
+    }
+    let raw = match crate::parser::parse_runbook_no_xref(content, format) {
+        Ok(rb) => rb,
+        Err(_) => return result,
+    };
+    for (source, import_def) in &raw.imports {
+        let library_files = match crate::import::resolve_library(source, library_dirs) {
+            Ok(files) => files,
+            Err(_) => continue,
+        };
+        let alias = import_def.alias.as_deref();
+        for (_filename, file_content) in &library_files {
+            let block_comments = extract_block_comments(file_content);
+            let file_comment = extract_file_comment(file_content);
+            let file_rb = match crate::parser::parse_runbook_no_xref(file_content, Format::Hcl) {
+                Ok(rb) => rb,
+                Err(_) => continue,
+            };
+            for cmd_name in file_rb.commands.keys() {
+                let aliased_name = match alias {
+                    Some(a) => format!("{}:{}", a, cmd_name),
+                    None => cmd_name.clone(),
+                };
+                let comment = block_comments.get(cmd_name).or(file_comment.as_ref());
+                if let Some(c) = comment {
+                    result.insert(
+                        aliased_name,
+                        FileComment {
+                            short: c.short.clone(),
+                            long: c.long.clone(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+    result
+}
+
 /// Find a command definition and its runbook file comment.
 pub fn find_command_with_comment(
     runbook_dir: &Path,
@@ -170,9 +222,20 @@ pub fn find_command_with_comment(
         };
         if let Some(cmd) = runbook.commands.get(command_name) {
             let mut block_comments = extract_block_comments(&content);
-            let comment = block_comments
-                .remove(command_name)
-                .or_else(|| extract_file_comment(&content));
+            let comment = block_comments.remove(command_name).or_else(|| {
+                // Only use the file-level comment for locally defined commands
+                let local_commands = crate::parser::parse_runbook_no_xref(&content, format)
+                    .map(|rb| rb.commands.keys().cloned().collect::<HashSet<_>>())
+                    .unwrap_or_default();
+                if local_commands.contains(command_name) {
+                    extract_file_comment(&content)
+                } else {
+                    // For imported commands, look up comments from library sources
+                    let mut import_comments =
+                        extract_import_command_comments(&content, format, &library_dirs);
+                    import_comments.remove(command_name)
+                }
+            });
             return Ok(Some((cmd.clone(), comment)));
         }
     }
@@ -270,15 +333,32 @@ fn collect_all<T>(
 pub fn collect_all_commands(
     runbook_dir: &Path,
 ) -> Result<Vec<(String, crate::CommandDef, Option<String>)>, FindError> {
+    let library_dirs = project_library_dirs(runbook_dir);
     let items: Vec<(String, (crate::CommandDef, Option<String>))> =
         collect_all(runbook_dir, |runbook, content| {
             let block_comments = extract_block_comments(content);
             let file_comment = extract_file_comment(content);
+
+            // Determine which commands are locally defined (not from imports)
+            let local_commands = crate::parser::parse_runbook_no_xref(content, Format::Hcl)
+                .map(|rb| rb.commands.keys().cloned().collect::<HashSet<_>>())
+                .unwrap_or_default();
+
+            // For imported commands, resolve their comments from library sources
+            let import_comments =
+                extract_import_command_comments(content, Format::Hcl, &library_dirs);
+
             runbook
                 .commands
                 .iter()
                 .map(|(name, cmd)| {
-                    let comment = block_comments.get(name).or(file_comment.as_ref());
+                    let comment = block_comments.get(name).or_else(|| {
+                        if local_commands.contains(name) {
+                            file_comment.as_ref()
+                        } else {
+                            import_comments.get(name)
+                        }
+                    });
                     let description = comment.and_then(|c| {
                         let desc_line = c
                             .short
