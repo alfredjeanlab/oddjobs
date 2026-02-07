@@ -57,12 +57,13 @@ fn test_dead_trigger_builds_correct_options() {
             context,
             ..
         } => {
-            assert_eq!(source, DecisionSource::Error);
-            assert_eq!(options.len(), 3);
+            assert_eq!(source, DecisionSource::Dead);
+            assert_eq!(options.len(), 4);
             assert_eq!(options[0].label, "Retry");
             assert!(options[0].recommended);
             assert_eq!(options[1].label, "Skip");
             assert_eq!(options[2].label, "Cancel");
+            assert_eq!(options[3].label, "Dismiss");
             assert!(context.contains("exit code 137"));
         }
         _ => panic!("expected DecisionCreated"),
@@ -90,8 +91,9 @@ fn test_error_trigger_builds_correct_options() {
             ..
         } => {
             assert_eq!(source, DecisionSource::Error);
-            assert_eq!(options.len(), 3);
+            assert_eq!(options.len(), 4);
             assert_eq!(options[0].label, "Retry");
+            assert_eq!(options[3].label, "Dismiss");
             assert!(context.contains("OutOfCredits"));
             assert!(context.contains("API quota exceeded"));
         }
@@ -528,8 +530,9 @@ fn test_for_agent_run_error_trigger() {
         } => {
             assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-456")));
             assert_eq!(source, DecisionSource::Error);
-            assert_eq!(options.len(), 3);
+            assert_eq!(options.len(), 4);
             assert_eq!(options[0].label, "Retry");
+            assert_eq!(options[3].label, "Dismiss");
             assert_eq!(namespace, "test-ns");
             assert!(context.contains("OutOfCredits"));
         }

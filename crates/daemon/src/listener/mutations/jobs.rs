@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::{Event, JobId, ShortId};
+use oj_core::{Event, JobId, OwnerId, ShortId};
 use oj_runbook::Runbook;
 use oj_storage::MaterializedState;
 
@@ -71,6 +71,9 @@ pub(crate) fn handle_job_resume(
                 return Ok(Response::Error { message: err_msg });
             }
         }
+
+        // Auto-dismiss any pending decisions for this job
+        auto_dismiss_decisions_for_job(ctx, &job_id)?;
 
         emit(
             &ctx.event_bus,
@@ -223,6 +226,9 @@ pub(crate) fn handle_job_resume_all(
 
     let mut resumed = Vec::new();
     for job_id in targets {
+        // Auto-dismiss any pending decisions for this job
+        auto_dismiss_decisions_for_job(ctx, &job_id)?;
+
         emit(
             &ctx.event_bus,
             Event::JobResume {
@@ -385,6 +391,45 @@ pub(crate) fn handle_job_prune(
         pruned: to_prune,
         skipped,
     })
+}
+
+/// Auto-dismiss unresolved decisions for a job owner.
+///
+/// When a job is resumed manually, any pending decisions for that job
+/// are no longer relevant. Emits `DecisionResolved` with `chosen: None`
+/// for each unresolved decision.
+fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), ConnectionError> {
+    let owner = OwnerId::Job(JobId::new(job_id));
+    let unresolved: Vec<(String, String)> = {
+        let state_guard = ctx.state.lock();
+        state_guard
+            .decisions
+            .values()
+            .filter(|d| d.owner == owner && !d.is_resolved())
+            .map(|d| (d.id.as_str().to_string(), d.namespace.clone()))
+            .collect()
+    };
+
+    let resolved_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    for (dec_id, namespace) in unresolved {
+        emit(
+            &ctx.event_bus,
+            Event::DecisionResolved {
+                id: dec_id,
+                chosen: None,
+                choices: vec![],
+                message: Some("auto-dismissed by job resume".to_string()),
+                resolved_at_ms,
+                namespace,
+            },
+        )?;
+    }
+
+    Ok(())
 }
 
 /// Validate that agent steps have a message for resume.

@@ -202,7 +202,8 @@ enum ResolvedAction {
 ///
 /// Option numbering (1-indexed):
 /// - Idle: 1=Nudge, 2=Done, 3=Cancel, 4=Dismiss
-/// - Error/Gate: 1=Retry, 2=Skip, 3=Cancel
+/// - Error/Dead: 1=Retry, 2=Skip, 3=Cancel, 4=Dismiss
+/// - Gate: 1=Retry, 2=Skip, 3=Cancel
 /// - Approval: 1=Approve, 2=Deny, 3=Cancel
 /// - Question: 1..N=user options, N+1=Cancel (dynamic position)
 /// - Plan: 1=Accept(clear), 2=Accept(auto), 3=Accept(manual), 4=Revise, 5=Cancel
@@ -233,7 +234,14 @@ fn resolve_decision_action(
             4 => ResolvedAction::Dismiss,
             _ => ResolvedAction::Dismiss,
         },
-        DecisionSource::Error | DecisionSource::Gate => match choice {
+        DecisionSource::Error | DecisionSource::Dead => match choice {
+            1 => ResolvedAction::Retry,
+            2 => ResolvedAction::Complete,
+            3 => ResolvedAction::Cancel,
+            4 => ResolvedAction::Dismiss,
+            _ => ResolvedAction::Dismiss,
+        },
+        DecisionSource::Gate => match choice {
             1 => ResolvedAction::Retry,
             2 => ResolvedAction::Complete,
             3 => ResolvedAction::Cancel,
@@ -450,7 +458,7 @@ fn map_decision_to_agent_run_action(
         }
         ResolvedAction::Complete => {
             let reason = match ctx.source {
-                DecisionSource::Error | DecisionSource::Gate => {
+                DecisionSource::Error | DecisionSource::Dead | DecisionSource::Gate => {
                     format!("skipped via decision {}", ctx.decision_id)
                 }
                 _ => format!("marked done via decision {}", ctx.decision_id),
