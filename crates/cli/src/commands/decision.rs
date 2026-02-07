@@ -161,16 +161,30 @@ pub async fn handle(
 
                 match parse_review_input(&line, option_count) {
                     ReviewAction::Pick(n) => {
-                        eprint!("Message (Enter to skip): ");
-                        std::io::stderr().flush().ok();
-                        let msg_line = match lines.next() {
-                            Some(Ok(l)) => l,
-                            _ => String::new(),
-                        };
-                        let message = if msg_line.trim().is_empty() {
-                            None
+                        // Only prompt for a message when the option actually uses
+                        // one (e.g. Nudge, Retry, Revise).  Terminal actions like
+                        // Skip, Cancel, Done, Dismiss, Approve, Deny, and Accept
+                        // variants ignore the message on the daemon side.
+                        let label = detail
+                            .options
+                            .iter()
+                            .find(|o| o.number == n)
+                            .map(|o| o.label.as_str())
+                            .unwrap_or("");
+                        let message = if needs_follow_up_message(label) {
+                            eprint!("Message (Enter to skip): ");
+                            std::io::stderr().flush().ok();
+                            let msg_line = match lines.next() {
+                                Some(Ok(l)) => l,
+                                _ => String::new(),
+                            };
+                            if msg_line.trim().is_empty() {
+                                None
+                            } else {
+                                Some(msg_line.trim().to_string())
+                            }
                         } else {
-                            Some(msg_line.trim().to_string())
+                            None
                         };
 
                         match client
@@ -381,6 +395,16 @@ pub(crate) enum ReviewAction {
     Skip,
     Quit,
     Invalid,
+}
+
+/// Whether the given option label warrants a follow-up message prompt.
+///
+/// Interactive actions (Nudge, Retry, Revise) benefit from user-provided
+/// context.  Terminal/navigational actions (Skip, Cancel, Done, Dismiss,
+/// Approve, Deny, Accept variants) do not — the daemon ignores the message
+/// for those.
+pub(crate) fn needs_follow_up_message(label: &str) -> bool {
+    matches!(label, "Nudge" | "Retry" | "Revise")
 }
 
 pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewAction {

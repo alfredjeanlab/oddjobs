@@ -270,6 +270,28 @@ fn review_input_invalid() {
     assert_eq!(parse_review_input("pick", 3), ReviewAction::Invalid);
 }
 
+// --- needs_follow_up_message tests ---
+
+#[test]
+fn follow_up_message_for_interactive_options() {
+    assert!(needs_follow_up_message("Nudge"));
+    assert!(needs_follow_up_message("Retry"));
+    assert!(needs_follow_up_message("Revise"));
+}
+
+#[test]
+fn no_follow_up_message_for_terminal_options() {
+    assert!(!needs_follow_up_message("Skip"));
+    assert!(!needs_follow_up_message("Cancel"));
+    assert!(!needs_follow_up_message("Done"));
+    assert!(!needs_follow_up_message("Dismiss"));
+    assert!(!needs_follow_up_message("Approve"));
+    assert!(!needs_follow_up_message("Deny"));
+    assert!(!needs_follow_up_message("Accept (clear context)"));
+    assert!(!needs_follow_up_message("Accept (auto edits)"));
+    assert!(!needs_follow_up_message("Accept (manual edits)"));
+}
+
 // --- multi-question display tests ---
 
 #[test]
