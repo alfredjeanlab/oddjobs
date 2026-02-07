@@ -67,7 +67,7 @@ pub(super) fn append_agent_log(agent_id: &str, message: &str) {
 /// Returns None for unrecognized tools.
 pub(super) fn prompt_type_for_tool(tool_name: Option<&str>) -> Option<PromptType> {
     match tool_name {
-        Some("ExitPlanMode") | Some("EnterPlanMode") => Some(PromptType::PlanApproval),
+        Some("ExitPlanMode") => Some(PromptType::PlanApproval),
         Some("AskUserQuestion") => Some(PromptType::Question),
         _ => None,
     }

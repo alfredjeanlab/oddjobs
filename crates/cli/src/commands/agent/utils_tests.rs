@@ -76,11 +76,8 @@ fn prompt_type_for_tool_maps_exit_plan_mode() {
 }
 
 #[test]
-fn prompt_type_for_tool_maps_enter_plan_mode() {
-    assert_eq!(
-        prompt_type_for_tool(Some("EnterPlanMode")),
-        Some(oj_core::PromptType::PlanApproval)
-    );
+fn prompt_type_for_tool_ignores_enter_plan_mode() {
+    assert_eq!(prompt_type_for_tool(Some("EnterPlanMode")), None);
 }
 
 #[test]
