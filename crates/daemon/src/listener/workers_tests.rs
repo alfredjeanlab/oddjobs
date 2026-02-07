@@ -212,7 +212,7 @@ fn restart_stops_existing_then_starts() {
 #[test]
 fn restart_with_valid_runbook_returns_started() {
     let dir = tempdir().unwrap();
-    let ctx = super::super::test_ctx(dir.path());
+    let (ctx, wal) = super::super::test_ctx_with_wal(dir.path());
 
     // Create a project with a worker
     let project = tempdir().unwrap();
@@ -240,7 +240,7 @@ job "handle" {
     )
     .unwrap();
 
-    // Put existing worker in state
+    // Put existing worker in state as "running"
     {
         let mut state = ctx.state.lock();
         state.workers.insert(
@@ -264,6 +264,35 @@ job "handle" {
         matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "processor"),
         "expected WorkerStarted response, got {:?}",
         result
+    );
+
+    // Verify materialized state shows "running" (not stuck on "stopped")
+    let status = ctx.state.lock().workers["processor"].status.clone();
+    assert_eq!(
+        status, "running",
+        "worker status should be 'running' after restart, got '{}'",
+        status
+    );
+
+    // Verify emitted events: WorkerStopped then WorkerStarted (not WorkerWake)
+    let events = drain_events(&wal);
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, oj_core::Event::WorkerStopped { .. })),
+        "restart should emit WorkerStopped"
+    );
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
+        "restart should emit WorkerStarted (not WorkerWake)"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, oj_core::Event::WorkerWake { .. })),
+        "restart should NOT emit WorkerWake"
     );
 }
 

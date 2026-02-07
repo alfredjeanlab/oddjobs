@@ -45,16 +45,28 @@ fn simple_action_variant_checks() {
     let agent = test_agent_def();
 
     let c = ActionConfig::simple(AgentAction::Nudge);
-    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "idle"), &job), Ok(ActionEffects::Nudge { .. })));
+    assert!(matches!(
+        build_action_effects(&test_ctx(&agent, &c, "idle"), &job),
+        Ok(ActionEffects::Nudge { .. })
+    ));
 
     let c = ActionConfig::simple(AgentAction::Done);
-    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "idle"), &job), Ok(ActionEffects::AdvanceJob)));
+    assert!(matches!(
+        build_action_effects(&test_ctx(&agent, &c, "idle"), &job),
+        Ok(ActionEffects::AdvanceJob)
+    ));
 
     let c = ActionConfig::simple(AgentAction::Fail);
-    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "error"), &job), Ok(ActionEffects::FailJob { .. })));
+    assert!(matches!(
+        build_action_effects(&test_ctx(&agent, &c, "error"), &job),
+        Ok(ActionEffects::FailJob { .. })
+    ));
 
     let c = ActionConfig::simple(AgentAction::Resume);
-    assert!(matches!(build_action_effects(&test_ctx(&agent, &c, "exit"), &job), Ok(ActionEffects::Resume { .. })));
+    assert!(matches!(
+        build_action_effects(&test_ctx(&agent, &c, "exit"), &job),
+        Ok(ActionEffects::Resume { .. })
+    ));
 }
 
 #[test]
@@ -510,10 +522,22 @@ fn agent_notify_includes_step_variable() {
 #[test]
 fn monitor_state_simple_conversions() {
     use oj_core::AgentState;
-    assert!(matches!(MonitorState::from_agent_state(&AgentState::Working), MonitorState::Working));
-    assert!(matches!(MonitorState::from_agent_state(&AgentState::WaitingForInput), MonitorState::WaitingForInput));
-    assert!(matches!(MonitorState::from_agent_state(&AgentState::Exited { exit_code: Some(0) }), MonitorState::Exited));
-    assert!(matches!(MonitorState::from_agent_state(&AgentState::SessionGone), MonitorState::Gone));
+    assert!(matches!(
+        MonitorState::from_agent_state(&AgentState::Working),
+        MonitorState::Working
+    ));
+    assert!(matches!(
+        MonitorState::from_agent_state(&AgentState::WaitingForInput),
+        MonitorState::WaitingForInput
+    ));
+    assert!(matches!(
+        MonitorState::from_agent_state(&AgentState::Exited { exit_code: Some(0) }),
+        MonitorState::Exited
+    ));
+    assert!(matches!(
+        MonitorState::from_agent_state(&AgentState::SessionGone),
+        MonitorState::Gone
+    ));
 }
 
 #[yare::parameterized(
@@ -539,7 +563,10 @@ fn monitor_state_from_failed_other() {
         oj_core::AgentError::Other("custom error".to_string()),
     ));
     match state {
-        MonitorState::Failed { message, error_type } => {
+        MonitorState::Failed {
+            message,
+            error_type,
+        } => {
             assert!(message.contains("custom error"));
             assert_eq!(error_type, None);
         }
@@ -677,13 +704,22 @@ fn agent_run_simple_action_variant_checks() {
     let agent = test_agent_def();
 
     let c = ActionConfig::simple(AgentAction::Nudge);
-    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::Nudge { .. })));
+    assert!(matches!(
+        build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar),
+        Ok(ActionEffects::Nudge { .. })
+    ));
 
     let c = ActionConfig::simple(AgentAction::Done);
-    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::CompleteAgentRun)));
+    assert!(matches!(
+        build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar),
+        Ok(ActionEffects::CompleteAgentRun)
+    ));
 
     let c = ActionConfig::simple(AgentAction::Escalate);
-    assert!(matches!(build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar), Ok(ActionEffects::EscalateAgentRun { .. })));
+    assert!(matches!(
+        build_action_effects_for_agent_run(&test_ctx(&agent, &c, "idle"), &ar),
+        Ok(ActionEffects::EscalateAgentRun { .. })
+    ));
 }
 
 #[test]

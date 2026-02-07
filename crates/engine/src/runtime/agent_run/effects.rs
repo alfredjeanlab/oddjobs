@@ -10,9 +10,7 @@ use crate::runtime::Runtime;
 use crate::ActionContext;
 use oj_adapters::subprocess::{run_with_timeout, GATE_TIMEOUT};
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{
-    AgentRun, AgentRunId, AgentRunStatus, Clock, Effect, Event, SessionId,
-};
+use oj_core::{AgentRun, AgentRunId, AgentRunStatus, Clock, Effect, Event, SessionId};
 use oj_runbook::AgentDef;
 
 impl<S, A, N, C> Runtime<S, A, N, C>

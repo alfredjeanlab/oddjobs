@@ -116,17 +116,23 @@ pub(super) fn handle_worker_start(
     let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
 
     // Emit WorkerStarted event
-    emit(
-        &ctx.event_bus,
-        Event::WorkerStarted {
-            worker_name: worker_name.to_string(),
-            project_root: project_root.to_path_buf(),
-            runbook_hash,
-            queue_name: worker_def.source.queue.clone(),
-            concurrency: worker_def.concurrency,
-            namespace: namespace.to_string(),
-        },
-    )?;
+    let event = Event::WorkerStarted {
+        worker_name: worker_name.to_string(),
+        project_root: project_root.to_path_buf(),
+        runbook_hash,
+        queue_name: worker_def.source.queue.clone(),
+        concurrency: worker_def.concurrency,
+        namespace: namespace.to_string(),
+    };
+    emit(&ctx.event_bus, event.clone())?;
+
+    // Apply to materialized state before responding so queries see it
+    // immediately. apply_event is idempotent so the second apply when the
+    // engine loop processes this event from the WAL is harmless.
+    {
+        let mut state = ctx.state.lock();
+        state.apply_event(&event);
+    }
 
     Ok(Response::WorkerStarted {
         worker_name: worker_name.to_string(),
@@ -267,13 +273,21 @@ pub(super) fn handle_worker_restart(
     if super::scoped_exists(&ctx.state, namespace, worker_name, |s, k| {
         s.workers.contains_key(k)
     }) {
-        emit(
-            &ctx.event_bus,
-            Event::WorkerStopped {
-                worker_name: worker_name.to_string(),
-                namespace: namespace.to_string(),
-            },
-        )?;
+        let event = Event::WorkerStopped {
+            worker_name: worker_name.to_string(),
+            namespace: namespace.to_string(),
+        };
+        emit(&ctx.event_bus, event.clone())?;
+
+        // Apply to materialized state immediately so handle_worker_start sees
+        // the worker as stopped and takes the full start path (emitting
+        // WorkerStarted) instead of the WorkerWake shortcut for already-running
+        // workers. apply_event is idempotent so the second apply when the
+        // engine loop processes this event from the WAL is harmless.
+        {
+            let mut state = ctx.state.lock();
+            state.apply_event(&event);
+        }
     }
 
     // Start with fresh runbook
