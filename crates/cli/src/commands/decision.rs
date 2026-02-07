@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use oj_core::ShortId;
-use oj_daemon::protocol::DecisionDetail;
+use oj_daemon::protocol::{DecisionDetail, DecisionOptionDetail};
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
@@ -161,16 +161,20 @@ pub async fn handle(
 
                 match parse_review_input(&line, option_count) {
                     ReviewAction::Pick(n) => {
-                        eprint!("Message (Enter to skip): ");
-                        std::io::stderr().flush().ok();
-                        let msg_line = match lines.next() {
-                            Some(Ok(l)) => l,
-                            _ => String::new(),
-                        };
-                        let message = if msg_line.trim().is_empty() {
-                            None
+                        let message = if needs_message(&detail.options, n) {
+                            eprint!("Message (Enter to skip): ");
+                            std::io::stderr().flush().ok();
+                            let msg_line = match lines.next() {
+                                Some(Ok(l)) => l,
+                                _ => String::new(),
+                            };
+                            if msg_line.trim().is_empty() {
+                                None
+                            } else {
+                                Some(msg_line.trim().to_string())
+                            }
                         } else {
-                            Some(msg_line.trim().to_string())
+                            None
                         };
 
                         match client
@@ -381,6 +385,19 @@ pub(crate) enum ReviewAction {
     Skip,
     Quit,
     Invalid,
+}
+
+/// Returns true if the chosen option should prompt the user for a message.
+///
+/// Terminal actions like Skip, Cancel, and Dismiss don't use a follow-up
+/// message, so there's no point asking for one.
+pub(crate) fn needs_message(options: &[DecisionOptionDetail], chosen: usize) -> bool {
+    let label = options
+        .iter()
+        .find(|o| o.number == chosen)
+        .map(|o| o.label.as_str())
+        .unwrap_or("");
+    !matches!(label, "Skip" | "Cancel" | "Dismiss" | "Done")
 }
 
 pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewAction {

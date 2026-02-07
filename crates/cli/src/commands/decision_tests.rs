@@ -270,6 +270,90 @@ fn review_input_invalid() {
     assert_eq!(parse_review_input("pick", 3), ReviewAction::Invalid);
 }
 
+// --- needs_message tests ---
+
+#[test]
+fn needs_message_skip_and_cancel() {
+    let options = vec![
+        DecisionOptionDetail {
+            number: 1,
+            label: "Retry".to_string(),
+            description: None,
+            recommended: true,
+        },
+        DecisionOptionDetail {
+            number: 2,
+            label: "Skip".to_string(),
+            description: Some("Skip and mark as complete".to_string()),
+            recommended: false,
+        },
+        DecisionOptionDetail {
+            number: 3,
+            label: "Cancel".to_string(),
+            description: Some("Cancel and fail".to_string()),
+            recommended: false,
+        },
+    ];
+    assert!(
+        needs_message(&options, 1),
+        "Retry should prompt for message"
+    );
+    assert!(
+        !needs_message(&options, 2),
+        "Skip should not prompt for message"
+    );
+    assert!(
+        !needs_message(&options, 3),
+        "Cancel should not prompt for message"
+    );
+}
+
+#[test]
+fn needs_message_dismiss_and_done() {
+    let options = vec![
+        DecisionOptionDetail {
+            number: 1,
+            label: "Nudge".to_string(),
+            description: None,
+            recommended: true,
+        },
+        DecisionOptionDetail {
+            number: 2,
+            label: "Done".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOptionDetail {
+            number: 3,
+            label: "Cancel".to_string(),
+            description: None,
+            recommended: false,
+        },
+        DecisionOptionDetail {
+            number: 4,
+            label: "Dismiss".to_string(),
+            description: None,
+            recommended: false,
+        },
+    ];
+    assert!(
+        needs_message(&options, 1),
+        "Nudge should prompt for message"
+    );
+    assert!(
+        !needs_message(&options, 2),
+        "Done should not prompt for message"
+    );
+    assert!(
+        !needs_message(&options, 3),
+        "Cancel should not prompt for message"
+    );
+    assert!(
+        !needs_message(&options, 4),
+        "Dismiss should not prompt for message"
+    );
+}
+
 // --- multi-question display tests ---
 
 #[test]
