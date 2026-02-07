@@ -436,7 +436,7 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                         qd.questions
                             .iter()
                             .map(|entry| {
-                                let opts = entry
+                                let mut opts: Vec<DecisionOptionDetail> = entry
                                     .options
                                     .iter()
                                     .enumerate()
@@ -447,6 +447,13 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                                         recommended: false,
                                     })
                                     .collect();
+                                // Add "Other" option for custom response
+                                opts.push(DecisionOptionDetail {
+                                    number: opts.len() + 1,
+                                    label: "Other".to_string(),
+                                    description: Some("Write a custom response".to_string()),
+                                    recommended: false,
+                                });
                                 QuestionGroupDetail {
                                     question: entry.question.clone(),
                                     header: entry.header.clone(),

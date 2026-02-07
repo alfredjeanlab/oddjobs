@@ -78,13 +78,14 @@ pub(super) fn handle_decision_resolve(
             }
             for (i, &c) in choices.iter().enumerate() {
                 let opt_count = qd.questions[i].options.len();
-                if c == 0 || c > opt_count {
+                // Allow opt_count + 1 for the "Other" (custom response) option
+                if c == 0 || c > opt_count + 1 {
                     return Ok(Response::Error {
                         message: format!(
                             "choice {} for question {} out of range (1..{})",
                             c,
                             i + 1,
-                            opt_count
+                            opt_count + 1
                         ),
                     });
                 }
@@ -205,7 +206,7 @@ enum ResolvedAction {
 /// - Error/Dead: 1=Retry, 2=Skip, 3=Cancel, 4=Dismiss
 /// - Gate: 1=Retry, 2=Skip, 3=Cancel
 /// - Approval: 1=Approve, 2=Deny, 3=Cancel, 4=Dismiss
-/// - Question: 1..N=user options, N+1=Cancel, N+2=Dismiss (dynamic positions)
+/// - Question: 1..N=user options, N+1=Other, N+2=Cancel, N+3=Dismiss (dynamic positions)
 /// - Plan: 1=Accept(clear), 2=Accept(auto), 3=Accept(manual), 4=Revise, 5=Cancel
 fn resolve_decision_action(
     source: &DecisionSource,
@@ -217,12 +218,15 @@ fn resolve_decision_action(
         None => return ResolvedAction::Freeform,
     };
 
-    // For Question decisions: Cancel is second-to-last, Dismiss is last (dynamic positions).
+    // For Question decisions: Other is third-to-last, Cancel is second-to-last,
+    // Dismiss is last (dynamic positions).
     if matches!(source, DecisionSource::Question) {
         return if choice == options.len() {
             ResolvedAction::Dismiss
         } else if choice == options.len() - 1 {
             ResolvedAction::Cancel
+        } else if choice == options.len() - 2 {
+            ResolvedAction::Freeform
         } else {
             ResolvedAction::Answer
         };
@@ -421,6 +425,13 @@ fn map_decision_to_agent_run_action(
                     });
                 }
                 events
+            } else if matches!(ctx.source, DecisionSource::Question) {
+                // Question "Other": send custom text as session input since
+                // the agent is waiting at an AskUserQuestion prompt.
+                ctx.message
+                    .and_then(|msg| send_to_session(format!("{}\n", msg)))
+                    .into_iter()
+                    .collect()
             } else {
                 ctx.message
                     .map(|msg| Event::AgentRunResume {
@@ -536,18 +547,28 @@ fn build_multi_question_resume_message(ctx: &DecisionResolveCtx) -> String {
             .iter()
             .enumerate()
             .map(|(i, &c)| {
-                let label = qd
-                    .questions
-                    .get(i)
-                    .and_then(|q| q.options.get(c - 1))
-                    .map(|o| o.label.as_str())
-                    .unwrap_or("?");
                 let header = qd
                     .questions
                     .get(i)
                     .and_then(|q| q.header.as_deref())
                     .unwrap_or("Q");
-                format!("{}: {} ({})", header, label, c)
+                let opt_count = qd.questions.get(i).map(|q| q.options.len()).unwrap_or(0);
+                if c == opt_count + 1 {
+                    // "Other" choice — include freeform message if available
+                    if let Some(msg) = ctx.message {
+                        format!("{}: Other - {}", header, msg)
+                    } else {
+                        format!("{}: Other", header)
+                    }
+                } else {
+                    let label = qd
+                        .questions
+                        .get(i)
+                        .and_then(|q| q.options.get(c - 1))
+                        .map(|o| o.label.as_str())
+                        .unwrap_or("?");
+                    format!("{}: {} ({})", header, label, c)
+                }
             })
             .collect();
         parts.join("; ")

@@ -404,7 +404,7 @@ pub(crate) enum ReviewAction {
 /// Approve, Deny, Accept variants) do not — the daemon ignores the message
 /// for those.
 pub(crate) fn needs_follow_up_message(label: &str) -> bool {
-    matches!(label, "Nudge" | "Retry" | "Revise")
+    matches!(label, "Nudge" | "Retry" | "Revise" | "Other")
 }
 
 pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewAction {

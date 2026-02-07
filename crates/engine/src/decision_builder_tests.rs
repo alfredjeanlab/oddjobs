@@ -287,16 +287,17 @@ fn test_question_trigger_with_data() {
             ..
         } => {
             assert_eq!(source, DecisionSource::Question);
-            // 2 user options + Cancel + Dismiss
-            assert_eq!(options.len(), 4);
+            // 2 user options + Other + Cancel + Dismiss
+            assert_eq!(options.len(), 5);
             assert_eq!(options[0].label, "React");
             assert_eq!(
                 options[0].description,
                 Some("Popular UI library".to_string())
             );
             assert_eq!(options[1].label, "Vue");
-            assert_eq!(options[2].label, "Cancel");
-            assert_eq!(options[3].label, "Dismiss");
+            assert_eq!(options[2].label, "Other");
+            assert_eq!(options[3].label, "Cancel");
+            assert_eq!(options[4].label, "Dismiss");
             // Context includes question text
             assert!(context.contains("Which library should we use?"));
             assert!(context.contains("[Library]"));
@@ -325,10 +326,11 @@ fn test_question_trigger_without_data() {
             ..
         } => {
             assert_eq!(source, DecisionSource::Question);
-            // Cancel + Dismiss when no question data
-            assert_eq!(options.len(), 2);
-            assert_eq!(options[0].label, "Cancel");
-            assert_eq!(options[1].label, "Dismiss");
+            // Other + Cancel + Dismiss when no question data
+            assert_eq!(options.len(), 3);
+            assert_eq!(options[0].label, "Other");
+            assert_eq!(options[1].label, "Cancel");
+            assert_eq!(options[2].label, "Dismiss");
             assert!(context.contains("no details available"));
         }
         _ => panic!("expected DecisionCreated"),
@@ -387,10 +389,11 @@ fn test_question_trigger_multi_question_context() {
             assert!(context.contains("[Q1] First question?"));
             assert!(context.contains("[Q2] Second question?"));
             // Options come from ALL questions
-            assert_eq!(options.len(), 3); // "Yes" (from Q1) + "Cancel" + "Dismiss"
+            assert_eq!(options.len(), 4); // "Yes" (from Q1) + "Other" + "Cancel" + "Dismiss"
             assert_eq!(options[0].label, "Yes");
-            assert_eq!(options[1].label, "Cancel");
-            assert_eq!(options[2].label, "Dismiss");
+            assert_eq!(options[1].label, "Other");
+            assert_eq!(options[2].label, "Cancel");
+            assert_eq!(options[3].label, "Dismiss");
             // question_data is passed through
             assert!(question_data.is_some());
             assert_eq!(question_data.unwrap().questions.len(), 2);
@@ -452,15 +455,16 @@ fn test_multi_question_options_from_all_questions() {
             question_data,
             ..
         } => {
-            // Options from ALL questions: React, Vue, PostgreSQL, MySQL + Cancel + Dismiss
-            assert_eq!(options.len(), 6);
+            // Options from ALL questions: React, Vue, PostgreSQL, MySQL + Other + Cancel + Dismiss
+            assert_eq!(options.len(), 7);
             assert_eq!(options[0].label, "React");
             assert_eq!(options[0].description, Some("Component-based".to_string()));
             assert_eq!(options[1].label, "Vue");
             assert_eq!(options[2].label, "PostgreSQL");
             assert_eq!(options[3].label, "MySQL");
-            assert_eq!(options[4].label, "Cancel");
-            assert_eq!(options[5].label, "Dismiss");
+            assert_eq!(options[4].label, "Other");
+            assert_eq!(options[5].label, "Cancel");
+            assert_eq!(options[6].label, "Dismiss");
 
             // question_data preserved
             let qd = question_data.unwrap();
