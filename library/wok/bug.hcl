@@ -93,7 +93,7 @@ job "bug" {
 
 agent "bugs" {
   run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
-  on_dead = { action = "gate", run = "${raw(const.check)}" }
+  on_dead = { action = "resume", attempts = 1 }
 
   on_idle {
     action  = "nudge"
@@ -119,28 +119,27 @@ agent "bugs" {
     }
   }
 
-  prime = ["wok show ${var.bug.id}"]
+  prime = [
+    "wok show ${var.bug.id}",
+    <<-PRIME
+    echo '## Workflow'
+    echo
+    echo '1. Understand the bug and find the relevant code'
+    echo '2. Implement a fix and write or update tests'
+%{ if const.check != "true" ~}
+    echo '3. Verify: `${raw(const.check)}` — changes REJECTED if this fails'
+    echo '4. Commit your changes'
+    echo '5. Mark done: `wok done ${var.bug.id}`'
+    echo
+    echo 'If already fixed by a prior commit, skip to step 5.'
+%{ else ~}
+    echo '3. Commit your changes'
+    echo '4. Mark done: `wok done ${var.bug.id}`'
+    echo
+    echo 'If already fixed by a prior commit, skip to step 4.'
+%{ endif ~}
+    PRIME
+  ]
 
-  prompt = <<-PROMPT
-    Fix the following bug: ${var.bug.id} - ${var.bug.title}
-
-    ## Steps
-
-    1. Understand the bug
-    2. Find the relevant code
-    3. Implement a fix
-    4. Write or update tests
-%{ if const.check != "true" }
-    5. Verify: `${raw(const.check)}`
-    6. Commit your changes
-    7. Mark the issue as done: `wok done ${var.bug.id}`
-
-    If the bug is already fixed (e.g. by a prior commit), skip to step 7.
-%{ else }
-    5. Commit your changes
-    6. Mark the issue as done: `wok done ${var.bug.id}`
-
-    If the bug is already fixed (e.g. by a prior commit), skip to step 6.
-%{ endif }
-  PROMPT
+  prompt = "Fix the following bug: ${var.bug.id} - ${var.bug.title}"
 }

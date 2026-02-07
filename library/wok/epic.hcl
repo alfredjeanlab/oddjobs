@@ -287,7 +287,7 @@ job "draft" {
 
 agent "plan" {
   run = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
-  on_dead = { action = "gate", run = "wok show ${var.epic.id} -o json | jq -e '.notes | length > 0'" }
+  on_dead = { action = "resume", attempts = 1 }
 
   session "tmux" {
     color = "blue"
@@ -295,20 +295,25 @@ agent "plan" {
     status { left = "${var.epic.id}: ${var.epic.title}" }
   }
 
-  prime = ["wok show ${var.epic.id}"]
+  prime = [
+    "wok show ${var.epic.id}",
+    <<-PRIME
+    echo '## Workflow'
+    echo
+    echo '1. Spawn 3-5 Explore agents in parallel to understand the codebase'
+    echo '2. Spawn a Plan agent to synthesize findings into a plan'
+    echo '3. Add the plan: `wok note ${var.epic.id} "the plan"`'
+    echo
+    echo 'The job will not advance until a note is added to the issue.'
+    PRIME
+  ]
 
-  prompt = <<-PROMPT
-    Create an implementation plan for: ${var.epic.id} - ${var.epic.title}
-
-    1. Spawn 3-5 Explore agents in parallel (depending on complexity)
-    2. Spawn a Plan agent to synthesize findings
-    3. Add the plan: `wok note ${var.epic.id} "the plan"`
-  PROMPT
+  prompt = "Create an implementation plan for: ${var.epic.id} - ${var.epic.title}"
 }
 
 agent "implement" {
   run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
-  on_dead = { action = "gate", run = "${raw(const.check)}" }
+  on_dead = { action = "resume", attempts = 1 }
 
   on_idle {
     action  = "nudge"
@@ -334,28 +339,32 @@ agent "implement" {
     }
   }
 
-  prime = ["wok show ${var.epic.id} --notes"]
+  prime = [
+    "wok show ${var.epic.id} --notes",
+    <<-PRIME
+    echo '## Workflow'
+    echo
+    echo 'The plan is in the issue notes above.'
+    echo
+    echo '1. Follow the plan and implement the changes'
+    echo '2. Write or update tests'
+%{ if const.check != "true" ~}
+    echo '3. Verify: `${raw(const.check)}` — changes REJECTED if this fails'
+    echo '4. Commit your changes'
+    echo '5. Mark done: `wok done ${var.epic.id}`'
+%{ else ~}
+    echo '3. Commit your changes'
+    echo '4. Mark done: `wok done ${var.epic.id}`'
+%{ endif ~}
+    PRIME
+  ]
 
-  prompt = <<-PROMPT
-    Implement: ${var.epic.id} - ${var.epic.title}
-
-    The plan is in the issue notes above.
-
-    1. Follow the plan
-    2. Implement
-%{ if const.check != "true" }
-    3. Verify: `${raw(const.check)}`
-    4. Commit
-%{ else }
-    3. Commit
-%{ endif }
-    5. Run: `wok done ${var.epic.id}`
-  PROMPT
+  prompt = "Implement: ${var.epic.id} - ${var.epic.title}"
 }
 
 agent "draft" {
   run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
-  on_dead = { action = "gate", run = "${raw(const.check)}" }
+  on_dead = { action = "resume", attempts = 1 }
 
   on_idle {
     action  = "nudge"
@@ -381,21 +390,25 @@ agent "draft" {
     }
   }
 
-  prime = ["wok show ${var.epic.id} --notes"]
+  prime = [
+    "wok show ${var.epic.id} --notes",
+    <<-PRIME
+    echo '## Workflow'
+    echo
+    echo 'The plan is in the issue notes above.'
+    echo
+    echo '1. Follow the plan and implement the changes'
+    echo '2. Write or update tests'
+%{ if const.check != "true" ~}
+    echo '3. Verify: `${raw(const.check)}` — changes REJECTED if this fails'
+    echo '4. Commit your changes'
+    echo '5. Mark done: `wok done ${var.epic.id}`'
+%{ else ~}
+    echo '3. Commit your changes'
+    echo '4. Mark done: `wok done ${var.epic.id}`'
+%{ endif ~}
+    PRIME
+  ]
 
-  prompt = <<-PROMPT
-    Implement: ${var.epic.id} - ${var.epic.title}
-
-    The plan is in the issue notes above.
-
-    1. Follow the plan
-    2. Implement
-%{ if const.check != "true" }
-    3. Verify: `${raw(const.check)}`
-    4. Commit
-%{ else }
-    3. Commit
-%{ endif }
-    5. Run: `wok done ${var.epic.id}`
-  PROMPT
+  prompt = "Implement: ${var.epic.id} - ${var.epic.title}"
 }

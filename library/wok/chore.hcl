@@ -94,7 +94,7 @@ job "chore" {
 
 agent "chores" {
   run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
-  on_dead = { action = "gate", run = "${raw(const.check)}" }
+  on_dead = { action = "resume", attempts = 1 }
 
   on_idle {
     action  = "nudge"
@@ -120,28 +120,27 @@ agent "chores" {
     }
   }
 
-  prime = ["wok show ${var.task.id}"]
+  prime = [
+    "wok show ${var.task.id}",
+    <<-PRIME
+    echo '## Workflow'
+    echo
+    echo '1. Understand the task and find the relevant code'
+    echo '2. Implement the changes and write or update tests'
+%{ if const.check != "true" ~}
+    echo '3. Verify: `${raw(const.check)}` — changes REJECTED if this fails'
+    echo '4. Commit your changes'
+    echo '5. Mark done: `wok done ${var.task.id}`'
+    echo
+    echo 'If already completed by a prior commit, skip to step 5.'
+%{ else ~}
+    echo '3. Commit your changes'
+    echo '4. Mark done: `wok done ${var.task.id}`'
+    echo
+    echo 'If already completed by a prior commit, skip to step 4.'
+%{ endif ~}
+    PRIME
+  ]
 
-  prompt = <<-PROMPT
-    Complete the following task: ${var.task.id} - ${var.task.title}
-
-    ## Steps
-
-    1. Understand the task
-    2. Find the relevant code
-    3. Implement the changes
-    4. Write or update tests
-%{ if const.check != "true" }
-    5. Verify: `${raw(const.check)}`
-    6. Commit your changes
-    7. Mark the issue as done: `wok done ${var.task.id}`
-
-    If the task is already completed (e.g. by a prior commit), skip to step 7.
-%{ else }
-    5. Commit your changes
-    6. Mark the issue as done: `wok done ${var.task.id}`
-
-    If the task is already completed (e.g. by a prior commit), skip to step 6.
-%{ endif }
-  PROMPT
+  prompt = "Complete the following task: ${var.task.id} - ${var.task.title}"
 }
