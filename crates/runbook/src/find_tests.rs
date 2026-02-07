@@ -673,3 +673,154 @@ command "beta" {
     let comment = comment.unwrap();
     assert_eq!(comment.short, "Beta-specific description");
 }
+
+// ============================================================================
+// Alias suffix-matching tests (find entities from aliased imports)
+// ============================================================================
+
+/// Helper: set up a project-like structure with a library and a runbook that imports it.
+///
+/// Returns the runbooks dir path.
+fn setup_aliased_import(tmp: &TempDir, alias: &str, lib_name: &str, lib_hcl: &str) -> PathBuf {
+    // Structure: tmp/.oj/runbooks/ + tmp/.oj/libraries/<lib_name>/
+    let oj_dir = tmp.path().join(".oj");
+    let runbooks_dir = oj_dir.join("runbooks");
+    let lib_dir = oj_dir.join("libraries").join(lib_name);
+    fs::create_dir_all(&runbooks_dir).unwrap();
+    fs::create_dir_all(&lib_dir).unwrap();
+
+    // Write library content
+    fs::write(lib_dir.join("lib.hcl"), lib_hcl).unwrap();
+
+    // Write runbook that imports the library with an alias
+    let import_hcl = format!(r#"import "{lib_name}" {{ alias = "{alias}" }}"#);
+    fs::write(runbooks_dir.join("main.hcl"), import_hcl).unwrap();
+
+    runbooks_dir
+}
+
+#[test]
+fn find_worker_by_unaliased_name() {
+    let tmp = TempDir::new().unwrap();
+    let lib_hcl = r#"
+queue "tasks" {
+  type = "external"
+  list = "echo []"
+  take = "echo ok"
+}
+
+worker "builder" {
+  source  = { queue = "tasks" }
+  handler = { job = "build" }
+}
+
+job "build" {
+  step "run" {
+    run = "echo build"
+  }
+}
+"#;
+    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
+
+    // Should find "builder" even though it's stored as "ci:builder"
+    let result = find_runbook_by_worker(&runbooks_dir, "builder").unwrap();
+    assert!(result.is_some(), "should find worker by unaliased name");
+    let rb = result.unwrap();
+    assert!(
+        rb.get_worker("builder").is_some(),
+        "get_worker should resolve unaliased name"
+    );
+}
+
+#[test]
+fn find_worker_by_aliased_name() {
+    let tmp = TempDir::new().unwrap();
+    let lib_hcl = r#"
+queue "tasks" {
+  type = "external"
+  list = "echo []"
+  take = "echo ok"
+}
+
+worker "builder" {
+  source  = { queue = "tasks" }
+  handler = { job = "build" }
+}
+
+job "build" {
+  step "run" {
+    run = "echo build"
+  }
+}
+"#;
+    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
+
+    // Should also find by the full aliased name
+    let result = find_runbook_by_worker(&runbooks_dir, "ci:builder").unwrap();
+    assert!(result.is_some(), "should find worker by aliased name");
+}
+
+#[test]
+fn find_queue_by_unaliased_name() {
+    let tmp = TempDir::new().unwrap();
+    let lib_hcl = r#"
+queue "tasks" {
+  type = "persisted"
+  vars = ["title"]
+}
+"#;
+    let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", lib_hcl);
+
+    let result = find_runbook_by_queue(&runbooks_dir, "tasks").unwrap();
+    assert!(result.is_some(), "should find queue by unaliased name");
+    let rb = result.unwrap();
+    assert!(
+        rb.get_queue("tasks").is_some(),
+        "get_queue should resolve unaliased name"
+    );
+}
+
+#[test]
+fn find_command_by_unaliased_name() {
+    let tmp = TempDir::new().unwrap();
+    let lib_hcl = r#"
+command "deploy" {
+  run = "echo deploy"
+}
+"#;
+    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", lib_hcl);
+
+    let result = find_runbook_by_command(&runbooks_dir, "deploy").unwrap();
+    assert!(result.is_some(), "should find command by unaliased name");
+    let rb = result.unwrap();
+    assert!(
+        rb.get_command("deploy").is_some(),
+        "get_command should resolve unaliased name"
+    );
+}
+
+#[test]
+fn find_cron_by_unaliased_name() {
+    let tmp = TempDir::new().unwrap();
+    let lib_hcl = r#"
+cron "daily-backup" {
+  interval = "24h"
+  run      = { job = "backup" }
+}
+
+job "backup" {
+  step "run" {
+    run = "echo backup"
+  }
+}
+"#;
+    let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", lib_hcl);
+
+    let result = find_runbook_by_cron(&runbooks_dir, "daily-backup").unwrap();
+    assert!(result.is_some(), "should find cron by unaliased name");
+    let rb = result.unwrap();
+    assert!(
+        rb.get_cron("daily-backup").is_some(),
+        "get_cron should resolve unaliased name"
+    );
+}
