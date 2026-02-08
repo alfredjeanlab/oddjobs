@@ -29,6 +29,7 @@ where
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         let worker_key = scoped_name(namespace, worker_name);
+        let mut result_events = Vec::new();
 
         // Defense in depth: if this worker is already Running in memory, a second
         // WorkerStarted would replace the WorkerState and clear inflight_items /
@@ -48,8 +49,24 @@ where
             return self.handle_worker_wake(&worker_key).await;
         }
 
-        // Load runbook to get worker definition
-        let runbook = self.cached_runbook(runbook_hash)?;
+        // Load runbook to get worker definition.
+        // Try cached/state first; fall back to disk (handles daemon restart when
+        // the in-process cache is empty and state deserialization fails).
+        let (runbook, runbook_hash) = match self.cached_runbook(runbook_hash) {
+            Ok(rb) => (rb, runbook_hash.to_string()),
+            Err(cache_err) => {
+                tracing::warn!(
+                    worker = worker_name,
+                    hash = runbook_hash,
+                    error = %cache_err,
+                    "cached runbook lookup failed, loading from disk"
+                );
+                let (rb, hash, loaded_event) =
+                    self.load_runbook_from_disk(project_root, worker_name)?;
+                result_events.push(loaded_event);
+                (rb, hash)
+            }
+        };
         let worker_def = runbook
             .get_worker(worker_name)
             .ok_or_else(|| RuntimeError::WorkerNotFound(worker_name.to_string()))?;
@@ -129,7 +146,7 @@ where
         // Reconcile: release active jobs that already reached terminal state.
         // This handles the case where the daemon crashed after a job completed
         // but before the worker slot was freed. Runs for all queue types.
-        self.reconcile_active_jobs(&worker_key).await?;
+        result_events.extend(self.reconcile_active_jobs(&worker_key).await?);
 
         // Reconcile persisted queue items: track untracked jobs and fail orphaned items.
         if queue_type == QueueType::Persisted {
@@ -141,14 +158,15 @@ where
         match queue_type {
             QueueType::External => {
                 let list_command = queue_def.list.clone().unwrap_or_default();
-                let events = self
-                    .executor
-                    .execute_all(vec![Effect::PollQueue {
-                        worker_name: worker_key.clone(),
-                        list_command,
-                        cwd: project_root.to_path_buf(),
-                    }])
-                    .await?;
+                result_events.extend(
+                    self.executor
+                        .execute_all(vec![Effect::PollQueue {
+                            worker_name: worker_key.clone(),
+                            list_command,
+                            cwd: project_root.to_path_buf(),
+                        }])
+                        .await?,
+                );
 
                 // Start periodic poll timer if configured
                 if let Some(ref poll) = poll_interval {
@@ -167,10 +185,15 @@ where
                         .await?;
                 }
 
-                Ok(events)
+                Ok(result_events)
             }
             QueueType::Persisted => {
-                self.poll_persisted_queue(&worker_key, &worker_def.source.queue, namespace)
+                result_events.extend(self.poll_persisted_queue(
+                    &worker_key,
+                    &worker_def.source.queue,
+                    namespace,
+                )?);
+                Ok(result_events)
             }
         }
     }
@@ -253,7 +276,7 @@ where
     /// missing queue events and free the worker slot.
     ///
     /// Runs for ALL queue types (external and persisted).
-    async fn reconcile_active_jobs(&self, worker_key: &str) -> Result<(), RuntimeError> {
+    async fn reconcile_active_jobs(&self, worker_key: &str) -> Result<Vec<Event>, RuntimeError> {
         let active_pids: Vec<JobId> = {
             let workers = self.worker_states.lock();
             workers
@@ -274,6 +297,7 @@ where
                 .collect()
         });
 
+        let mut events = Vec::new();
         for (pid, terminal_step) in terminal_jobs {
             tracing::info!(
                 worker = worker_key,
@@ -281,10 +305,20 @@ where
                 step = terminal_step.as_str(),
                 "reconciling terminal job for worker slot"
             );
-            let _ = self.check_worker_job_complete(&pid, &terminal_step).await;
+            match self.check_worker_job_complete(&pid, &terminal_step).await {
+                Ok(evts) => events.extend(evts),
+                Err(e) => {
+                    tracing::warn!(
+                        worker = worker_key,
+                        job = pid.as_str(),
+                        error = %e,
+                        "failed to reconcile terminal job"
+                    );
+                }
+            }
         }
 
-        Ok(())
+        Ok(events)
     }
 
     /// Reconcile queue items after daemon recovery.

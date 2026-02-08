@@ -303,6 +303,53 @@ where
         }))
     }
 
+    /// Load a runbook from disk by worker name, hash it, and cache it.
+    ///
+    /// Used as a fallback when `cached_runbook` fails (e.g. after daemon
+    /// restart when the in-process cache is empty and the stored runbook
+    /// can't be deserialized due to schema changes).
+    ///
+    /// Returns `(runbook, hash, RunbookLoaded event)`.
+    pub(crate) fn load_runbook_from_disk(
+        &self,
+        project_root: &Path,
+        worker_name: &str,
+    ) -> Result<(Runbook, String, oj_core::Event), RuntimeError> {
+        let runbook_dir = project_root.join(".oj/runbooks");
+        let runbook = oj_runbook::find_runbook_by_worker(&runbook_dir, worker_name)
+            .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
+            .ok_or_else(|| {
+                RuntimeError::RunbookLoadError(format!(
+                    "no runbook found containing worker '{}'",
+                    worker_name
+                ))
+            })?;
+
+        let runbook_json = serde_json::to_value(&runbook)
+            .map_err(|e| RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e)))?;
+        let runbook_hash = {
+            use sha2::{Digest, Sha256};
+            let canonical = serde_json::to_string(&runbook_json).map_err(|e| {
+                RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e))
+            })?;
+            format!("{:x}", Sha256::digest(canonical.as_bytes()))
+        };
+
+        // Populate in-process cache
+        {
+            let mut cache = self.runbook_cache.lock();
+            cache.insert(runbook_hash.clone(), runbook.clone());
+        }
+
+        let event = oj_core::Event::RunbookLoaded {
+            hash: runbook_hash.clone(),
+            version: 1,
+            runbook: runbook_json,
+        };
+
+        Ok((runbook, runbook_hash, event))
+    }
+
     /// Retrieve a cached runbook by content hash.
     ///
     /// Checks the in-process cache first, then falls back to the
