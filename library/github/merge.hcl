@@ -1,7 +1,11 @@
-# GitHub PR merge queue with conflict resolution.
+# GitHub PR CI/CD resolution.
 #
-# Clean rebases flow through the fast-path. Conflicts and build failures
-# are forwarded to a resolve queue where an agent handles resolution.
+# PRs are created with `merge:auto` and `gh pr merge --squash --auto`.
+# GitHub CI runs checks and merges automatically when they pass.
+#
+# A cron polls for stuck PRs — those with failing checks or merge
+# conflicts — and relabels them `merge:cicd` for agent-assisted
+# resolution.
 #
 # Prerequisites:
 #   - GitHub CLI (gh) installed and authenticated
@@ -13,99 +17,40 @@
 const "check" { default = "true" }
 
 # ------------------------------------------------------------------------------
-# Merge queue (fast-path: clean rebases only)
+# Cron: detect stuck merge:auto PRs and escalate to cicd
 # ------------------------------------------------------------------------------
 
-queue "merges" {
-  type = "external"
-  list = "gh pr list --label merge:auto --json number,title,headRefName"
-  take = "gh pr edit ${item.number} --add-label in-progress"
-  poll = "30s"
+cron "merge" {
+  interval = "60s"
+  run      = { job = "merge-check" }
 }
 
-worker "merge" {
-  source      = { queue = "merges" }
-  handler     = { job = "merge" }
-  concurrency = 1
-}
+job "merge-check" {
+  name = "merge-check"
 
-job "merge" {
-  name      = "Merge PR #${var.pr.number}: ${var.pr.title}"
-  vars      = ["pr"]
-  workspace = "folder"
-  on_cancel = { step = "cleanup" }
-
-  locals {
-    repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "merge-pr-${var.pr.number}-${workspace.nonce}"
-  }
-
-  notify {
-    on_start = "Merging PR #${var.pr.number}: ${var.pr.title}"
-    on_done  = "Merged PR #${var.pr.number}: ${var.pr.title}"
-    on_fail  = "Merge failed PR #${var.pr.number}: ${var.pr.title}"
-  }
-
-  step "init" {
+  step "scan" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
-      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
-      git -C "${local.repo}" fetch origin main
-      git -C "${local.repo}" fetch origin pull/${var.pr.number}/head:${local.branch}
-      git -C "${local.repo}" worktree add "${workspace.root}" ${local.branch}
-    SHELL
-    on_done = { step = "rebase" }
-  }
-
-  step "rebase" {
-    run     = "git rebase origin/main"
-    on_done = { step = "verify" }
-    on_fail = { step = "queue-cicd" }
-  }
-
-  step "verify" {
-    run     = "${raw(const.check)}"
-    on_done = { step = "push" }
-    on_fail = { step = "queue-cicd" }
-  }
-
-  step "queue-cicd" {
-    run = <<-SHELL
-      git rebase --abort 2>/dev/null || true
-      gh pr edit ${var.pr.number} --remove-label merge:auto --add-label merge:cicd
-      oj worker start cicd
-    SHELL
-    on_done = { step = "cleanup" }
-  }
-
-  step "push" {
-    run = <<-SHELL
-      git push --force-with-lease origin HEAD:${var.pr.headRefName}
-      gh pr merge ${var.pr.number} --squash --auto
-      gh pr edit ${var.pr.number} --remove-label in-progress
-      issue=$(gh pr view ${var.pr.number} --json body -q '.body' | grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+' | head -1)
-      if [ -n "$issue" ]; then
-        gh issue edit "$issue" --remove-label build:ready
-      fi
-    SHELL
-    on_done = { step = "cleanup" }
-  }
-
-  step "cleanup" {
-    run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
-      git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
+      gh pr list --label merge:auto --json number,mergeable,statusCheckRollup --jq '
+        .[] | select(
+          .mergeable == "CONFLICTING" or
+          (.statusCheckRollup | length > 0 and (map(select(.conclusion != "")) | length > 0) and all(.conclusion != "SUCCESS" and .conclusion != "NEUTRAL" and .conclusion != "SKIPPED" and .conclusion != ""))
+        ) | .number
+      ' | while read -r num; do
+        echo "Escalating PR #$num to cicd"
+        gh pr edit "$num" --remove-label merge:auto --add-label merge:cicd
+      done
+      oj worker start cicd 2>/dev/null || true
     SHELL
   }
 }
 
 # ------------------------------------------------------------------------------
-# CI/CD resolve queue (slow-path: agent-assisted resolution)
+# CI/CD resolve queue (agent-assisted resolution)
 # ------------------------------------------------------------------------------
 
 queue "cicd" {
   type = "external"
-  list = "gh pr list --label merge:cicd --json number,title,headRefName"
+  list = "gh pr list --label merge:cicd --json number,title,headRefName --search '-label:in-progress'"
   take = "gh pr edit ${item.number} --add-label in-progress"
   poll = "30s"
 }
@@ -141,19 +86,7 @@ job "cicd" {
       git -C "${local.repo}" fetch origin pull/${var.pr.number}/head:${local.branch}
       git -C "${local.repo}" worktree add "${workspace.root}" ${local.branch}
     SHELL
-    on_done = { step = "rebase" }
-  }
-
-  step "rebase" {
-    run     = "git rebase origin/main"
-    on_done = { step = "verify" }
-    on_fail = { step = "resolve" }
-  }
-
-  step "verify" {
-    run     = "${raw(const.check)}"
-    on_done = { step = "push" }
-    on_fail = { step = "resolve" }
+    on_done = { step = "resolve" }
   }
 
   step "resolve" {
@@ -164,12 +97,8 @@ job "cicd" {
   step "push" {
     run = <<-SHELL
       git push --force-with-lease origin HEAD:${var.pr.headRefName}
+      gh pr edit ${var.pr.number} --remove-label merge:cicd,in-progress --add-label merge:auto
       gh pr merge ${var.pr.number} --squash --auto
-      gh pr edit ${var.pr.number} --remove-label merge:cicd,in-progress
-      issue=$(gh pr view ${var.pr.number} --json body -q '.body' | grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+' | head -1)
-      if [ -n "$issue" ]; then
-        gh issue edit "$issue" --remove-label build:ready
-      fi
     SHELL
     on_done = { step = "cleanup" }
   }
@@ -188,7 +117,7 @@ job "cicd" {
 
 agent "merge-resolver" {
   run     = "claude --model sonnet --dangerously-skip-permissions"
-  on_idle = { action = "gate", command = "test ! -d $(git rev-parse --git-dir)/rebase-merge" }
+  on_idle = { action = "gate", command = "test ! -d $(git rev-parse --git-dir)/rebase-merge && test ! -f $(git rev-parse --git-dir)/MERGE_HEAD" }
   on_dead = { action = "escalate" }
 
   session "tmux" {
@@ -205,30 +134,23 @@ agent "merge-resolver" {
     "git status",
     "echo '## PR'",
     "gh pr view ${var.pr.number}",
+    "echo '## PR Checks'",
+    "gh pr checks ${var.pr.number} || true",
     "echo '## Commits (branch vs main)'",
-    "git log --oneline origin/main..HEAD 2>/dev/null || git log --oneline REBASE_HEAD~1..REBASE_HEAD 2>/dev/null || true",
-    <<-PRIME
-%{ if const.check != "true" }
-    echo '## Recent build output'
-    ${raw(const.check)} 2>&1 | tail -80 || true
-%{ endif }
-    PRIME
+    "git log --oneline origin/main..HEAD 2>/dev/null || true",
   ]
 
   prompt = <<-PROMPT
-    You are landing PR #${var.pr.number} ("${var.pr.title}") onto main.
+    You are fixing PR #${var.pr.number} ("${var.pr.title}") so it can merge into main.
 
-    Something went wrong — either a rebase conflict or a build failure.
-    Diagnose from the git status and build output above, then fix it.
+    GitHub auto-merge is stuck — either CI is failing or there are conflicts.
+    Check the PR status and build output above to diagnose the issue.
 
-    If mid-rebase: resolve conflicts, `git add`, `git rebase --continue`, repeat.
-    If build fails: fix the code, amend the commit.
+    If there are merge conflicts: rebase onto main, resolve conflicts, force-push.
+    If CI is failing: fix the code, commit, push.
 %{ if const.check != "true" }
 
-    Done when: rebase is complete and `${raw(const.check)}` passes.
-%{ else }
-
-    Done when: rebase is complete with no conflicts.
+    Verify locally with `${raw(const.check)}` before pushing.
 %{ endif }
   PROMPT
 }

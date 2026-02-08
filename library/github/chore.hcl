@@ -85,7 +85,7 @@ job "chore" {
         branch="${workspace.branch}"
         git push origin "$branch"
         gh pr create --title "${local.title}" --body "Closes #${var.task.number}" --head "$branch" --label merge:auto
-        oj worker start merge
+        gh pr merge --squash --auto
       elif gh issue view ${var.task.number} --json state -q '.state' | grep -q 'CLOSED'; then
         echo "Issue already resolved, no changes needed"
       else
