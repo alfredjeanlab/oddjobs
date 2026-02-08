@@ -46,8 +46,8 @@ pub enum DaemonCommand {
     },
     /// View daemon logs
     Logs {
-        /// Number of recent lines to show (default: 50)
-        #[arg(short = 'n', long, default_value = "50")]
+        /// Number of recent lines to show (default: 200)
+        #[arg(short = 'n', long, default_value = "200")]
         limit: usize,
         /// Show all lines (no limit)
         #[arg(long, conflicts_with = "limit")]
