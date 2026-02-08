@@ -3,10 +3,6 @@
 # Workflow: create epic issue → plan worker explores and writes plan →
 # build worker implements the plan → PR with auto-merge.
 #
-# Blocking: single `blocked` label. Dependencies tracked in issue body
-# as "Blocked by: #2, #5, #14". An unblock cron detects when deps close
-# and removes the blocked label.
-#
 # Consts:
 #   check - verification command (default: "true")
 
@@ -17,23 +13,15 @@ const "check" { default = "true" }
 # Examples:
 #   oj run epic "Implement user authentication with OAuth"
 #   oj run epic "Implement OAuth" "Support Google and GitHub providers"
-#   oj run epic "Refactor storage layer" --after 5
-#   oj run epic "Wire everything together" --after "3 5 14"
+#   oj run epic "Refactor storage layer" --blocked 5
+#   oj run epic "Wire everything together" --blocked "3 5 14"
 command "epic" {
-  args = "<title> [body] [--after <numbers>]"
+  args = "<title> [body] [--blocked <numbers>]"
   run  = <<-SHELL
     labels="type:epic,plan:needed,build:needed"
     body="${args.body}"
-    if [ -n "${args.after}" ]; then
-      labels="$labels,blocked"
-      refs=""
-      for n in ${args.after}; do refs="$refs #$n"; done
-      if [ -n "$body" ]; then
-        body="$body\n\nBlocked by:$refs"
-      else
-        body="Blocked by:$refs"
-      fi
-    fi
+    _blocked="${args.blocked}"
+    ${raw(const.blocked)}
     if [ -n "$body" ]; then
       gh issue create --label "$labels" --title "${args.title}" --body "$body"
     else
@@ -44,8 +32,8 @@ command "epic" {
   SHELL
 
   defaults = {
-    body  = ""
-    after = ""
+    body    = ""
+    blocked = ""
   }
 }
 
@@ -105,36 +93,6 @@ command "build" {
       gh issue reopen "$num" 2>/dev/null || true
     done
     oj worker start epic
-  SHELL
-}
-
-# Check all blocked issues and remove label when all deps are resolved.
-#
-# Examples:
-#   oj run unblock
-command "unblock" {
-  run = <<-SHELL
-    gh issue list --label blocked --state open --json number,body | jq -c '.[]' | while read -r obj; do
-      num=$(echo "$obj" | jq -r .number)
-      deps=$(echo "$obj" | jq -r '.body' | grep -i 'Blocked by:' | grep -oE '#[0-9]+' | grep -oE '[0-9]+')
-      if [ -z "$deps" ]; then
-        gh issue edit "$num" --remove-label blocked
-        echo "Unblocked #$num (no deps)"
-        continue
-      fi
-      all_closed=true
-      for dep in $deps; do
-        state=$(gh issue view "$dep" --json state -q .state 2>/dev/null)
-        if [ "$state" != "CLOSED" ]; then
-          all_closed=false
-          break
-        fi
-      done
-      if [ "$all_closed" = true ]; then
-        gh issue edit "$num" --remove-label blocked
-        echo "Unblocked #$num"
-      fi
-    done
   SHELL
 }
 
@@ -275,45 +233,6 @@ job "epic" {
 
   step "cancel" {
     run = "gh issue close ${var.epic.number}"
-  }
-}
-
-# ------------------------------------------------------------------------------
-# Unblock cron
-# ------------------------------------------------------------------------------
-
-cron "unblock" {
-  interval = "60s"
-  run      = { job = "unblock" }
-}
-
-job "unblock" {
-  name = "unblock"
-
-  step "check" {
-    run = <<-SHELL
-      gh issue list --label blocked --state open --json number,body | jq -c '.[]' | while read -r obj; do
-        num=$(echo "$obj" | jq -r .number)
-        deps=$(echo "$obj" | jq -r '.body' | grep -i 'Blocked by:' | grep -oE '#[0-9]+' | grep -oE '[0-9]+')
-        if [ -z "$deps" ]; then
-          gh issue edit "$num" --remove-label blocked
-          echo "Unblocked #$num (no deps)"
-          continue
-        fi
-        all_closed=true
-        for dep in $deps; do
-          state=$(gh issue view "$dep" --json state -q .state 2>/dev/null)
-          if [ "$state" != "CLOSED" ]; then
-            all_closed=false
-            break
-          fi
-        done
-        if [ "$all_closed" = true ]; then
-          gh issue edit "$num" --remove-label blocked
-          echo "Unblocked #$num"
-        fi
-      done
-    SHELL
   }
 }
 

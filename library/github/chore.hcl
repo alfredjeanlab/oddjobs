@@ -10,25 +10,31 @@ const "check" { default = "true" }
 # Examples:
 #   oj run chore "Update dependencies to latest versions"
 #   oj run chore "Add missing test coverage for auth module" "Details here..."
+#   oj run chore "Cleanup after migration" --blocked 15
 command "chore" {
-  args = "<title> [body]"
+  args = "<title> [body] [--blocked <numbers>]"
   run  = <<-SHELL
-    if [ -n "${args.body}" ]; then
-      gh issue create --label type:chore --title "${args.title}" --body "${args.body}"
+    labels="type:chore"
+    body="${args.body}"
+    _blocked="${args.blocked}"
+    ${raw(const.blocked)}
+    if [ -n "$body" ]; then
+      gh issue create --label "$labels" --title "${args.title}" --body "$body"
     else
-      gh issue create --label type:chore --title "${args.title}"
+      gh issue create --label "$labels" --title "${args.title}"
     fi
     oj worker start chore
   SHELL
 
   defaults = {
-    body = ""
+    body    = ""
+    blocked = ""
   }
 }
 
 queue "chores" {
   type = "external"
-  list = "gh issue list --label type:chore --state open --json number,title --search '-label:in-progress'"
+  list = "gh issue list --label type:chore --state open --json number,title --search '-label:blocked -label:in-progress'"
   take = "gh issue edit ${item.number} --add-label in-progress"
   poll = "30s"
 }

@@ -10,25 +10,31 @@ const "check" { default = "true" }
 # Examples:
 #   oj run fix "Button doesn't respond to clicks"
 #   oj run fix "Login page crashes on empty password" "Repro steps..."
+#   oj run fix "Fix after auth lands" --blocked 42
 command "fix" {
-  args = "<title> [body]"
+  args = "<title> [body] [--blocked <numbers>]"
   run  = <<-SHELL
-    if [ -n "${args.body}" ]; then
-      gh issue create --label type:bug --title "${args.title}" --body "${args.body}"
+    labels="type:bug"
+    body="${args.body}"
+    _blocked="${args.blocked}"
+    ${raw(const.blocked)}
+    if [ -n "$body" ]; then
+      gh issue create --label "$labels" --title "${args.title}" --body "$body"
     else
-      gh issue create --label type:bug --title "${args.title}"
+      gh issue create --label "$labels" --title "${args.title}"
     fi
     oj worker start bug
   SHELL
 
   defaults = {
-    body = ""
+    body    = ""
+    blocked = ""
   }
 }
 
 queue "bugs" {
   type = "external"
-  list = "gh issue list --label type:bug --state open --json number,title --search '-label:in-progress'"
+  list = "gh issue list --label type:bug --state open --json number,title --search '-label:blocked -label:in-progress'"
   take = "gh issue edit ${item.number} --add-label in-progress"
   poll = "30s"
 }
