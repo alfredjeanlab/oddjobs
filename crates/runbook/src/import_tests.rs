@@ -357,9 +357,13 @@ fn parse_import_with_custom_check() {
 "#;
     let (runbook, _) = parse_with_imports(content, Format::Hcl, &[]).unwrap();
 
-    // The agent's on_dead gate should use "make check"
+    // The agent's on_idle nudge message should contain "make check"
     let bugs_agent = runbook.agents.get("bugs").unwrap();
-    assert_eq!(bugs_agent.on_dead.run(), Some("make check"));
+    let message = bugs_agent.on_idle.message().expect("on_idle should have a message");
+    assert!(
+        message.contains("make check"),
+        "on_idle message should interpolate const.check, got: {message}"
+    );
 }
 
 #[test]
