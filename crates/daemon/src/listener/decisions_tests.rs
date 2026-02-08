@@ -804,8 +804,14 @@ fn plan_job_accept_sends_enter() {
     };
     let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    assert_eq!(result.len(), 1);
-    match &result[0] {
+    assert_eq!(result.len(), 2);
+    // First: StepStarted to transition from Waiting → Running
+    assert!(
+        matches!(&result[0], Event::StepStarted { job_id, step, .. } if job_id.as_str() == "pipe-1" && step == "step-1"),
+        "expected StepStarted, got {:?}", result[0]
+    );
+    // Then: Enter to approve the plan
+    match &result[1] {
         Event::SessionInput { id, input } => {
             assert_eq!(id.as_str(), "session-plan");
             assert_eq!(input, "Enter");
@@ -822,8 +828,9 @@ fn plan_job_accept_option2_sends_down_enter() {
     };
     let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    assert_eq!(result.len(), 1);
-    match &result[0] {
+    assert_eq!(result.len(), 2);
+    assert!(matches!(&result[0], Event::StepStarted { .. }));
+    match &result[1] {
         Event::SessionInput { id, input } => {
             assert_eq!(id.as_str(), "session-plan");
             assert_eq!(input, "Down Enter");
@@ -840,8 +847,9 @@ fn plan_job_accept_option3_sends_down_down_enter() {
     };
     let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
 
-    assert_eq!(result.len(), 1);
-    match &result[0] {
+    assert_eq!(result.len(), 2);
+    assert!(matches!(&result[0], Event::StepStarted { .. }));
+    match &result[1] {
         Event::SessionInput { id, input } => {
             assert_eq!(id.as_str(), "session-plan");
             assert_eq!(input, "Down Down Enter");
@@ -858,8 +866,9 @@ fn plan_job_accept_no_session_emits_nothing() {
     };
     let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
 
-    // Without a session, we can't send key presses
-    assert!(result.is_empty());
+    // Without a session, we can't send key presses — but StepStarted still emitted
+    assert_eq!(result.len(), 1);
+    assert!(matches!(&result[0], Event::StepStarted { .. }));
 }
 
 #[test]

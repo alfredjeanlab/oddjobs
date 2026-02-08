@@ -311,7 +311,19 @@ fn map_decision_to_job_action(
                 let downs = ctx.chosen.unwrap_or(1) - 1;
                 let mut keys = "Down ".repeat(downs);
                 keys.push_str("Enter");
-                send_to_session(keys).into_iter().collect()
+                // Transition step_status from Waiting → Running so the
+                // watcher's subsequent AgentIdle can set a grace timer.
+                let mut events = Vec::new();
+                if let Some(step) = job_step {
+                    events.push(Event::StepStarted {
+                        job_id: pid.clone(),
+                        step: step.to_string(),
+                        agent_id: None,
+                        agent_name: None,
+                    });
+                }
+                events.extend(send_to_session(keys));
+                events
             }
             ResolvedAction::Freeform => {
                 // Plan revision: send Escape to cancel the plan dialog, then
