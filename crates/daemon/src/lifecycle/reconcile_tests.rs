@@ -145,6 +145,7 @@ async fn reconcile_deduplicates_runbook_loaded_for_shared_hash() {
                 active_job_ids: vec![],
                 queue_name: "q".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
             },
         );
     }
