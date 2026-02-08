@@ -529,9 +529,6 @@ fn build_question_resume_message(ctx: &DecisionResolveCtx) -> String {
     if let Some(m) = ctx.message {
         parts.push(m.to_string());
     }
-    if parts.is_empty() {
-        parts.push("Resolved.".to_string());
-    }
 
     parts.join("; ")
 }

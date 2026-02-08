@@ -193,17 +193,6 @@ fn question_choice_with_message() {
     );
 }
 
-#[test]
-fn question_resume_message_no_choice_no_message() {
-    let options = make_question_options();
-    let c = DecisionResolveCtx {
-        options: &options,
-        ..ctx(&DecisionSource::Question, "dec-q1")
-    };
-    let msg = build_question_resume_message(&c);
-    assert_eq!(msg, "Resolved.");
-}
-
 // ===================== Tests for agent run action mapping =====================
 
 #[test]
