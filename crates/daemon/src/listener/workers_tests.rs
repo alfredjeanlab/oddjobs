@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -115,6 +116,7 @@ fn stop_suggests_similar_worker_from_state() {
                 active_job_ids: vec![],
                 queue_name: "tasks".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: String::new(),
             },
         );
@@ -146,6 +148,7 @@ fn stop_suggests_cross_namespace_worker() {
                 active_job_ids: vec![],
                 queue_name: "issues".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "other-project".to_string(),
             },
         );
@@ -192,6 +195,7 @@ fn restart_stops_existing_then_starts() {
                 active_job_ids: vec![],
                 queue_name: "tasks".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: String::new(),
             },
         );
@@ -253,6 +257,7 @@ job "handle" {
                 active_job_ids: vec![],
                 queue_name: "tasks".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: String::new(),
             },
         );
@@ -325,6 +330,7 @@ fn resolve_effective_project_root_uses_known_root_when_namespace_differs() {
             active_job_ids: vec![],
             queue_name: "merges".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
             namespace: "wok".to_string(),
         },
     );
@@ -422,6 +428,7 @@ job "handle-merge" {
                 active_job_ids: vec![],
                 queue_name: "other".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "wok".to_string(),
             },
         );
@@ -484,6 +491,7 @@ job "build" {
                 active_job_ids: vec![],
                 queue_name: "bugs".to_string(),
                 concurrency: 3,
+                item_job_map: HashMap::new(),
                 namespace: String::new(),
             },
         );
@@ -534,6 +542,7 @@ fn stop_all_stops_running_workers_in_namespace() {
                 active_job_ids: vec![],
                 queue_name: "q1".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "proj".to_string(),
             },
         );
@@ -547,6 +556,7 @@ fn stop_all_stops_running_workers_in_namespace() {
                 active_job_ids: vec![],
                 queue_name: "q2".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "proj".to_string(),
             },
         );
@@ -560,6 +570,7 @@ fn stop_all_stops_running_workers_in_namespace() {
                 active_job_ids: vec![],
                 queue_name: "q3".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "proj".to_string(),
             },
         );
@@ -574,6 +585,7 @@ fn stop_all_stops_running_workers_in_namespace() {
                 active_job_ids: vec![],
                 queue_name: "q4".to_string(),
                 concurrency: 1,
+                item_job_map: HashMap::new(),
                 namespace: "other".to_string(),
             },
         );

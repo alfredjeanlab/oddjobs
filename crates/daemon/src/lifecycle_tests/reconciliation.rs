@@ -44,6 +44,7 @@ async fn reconcile_state_resumes_running_workers() {
             active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 2,
+            item_job_map: HashMap::new(),
         },
     );
     test_state.workers.insert(
@@ -57,6 +58,7 @@ async fn reconcile_state_resumes_running_workers() {
             active_job_ids: vec![],
             queue_name: "other".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
         },
     );
 

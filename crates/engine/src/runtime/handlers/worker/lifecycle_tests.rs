@@ -233,25 +233,21 @@ async fn started_restores_inflight_items_for_external_queue() {
             concurrency: 2,
             namespace: String::new(),
         });
-        // Simulate a dispatched job with an item.id var
+        // Simulate a dispatched job with WorkerItemDispatched event
         state.apply_event(&Event::WorkerItemDispatched {
             worker_name: "fixer".to_string(),
             item_id: "ext-item-1".to_string(),
             job_id: JobId::new("pipe-ext"),
             namespace: String::new(),
         });
-        // Also need a job record with the item.id var
+        // Also need a job record
         state.apply_event(&Event::JobCreated {
             id: JobId::new("pipe-ext"),
             kind: "build".to_string(),
             name: "test".to_string(),
             runbook_hash: hash.clone(),
             cwd: ctx.project_root.clone(),
-            vars: {
-                let mut m = HashMap::new();
-                m.insert("item.id".to_string(), "ext-item-1".to_string());
-                m
-            },
+            vars: HashMap::new(),
             initial_step: "init".to_string(),
             created_at_epoch_ms: 1000,
             namespace: String::new(),

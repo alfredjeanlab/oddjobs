@@ -522,7 +522,6 @@ const ALLOWED_VAR_PREFIXES: &[&str] = &[
     "invoke.",    // Invocation context (e.g., invoke.dir)
     "workspace.", // Workspace context (id, root, branch, ref, nonce)
     "args.",      // Command arguments
-    "item.",      // Queue item fields
 ];
 
 /// Filter variables to only include user-facing scopes.

@@ -219,7 +219,7 @@ async fn worker_stop_clears_inflight_items() {
 // -- Variable namespace isolation tests --
 
 /// Runbook with a worker that creates jobs from queue items.
-/// The job declares vars = ["epic"] so fields should be mapped to epic.* and item.*
+/// The job declares vars = ["epic"] so fields should be mapped to var.epic.*
 const NAMESPACED_WORKER_RUNBOOK: &str = r#"
 [job.handle-epic]
 vars = ["epic"]
@@ -244,8 +244,7 @@ concurrency = 1
 "#;
 
 /// Worker dispatch should only create properly namespaced variable mappings:
-/// - item.* (canonical namespace for queue item fields)
-/// - ${first_var}.* (for backward compatibility with jobs declaring vars = ["epic"])
+/// - var.${first_var}.* (fields namespaced under the job's first declared var)
 /// - invoke.* (system-provided invocation context)
 ///
 /// Bare keys (like "title" without a namespace prefix) should NOT be present.
@@ -280,21 +279,23 @@ async fn worker_dispatch_uses_namespaced_vars_only() {
 
     // Verify namespaced keys exist
     assert!(
-        job.vars.contains_key("item.title"),
-        "job.vars should contain item.title, got keys: {:?}",
+        job.vars.contains_key("var.epic.title"),
+        "job.vars should contain var.epic.title, got keys: {:?}",
         job.vars.keys().collect::<Vec<_>>()
     );
     assert!(
-        job.vars.contains_key("item.labels"),
-        "job.vars should contain item.labels"
-    );
-    assert!(
-        job.vars.contains_key("var.epic.title"),
-        "job.vars should contain var.epic.title (from first declared var, namespaced)"
-    );
-    assert!(
         job.vars.contains_key("var.epic.labels"),
-        "job.vars should contain var.epic.labels (from first declared var, namespaced)"
+        "job.vars should contain var.epic.labels"
+    );
+
+    // Verify NO item.* keys (item fields are only in var.${first_var}.*)
+    assert!(
+        !job.vars.contains_key("item.title"),
+        "job.vars should NOT contain item.title (duplicate of var.epic.title)"
+    );
+    assert!(
+        !job.vars.contains_key("item.labels"),
+        "job.vars should NOT contain item.labels (duplicate of var.epic.labels)"
     );
 
     // Verify NO bare keys (keys without a dot prefix that came from queue item fields)

@@ -180,6 +180,7 @@ fn reconcile_context_counts_running_workers() {
             active_job_ids: vec![],
             queue_name: "q".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
         },
     );
     state.workers.insert(
@@ -193,6 +194,7 @@ fn reconcile_context_counts_running_workers() {
             active_job_ids: vec![],
             queue_name: "q".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
         },
     );
 

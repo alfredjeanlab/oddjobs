@@ -751,26 +751,20 @@ fn var_scope_order_workspace_third() {
 }
 
 #[test]
-fn var_scope_order_item_fourth() {
-    assert_eq!(var_scope_order("item.id").0, 3);
-    assert_eq!(var_scope_order("item.name").0, 3);
-}
-
-#[test]
-fn var_scope_order_invoke_fifth() {
-    assert_eq!(var_scope_order("invoke.item").0, 4);
-    assert_eq!(var_scope_order("invoke.foo.bar").0, 4);
+fn var_scope_order_invoke_fourth() {
+    assert_eq!(var_scope_order("invoke.item").0, 3);
+    assert_eq!(var_scope_order("invoke.foo.bar").0, 3);
 }
 
 #[test]
 fn var_scope_order_other_namespaced() {
-    assert_eq!(var_scope_order("custom.value").0, 5);
+    assert_eq!(var_scope_order("custom.value").0, 4);
 }
 
 #[test]
 fn var_scope_order_unnamespaced_last() {
-    assert_eq!(var_scope_order("result").0, 6);
-    assert_eq!(var_scope_order("unknown").0, 6);
+    assert_eq!(var_scope_order("result").0, 5);
+    assert_eq!(var_scope_order("unknown").0, 5);
 }
 
 #[test]

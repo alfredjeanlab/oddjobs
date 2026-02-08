@@ -66,23 +66,21 @@ where
         // Restore active jobs from persisted state (survives daemon restart)
         let (persisted_active, persisted_item_map, persisted_inflight) = self.lock_state(|state| {
             let scoped = scoped_name(namespace, worker_name);
-            let active: HashSet<JobId> = state
-                .workers
-                .get(&scoped)
+            let record = state.workers.get(&scoped);
+
+            let active: HashSet<JobId> = record
                 .map(|w| w.active_job_ids.iter().map(JobId::new).collect())
                 .unwrap_or_default();
 
-            // Build job→item map from persisted job vars
-            let item_map: HashMap<JobId, String> = active
-                .iter()
-                .filter_map(|pid| {
-                    state
-                        .jobs
-                        .get(pid.as_str())
-                        .and_then(|p| p.vars.get("item.id"))
-                        .map(|item_id| (pid.clone(), item_id.clone()))
+            // Restore job→item map from persisted WorkerRecord
+            let item_map: HashMap<JobId, String> = record
+                .map(|w| {
+                    w.item_job_map
+                        .iter()
+                        .map(|(job_id, item_id)| (JobId::new(job_id), item_id.clone()))
+                        .collect()
                 })
-                .collect();
+                .unwrap_or_default();
 
             // For external queues, restore inflight item IDs so overlapping
             // polls after restart don't re-dispatch already-active items.
@@ -318,38 +316,29 @@ where
                 .unwrap_or_default()
         };
 
-        // Find Active queue items assigned to this worker but not in item_job_map,
-        // then check if a corresponding job exists (by searching for item.id var match)
+        // Recover item→job mappings from the materialized WorkerRecord.
+        // This handles cases where the runtime item_job_map was lost (e.g.,
+        // daemon restart) but WorkerItemDispatched events exist in the WAL.
         let untracked_items: Vec<(String, JobId)> = self.lock_state(|state| {
-            let active_items: Vec<String> = state
-                .queue_items
-                .get(&scoped_queue)
-                .map(|items| {
-                    items
+            let scoped = scoped_name(namespace, worker_key);
+            state
+                .workers
+                .get(&scoped)
+                .map(|record| {
+                    record
+                        .item_job_map
                         .iter()
-                        .filter(|i| {
-                            i.status == QueueItemStatus::Active
-                                && i.worker_name.as_deref() == Some(bare_name)
-                                && !mapped_item_ids.contains(&i.id)
+                        .filter(|(job_id, item_id)| {
+                            !mapped_item_ids.contains(item_id.as_str())
+                                && state
+                                    .jobs
+                                    .get(job_id.as_str())
+                                    .is_some_and(|j| !j.is_terminal())
                         })
-                        .map(|i| i.id.clone())
+                        .map(|(job_id, item_id)| (item_id.clone(), JobId::new(job_id)))
                         .collect()
                 })
-                .unwrap_or_default();
-
-            // For each active item, look for a job with matching item.id
-            active_items
-                .into_iter()
-                .filter_map(|item_id| {
-                    state
-                        .jobs
-                        .iter()
-                        .find(|(_, job)| {
-                            job.vars.get("item.id") == Some(&item_id) && !job.is_terminal()
-                        })
-                        .map(|(job_id, _)| (item_id, JobId::new(job_id.clone())))
-                })
-                .collect()
+                .unwrap_or_default()
         });
 
         // Add untracked jobs to worker's active list
@@ -360,26 +349,13 @@ where
                 job_id = job_id.as_str(),
                 "reconciling untracked job for active queue item"
             );
-            {
-                let mut workers = self.worker_states.lock();
-                if let Some(state) = workers.get_mut(worker_key) {
-                    if !state.active_jobs.contains(&job_id) {
-                        state.active_jobs.insert(job_id.clone());
-                    }
-                    state.item_job_map.insert(job_id.clone(), item_id.clone());
+            let mut workers = self.worker_states.lock();
+            if let Some(state) = workers.get_mut(worker_key) {
+                if !state.active_jobs.contains(&job_id) {
+                    state.active_jobs.insert(job_id.clone());
                 }
+                state.item_job_map.insert(job_id, item_id);
             }
-            // Emit WorkerItemDispatched to persist the tracking
-            self.executor
-                .execute_all(vec![Effect::Emit {
-                    event: Event::WorkerItemDispatched {
-                        worker_name: bare_name.to_string(),
-                        item_id,
-                        job_id,
-                        namespace: namespace.to_string(),
-                    },
-                }])
-                .await?;
         }
 
         // 2. Fail active queue items with no corresponding job

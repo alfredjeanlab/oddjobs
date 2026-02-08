@@ -91,6 +91,10 @@ pub struct WorkerRecord {
     pub queue_name: String,
     #[serde(default)]
     pub concurrency: u32,
+    /// Mapping from job_id → item_id for queue item tracking.
+    /// Persisted via WorkerItemDispatched events for restart recovery.
+    #[serde(default)]
+    pub item_job_map: HashMap<String, String>,
 }
 
 /// Status of a queue item through its lifecycle

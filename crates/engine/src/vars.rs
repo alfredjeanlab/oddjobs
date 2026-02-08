@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 /// Known variable scope prefixes.
-const SCOPE_PREFIXES: &[&str] = &["var.", "invoke.", "workspace.", "local.", "args.", "item."];
+const SCOPE_PREFIXES: &[&str] = &["var.", "invoke.", "workspace.", "local.", "args."];
 
 /// Returns true if `key` already has a recognized scope prefix.
 fn has_scope_prefix(key: &str) -> bool {
