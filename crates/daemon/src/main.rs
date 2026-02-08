@@ -78,6 +78,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration (user-level daemon, no project root)
     let config = Config::load()?;
 
+    // Isolate tmux sessions to a daemon-specific server so that
+    // `tmux kill-server` from tests or other processes cannot destroy
+    // production sessions.
+    let tmux_dir = config.state_dir.join("tmux");
+    std::fs::create_dir_all(&tmux_dir)?;
+    std::env::set_var("TMUX_TMPDIR", &tmux_dir);
+
     // Rotate log file if it has grown too large
     rotate_log_if_needed(&config.log_path);
 

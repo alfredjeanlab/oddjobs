@@ -73,7 +73,9 @@ impl SessionCommand {
 
 /// Attach to a tmux session
 pub fn attach(id: &str) -> Result<()> {
+    let tmux_dir = crate::daemon_process::daemon_tmux_dir()?;
     let status = std::process::Command::new("tmux")
+        .env("TMUX_TMPDIR", &tmux_dir)
         .args(["attach", "-t", id])
         .status()?;
 

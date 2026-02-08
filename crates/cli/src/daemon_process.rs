@@ -122,6 +122,11 @@ pub fn daemon_dir() -> Result<PathBuf, ClientError> {
     crate::env::state_dir()
 }
 
+/// Tmux socket directory used by the daemon for session isolation.
+pub fn daemon_tmux_dir() -> Result<PathBuf, ClientError> {
+    Ok(daemon_dir()?.join("tmux"))
+}
+
 /// Clean up orphaned PID file during shutdown.
 pub fn cleanup_stale_pid(dir: &std::path::Path) {
     let pid_path = dir.join("daemon.pid");
