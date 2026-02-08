@@ -273,12 +273,26 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
     info!("Reconciling {} non-terminal jobs", non_terminal.len());
 
     for job in &non_terminal {
-        // Skip jobs in Waiting status — already escalated to human
+        // Waiting jobs (escalated to human) still need their watcher reconnected
+        // so that agent state changes are detected after decision resolution.
         if job.step_status.is_waiting() {
-            info!(
-                job_id = %job.id,
-                "skipping Waiting job (already escalated)"
-            );
+            if let Some(ref session_id) = job.session_id {
+                let is_alive = ctx
+                    .session_adapter
+                    .is_alive(session_id)
+                    .await
+                    .unwrap_or(false);
+                if is_alive {
+                    info!(job_id = %job.id, "reconnecting watcher for Waiting job");
+                    if let Err(e) = ctx.runtime.recover_agent(job).await {
+                        warn!(
+                            job_id = %job.id,
+                            error = %e,
+                            "failed to reconnect watcher for Waiting job"
+                        );
+                    }
+                }
+            }
             continue;
         }
 

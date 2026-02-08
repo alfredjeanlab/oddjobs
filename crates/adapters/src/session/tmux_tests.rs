@@ -72,7 +72,13 @@ async fn spawn_with_env_passes_environment() {
     let env = vec![("TEST_VAR".to_string(), "test_value".to_string())];
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "echo $TEST_VAR && sleep 60", &env, &[])
+        .spawn(
+            &name,
+            Path::new("/tmp"),
+            "echo $TEST_VAR && sleep 60",
+            &env,
+            &[],
+        )
         .await
         .unwrap();
 
@@ -261,7 +267,13 @@ async fn is_process_running_detects_child_process() {
     // Use background + wait to ensure sleep is a child of bash (the pane process)
     // Without this, bash would exec the command directly, making sleep the pane itself
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[], &[])
+        .spawn(
+            &name,
+            Path::new("/tmp"),
+            "bash -c 'sleep 60 & wait'",
+            &[],
+            &[],
+        )
         .await
         .unwrap();
 
@@ -307,7 +319,13 @@ async fn is_process_running_returns_false_for_no_match() {
 
     // Use background + wait to ensure sleep is a child of bash
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[], &[])
+        .spawn(
+            &name,
+            Path::new("/tmp"),
+            "bash -c 'sleep 60 & wait'",
+            &[],
+            &[],
+        )
         .await
         .unwrap();
 

@@ -79,6 +79,15 @@ where
             })
             .await?;
 
+        // Clear stale idle grace state — the in-memory timer was lost on restart.
+        // Without this, handle_agent_idle_hook deduplicates new idle events because
+        // idle_grace_log_size is still Some from the pre-restart snapshot.
+        self.lock_state_mut(|state| {
+            if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
+                p.idle_grace_log_size = None;
+            }
+        });
+
         Ok(())
     }
 
