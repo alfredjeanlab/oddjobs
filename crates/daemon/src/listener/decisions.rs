@@ -321,10 +321,7 @@ fn map_decision_to_job_action(
                 if let Some(msg) = ctx.message {
                     events.push(Event::JobResume {
                         id: pid,
-                        message: Some(format!(
-                            "decision {} plan revision: {}",
-                            ctx.decision_id, msg
-                        )),
+                        message: Some(msg.to_string()),
                         vars: HashMap::new(),
                         kill: false,
                     });
@@ -347,7 +344,7 @@ fn map_decision_to_job_action(
             .message
             .map(|msg| Event::JobResume {
                 id: pid,
-                message: Some(format!("decision {} freeform: {}", ctx.decision_id, msg)),
+                message: Some(msg.to_string()),
                 vars: HashMap::new(),
                 kill: false,
             })
@@ -369,7 +366,7 @@ fn map_decision_to_job_action(
             .collect(),
         ResolvedAction::Approve => vec![Event::JobResume {
             id: pid,
-            message: Some(format!("decision {} approved", ctx.decision_id)),
+            message: Some("Approved.".to_string()),
             vars: HashMap::new(),
             kill: false,
         }],
@@ -533,7 +530,7 @@ fn build_question_resume_message(ctx: &DecisionResolveCtx) -> String {
         parts.push(m.to_string());
     }
     if parts.is_empty() {
-        parts.push(format!("decision {} resolved", ctx.decision_id));
+        parts.push("Resolved.".to_string());
     }
 
     parts.join("; ")
@@ -574,8 +571,7 @@ fn build_multi_question_resume_message(ctx: &DecisionResolveCtx) -> String {
         parts.join("; ")
     } else {
         format!(
-            "decision {} resolved: choices [{}]",
-            ctx.decision_id,
+            "Selected: choices [{}]",
             ctx.choices
                 .iter()
                 .map(|c| c.to_string())
@@ -585,23 +581,14 @@ fn build_multi_question_resume_message(ctx: &DecisionResolveCtx) -> String {
     }
 }
 
-/// Build a human-readable resume message from the decision resolution.
+/// Build a resume message from the decision resolution.
+///
+/// Sends the user's message as-is when provided, falling back to a default
+/// nudge prompt. Decision metadata is not useful to agents, so we omit it.
 fn build_resume_message(ctx: &DecisionResolveCtx) -> String {
-    let mut parts = Vec::new();
-    if let Some(c) = ctx.chosen {
-        parts.push(format!(
-            "decision {} resolved: option {}",
-            ctx.decision_id, c
-        ));
-    }
-    if let Some(m) = ctx.message {
-        if parts.is_empty() {
-            parts.push(format!("decision {} resolved: {}", ctx.decision_id, m));
-        } else {
-            parts.push(format!("message: {}", m));
-        }
-    }
-    parts.join("; ")
+    ctx.message
+        .unwrap_or("Please continue with the task.")
+        .to_string()
 }
 
 #[cfg(test)]

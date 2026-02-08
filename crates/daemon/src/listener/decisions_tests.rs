@@ -33,14 +33,13 @@ fn idle_dismiss_returns_no_action() {
 }
 
 #[test]
-fn build_resume_message_with_choice() {
+fn build_resume_message_with_choice_only() {
     let c = DecisionResolveCtx {
         chosen: Some(2),
         ..ctx(&DecisionSource::Idle, "dec-123")
     };
     let msg = build_resume_message(&c);
-    assert!(msg.contains("option 2"));
-    assert!(msg.contains("dec-123"));
+    assert_eq!(msg, "Please continue with the task.");
 }
 
 #[test]
@@ -50,8 +49,7 @@ fn build_resume_message_with_message_only() {
         ..ctx(&DecisionSource::Idle, "dec-123")
     };
     let msg = build_resume_message(&c);
-    assert!(msg.contains("looks good"));
-    assert!(msg.contains("dec-123"));
+    assert_eq!(msg, "looks good");
 }
 
 #[test]
@@ -62,8 +60,7 @@ fn build_resume_message_with_both() {
         ..ctx(&DecisionSource::Idle, "dec-123")
     };
     let msg = build_resume_message(&c);
-    assert!(msg.contains("option 1"));
-    assert!(msg.contains("approved"));
+    assert_eq!(msg, "approved");
 }
 
 fn make_question_options() -> Vec<DecisionOption> {
@@ -204,7 +201,7 @@ fn question_resume_message_no_choice_no_message() {
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
     let msg = build_question_resume_message(&c);
-    assert!(msg.contains("dec-q1"), "expected decision id, got: {}", msg);
+    assert_eq!(msg, "Resolved.");
 }
 
 // ===================== Tests for agent run action mapping =====================
@@ -673,8 +670,7 @@ fn build_multi_question_resume_message_without_data() {
         ..ctx(&DecisionSource::Question, "dec-1")
     };
     let msg = build_multi_question_resume_message(&c);
-    assert!(msg.contains("dec-1"));
-    assert!(msg.contains("1, 2"));
+    assert_eq!(msg, "Selected: choices [1, 2]");
 }
 
 // ===================== Tests for Plan decision resolution =====================
@@ -895,12 +891,10 @@ fn plan_job_revise_sends_escape_then_resume() {
         }
         other => panic!("expected SessionInput(Escape), got {:?}", other),
     }
-    // Second: JobResume with revision feedback
+    // Second: JobResume with revision feedback (user message only, no decision ID)
     match &result[1] {
         Event::JobResume { message, .. } => {
-            let msg = message.as_ref().unwrap();
-            assert!(msg.contains("plan revision"), "got: {}", msg);
-            assert!(msg.contains("Add error handling"), "got: {}", msg);
+            assert_eq!(message.as_deref(), Some("Add error handling"));
         }
         other => panic!("expected JobResume, got {:?}", other),
     }

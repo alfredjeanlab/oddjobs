@@ -77,9 +77,6 @@ where
     ///
     /// Returns an optional event that should be fed back into the event loop.
     pub async fn execute(&self, effect: Effect) -> Result<Option<Event>, ExecuteError> {
-        let op_name = effect.name();
-        let span = tracing::info_span!("effect", effect = op_name);
-        let _guard = span.enter();
 
         // Format the fields as `key=val`
         let info = {
@@ -95,9 +92,11 @@ where
             fmt.pop();
             fmt
         };
+
+        let effect_name = effect.name();
         let verbose = effect.verbose();
         if verbose {
-            tracing::info!(info, "executing");
+            tracing::info!("executing effect={} {}", effect_name, info);
         }
 
         let start = std::time::Instant::now();
@@ -120,16 +119,18 @@ where
         } else {
             match &result {
                 Ok(event) => tracing::info!(
-                    info,
                     event = ?event.is_some(),
                     elapsed_ms = ?elapsed.as_millis() as u64,
-                    "executed"
+                    "executed effect={} {}",
+                    effect_name,
+                    info
                 ),
                 Err(e) => tracing::error!(
-                    info,
                     error = %e,
                     elapsed_ms = ?elapsed.as_millis() as u64,
-                    "error"
+                    "errored effect={} {}",
+                    effect_name,
+                    info
                 ),
             }
         }
