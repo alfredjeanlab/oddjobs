@@ -185,8 +185,13 @@ where
                     )
                     .await;
             }
-            MonitorState::Exited => {
-                tracing::info!(agent_run_id = %agent_run.id, "standalone agent process exited");
+            MonitorState::Exited { exit_code } => {
+                let msg = monitor::format_exit_message(exit_code);
+                tracing::info!(agent_run_id = %agent_run.id, exit_code, "{}", msg);
+                if let Some(agent_id) = agent_run.agent_id.as_deref() {
+                    self.logger.append_agent_error(agent_id, &msg);
+                    self.capture_agent_terminal(&AgentId::new(agent_id)).await;
+                }
                 self.copy_standalone_agent_session_log(agent_run);
                 (&agent_def.on_dead, "exit", None)
             }

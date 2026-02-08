@@ -181,19 +181,14 @@ where
                 assistant_context, ..
             } => assistant_context.clone(),
             MonitorState::Working => None,
-            _ => {
-                // For idle, exited, gone, failed: fetch from agent adapter
-                let agent_id = job
-                    .step_history
-                    .iter()
-                    .rfind(|r| r.name == job.step)
-                    .and_then(|r| r.agent_id.as_ref())
-                    .map(AgentId::new);
-                match agent_id {
-                    Some(aid) => self.executor.get_last_assistant_message(&aid).await,
-                    None => None,
+            _ => match step_agent_id(job) {
+                Some(id) => {
+                    self.executor
+                        .get_last_assistant_message(&AgentId::new(id))
+                        .await
                 }
-            }
+                None => None,
+            },
         };
 
         let (action_config, trigger, qd) = match state {
@@ -327,13 +322,7 @@ where
                 tracing::warn!(job_id = %job.id, error = %message, "agent error");
                 self.logger
                     .append(&job.id, &job.step, &format!("agent error: {}", message));
-                // Write error to agent log so it's visible in `oj logs <agent>`
-                if let Some(agent_id) = job
-                    .step_history
-                    .iter()
-                    .rfind(|r| r.name == job.step)
-                    .and_then(|r| r.agent_id.as_deref())
-                {
+                if let Some(agent_id) = step_agent_id(job) {
                     self.logger.append_agent_error(agent_id, message);
                 }
                 let error_action = agent_def.on_error.action_for(error_type.as_ref());
@@ -351,16 +340,19 @@ where
                     )
                     .await;
             }
-            MonitorState::Exited => {
-                tracing::info!(job_id = %job.id, "agent process exited");
-                self.logger.append(&job.id, &job.step, "agent exited");
+            MonitorState::Exited { exit_code } => {
+                let msg = monitor::format_exit_message(exit_code);
+                tracing::info!(job_id = %job.id, exit_code, "{}", msg);
+                self.logger.append(&job.id, &job.step, &msg);
+                let aid = step_agent_id(job);
+                if let Some(agent_id) = aid {
+                    self.logger.append_agent_error(agent_id, &msg);
+                    self.capture_agent_terminal(&AgentId::new(agent_id)).await;
+                }
                 self.copy_agent_session_log(job);
                 (&agent_def.on_dead, "exit", None)
             }
             MonitorState::Gone => {
-                // Session gone is the normal exit path when tmux closes after
-                // the agent process exits. Treat it the same as Exited so
-                // that on_dead actions (done, gate, escalate, etc.) fire.
                 tracing::info!(job_id = %job.id, "agent session ended");
                 self.logger
                     .append(&job.id, &job.step, "agent session ended");
@@ -714,6 +706,14 @@ where
         self.spawn_agent_with_resume(job_id, agent_name, input, resume_session_id)
             .await
     }
+}
+
+/// Get the agent_id for the current step from a job's step history.
+fn step_agent_id(job: &Job) -> Option<&str> {
+    job.step_history
+        .iter()
+        .rfind(|r| r.name == job.step)
+        .and_then(|r| r.agent_id.as_deref())
 }
 
 /// Parse a gate error string into exit code and stderr.

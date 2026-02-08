@@ -80,7 +80,7 @@ pub enum MonitorState {
         error_type: Option<ErrorType>,
     },
     /// Agent process exited
-    Exited,
+    Exited { exit_code: Option<i32> },
     /// Session terminated unexpectedly
     Gone,
 }
@@ -95,9 +95,19 @@ impl MonitorState {
                 message: failure.to_string(),
                 error_type: agent_failure_to_error_type(failure),
             },
-            AgentState::Exited { .. } => MonitorState::Exited,
+            AgentState::Exited { exit_code } => MonitorState::Exited {
+                exit_code: *exit_code,
+            },
             AgentState::SessionGone => MonitorState::Gone,
         }
+    }
+}
+
+/// Format exit message for agent exit logging.
+pub(crate) fn format_exit_message(exit_code: Option<i32>) -> String {
+    match exit_code {
+        Some(code) => format!("agent exited (exit code: {})", code),
+        None => "agent exited".to_string(),
     }
 }
 

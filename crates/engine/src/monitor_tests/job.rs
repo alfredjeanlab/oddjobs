@@ -532,7 +532,7 @@ fn monitor_state_simple_conversions() {
     ));
     assert!(matches!(
         MonitorState::from_agent_state(&AgentState::Exited { exit_code: Some(0) }),
-        MonitorState::Exited
+        MonitorState::Exited { exit_code: Some(0) }
     ));
     assert!(matches!(
         MonitorState::from_agent_state(&AgentState::SessionGone),

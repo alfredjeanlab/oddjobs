@@ -159,7 +159,7 @@ where
     /// Capture agent terminal output and save to the agent's log directory.
     ///
     /// Best-effort: failures are logged but do not interrupt signal handling.
-    async fn capture_agent_terminal(&self, agent_id: &AgentId) {
+    pub(crate) async fn capture_agent_terminal(&self, agent_id: &AgentId) {
         // Look up the agent's tmux session_id from state
         let session_id = self.lock_state(|s| {
             s.agents

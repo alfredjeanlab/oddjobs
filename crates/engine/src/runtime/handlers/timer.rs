@@ -299,7 +299,7 @@ where
             Some(AgentState::Failed(err)) => {
                 MonitorState::from_agent_state(&AgentState::Failed(err))
             }
-            _ => MonitorState::Exited, // on_dead (unexpected death)
+            _ => MonitorState::Exited { exit_code: None }, // on_dead (unexpected death)
         };
 
         self.handle_monitor_state(&job, &agent_def, monitor_state)
@@ -393,7 +393,7 @@ where
             Some(AgentState::Failed(err)) => {
                 MonitorState::from_agent_state(&AgentState::Failed(err))
             }
-            _ => MonitorState::Exited,
+            _ => MonitorState::Exited { exit_code: None },
         };
 
         self.handle_standalone_monitor_state(&agent_run, &agent_def, monitor_state)
