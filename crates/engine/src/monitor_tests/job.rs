@@ -732,3 +732,39 @@ fn ask_without_session_fails() {
     let result = build_action_effects(&test_ctx(&agent, &config, "idle"), &job);
     assert!(result.is_err());
 }
+
+// =============================================================================
+// Exit Message Formatting Tests
+// =============================================================================
+
+#[yare::parameterized(
+    with_zero     = { Some(0),  "agent exited (exit code: 0)" },
+    with_one      = { Some(1),  "agent exited (exit code: 1)" },
+    with_negative = { Some(-1), "agent exited (exit code: -1)" },
+    with_signal   = { Some(137), "agent exited (exit code: 137)" },
+    with_none     = { None,     "agent exited" },
+)]
+fn format_exit_message(exit_code: Option<i32>, expected: &str) {
+    assert_eq!(crate::monitor::format_exit_message(exit_code), expected);
+}
+
+// =============================================================================
+// MonitorState Exit Code Propagation Tests
+// =============================================================================
+
+#[yare::parameterized(
+    exit_zero     = { Some(0) },
+    exit_one      = { Some(1) },
+    exit_signal   = { Some(137) },
+    exit_none     = { None },
+)]
+fn monitor_state_exited_preserves_exit_code(exit_code: Option<i32>) {
+    use oj_core::AgentState;
+    let state = MonitorState::from_agent_state(&AgentState::Exited { exit_code });
+    match state {
+        MonitorState::Exited {
+            exit_code: actual, ..
+        } => assert_eq!(actual, exit_code),
+        _ => panic!("expected Exited"),
+    }
+}
