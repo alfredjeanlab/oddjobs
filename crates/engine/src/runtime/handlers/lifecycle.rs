@@ -320,7 +320,10 @@ where
             }
         }
 
-        // 5. Kill session as fallback (in case agent kill didn't cover it)
+        // 5. Capture terminal + session log before killing session
+        self.capture_before_kill_job(&job).await;
+
+        // 6. Kill session as fallback (in case agent kill didn't cover it)
         if let Some(session_id) = &job.session_id {
             let sid = SessionId::new(session_id);
             if let Err(e) = self
@@ -346,7 +349,7 @@ where
                 .await;
         }
 
-        // 6. Delete workspace if one exists
+        // 7. Delete workspace if one exists
         let ws_id = job.workspace_id.clone().or_else(|| {
             self.lock_state(|s| {
                 s.workspaces

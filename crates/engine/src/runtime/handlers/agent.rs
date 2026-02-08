@@ -497,6 +497,9 @@ where
         let mut new_inputs = input.clone();
         new_inputs.insert("resume_message".to_string(), message.to_string());
 
+        // Capture terminal + session log before killing old session
+        self.capture_before_kill_job(job).await;
+
         // Kill old tmux session if it exists (cleanup - Claude conversation persists in JSONL)
         if let Some(session_id) = &job.session_id {
             let _ = self

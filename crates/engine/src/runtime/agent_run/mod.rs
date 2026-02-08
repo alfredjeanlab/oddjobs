@@ -9,7 +9,6 @@ mod spawn;
 
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
-use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
     AgentId, AgentRun, AgentRunId, AgentRunStatus, Clock, Effect, Event, OwnerId, SessionId,
@@ -95,6 +94,9 @@ where
         &self,
         agent_run: &AgentRun,
     ) -> Result<(), RuntimeError> {
+        // Capture terminal + session log before killing
+        self.capture_before_kill_agent_run(agent_run).await;
+
         if let Some(ref aid) = agent_run.agent_id {
             self.deregister_agent(&AgentId::new(aid));
         }
@@ -114,16 +116,5 @@ where
                 .await;
         }
         Ok(())
-    }
-
-    /// Copy standalone agent session log on exit.
-    fn copy_standalone_agent_session_log(&self, agent_run: &AgentRun) {
-        let agent_id = match &agent_run.agent_id {
-            Some(id) => id,
-            None => return,
-        };
-        if let Some(source) = find_session_log(&agent_run.cwd, agent_id) {
-            self.logger.copy_session_log(agent_id, &source);
-        }
     }
 }

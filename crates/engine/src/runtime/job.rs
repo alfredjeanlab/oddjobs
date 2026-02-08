@@ -174,6 +174,9 @@ where
                 self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
 
+            // Capture terminal + session log before killing
+            self.capture_before_kill_job(job).await;
+
             // Kill the agent's tmux session before moving to the next step
             if let Some(session_id) = &job.session_id {
                 let sid = SessionId::new(session_id);
@@ -317,6 +320,9 @@ where
             {
                 self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
+
+            // Capture terminal + session log before killing
+            self.capture_before_kill_job(job).await;
 
             // Kill the agent's tmux session before moving to the failure step
             if let Some(session_id) = &job.session_id {
@@ -520,6 +526,9 @@ where
             {
                 self.deregister_agent(&oj_core::AgentId::new(agent_id));
             }
+
+            // Capture terminal + session log before killing
+            self.capture_before_kill_job(job).await;
 
             if let Some(session_id) = &job.session_id {
                 let sid = SessionId::new(session_id);

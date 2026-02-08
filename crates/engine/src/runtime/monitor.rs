@@ -344,19 +344,20 @@ where
                 let msg = monitor::format_exit_message(exit_code);
                 tracing::info!(job_id = %job.id, exit_code, "{}", msg);
                 self.logger.append(&job.id, &job.step, &msg);
-                let aid = step_agent_id(job);
-                if let Some(agent_id) = aid {
+                if let Some(agent_id) = step_agent_id(job) {
                     self.logger.append_agent_error(agent_id, &msg);
                     self.capture_agent_terminal(&AgentId::new(agent_id)).await;
+                    self.copy_session_log(agent_id, &self.execution_dir(job));
                 }
-                self.copy_agent_session_log(job);
                 (&agent_def.on_dead, "exit", None)
             }
             MonitorState::Gone => {
                 tracing::info!(job_id = %job.id, "agent session ended");
                 self.logger
                     .append(&job.id, &job.step, "agent session ended");
-                self.copy_agent_session_log(job);
+                if let Some(agent_id) = step_agent_id(job) {
+                    self.copy_session_log(agent_id, &self.execution_dir(job));
+                }
                 (&agent_def.on_dead, "exit", None)
             }
         };
@@ -595,11 +596,10 @@ where
                 resume_session_id,
                 ..
             } => {
-                let job_id = JobId::new(&job.id);
                 let session_id = kill_session.map(SessionId::new);
                 self.kill_and_resume(
+                    job,
                     session_id,
-                    &job_id,
                     &agent_name,
                     &input,
                     resume_session_id.as_deref(),
@@ -692,24 +692,26 @@ where
 
     async fn kill_and_resume(
         &self,
+        job: &Job,
         kill_session: Option<SessionId>,
-        job_id: &JobId,
         agent_name: &str,
         input: &HashMap<String, String>,
         resume_session_id: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
         if let Some(sid) = kill_session {
+            self.capture_before_kill_job(job).await;
             self.executor
                 .execute(Effect::KillSession { session_id: sid })
                 .await?;
         }
-        self.spawn_agent_with_resume(job_id, agent_name, input, resume_session_id)
+        let job_id = JobId::new(&job.id);
+        self.spawn_agent_with_resume(&job_id, agent_name, input, resume_session_id)
             .await
     }
 }
 
 /// Get the agent_id for the current step from a job's step history.
-fn step_agent_id(job: &Job) -> Option<&str> {
+pub(super) fn step_agent_id(job: &Job) -> Option<&str> {
     job.step_history
         .iter()
         .rfind(|r| r.name == job.step)

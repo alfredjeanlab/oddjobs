@@ -9,7 +9,10 @@ use crate::error::RuntimeError;
 use crate::monitor;
 use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, OwnerId, TimerId};
+use oj_core::{
+    AgentId, AgentRun, AgentSignalKind, Clock, Effect, Event, Job, JobId, OwnerId, TimerId,
+};
+use std::path::Path;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -190,41 +193,37 @@ where
         }
     }
 
-    /// Copy the agent's session.jsonl to the logs directory on exit.
+    /// Copy an agent's session.jsonl to the logs directory.
     ///
     /// Finds the session log from Claude's state directory and copies it to
     /// `{logs}/agent/{agent_id}/session.jsonl` for archival.
-    pub(crate) fn copy_agent_session_log(&self, job: &Job) {
-        // Get agent_id from step history
-        let agent_id = match job
-            .step_history
-            .iter()
-            .rfind(|r| r.name == job.step)
-            .and_then(|r| r.agent_id.as_ref())
-        {
-            Some(id) => id,
-            None => {
-                tracing::debug!(
-                    job_id = %job.id,
-                    "no agent_id in step history, skipping session log copy"
-                );
-                return;
-            }
-        };
-
-        // Get workspace path
-        let workspace_path = self.execution_dir(job);
-
-        // Find the session.jsonl
-        if let Some(source) = find_session_log(&workspace_path, agent_id) {
+    pub(crate) fn copy_session_log(&self, agent_id: &str, workspace: &Path) {
+        if let Some(source) = find_session_log(workspace, agent_id) {
             self.logger.copy_session_log(agent_id, &source);
         } else {
             tracing::debug!(
-                job_id = %job.id,
                 agent_id,
-                workspace = %workspace_path.display(),
+                workspace = %workspace.display(),
                 "session.jsonl not found, skipping copy"
             );
         }
+    }
+
+    /// Best-effort capture of terminal output and session log before killing a job's agent.
+    pub(crate) async fn capture_before_kill_job(&self, job: &Job) {
+        let Some(agent_id) = super::monitor::step_agent_id(job) else {
+            return;
+        };
+        self.capture_agent_terminal(&AgentId::new(agent_id)).await;
+        self.copy_session_log(agent_id, &self.execution_dir(job));
+    }
+
+    /// Best-effort capture of terminal output and session log before killing a standalone agent.
+    pub(crate) async fn capture_before_kill_agent_run(&self, agent_run: &AgentRun) {
+        let Some(ref agent_id) = agent_run.agent_id else {
+            return;
+        };
+        self.capture_agent_terminal(&AgentId::new(agent_id)).await;
+        self.copy_session_log(agent_id, &agent_run.cwd);
     }
 }

@@ -71,6 +71,10 @@ where
                 resume_session_id,
                 ..
             } => {
+                // Capture terminal + session log before killing old session
+                if kill_session.is_some() {
+                    self.capture_before_kill_agent_run(agent_run).await;
+                }
                 // Kill old session if present
                 if let Some(sid) = kill_session {
                     let _ = self

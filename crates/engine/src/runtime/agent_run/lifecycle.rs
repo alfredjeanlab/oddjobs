@@ -192,12 +192,16 @@ where
                     self.logger.append_agent_error(agent_id, &msg);
                     self.capture_agent_terminal(&AgentId::new(agent_id)).await;
                 }
-                self.copy_standalone_agent_session_log(agent_run);
+                if let Some(ref agent_id) = agent_run.agent_id {
+                    self.copy_session_log(agent_id, &agent_run.cwd);
+                };
                 (&agent_def.on_dead, "exit", None)
             }
             MonitorState::Gone => {
                 tracing::info!(agent_run_id = %agent_run.id, "standalone agent session ended");
-                self.copy_standalone_agent_session_log(agent_run);
+                if let Some(ref agent_id) = agent_run.agent_id {
+                    self.copy_session_log(agent_id, &agent_run.cwd);
+                };
                 (&agent_def.on_dead, "exit", None)
             }
         };
@@ -328,7 +332,9 @@ where
                 tracing::info!(agent_run_id = %agent_run.id, "standalone agent:signal complete");
 
                 // Copy session log before killing the session
-                self.copy_standalone_agent_session_log(agent_run);
+                if let Some(ref agent_id) = agent_run.agent_id {
+                    self.copy_session_log(agent_id, &agent_run.cwd);
+                };
 
                 // Emit on_done notification
                 if let Ok(runbook) = self.cached_runbook(&agent_run.runbook_hash) {
