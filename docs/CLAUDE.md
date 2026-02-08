@@ -28,6 +28,5 @@ docs/
     ├── CLI.md                # Adds: worker stop, session prune
     ├── CANCELLATION.md       # Handler cancellation on client disconnect
     ├── CHECKPOINT.md         # Checkpoint lock contention at scale
-    ├── CONCURRENCY.md        # Deferred effects, event-driven sequencing
     └── runbooks/             # Example HCL runbooks
 ```

@@ -92,20 +92,25 @@ loop {
 }
 ```
 
-The runtime's `handle_event` dispatches to handler methods that build effects and execute them via the `Executor`. The executor runs effects using adapters and returns any resulting events (e.g., `SpawnAgent` returns `SessionCreated`, `CreateWorkspace` returns `WorkspaceReady`).
+The runtime's `handle_event` dispatches to handler methods that build effects and execute them via the `Executor`. Effects are split into **immediate** (executed inline, <10ms) and **deferred** (spawned as background tasks that emit completion events back into the event loop):
 
-Effects are executed via adapters:
+| Effect | Execution | Adapter / Mechanism |
+|--------|-----------|---------------------|
+| Emit | Immediate | MaterializedState (apply + WAL) |
+| SetTimer, CancelTimer | Immediate | Scheduler |
+| Notify | Immediate | notify_rust (fire-and-forget thread) |
+| CreateWorkspace | Deferred | Filesystem / git subprocess → `WorkspaceReady` / `WorkspaceFailed` |
+| DeleteWorkspace | Deferred | Filesystem / git subprocess → `WorkspaceDeleted` |
+| SpawnAgent | Deferred | AgentAdapter → `SessionCreated` / `AgentSpawnFailed` |
+| SendToAgent | Deferred | AgentAdapter (fire-and-forget, no result event) |
+| KillAgent | Deferred | AgentAdapter (fire-and-forget) |
+| SendToSession | Deferred | SessionAdapter (fire-and-forget) |
+| KillSession | Deferred | SessionAdapter (fire-and-forget) |
+| Shell | Deferred | tokio subprocess → `ShellExited` |
+| PollQueue | Deferred | tokio subprocess |
+| TakeQueueItem | Deferred | tokio subprocess |
 
-| Effect | Adapter |
-|--------|---------|
-| SpawnAgent, SendToAgent, KillAgent | AgentAdapter |
-| SendToSession, KillSession | SessionAdapter |
-| CreateWorkspace, DeleteWorkspace | MaterializedState + filesystem |
-| Shell | tokio subprocess (async, emits ShellExited event) |
-| Emit | MaterializedState (apply + WAL) |
-| SetTimer, CancelTimer | Scheduler |
-| Notify | notify_rust (fire-and-forget background thread) |
-| PollQueue, TakeQueueItem | tokio subprocess |
+Deferred effects follow the same pattern: the executor spawns a `tokio::spawn` background task and returns immediately. The background task executes the I/O and emits a result event (e.g., `WorkspaceReady`, `SessionCreated`) back through the event bus. This keeps event loop iterations under ~10ms.
 
 ### Agent vs Session Effects
 

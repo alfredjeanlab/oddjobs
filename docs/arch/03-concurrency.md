@@ -41,6 +41,7 @@ daemon process
 ├─ agent watcher task
 ├─ ...
 │
+├─ deferred effect task ─ per-effect background I/O (workspace, agent, session)
 ├─ shell task ────────── fire-and-forget bash execution (per Shell effect)
 ├─ queue poll task ───── fire-and-forget queue list command
 ├─ agent log writer ──── mpsc → append-only log files
@@ -75,15 +76,17 @@ The daemon's core loop in `daemon/src/main.rs` multiplexes five sources with
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The loop processes **one event at a time**. While `process_event()` is
-awaiting, no other branch runs — timers, signals, and subsequent events wait
-until the current event completes.
+The loop processes **one event at a time**. Each `process_event()` iteration
+completes in <10ms because all heavy I/O effects are deferred to background
+tasks (see Effect Execution Model below). Timer resolution stays at the
+configured interval (default 1s).
 
 ## Effect Execution Model
 
 Effects are executed by `executor.execute_all()` in a **sequential for-loop**.
-Each effect in a batch is awaited before the next begins. Effects fall into
-two categories:
+Each effect in a batch is awaited before the next begins. Effects are split
+into **immediate** (executed inline, <10ms) and **deferred** (spawned as
+background `tokio::spawn` tasks):
 
 ```diagram
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -94,48 +97,50 @@ two categories:
 │  }                                                                       │
 │                                                                          │
 │  ┌─────────────────────────────┐  ┌────────────────────────────────────┐ │
-│  │  Inline (awaited)           │  │  Background (spawned)              │ │
+│  │  Immediate (<10ms)          │  │  Deferred (tokio::spawn)           │ │
 │  │                             │  │                                    │ │
-│  │  Emit          ~µs          │  │  Shell           tokio::spawn      │ │
-│  │  SetTimer      ~µs          │  │  PollQueue       tokio::spawn      │ │
-│  │  CancelTimer   ~µs          │  │  TakeQueueItem   tokio::spawn      │ │
-│  │  Notify        ~1ms  [1]    │  │  CreateWorkspace tokio::spawn      │ │
-│  │                             │  │  DeleteWorkspace tokio::spawn      │ │
-│  │  [1] fire-and-forget via    │  │  SpawnAgent      tokio::spawn      │ │
-│  │      spawn_blocking         │  │  SendToAgent     tokio::spawn  [2] │ │
-│  │                             │  │  KillAgent       tokio::spawn  [2] │ │
-│  └─────────────────────────────┘  │  SendToSession   tokio::spawn  [2] │ │
-│                                   │  KillSession     tokio::spawn  [2] │ │
+│  │  Emit          ~µs          │  │  CreateWorkspace  → WorkspaceReady │ │
+│  │  SetTimer      ~µs          │  │  DeleteWorkspace  → WorkspaceDeleted│ │
+│  │  CancelTimer   ~µs          │  │  SpawnAgent       → SessionCreated │ │
+│  │  Notify        ~1ms  [1]    │  │  SendToAgent      (fire-and-forget)│ │
+│  │                             │  │  KillAgent        (fire-and-forget)│ │
+│  │  [1] fire-and-forget via    │  │  SendToSession    (fire-and-forget)│ │
+│  │      spawn_blocking         │  │  KillSession      (fire-and-forget)│ │
+│  │                             │  │  Shell            → ShellExited    │ │
+│  └─────────────────────────────┘  │  PollQueue        → WorkerPollComplete│
+│                                   │  TakeQueueItem    → WorkerTakeComplete│
 │                                   │                                    │ │
 │                                   │  Result events emitted via         │ │
 │                                   │  mpsc → EventBus on completion     │ │
-│                                   │                                    │ │
-│                                   │  [2] fire-and-forget (no result    │ │
-│                                   │      event; errors logged)         │ │
 │                                   └────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-All subprocess and I/O effects are spawned as background tasks. Inline effects
-complete in microseconds and never block the event loop. A `CommandRun` event
-that creates a workspace and spawns an agent now returns in ~µs, with the
-actual work proceeding asynchronously:
+Deferred effects return immediately after spawning the background task. The
+event loop never blocks on I/O-heavy operations like git worktree creation,
+tmux session spawning, or agent communication.
+
+Sequential dependencies are handled via event-driven chaining. A `CommandRun`
+event that creates a workspace and spawns an agent progresses through multiple
+event iterations, each completing in <10ms:
 
 ```diagram
 process_event(CommandRun)
-  └─ handle_command()
-       ├─ load runbook from disk               ~100ms   (blocking file I/O)
-       ├─ evaluate workspace.ref expression     ~50-500ms (bash subprocess)
-       ├─ CreateWorkspace effect                ~µs (spawns background task)
-       ├─ SetTimer effect                       ~µs
-       └─ Notify effect                         ~1ms
+  └─ handler emits JobCreated + dispatches CreateWorkspace (deferred)
+     └─ returns immediately
 
-Background: CreateWorkspace task      ~1-30s   (git worktree add)
-  ──► emits WorkspaceReady → SpawnAgent task   ~1-9s    (tmux + prompt polls)
-  ──► emits SessionCreated → timer setup       ~µs
+process_event(WorkspaceReady)        ◄── emitted by background task
+  └─ handler calls start_step() → dispatches SpawnAgent (deferred)
+     └─ returns immediately
+
+process_event(SessionCreated)        ◄── emitted by background task
+  └─ handler sets up watcher, timers
+     └─ returns immediately
 ```
 
-The event loop remains responsive throughout.
+The total wall-clock time for workspace creation + agent spawn is the same,
+but the event loop remains responsive throughout — timers fire, other events
+process, and IPC queries respond without delay.
 
 ## Listener and IPC
 
@@ -163,10 +168,15 @@ All `Query::*` variants, `JobCancel`, `JobResume`, `SessionSend`,
 `DecisionResolve` — acquire the shared `Mutex<MaterializedState>`. Blocked
 whenever `process_event()` holds the lock.
 
-**Subprocess-calling** (blocks on external process):
+**Subprocess-calling** (blocks on external process, with timeouts):
 `SessionKill`, `PeekSession`, `AgentSend`, `AgentResume`, `WorkspacePrune`
-— run tmux or git subprocesses. Can block for seconds even when the engine
-is idle.
+— run tmux or git subprocesses. Each has a purpose-specific timeout:
+
+| Handler | Timeout | Operation |
+|---------|---------|-----------|
+| `PeekSession` | 5s | tmux capture-pane |
+| `AgentResume` | 5s per session | tmux session kills |
+| `WorkspacePrune` | 30s per workspace | git worktree operations |
 
 ## Synchronization Primitives
 
@@ -262,33 +272,15 @@ milliseconds.
 
 The state lock is **not** held across long `.await` points — it is acquired
 and released in brief scoped blocks (during `apply_event()` in
-`process_event()`, and again at several points within `execute_inner()`).
-Query handlers can interleave between these brief acquisitions.
+`process_event()`). Query handlers can interleave between these brief
+acquisitions. In practice, lock contention is low.
 
-In practice, lock contention is low: the real issue is that subprocess-calling
-IPC handlers (`PeekSession`, `WorkspacePrune`, `AgentResume`) block their
-connection task on external process I/O for seconds, with no timeout.
+### Subprocess-calling IPC handlers
 
-### Cascading event chains
-
-A single `CommandRun` produces result events (`WorkspaceReady`,
-`SessionCreated`) that feed back through the WAL. Each result event triggers
-another `process_event()` iteration. Because all I/O effects are deferred,
-each iteration completes in microseconds:
-
-```diagram
-CommandRun ─► CreateWorkspace (spawned) ─► returns ~µs
-WorkspaceReady ─► SpawnAgent (spawned) ─► returns ~µs
-SessionCreated ─► SetTimer (~µs)
-```
-
-The actual work (git worktree, tmux spawn) runs concurrently in background
-tasks. The event loop remains available for timers and other events throughout.
-
-### Timer resolution
-
-With all I/O effects deferred, the `tokio::select!` timer branch fires at
-the configured interval (default 1s) without degradation.
+IPC handlers that call subprocesses (`PeekSession`, `WorkspacePrune`,
+`AgentResume`) block their connection task on external process I/O. Each has
+a purpose-specific timeout to bound the blocking duration (see Listener and
+IPC section above).
 
 ## See Also
 

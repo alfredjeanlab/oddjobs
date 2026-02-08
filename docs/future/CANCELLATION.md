@@ -86,8 +86,9 @@ This requires:
 4. Deciding whether to propagate cancellation into subprocess kills
    (`Command::kill()`) or just abandon the await
 
-The simpler alternative is handler-side timeouts: wrap each subprocess call
-in `tokio::time::timeout()` (proposed in `future/CONCURRENCY.md` Phase 3).
-This doesn't detect client disconnect but bounds the maximum handler
-duration, which addresses the same symptom. The two approaches compose well
-— timeouts prevent unbounded blocking, cancellation prevents wasted work.
+The simpler alternative is handler-side timeouts: subprocess-calling IPC
+handlers use `tokio::time::timeout()` with purpose-specific limits (see
+`arch/03-concurrency.md`). This doesn't detect client disconnect but bounds
+the maximum handler duration, which addresses the same symptom. The two
+approaches compose well — timeouts prevent unbounded blocking, cancellation
+prevents wasted work.
