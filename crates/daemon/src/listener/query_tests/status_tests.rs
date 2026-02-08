@@ -416,3 +416,64 @@ fn status_overview_includes_orphans() {
         other => panic!("unexpected response: {:?}", other),
     }
 }
+
+#[test]
+fn status_overview_includes_suspended_jobs() {
+    let state = empty_state();
+    let temp = tempdir().unwrap();
+    let start = Instant::now();
+
+    {
+        let mut s = state.lock();
+        // Suspended job — should appear in suspended_jobs
+        s.jobs.insert(
+            "p1".to_string(),
+            make_job(
+                "p1",
+                "fix/paused",
+                "oddjobs",
+                "suspended",
+                StepStatus::Suspended,
+                StepOutcome::Failed("user suspended".to_string()),
+                Some("agent-1"),
+                1000,
+            ),
+        );
+        // Active job — should appear in active_jobs
+        s.jobs.insert(
+            "p2".to_string(),
+            make_job(
+                "p2",
+                "fix/active",
+                "oddjobs",
+                "work",
+                StepStatus::Running,
+                StepOutcome::Running,
+                None,
+                2000,
+            ),
+        );
+    }
+
+    let response = handle_query(
+        Query::StatusOverview,
+        &state,
+        &empty_orphans(),
+        temp.path(),
+        start,
+    );
+    match response {
+        Response::StatusOverview { namespaces, .. } => {
+            assert_eq!(namespaces.len(), 1);
+            let ns = &namespaces[0];
+            assert_eq!(ns.namespace, "oddjobs");
+            assert_eq!(ns.active_jobs.len(), 1);
+            assert_eq!(ns.active_jobs[0].name, "fix/active");
+            assert_eq!(ns.suspended_jobs.len(), 1);
+            assert_eq!(ns.suspended_jobs[0].name, "fix/paused");
+            assert_eq!(ns.suspended_jobs[0].step_status, StepStatusKind::Suspended);
+            assert!(ns.escalated_jobs.is_empty());
+        }
+        other => panic!("unexpected response: {:?}", other),
+    }
+}

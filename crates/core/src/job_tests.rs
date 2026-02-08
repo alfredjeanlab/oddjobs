@@ -321,6 +321,17 @@ fn step_status_waiting_is_waiting() {
     assert!(!StepStatus::Running.is_waiting());
     assert!(!StepStatus::Completed.is_waiting());
     assert!(!StepStatus::Failed.is_waiting());
+    assert!(!StepStatus::Suspended.is_waiting());
+}
+
+#[test]
+fn step_status_suspended_is_suspended() {
+    assert!(StepStatus::Suspended.is_suspended());
+    assert!(!StepStatus::Pending.is_suspended());
+    assert!(!StepStatus::Running.is_suspended());
+    assert!(!StepStatus::Completed.is_suspended());
+    assert!(!StepStatus::Failed.is_suspended());
+    assert!(!StepStatus::Waiting(None).is_suspended());
 }
 
 #[test]
@@ -356,5 +367,9 @@ fn step_status_serde_roundtrip() {
     assert_eq!(
         serde_json::to_string(&StepStatus::Failed).unwrap(),
         r#""Failed""#
+    );
+    assert_eq!(
+        serde_json::to_string(&StepStatus::Suspended).unwrap(),
+        r#""Suspended""#
     );
 }

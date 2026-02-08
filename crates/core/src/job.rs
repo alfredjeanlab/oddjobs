@@ -36,12 +36,19 @@ pub enum StepStatus {
     Completed,
     /// Step failed
     Failed,
+    /// Job suspended (terminal but resumable)
+    Suspended,
 }
 
 impl StepStatus {
     /// Check if this step is in a waiting state.
     pub fn is_waiting(&self) -> bool {
         matches!(self, StepStatus::Waiting(_))
+    }
+
+    /// Check if this step is suspended.
+    pub fn is_suspended(&self) -> bool {
+        matches!(self, StepStatus::Suspended)
     }
 }
 
@@ -53,6 +60,7 @@ impl fmt::Display for StepStatus {
             StepStatus::Waiting(_) => write!(f, "waiting"),
             StepStatus::Completed => write!(f, "completed"),
             StepStatus::Failed => write!(f, "failed"),
+            StepStatus::Suspended => write!(f, "suspended"),
         }
     }
 }
@@ -75,6 +83,7 @@ pub enum StepStatusKind {
     Waiting,
     Completed,
     Failed,
+    Suspended,
     /// Orphaned job detected from breadcrumb (not a core step status).
     Orphaned,
 }
@@ -87,6 +96,7 @@ impl From<&StepStatus> for StepStatusKind {
             StepStatus::Waiting(_) => StepStatusKind::Waiting,
             StepStatus::Completed => StepStatusKind::Completed,
             StepStatus::Failed => StepStatusKind::Failed,
+            StepStatus::Suspended => StepStatusKind::Suspended,
         }
     }
 }
@@ -99,6 +109,7 @@ impl fmt::Display for StepStatusKind {
             StepStatusKind::Waiting => write!(f, "waiting"),
             StepStatusKind::Completed => write!(f, "completed"),
             StepStatusKind::Failed => write!(f, "failed"),
+            StepStatusKind::Suspended => write!(f, "suspended"),
             StepStatusKind::Orphaned => write!(f, "orphaned"),
         }
     }

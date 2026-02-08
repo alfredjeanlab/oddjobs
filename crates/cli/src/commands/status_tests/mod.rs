@@ -45,6 +45,7 @@ pub(super) fn empty_ns(name: &str) -> NamespaceStatus {
         namespace: name.to_string(),
         active_jobs: vec![],
         escalated_jobs: vec![],
+        suspended_jobs: vec![],
         orphaned_jobs: vec![],
         workers: vec![],
         crons: vec![],

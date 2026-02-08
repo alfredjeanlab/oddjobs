@@ -87,7 +87,8 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
 
                 job.step = step.clone();
                 job.step_status = match step.as_str() {
-                    "failed" | "cancelled" | "suspended" => StepStatus::Failed,
+                    "failed" | "cancelled" => StepStatus::Failed,
+                    "suspended" => StepStatus::Suspended,
                     "done" => StepStatus::Completed,
                     _ => StepStatus::Pending,
                 };
@@ -187,7 +188,12 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
 
         Event::StepFailed { job_id, error, .. } => {
             if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
-                job.step_status = StepStatus::Failed;
+                // Don't overwrite Suspended status — suspension_effects() emits
+                // JobAdvanced{step:"suspended"} then StepFailed, and the latter
+                // must not reset the status back to Failed.
+                if !job.step_status.is_suspended() {
+                    job.step_status = StepStatus::Failed;
+                }
                 job.error = Some(error.clone());
                 job.finalize_current_step(
                     StepOutcome::Failed(error.clone()),

@@ -32,6 +32,9 @@ pub struct NamespaceStatus {
     pub active_jobs: Vec<JobStatusEntry>,
     /// Jobs in Waiting status (escalated to human)
     pub escalated_jobs: Vec<JobStatusEntry>,
+    /// Suspended jobs (terminal but resumable)
+    #[serde(default)]
+    pub suspended_jobs: Vec<JobStatusEntry>,
     /// Orphaned jobs detected from breadcrumb files
     pub orphaned_jobs: Vec<JobStatusEntry>,
     /// Workers and their status

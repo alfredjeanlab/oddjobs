@@ -257,7 +257,9 @@ pub(crate) async fn handle_agent_resume(
                             if !job.step_status.is_waiting()
                                 && !matches!(
                                     job.step_status,
-                                    oj_core::StepStatus::Failed | oj_core::StepStatus::Pending
+                                    oj_core::StepStatus::Failed
+                                        | oj_core::StepStatus::Pending
+                                        | oj_core::StepStatus::Suspended
                                 )
                             {
                                 skipped.push((

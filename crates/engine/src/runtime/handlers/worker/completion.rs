@@ -95,8 +95,10 @@ where
                     .unwrap_or(_old_runbook_hash)
             };
 
-            // For persisted queues, emit queue completion/failure event
-            if queue_type == QueueType::Persisted {
+            // For persisted queues, emit queue completion/failure event.
+            // Skip for suspended jobs — the queue item stays Active so it can
+            // be retried when the job is resumed.
+            if queue_type == QueueType::Persisted && terminal_step != "suspended" {
                 if let Some(ref item_id) = item_id {
                     let queue_event = if terminal_step == "done" {
                         Event::QueueCompleted {

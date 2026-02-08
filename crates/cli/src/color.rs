@@ -216,8 +216,8 @@ pub(crate) fn apply_status(text: &str) -> String {
         .unwrap_or("");
     let code = match first_word {
         "completed" | "done" | "running" | "started" | "ready" | "on" => "\x1b[32m",
-        "waiting" | "escalated" | "pending" | "idle" | "orphaned" | "stopping" | "stopped"
-        | "creating" | "cleaning" | "full" | "off" => "\x1b[33m",
+        "waiting" | "escalated" | "pending" | "idle" | "orphaned" | "suspended" | "stopping"
+        | "stopped" | "creating" | "cleaning" | "full" | "off" => "\x1b[33m",
         "failed" | "cancelled" | "dead" | "gone" | "error" => "\x1b[31m",
         _ => return text.to_string(),
     };

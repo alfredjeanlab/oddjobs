@@ -182,7 +182,9 @@ pub(crate) fn handle_job_resume_all(
                 if !job.step_status.is_waiting()
                     && !matches!(
                         job.step_status,
-                        oj_core::StepStatus::Failed | oj_core::StepStatus::Pending
+                        oj_core::StepStatus::Failed
+                            | oj_core::StepStatus::Pending
+                            | oj_core::StepStatus::Suspended
                     )
                 {
                     skipped.push((

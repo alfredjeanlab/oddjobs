@@ -34,9 +34,32 @@ pub(super) fn handle_status_overview(
     // Collect all namespaces seen across entities
     let mut ns_active: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
     let mut ns_escalated: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
+    let mut ns_suspended: BTreeMap<String, Vec<JobStatusEntry>> = BTreeMap::new();
     let mut ns_agents: BTreeMap<String, Vec<AgentStatusEntry>> = BTreeMap::new();
 
     for p in state.jobs.values() {
+        if p.is_suspended() {
+            let created_at_ms = p.step_history.first().map(|r| r.started_at_ms).unwrap_or(0);
+            let elapsed_ms = now_ms.saturating_sub(created_at_ms);
+            let last_activity_ms = p
+                .step_history
+                .last()
+                .map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms))
+                .unwrap_or(0);
+            let entry = JobStatusEntry {
+                id: p.id.clone(),
+                name: p.name.clone(),
+                kind: p.kind.clone(),
+                step: p.step.clone(),
+                step_status: StepStatusKind::from(&p.step_status),
+                elapsed_ms,
+                last_activity_ms,
+                waiting_reason: None,
+                escalate_source: None,
+            };
+            ns_suspended.entry(p.namespace.clone()).or_default().push(entry);
+            continue;
+        }
         if p.is_terminal() {
             continue;
         }
@@ -230,6 +253,9 @@ pub(super) fn handle_status_overview(
     for ns in ns_escalated.keys() {
         all_namespaces.insert(ns.clone());
     }
+    for ns in ns_suspended.keys() {
+        all_namespaces.insert(ns.clone());
+    }
     for ns in ns_orphaned.keys() {
         all_namespaces.insert(ns.clone());
     }
@@ -254,6 +280,7 @@ pub(super) fn handle_status_overview(
         .map(|ns| NamespaceStatus {
             active_jobs: ns_active.remove(&ns).unwrap_or_default(),
             escalated_jobs: ns_escalated.remove(&ns).unwrap_or_default(),
+            suspended_jobs: ns_suspended.remove(&ns).unwrap_or_default(),
             orphaned_jobs: ns_orphaned.remove(&ns).unwrap_or_default(),
             workers: ns_workers.remove(&ns).unwrap_or_default(),
             crons: ns_crons.remove(&ns).unwrap_or_default(),

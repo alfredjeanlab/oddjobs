@@ -255,6 +255,10 @@ fn format_text(
     if total_escalated > 0 {
         let _ = write!(out, " | {} {}", total_escalated, color::status("escalated"));
     }
+    let total_suspended: usize = namespaces.iter().map(|ns| ns.suspended_jobs.len()).sum();
+    if total_suspended > 0 {
+        let _ = write!(out, " | {} {}", total_suspended, color::status("suspended"));
+    }
     let total_orphaned: usize = namespaces.iter().map(|ns| ns.orphaned_jobs.len()).sum();
     if total_orphaned > 0 {
         let _ = write!(out, " | {} {}", total_orphaned, color::status("orphaned"));
@@ -314,6 +318,7 @@ fn format_text(
             .any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
         let has_content = !ns.active_jobs.is_empty()
             || !ns.escalated_jobs.is_empty()
+            || !ns.suspended_jobs.is_empty()
             || !ns.orphaned_jobs.is_empty()
             || !ns.workers.is_empty()
             || !ns.crons.is_empty()
@@ -340,6 +345,9 @@ fn format_text(
         let mut escalated_jobs: Vec<&oj_daemon::JobStatusEntry> =
             ns.escalated_jobs.iter().collect();
         escalated_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+
+        let mut suspended_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.suspended_jobs.iter().collect();
+        suspended_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
         let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.orphaned_jobs.iter().collect();
         orphaned_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
@@ -422,6 +430,29 @@ fn format_text(
                 .collect();
             write_aligned_job_rows(&mut out, &rows);
             let _ = writeln!(out, "    Run `oj daemon orphans` for recovery details");
+            out.push('\n');
+        }
+
+        // Suspended jobs
+        if !suspended_jobs.is_empty() {
+            let _ = writeln!(
+                out,
+                "  {}",
+                color::header(&format!("Suspended ({}):", suspended_jobs.len()))
+            );
+            let rows: Vec<JobRow> = suspended_jobs
+                .iter()
+                .map(|p| JobRow {
+                    prefix: "    ".to_string(),
+                    id: p.id.short(8).to_string(),
+                    name: friendly_name_label(&p.name, &p.kind, &p.id),
+                    kind_step: format!("{}/{}", p.kind, p.step),
+                    status: "suspended".to_string(),
+                    suffix: format_duration_ms(p.elapsed_ms),
+                    reason: None,
+                })
+                .collect();
+            write_aligned_job_rows(&mut out, &rows);
             out.push('\n');
         }
 
