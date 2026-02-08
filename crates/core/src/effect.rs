@@ -227,7 +227,7 @@ impl Effect {
             Effect::PollQueue {
                 worker_name, cwd, ..
             } => vec![
-                ("worker_name", worker_name.clone()),
+                ("worker", worker_name.clone()),
                 ("cwd", cwd.display().to_string()),
             ],
             Effect::TakeQueueItem {
@@ -236,11 +236,25 @@ impl Effect {
                 item_id,
                 ..
             } => vec![
-                ("worker_name", worker_name.clone()),
+                ("worker", worker_name.clone()),
                 ("cwd", cwd.display().to_string()),
                 ("item_id", item_id.clone()),
             ],
             Effect::Notify { title, .. } => vec![("title", title.clone())],
+        }
+    }
+
+    /// Whether to show both 'started' and 'completed' or just 'executed',
+    /// to control the verbosity for frequent events.
+    pub fn verbose(&self) -> bool {
+        match self {
+            // Show less information for very frequent signaling effects
+            Effect::Emit { .. } => false,
+            Effect::SetTimer { .. } => false,
+            Effect::CancelTimer { .. } => false,
+            Effect::PollQueue { .. } => false,
+            // Maintain full information for infrequent and destructive effects
+            _ => true,
         }
     }
 }

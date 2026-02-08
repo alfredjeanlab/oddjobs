@@ -81,23 +81,57 @@ where
         let span = tracing::info_span!("effect", effect = op_name);
         let _guard = span.enter();
 
-        tracing::info!(fields = ?effect.fields(), "executing");
+        // Format the fields as `key=val`
+        let info = {
+            let fields = effect.fields();
+            let cap = fields.iter().map(|(a, b)| a.len() + b.len() + 2).sum();
+            let mut fmt = String::with_capacity(cap);
+            for (key, val) in fields {
+                fmt.push_str(key);
+                fmt.push('=');
+                fmt.push_str(&val);
+                fmt.push(' ');
+            }
+            fmt.pop();
+            fmt
+        };
+        let verbose = effect.verbose();
+        if verbose {
+            tracing::info!(info, "executing");
+        }
 
         let start = std::time::Instant::now();
         let result = self.execute_inner(effect).await;
         let elapsed = start.elapsed();
 
-        match &result {
-            Ok(event) => tracing::info!(
-                elapsed_ms = elapsed.as_millis() as u64,
-                has_event = event.is_some(),
-                "completed"
-            ),
-            Err(e) => tracing::error!(
-                elapsed_ms = elapsed.as_millis() as u64,
-                error = %e,
-                "failed"
-            ),
+        if verbose {
+            match &result {
+                Ok(event) => tracing::info!(
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    has_event = event.is_some(),
+                    "completed"
+                ),
+                Err(e) => tracing::error!(
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    error = %e,
+                    "failed"
+                ),
+            }
+        } else {
+            match &result {
+                Ok(event) => tracing::info!(
+                    info,
+                    event = ?event.is_some(),
+                    elapsed_ms = ?elapsed.as_millis() as u64,
+                    "executed"
+                ),
+                Err(e) => tracing::error!(
+                    info,
+                    error = %e,
+                    elapsed_ms = ?elapsed.as_millis() as u64,
+                    "error"
+                ),
+            }
         }
 
         result
