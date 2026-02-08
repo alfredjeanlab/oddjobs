@@ -9,7 +9,7 @@ use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, TimerId};
 use oj_runbook::QueueType;
-use oj_storage::QueueItemStatus;
+use oj_storage::{QueueItemStatus, QueuePollMeta};
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -143,6 +143,16 @@ where
             total,
             "polled persisted queue"
         );
+
+        self.lock_state_mut(|s| {
+            s.poll_meta.insert(
+                key.clone(),
+                QueuePollMeta {
+                    last_item_count: total,
+                    last_polled_at_ms: self.clock().epoch_ms(),
+                },
+            )
+        });
 
         // Synthesize a WorkerPollComplete event with scoped key to reuse the existing dispatch flow
         Ok(vec![Event::WorkerPollComplete {

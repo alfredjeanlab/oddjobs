@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use oj_core::split_scoped_name;
+use oj_core::{scoped_name, split_scoped_name};
 use oj_storage::MaterializedState;
 
 use crate::protocol::{QueueSummary, Response};
@@ -30,12 +30,16 @@ pub(super) fn list_queues(
                 .map(|w| w.name.clone())
                 .collect();
 
+            let poll_meta = state.poll_meta.get(scoped_key);
+
             QueueSummary {
                 name: queue_name.to_string(),
                 namespace: ns.to_string(),
                 queue_type: "persisted".to_string(),
                 item_count: items.len(),
                 workers,
+                last_poll_count: poll_meta.map(|m| m.last_item_count),
+                last_polled_at_ms: poll_meta.map(|m| m.last_polled_at_ms),
             }
         })
         .collect();
@@ -52,12 +56,16 @@ pub(super) fn list_queues(
                 oj_runbook::QueueType::External => "external",
                 oj_runbook::QueueType::Persisted => "persisted",
             };
+            let key = scoped_name(namespace, &name);
+            let poll_meta = state.poll_meta.get(&key);
             queues.push(QueueSummary {
                 name,
                 namespace: namespace.to_string(),
                 queue_type: queue_type.to_string(),
                 item_count: 0,
                 workers: vec![],
+                last_poll_count: poll_meta.map(|m| m.last_item_count),
+                last_polled_at_ms: poll_meta.map(|m| m.last_polled_at_ms),
             });
         }
     }

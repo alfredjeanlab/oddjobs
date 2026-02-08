@@ -871,13 +871,7 @@ fn resume_agent_step_without_message_succeeds() {
     }
 
     // Resume without a message — should succeed with default message
-    let result = handle_job_resume(
-        &ctx,
-        "pipe-agent".to_string(),
-        None,
-        HashMap::new(),
-        false,
-    );
+    let result = handle_job_resume(&ctx, "pipe-agent".to_string(), None, HashMap::new(), false);
 
     match result {
         Ok(Response::Ok) => {}

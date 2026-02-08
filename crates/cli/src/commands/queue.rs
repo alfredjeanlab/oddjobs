@@ -322,6 +322,8 @@ pub async fn handle(
                         Column::left("NAME"),
                         Column::left("TYPE"),
                         Column::right("ITEMS"),
+                        Column::right("POLL"),
+                        Column::muted("POLLED"),
                         Column::left("WORKERS"),
                     ]);
                     let mut table = Table::new(cols);
@@ -332,6 +334,14 @@ pub async fn handle(
                         } else {
                             q.workers.join(", ")
                         };
+                        let poll_count = q
+                            .last_poll_count
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| "-".to_string());
+                        let polled_at = q
+                            .last_polled_at_ms
+                            .map(format_time_ago)
+                            .unwrap_or_else(|| "-".to_string());
                         let mut cells = Vec::new();
                         if show_project {
                             cells.push(project_cell(&q.namespace));
@@ -340,6 +350,8 @@ pub async fn handle(
                             q.name.clone(),
                             q.queue_type.clone(),
                             q.item_count.to_string(),
+                            poll_count,
+                            polled_at,
                             workers_str,
                         ]);
                         table.row(cells);

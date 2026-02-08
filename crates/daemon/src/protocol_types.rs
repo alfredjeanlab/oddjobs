@@ -199,6 +199,10 @@ pub struct QueueSummary {
     pub queue_type: String,
     pub item_count: usize,
     pub workers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_poll_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_polled_at_ms: Option<u64>,
 }
 
 /// Summary of a decision for listing
