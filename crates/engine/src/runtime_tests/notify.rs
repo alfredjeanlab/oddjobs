@@ -56,16 +56,11 @@ async fn job_on_start_emits_notification() {
         .into_iter()
         .collect();
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "notified",
-            "notified",
-            args,
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    handle_event_chain(
+        &ctx,
+        command_event("pipe-1", "notified", "notified", args, &ctx.project_root),
+    )
+    .await;
 
     let calls = ctx.notifier.calls();
     assert_eq!(calls.len(), 1, "on_start should emit one notification");
@@ -81,16 +76,11 @@ async fn job_on_done_emits_notification() {
         .into_iter()
         .collect();
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "notified",
-            "notified",
-            args,
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    handle_event_chain(
+        &ctx,
+        command_event("pipe-1", "notified", "notified", args, &ctx.project_root),
+    )
+    .await;
 
     // No notification yet (on_done fires on completion, not start)
     assert_eq!(ctx.notifier.calls().len(), 0);
@@ -121,16 +111,11 @@ async fn job_on_fail_emits_notification() {
         .into_iter()
         .collect();
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "notified",
-            "notified",
-            args,
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    handle_event_chain(
+        &ctx,
+        command_event("pipe-1", "notified", "notified", args, &ctx.project_root),
+    )
+    .await;
 
     // No notification yet
     assert_eq!(ctx.notifier.calls().len(), 0);
@@ -188,8 +173,9 @@ on_idle = { action = "gate", run = "false" }
 async fn gate_failure_does_not_produce_automatic_notification() {
     let ctx = setup_with_runbook(GATE_NO_NOTIFY_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -197,9 +183,9 @@ async fn gate_failure_does_not_produce_automatic_notification() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -259,8 +245,9 @@ on_dead = { action = "gate", run = "false" }
 async fn gate_dead_failure_does_not_produce_automatic_notification() {
     let ctx = setup_with_runbook(GATE_DEAD_NO_NOTIFY_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -268,9 +255,9 @@ async fn gate_dead_failure_does_not_produce_automatic_notification() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

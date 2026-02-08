@@ -13,8 +13,9 @@ use super::*;
 async fn standalone_on_dead_fail_fails_agent_run() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -22,9 +23,9 @@ async fn standalone_on_dead_fail_fails_agent_run() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -73,8 +74,9 @@ async fn standalone_on_dead_fail_fails_agent_run() {
 async fn standalone_on_dead_gate_pass_completes_agent_run() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_PASS).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -82,9 +84,9 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -124,8 +126,9 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
 async fn standalone_on_dead_gate_fail_escalates_agent_run() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -133,9 +136,9 @@ async fn standalone_on_dead_gate_fail_escalates_agent_run() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -194,8 +197,9 @@ on_idle = { action = "gate", run = "true" }
 
     let ctx = setup_with_runbook(runbook).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -203,9 +207,9 @@ on_idle = { action = "gate", run = "true" }
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -250,8 +254,9 @@ on_idle = { action = "gate", run = "true" }
 async fn standalone_on_error_fail_fails_agent_run() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ERROR_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -259,9 +264,9 @@ async fn standalone_on_error_fail_fails_agent_run() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx

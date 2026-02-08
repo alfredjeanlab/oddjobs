@@ -103,8 +103,9 @@ async fn agent_state_changed_routes_through_agent_jobs() {
 async fn gate_idle_escalates_when_command_fails() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -112,9 +113,9 @@ async fn gate_idle_escalates_when_command_fails() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -143,8 +144,9 @@ async fn gate_idle_escalates_when_command_fails() {
 async fn agent_signal_complete_overrides_gate_escalation() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -152,9 +154,9 @@ async fn agent_signal_complete_overrides_gate_escalation() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -197,8 +199,9 @@ async fn agent_signal_complete_overrides_gate_escalation() {
 async fn agent_signal_complete_advances_job() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -206,9 +209,9 @@ async fn agent_signal_complete_advances_job() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -243,8 +246,9 @@ async fn agent_signal_complete_advances_job() {
 async fn agent_signal_continue_no_job_state_change() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -252,9 +256,9 @@ async fn agent_signal_continue_no_job_state_change() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

@@ -34,8 +34,9 @@ run = "echo teardown"
 async fn job_on_done_routes_to_teardown() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ON_DONE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "deploy",
             "deploy",
@@ -43,9 +44,9 @@ async fn job_on_done_routes_to_teardown() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -122,8 +123,9 @@ run = "echo cleanup"
 async fn job_on_fail_routes_to_cleanup() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ON_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "deploy",
             "deploy",
@@ -131,9 +133,9 @@ async fn job_on_fail_routes_to_cleanup() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -184,8 +186,9 @@ run = "echo teardown"
 async fn step_level_on_done_takes_precedence() {
     let ctx = setup_with_runbook(RUNBOOK_STEP_ON_DONE_PRECEDENCE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "deploy",
             "deploy",
@@ -193,9 +196,9 @@ async fn step_level_on_done_takes_precedence() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -246,8 +249,9 @@ run = "echo global-cleanup"
 async fn step_level_on_fail_takes_precedence() {
     let ctx = setup_with_runbook(RUNBOOK_STEP_ON_FAIL_PRECEDENCE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "deploy",
             "deploy",
@@ -255,9 +259,9 @@ async fn step_level_on_fail_takes_precedence() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 

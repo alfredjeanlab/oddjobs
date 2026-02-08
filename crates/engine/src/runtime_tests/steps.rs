@@ -241,8 +241,9 @@ async fn step_without_on_done_completes_job() {
     let ctx = setup_with_runbook(RUNBOOK_NO_ON_DONE).await;
 
     // Create job
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "simple",
             "simple",
@@ -250,9 +251,9 @@ async fn step_without_on_done_completes_job() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -302,8 +303,9 @@ async fn explicit_next_step_is_followed() {
     let ctx = setup_with_runbook(RUNBOOK_EXPLICIT_NEXT).await;
 
     // Create job
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -311,9 +313,9 @@ async fn explicit_next_step_is_followed() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -371,8 +373,9 @@ run = "true"
 async fn implicit_done_step_completes_immediately() {
     let ctx = setup_with_runbook(RUNBOOK_IMPLICIT_DONE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -380,9 +383,9 @@ async fn implicit_done_step_completes_immediately() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 

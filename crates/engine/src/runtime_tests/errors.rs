@@ -89,11 +89,12 @@ run = "echo init"
 
 #[tokio::test]
 async fn workspace_job_creates_directory() {
-    // Workspace creation is deferred: the job starts with step_status=Pending,
-    // and WorkspaceReady arrives asynchronously via event_tx.
+    // Workspace creation is deferred: CommandRun emits JobCreated,
+    // which triggers handle_job_created → CreateWorkspace.
+    // WorkspaceReady arrives asynchronously via event_tx.
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
 
-    let result = ctx
+    let events = ctx
         .runtime
         .handle_event(command_event(
             "pipe-1",
@@ -104,9 +105,8 @@ async fn workspace_job_creates_directory() {
                 .collect(),
             &ctx.project_root,
         ))
-        .await;
-
-    assert!(result.is_ok(), "expected Ok, got: {:?}", result);
+        .await
+        .unwrap();
 
     // Job should exist with step_status=Pending (waiting for workspace)
     let job = ctx
@@ -119,6 +119,11 @@ async fn workspace_job_creates_directory() {
         oj_core::StepStatus::Pending,
         "step should be pending until workspace is ready"
     );
+
+    // Process the JobCreated event to trigger workspace creation
+    for event in events {
+        ctx.runtime.handle_event(event).await.unwrap();
+    }
 
     // Wait for WorkspaceReady from the background task
     let event = tokio::time::timeout(std::time::Duration::from_secs(5), ctx.event_rx.recv())

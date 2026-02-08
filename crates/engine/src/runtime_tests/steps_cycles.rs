@@ -30,8 +30,9 @@ run = "echo done"
 async fn on_fail_self_cycle_preserves_action_attempts() {
     let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -39,9 +40,9 @@ async fn on_fail_self_cycle_preserves_action_attempts() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -108,8 +109,9 @@ run = "echo done"
 async fn on_fail_multi_step_cycle_preserves_action_attempts() {
     let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_MULTI_STEP_CYCLE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -117,9 +119,9 @@ async fn on_fail_multi_step_cycle_preserves_action_attempts() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
@@ -176,8 +178,9 @@ async fn on_fail_multi_step_cycle_preserves_action_attempts() {
 async fn on_done_transition_resets_action_attempts() {
     let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -185,9 +188,9 @@ async fn on_done_transition_resets_action_attempts() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 
@@ -252,8 +255,9 @@ run = "echo done"
 async fn circuit_breaker_fails_job_after_max_step_visits() {
     let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -261,9 +265,9 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
@@ -314,8 +318,9 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
 async fn step_visits_tracked_across_transitions() {
     let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -323,9 +328,9 @@ async fn step_visits_tracked_across_transitions() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
 

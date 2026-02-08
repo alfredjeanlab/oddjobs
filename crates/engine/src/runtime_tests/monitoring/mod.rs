@@ -43,8 +43,9 @@ async fn setup_job_at_agent_step(ctx: &TestContext) -> (String, String, AgentId)
 
 /// Helper: spawn a standalone agent and return (agent_run_id, session_id, agent_id)
 async fn setup_standalone_agent(ctx: &TestContext) -> (String, String, AgentId) {
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "agent_cmd",
@@ -52,9 +53,9 @@ async fn setup_standalone_agent(ctx: &TestContext) -> (String, String, AgentId) 
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let agent_run_id = "pipe-1".to_string();
     let agent_run = ctx

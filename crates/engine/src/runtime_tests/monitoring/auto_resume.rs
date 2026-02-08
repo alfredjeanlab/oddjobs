@@ -13,8 +13,9 @@ use super::*;
 async fn working_auto_resumes_job_from_waiting() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -22,9 +23,9 @@ async fn working_auto_resumes_job_from_waiting() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -104,8 +105,9 @@ async fn working_noop_when_job_already_running() {
 async fn working_auto_resume_resets_action_attempts() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -113,9 +115,9 @@ async fn working_auto_resume_resets_action_attempts() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -167,8 +169,9 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
 
     // Spawn standalone agent via command
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -176,9 +179,9 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     // Find the agent_run and its agent_id
     let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
@@ -226,8 +229,9 @@ async fn working_noop_when_standalone_agent_already_running() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
 
     // Spawn standalone agent
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -235,9 +239,9 @@ async fn working_noop_when_standalone_agent_already_running() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
         let ar = state.agent_runs.values().next().unwrap();
@@ -274,8 +278,9 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
 
     // Spawn standalone agent
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -283,9 +288,9 @@ async fn working_auto_resume_resets_standalone_action_attempts() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
         let ar = state.agent_runs.values().next().unwrap();

@@ -45,16 +45,11 @@ async fn create_test_job(ctx: &TestContext, job_id: &str) -> String {
     .into_iter()
     .collect();
 
-    ctx.runtime
-        .handle_event(command_event(
-            job_id,
-            "test",
-            "test",
-            args,
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    handle_event_chain(
+        &ctx,
+        command_event(job_id, "test", "test", args, &ctx.project_root),
+    )
+    .await;
 
     job_id.to_string()
 }

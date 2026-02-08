@@ -14,8 +14,9 @@ use super::*;
 async fn idle_grace_timer_set_on_agent_idle() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -23,9 +24,9 @@ async fn idle_grace_timer_set_on_agent_idle() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -79,8 +80,9 @@ async fn idle_grace_timer_set_on_agent_idle() {
 async fn idle_grace_timer_deduplicates() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -88,9 +90,9 @@ async fn idle_grace_timer_deduplicates() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -132,8 +134,9 @@ async fn idle_grace_timer_deduplicates() {
 async fn idle_grace_timer_cancelled_on_working() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -141,9 +144,9 @@ async fn idle_grace_timer_cancelled_on_working() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -182,8 +185,9 @@ async fn idle_grace_timer_cancelled_on_working() {
 async fn idle_grace_timer_noop_when_log_grew() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -191,9 +195,9 @@ async fn idle_grace_timer_noop_when_log_grew() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -237,8 +241,9 @@ async fn idle_grace_timer_noop_when_log_grew() {
 async fn idle_grace_timer_noop_when_agent_working() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -246,9 +251,9 @@ async fn idle_grace_timer_noop_when_agent_working() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -291,8 +296,9 @@ async fn idle_grace_timer_noop_when_agent_working() {
 async fn idle_grace_timer_proceeds_when_genuinely_idle() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -300,9 +306,9 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -341,8 +347,9 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
 async fn auto_resume_suppressed_after_nudge() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -350,9 +357,9 @@ async fn auto_resume_suppressed_after_nudge() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -408,8 +415,9 @@ async fn auto_resume_suppressed_after_nudge() {
 async fn auto_resume_allowed_after_nudge_cooldown() {
     let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -417,9 +425,9 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -470,8 +478,9 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
 async fn rapid_idle_working_cycling_no_nudge() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -479,9 +488,9 @@ async fn rapid_idle_working_cycling_no_nudge() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

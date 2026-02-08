@@ -51,6 +51,18 @@ fn command_event(
     }
 }
 
+/// Process an event and all cascading result events until stable.
+///
+/// Simulates the daemon event loop: result events from `handle_event` are
+/// re-processed (e.g., `CommandRun` → `JobCreated` → workspace/step start).
+async fn handle_event_chain(ctx: &TestContext, event: Event) {
+    let mut queue = vec![event];
+    while let Some(event) = queue.pop() {
+        let result = ctx.runtime.handle_event(event).await.unwrap();
+        queue.extend(result);
+    }
+}
+
 const TEST_RUNBOOK: &str = r#"
 [command.build]
 args = "<name> <prompt>"
@@ -125,16 +137,11 @@ async fn create_job_with_id(ctx: &TestContext, job_id: &str) -> String {
     .into_iter()
     .collect();
 
-    ctx.runtime
-        .handle_event(command_event(
-            job_id,
-            "build",
-            "build",
-            args,
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    handle_event_chain(
+        ctx,
+        command_event(job_id, "build", "build", args, &ctx.project_root),
+    )
+    .await;
 
     job_id.to_string()
 }
