@@ -72,22 +72,20 @@ Background tasks:
 ### Effect classification
 
 ```
-Already immediate (<10ms)             Already deferred (spawned)
+Immediate (<10ms)                     Deferred (spawned)
 ────────────────────────────────────  ──────────────────────────────────────
 Emit          state mutation          Shell             bash subprocess
 SetTimer      scheduler insert        PollQueue         bash subprocess
 CancelTimer   scheduler remove        TakeQueueItem     bash subprocess
-Notify        fire-and-forget thread
+Notify        fire-and-forget thread  CreateWorkspace   git worktree
+                                      DeleteWorkspace   git + rm
+                                      SpawnAgent        tmux + prompts
+                                      SendToAgent       tmux + settle  [f&f]
+                                      KillAgent         tmux kill      [f&f]
+                                      SendToSession     tmux send      [f&f]
+                                      KillSession       tmux kill      [f&f]
 
-To be deferred (currently inline)
-──────────────────────────────────────
-CreateWorkspace   git worktree
-DeleteWorkspace   git + rm
-SpawnAgent        tmux + prompts
-SendToAgent       tmux + settle
-KillAgent         tmux kill
-SendToSession     tmux send
-KillSession       tmux kill
+[f&f] = fire-and-forget (no result event; errors logged)
 ```
 
 ### Sequential dependencies via events
@@ -200,20 +198,20 @@ Options:
    (event exists, handler is a no-op)
 8. Add `AgentSpawnFailed` → `fail_job()` handler
 
-### Phase 2: Deferred remaining I/O effects
+### Phase 2: Deferred remaining I/O effects ✓
 
-1. Move `DeleteWorkspace` to deferred (emit `WorkspaceDeleted`)
-2. Move `SendToAgent` to deferred (fire-and-forget, no result event)
-3. Move `KillAgent`, `KillSession`, `SendToSession` to deferred
+1. ~~Move `DeleteWorkspace` to deferred (emit `WorkspaceDeleted`)~~
+2. ~~Move `SendToAgent` to deferred (fire-and-forget, no result event)~~
+3. ~~Move `KillAgent`, `KillSession`, `SendToSession` to deferred~~
 
 (`TakeQueueItem` is already deferred, following the `Shell`/`PollQueue` pattern.)
 
-### Phase 3: IPC handler timeouts
+### Phase 3: IPC handler timeouts ✓
 
-1. Wrap all subprocess calls in listener handlers with `tokio::time::timeout`
-2. `PeekSession` (tmux capture): 5s timeout
-3. `WorkspacePrune` (git operations): 30s timeout per workspace
-4. `AgentResume` (tmux kills): 5s timeout per session
+1. ~~Wrap all subprocess calls in listener handlers with `tokio::time::timeout`~~
+2. ~~`PeekSession` (tmux capture): 5s timeout~~
+3. ~~`WorkspacePrune` (git operations): 30s timeout per workspace~~
+4. ~~`AgentResume` (tmux kills): 5s timeout per session~~
 
 ## Non-goals
 

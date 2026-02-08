@@ -140,7 +140,7 @@ async fn create_workspace_failure_sends_failed_event() {
 
 #[tokio::test]
 async fn delete_workspace_removes_plain_directory() {
-    let harness = setup().await;
+    let mut harness = setup().await;
     let tmp = std::env::temp_dir().join("oj_test_delete_ws_plain");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp).unwrap();
@@ -170,17 +170,26 @@ async fn delete_workspace_removes_plain_directory() {
         })
         .await;
 
+    // Deferred: returns Ok(None) immediately
     assert!(result.is_ok());
-    assert!(matches!(
-        result.unwrap(),
-        Some(Event::WorkspaceDeleted { .. })
-    ));
+    assert!(result.unwrap().is_none());
+
+    // WorkspaceDeleted arrives via the event channel
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceDeleted")
+        .expect("channel closed");
+    assert!(
+        matches!(event, Event::WorkspaceDeleted { .. }),
+        "expected WorkspaceDeleted, got: {:?}",
+        event
+    );
     assert!(!tmp.exists(), "workspace directory should be removed");
 }
 
 #[tokio::test]
 async fn delete_workspace_removes_git_worktree() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     // Create a temporary git repo and a worktree from it
     let base = std::env::temp_dir().join("oj_test_delete_ws_wt");
@@ -248,11 +257,20 @@ async fn delete_workspace_removes_git_worktree() {
         })
         .await;
 
+    // Deferred: returns Ok(None) immediately
     assert!(result.is_ok());
-    assert!(matches!(
-        result.unwrap(),
-        Some(Event::WorkspaceDeleted { .. })
-    ));
+    assert!(result.unwrap().is_none());
+
+    // WorkspaceDeleted arrives via the event channel
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceDeleted")
+        .expect("channel closed");
+    assert!(
+        matches!(event, Event::WorkspaceDeleted { .. }),
+        "expected WorkspaceDeleted, got: {:?}",
+        event
+    );
     assert!(!wt_dir.exists(), "worktree directory should be removed");
 
     // Verify git no longer lists the worktree
@@ -300,7 +318,7 @@ async fn delete_workspace_not_found_returns_error() {
 
 #[tokio::test]
 async fn delete_workspace_already_removed_directory() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     // Insert a workspace record pointing to a directory that doesn't exist
     let nonexistent_path = std::env::temp_dir().join("oj_test_already_gone");
@@ -331,9 +349,18 @@ async fn delete_workspace_already_removed_directory() {
         })
         .await;
 
+    // Deferred: returns Ok(None) immediately
     assert!(result.is_ok());
-    assert!(matches!(
-        result.unwrap(),
-        Some(Event::WorkspaceDeleted { .. })
-    ));
+    assert!(result.unwrap().is_none());
+
+    // WorkspaceDeleted arrives via the event channel
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceDeleted")
+        .expect("channel closed");
+    assert!(
+        matches!(event, Event::WorkspaceDeleted { .. }),
+        "expected WorkspaceDeleted, got: {:?}",
+        event
+    );
 }

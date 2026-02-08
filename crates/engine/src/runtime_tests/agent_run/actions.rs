@@ -58,6 +58,9 @@ async fn standalone_on_dead_fail_fails_agent_run() {
         .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
     assert_eq!(agent_run.status, AgentRunStatus::Failed);
 
+    // Yield to let fire-and-forget KillSession task complete
+    tokio::task::yield_now().await;
+
     // Session should be killed
     let kills: Vec<_> = ctx
         .sessions

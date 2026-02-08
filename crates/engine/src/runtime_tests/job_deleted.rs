@@ -190,6 +190,9 @@ async fn job_deleted_kills_session() {
         .await
         .unwrap();
 
+    // Yield to let fire-and-forget KillSession task complete
+    tokio::task::yield_now().await;
+
     // Check that KillSession was called via the fake adapter
     let calls = ctx.sessions.calls();
     let kill_calls: Vec<_> = calls
