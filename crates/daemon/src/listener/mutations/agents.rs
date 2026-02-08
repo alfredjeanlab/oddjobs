@@ -464,3 +464,7 @@ pub(crate) fn handle_agent_prune(
         skipped,
     })
 }
+
+#[cfg(test)]
+#[path = "agents_tests.rs"]
+mod tests;

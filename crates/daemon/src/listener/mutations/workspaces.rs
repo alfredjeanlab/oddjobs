@@ -276,3 +276,7 @@ pub(crate) async fn workspace_prune_inner(
         skipped,
     })
 }
+
+#[cfg(test)]
+#[path = "workspaces_tests.rs"]
+mod tests;

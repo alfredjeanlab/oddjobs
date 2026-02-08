@@ -405,3 +405,7 @@ fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), C
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "jobs_tests.rs"]
+mod tests;

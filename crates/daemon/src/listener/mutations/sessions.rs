@@ -181,3 +181,7 @@ pub(crate) async fn handle_session_prune(
         skipped,
     })
 }
+
+#[cfg(test)]
+#[path = "sessions_tests.rs"]
+mod tests;

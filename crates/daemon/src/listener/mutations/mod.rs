@@ -43,5 +43,4 @@ pub(super) struct PruneFlags<'a> {
 }
 
 #[cfg(test)]
-#[path = "mutations_tests.rs"]
-mod tests;
+mod test_helpers;

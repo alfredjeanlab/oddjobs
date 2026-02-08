@@ -17,3 +17,7 @@ pub(crate) fn cleanup_agent_files(logs_path: &std::path::Path, agent_id: &str) {
     let agent_dir = logs_path.join("agent").join(agent_id);
     let _ = std::fs::remove_dir_all(&agent_dir);
 }
+
+#[cfg(test)]
+#[path = "prune_helpers_tests.rs"]
+mod tests;
