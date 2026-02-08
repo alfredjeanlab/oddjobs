@@ -19,7 +19,7 @@ use self::cron::{CronOnceParams, CronStartedParams};
 use super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event};
+use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event};
 
 impl<S, A, N, C> Runtime<S, A, N, C>
 where
@@ -239,8 +239,12 @@ where
                 );
             }
 
-            Event::WorkerWake { worker_name, .. } => {
-                result_events.extend(self.handle_worker_wake(worker_name).await?);
+            Event::WorkerWake {
+                worker_name,
+                namespace,
+            } => {
+                let worker_key = scoped_name(namespace, worker_name);
+                result_events.extend(self.handle_worker_wake(&worker_key).await?);
             }
 
             Event::WorkerPollComplete {
@@ -268,8 +272,12 @@ where
                 );
             }
 
-            Event::WorkerStopped { worker_name, .. } => {
-                result_events.extend(self.handle_worker_stopped(worker_name).await?);
+            Event::WorkerStopped {
+                worker_name,
+                namespace,
+            } => {
+                let worker_key = scoped_name(namespace, worker_name);
+                result_events.extend(self.handle_worker_stopped(&worker_key).await?);
             }
 
             Event::WorkerResized {
@@ -314,13 +322,14 @@ where
                     &format!("pushed data={{{}}}", data_str),
                 );
 
-                let (worker_names, all_workers): (Vec<String>, Vec<String>) = {
+                let (worker_keys, all_workers): (Vec<String>, Vec<String>) = {
                     let workers = self.worker_states.lock();
                     let all: Vec<String> = workers.keys().cloned().collect();
                     let matching: Vec<String> = workers
                         .iter()
                         .filter(|(_, state)| {
                             state.queue_name == *queue_name
+                                && state.namespace == *namespace
                                 && state.status == worker::WorkerStatus::Running
                         })
                         .map(|(name, _)| name.clone())
@@ -330,17 +339,18 @@ where
 
                 tracing::info!(
                     queue = queue_name.as_str(),
-                    matched = ?worker_names,
+                    matched = ?worker_keys,
                     registered = ?all_workers,
                     "queue pushed: waking workers"
                 );
 
-                for name in worker_names {
+                for key in worker_keys {
+                    let (_, bare_name) = split_scoped_name(&key);
                     result_events.extend(
                         self.executor
                             .execute_all(vec![Effect::Emit {
                                 event: Event::WorkerWake {
-                                    worker_name: name,
+                                    worker_name: bare_name.to_string(),
                                     namespace: namespace.clone(),
                                 },
                             }])

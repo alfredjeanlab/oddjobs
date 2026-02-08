@@ -7,7 +7,7 @@ use super::{WorkerState, WorkerStatus};
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, JobId, TimerId};
+use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, JobId, TimerId};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,8 @@ where
         runbook_hash: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let worker_key = scoped_name(namespace, worker_name);
+
         // Defense in depth: if this worker is already Running in memory, a second
         // WorkerStarted would replace the WorkerState and clear inflight_items /
         // pending_takes, allowing duplicate dispatches.  Delegate to wake instead
@@ -35,7 +37,7 @@ where
         let already_running = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(&worker_key)
                 .is_some_and(|s| s.status == WorkerStatus::Running)
         };
         if already_running {
@@ -43,7 +45,7 @@ where
                 worker = worker_name,
                 "duplicate WorkerStarted for running worker, delegating to wake"
             );
-            return self.handle_worker_wake(worker_name).await;
+            return self.handle_worker_wake(&worker_key).await;
         }
 
         // Load runbook to get worker definition
@@ -113,12 +115,11 @@ where
 
         {
             let mut workers = self.worker_states.lock();
-            workers.insert(worker_name.to_string(), state);
+            workers.insert(worker_key.clone(), state);
         }
 
-        let scoped = scoped_name(namespace, worker_name);
         self.worker_logger.append(
-            &scoped,
+            &worker_key,
             &format!(
                 "started (queue={}, concurrency={})",
                 worker_def.source.queue, worker_def.concurrency
@@ -128,11 +129,11 @@ where
         // Reconcile: release active jobs that already reached terminal state.
         // This handles the case where the daemon crashed after a job completed
         // but before the worker slot was freed. Runs for all queue types.
-        self.reconcile_active_jobs(worker_name).await?;
+        self.reconcile_active_jobs(&worker_key).await?;
 
         // Reconcile persisted queue items: track untracked jobs and fail orphaned items.
         if queue_type == QueueType::Persisted {
-            self.reconcile_queue_items(worker_name, namespace, &runbook)
+            self.reconcile_queue_items(&worker_key, namespace, &runbook)
                 .await?;
         }
 
@@ -143,7 +144,7 @@ where
                 let events = self
                     .executor
                     .execute_all(vec![Effect::PollQueue {
-                        worker_name: worker_name.to_string(),
+                        worker_name: worker_key.clone(),
                         list_command,
                         cwd: project_root.to_path_buf(),
                     }])
@@ -169,31 +170,32 @@ where
                 Ok(events)
             }
             QueueType::Persisted => {
-                self.poll_persisted_queue(worker_name, &worker_def.source.queue, namespace)
+                self.poll_persisted_queue(&worker_key, &worker_def.source.queue, namespace)
             }
         }
     }
 
     pub(crate) async fn handle_worker_stopped(
         &self,
-        worker_name: &str,
+        worker_key: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let namespace = {
+        let (bare_name, namespace) = {
             let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_name) {
-                let scoped = scoped_name(&state.namespace, worker_name);
-                self.worker_logger.append(&scoped, "stopped");
+            if let Some(state) = workers.get_mut(worker_key) {
+                self.worker_logger.append(worker_key, "stopped");
                 state.status = WorkerStatus::Stopped;
                 state.pending_takes = 0;
                 state.inflight_items.clear();
-                state.namespace.clone()
+                let (_, bare) = split_scoped_name(worker_key);
+                (bare.to_string(), state.namespace.clone())
             } else {
-                String::new()
+                let (_, bare) = split_scoped_name(worker_key);
+                (bare.to_string(), String::new())
             }
         };
 
         // Cancel poll timer if it was set (no-op if timer doesn't exist)
-        let timer_id = TimerId::queue_poll(worker_name, &namespace);
+        let timer_id = TimerId::queue_poll(&bare_name, &namespace);
         self.executor
             .execute(Effect::CancelTimer { id: timer_id })
             .await?;
@@ -207,9 +209,10 @@ where
         new_concurrency: u32,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let worker_key = scoped_name(namespace, worker_name);
         let (old_concurrency, should_poll) = {
             let mut workers = self.worker_states.lock();
-            match workers.get_mut(worker_name) {
+            match workers.get_mut(&worker_key) {
                 Some(state) if state.status == WorkerStatus::Running => {
                     let old = state.concurrency;
                     state.concurrency = new_concurrency;
@@ -227,9 +230,8 @@ where
         };
 
         // Log the resize
-        let scoped = scoped_name(namespace, worker_name);
         self.worker_logger.append(
-            &scoped,
+            &worker_key,
             &format!(
                 "resized concurrency {} → {}",
                 old_concurrency, new_concurrency
@@ -238,7 +240,7 @@ where
 
         // If we went from full to having capacity, trigger re-poll
         if should_poll {
-            return self.handle_worker_wake(worker_name).await;
+            return self.handle_worker_wake(&worker_key).await;
         }
 
         Ok(vec![])
@@ -251,11 +253,11 @@ where
     /// missing queue events and free the worker slot.
     ///
     /// Runs for ALL queue types (external and persisted).
-    async fn reconcile_active_jobs(&self, worker_name: &str) -> Result<(), RuntimeError> {
+    async fn reconcile_active_jobs(&self, worker_key: &str) -> Result<(), RuntimeError> {
         let active_pids: Vec<JobId> = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(worker_key)
                 .map(|s| s.active_jobs.iter().cloned().collect())
                 .unwrap_or_default()
         };
@@ -274,7 +276,7 @@ where
 
         for (pid, terminal_step) in terminal_jobs {
             tracing::info!(
-                worker = worker_name,
+                worker = worker_key,
                 job = pid.as_str(),
                 step = terminal_step.as_str(),
                 "reconciling terminal job for worker slot"
@@ -294,15 +296,16 @@ where
     ///    fails them with retry-or-dead logic.
     async fn reconcile_queue_items(
         &self,
-        worker_name: &str,
+        worker_key: &str,
         namespace: &str,
         runbook: &oj_runbook::Runbook,
     ) -> Result<(), RuntimeError> {
+        let (_, bare_name) = split_scoped_name(worker_key);
         // 1. Find and track active queue items with running jobs not in worker's active list
         let queue_name = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(worker_key)
                 .map(|s| s.queue_name.clone())
                 .unwrap_or_default()
         };
@@ -310,7 +313,7 @@ where
         let mapped_item_ids: HashSet<String> = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(worker_key)
                 .map(|s| s.item_job_map.values().cloned().collect())
                 .unwrap_or_default()
         };
@@ -326,7 +329,7 @@ where
                         .iter()
                         .filter(|i| {
                             i.status == QueueItemStatus::Active
-                                && i.worker_name.as_deref() == Some(worker_name)
+                                && i.worker_name.as_deref() == Some(bare_name)
                                 && !mapped_item_ids.contains(&i.id)
                         })
                         .map(|i| i.id.clone())
@@ -352,14 +355,14 @@ where
         // Add untracked jobs to worker's active list
         for (item_id, job_id) in untracked_items {
             tracing::info!(
-                worker = worker_name,
+                worker = worker_key,
                 item_id = item_id.as_str(),
                 job_id = job_id.as_str(),
                 "reconciling untracked job for active queue item"
             );
             {
                 let mut workers = self.worker_states.lock();
-                if let Some(state) = workers.get_mut(worker_name) {
+                if let Some(state) = workers.get_mut(worker_key) {
                     if !state.active_jobs.contains(&job_id) {
                         state.active_jobs.insert(job_id.clone());
                     }
@@ -370,7 +373,7 @@ where
             self.executor
                 .execute_all(vec![Effect::Emit {
                     event: Event::WorkerItemDispatched {
-                        worker_name: worker_name.to_string(),
+                        worker_name: bare_name.to_string(),
                         item_id,
                         job_id,
                         namespace: namespace.to_string(),
@@ -384,7 +387,7 @@ where
         let mapped_item_ids: HashSet<String> = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(worker_key)
                 .map(|s| s.item_job_map.values().cloned().collect())
                 .unwrap_or_default()
         };
@@ -398,7 +401,7 @@ where
                         .iter()
                         .filter(|i| {
                             i.status == QueueItemStatus::Active
-                                && i.worker_name.as_deref() == Some(worker_name)
+                                && i.worker_name.as_deref() == Some(bare_name)
                                 && !mapped_item_ids.contains(&i.id)
                         })
                         .map(|i| i.id.clone())
@@ -409,7 +412,7 @@ where
 
         for item_id in orphaned_items {
             tracing::info!(
-                worker = worker_name,
+                worker = worker_key,
                 item_id = item_id.as_str(),
                 "reconciling orphaned queue item (no job)"
             );

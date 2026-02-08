@@ -492,10 +492,12 @@ async fn cron_start_with_namespace() {
         .await
         .unwrap();
 
-    // Cron state should include namespace
+    // Cron state should include namespace (key is now scoped: "myproject/janitor")
     {
         let crons = ctx.runtime.cron_states.lock();
-        let state = crons.get("janitor").expect("cron state should exist");
+        let state = crons
+            .get("myproject/janitor")
+            .expect("cron state should exist");
         assert_eq!(state.namespace, "myproject");
     }
 

@@ -333,8 +333,11 @@ async fn worker_restart_restores_active_jobs_with_namespace() {
         .unwrap();
 
     // Verify in-memory WorkerState has the active job restored
+    // (key is now scoped: "myproject/fixer")
     let workers = ctx.runtime.worker_states.lock();
-    let state = workers.get("fixer").expect("worker state should exist");
+    let state = workers
+        .get("myproject/fixer")
+        .expect("worker state should exist");
     assert_eq!(
         state.active_jobs.len(),
         1,

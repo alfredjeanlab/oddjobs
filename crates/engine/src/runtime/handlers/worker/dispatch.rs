@@ -8,7 +8,7 @@ use crate::error::RuntimeError;
 use crate::runtime::handlers::CreateJobParams;
 use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, JobId, UuidIdGen};
+use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, UuidIdGen};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::HashMap;
@@ -25,16 +25,19 @@ where
         worker_name: &str,
         items: &[serde_json::Value],
     ) -> Result<Vec<Event>, RuntimeError> {
+        // worker_name is a scoped key (from transient WorkerPollComplete event)
+        let worker_key = worker_name;
+        let (_, bare_name) = split_scoped_name(worker_key);
         let mut result_events = Vec::new();
 
         // Refresh runbook from disk so edits after `oj worker start` are picked up
-        if let Some(loaded_event) = self.refresh_worker_runbook(worker_name)? {
+        if let Some(loaded_event) = self.refresh_worker_runbook(worker_key)? {
             result_events.push(loaded_event);
         }
 
         let (queue_type, take_template, cwd, available_slots, queue_name, worker_namespace) = {
             let mut workers = self.worker_states.lock();
-            let state = match workers.get_mut(worker_name) {
+            let state = match workers.get_mut(worker_key) {
                 Some(s) if s.status != WorkerStatus::Stopped => s,
                 _ => return Ok(result_events),
             };
@@ -42,9 +45,8 @@ where
             let active = state.active_jobs.len() as u32 + state.pending_takes;
             let available = state.concurrency.saturating_sub(active);
             if available == 0 || items.is_empty() {
-                let scoped = scoped_name(&state.namespace, worker_name);
                 self.worker_logger.append(
-                    &scoped,
+                    worker_key,
                     &format!("idle (active={}/{})", active, state.concurrency),
                 );
                 state.status = WorkerStatus::Running;
@@ -84,7 +86,7 @@ where
                     // have an in-flight take command or an active job.
                     {
                         let workers = self.worker_states.lock();
-                        if let Some(state) = workers.get(worker_name) {
+                        if let Some(state) = workers.get(worker_key) {
                             if state.inflight_items.contains(&item_id)
                                 || state.item_job_map.values().any(|id| id == &item_id)
                             {
@@ -115,7 +117,7 @@ where
                     // entry are released in handle_worker_take_complete.
                     {
                         let mut workers = self.worker_states.lock();
-                        if let Some(state) = workers.get_mut(worker_name) {
+                        if let Some(state) = workers.get_mut(worker_key) {
                             state.pending_takes += 1;
                             state.inflight_items.insert(item_id.clone());
                         }
@@ -126,7 +128,7 @@ where
                     // succeeds.
                     self.executor
                         .execute(Effect::TakeQueueItem {
-                            worker_name: worker_name.to_string(),
+                            worker_name: worker_key.to_string(),
                             take_command,
                             cwd: cwd.clone(),
                             item_id,
@@ -153,14 +155,14 @@ where
                         continue;
                     }
 
-                    // Emit queue:taken event via Effect::Emit
+                    // Emit queue:taken event via Effect::Emit (persisted — use bare name)
                     result_events.extend(
                         self.executor
                             .execute_all(vec![Effect::Emit {
                                 event: Event::QueueTaken {
                                     queue_name: queue_name.clone(),
                                     item_id: item_id.clone(),
-                                    worker_name: worker_name.to_string(),
+                                    worker_name: bare_name.to_string(),
                                     namespace: worker_namespace.clone(),
                                 },
                             }])
@@ -168,7 +170,7 @@ where
                     );
 
                     // Dispatch job immediately for persisted queues
-                    result_events.extend(self.dispatch_queue_item(worker_name, item).await?);
+                    result_events.extend(self.dispatch_queue_item(worker_key, item).await?);
                     dispatched_count += 1;
                 }
             }
@@ -189,10 +191,13 @@ where
         exit_code: i32,
         stderr: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
+        // worker_name is a scoped key (from transient WorkerTakeComplete event)
+        let worker_key = worker_name;
+
         // Release the pending-take slot reserved by handle_worker_poll_complete
         {
             let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_name) {
+            if let Some(state) = workers.get_mut(worker_key) {
                 state.pending_takes = state.pending_takes.saturating_sub(1);
             }
         }
@@ -200,27 +205,21 @@ where
         if exit_code != 0 {
             let err_msg = stderr.unwrap_or("unknown error");
             tracing::warn!(
-                worker = worker_name,
+                worker = worker_key,
                 item = item_id,
                 exit_code,
                 stderr = err_msg,
                 "take command failed, skipping item"
             );
-            let namespace = {
+            {
                 let mut workers = self.worker_states.lock();
-                let ns = workers
-                    .get(worker_name)
-                    .map(|s| s.namespace.clone())
-                    .unwrap_or_default();
                 // Remove from inflight set so the item can be retried on next poll
-                if let Some(state) = workers.get_mut(worker_name) {
+                if let Some(state) = workers.get_mut(worker_key) {
                     state.inflight_items.remove(item_id);
                 }
-                ns
-            };
-            let scoped = scoped_name(&namespace, worker_name);
+            }
             self.worker_logger.append(
-                &scoped,
+                worker_key,
                 &format!(
                     "error: take command failed for item {}: {}",
                     item_id, err_msg
@@ -232,11 +231,11 @@ where
         let mut result_events = Vec::new();
 
         // Refresh runbook in case it changed while the take command was running
-        if let Some(loaded_event) = self.refresh_worker_runbook(worker_name)? {
+        if let Some(loaded_event) = self.refresh_worker_runbook(worker_key)? {
             result_events.push(loaded_event);
         }
 
-        result_events.extend(self.dispatch_queue_item(worker_name, item).await?);
+        result_events.extend(self.dispatch_queue_item(worker_key, item).await?);
 
         Ok(result_events)
     }
@@ -247,16 +246,17 @@ where
     /// and external-queue dispatch (deferred in [`handle_worker_take_complete`]).
     async fn dispatch_queue_item(
         &self,
-        worker_name: &str,
+        worker_key: &str,
         item: &serde_json::Value,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let (_, bare_name) = split_scoped_name(worker_key);
         let mut result_events = Vec::new();
 
         let item_id = json_item_id(item);
 
         let (job_kind, runbook_hash, cwd, worker_namespace) = {
             let workers = self.worker_states.lock();
-            let state = match workers.get(worker_name) {
+            let state = match workers.get(worker_key) {
                 Some(s) if s.status != WorkerStatus::Stopped => s,
                 _ => return Ok(result_events),
             };
@@ -265,13 +265,12 @@ where
             // skip dispatch to prevent duplicate jobs.
             if state.item_job_map.values().any(|id| id == &item_id) {
                 tracing::warn!(
-                    worker = worker_name,
+                    worker = worker_key,
                     item_id = item_id.as_str(),
                     "skipping dispatch: item already has an active job"
                 );
-                let scoped = scoped_name(&state.namespace, worker_name);
                 self.worker_logger.append(
-                    &scoped,
+                    worker_key,
                     &format!("skipped duplicate dispatch for item {}", item_id),
                 );
                 return Ok(result_events);
@@ -338,15 +337,15 @@ where
         // Track job in worker state and item-job mapping
         {
             let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_name) {
+            if let Some(state) = workers.get_mut(worker_key) {
                 state.active_jobs.insert(job_id.clone());
                 state.item_job_map.insert(job_id.clone(), item_id.clone());
             }
         }
 
-        // Emit WorkerItemDispatched
+        // Emit WorkerItemDispatched (persisted — use bare name)
         let dispatch_event = Event::WorkerItemDispatched {
-            worker_name: worker_name.to_string(),
+            worker_name: bare_name.to_string(),
             item_id: item_id.clone(),
             job_id: job_id.clone(),
             namespace: worker_namespace.clone(),
@@ -359,9 +358,8 @@ where
                 .await?,
         );
 
-        let scoped = scoped_name(&worker_namespace, worker_name);
         self.worker_logger.append(
-            &scoped,
+            worker_key,
             &format!(
                 "dispatched item {} \u{2192} job {}",
                 item_id,

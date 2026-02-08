@@ -54,7 +54,7 @@ where
         let mut result_events = Vec::new();
 
         if let Some((
-            worker_name,
+            worker_key,
             _old_runbook_hash,
             queue_name,
             project_root,
@@ -67,16 +67,12 @@ where
             {
                 let workers = self.worker_states.lock();
                 let active = workers
-                    .get(&worker_name)
+                    .get(&worker_key)
                     .map(|s| s.active_jobs.len())
                     .unwrap_or(0);
-                let concurrency = workers
-                    .get(&worker_name)
-                    .map(|s| s.concurrency)
-                    .unwrap_or(0);
-                let scoped = scoped_name(&worker_namespace, &worker_name);
+                let concurrency = workers.get(&worker_key).map(|s| s.concurrency).unwrap_or(0);
                 self.worker_logger.append(
-                    &scoped,
+                    &worker_key,
                     &format!(
                         "job {} completed (step={}), active={}/{}",
                         job_id.as_str(),
@@ -88,13 +84,13 @@ where
             }
 
             // Refresh runbook from disk so edits after `oj worker start` are picked up
-            if let Some(loaded_event) = self.refresh_worker_runbook(&worker_name)? {
+            if let Some(loaded_event) = self.refresh_worker_runbook(&worker_key)? {
                 result_events.push(loaded_event);
             }
             let runbook_hash = {
                 let workers = self.worker_states.lock();
                 workers
-                    .get(&worker_name)
+                    .get(&worker_key)
                     .map(|s| s.runbook_hash.clone())
                     .unwrap_or(_old_runbook_hash)
             };
@@ -183,7 +179,7 @@ where
             let should_poll = {
                 let workers = self.worker_states.lock();
                 workers
-                    .get(&worker_name)
+                    .get(&worker_key)
                     .map(|s| {
                         s.status == WorkerStatus::Running
                             && (s.active_jobs.len() as u32) < s.concurrency
@@ -199,7 +195,7 @@ where
                             result_events.extend(
                                 self.executor
                                     .execute_all(vec![Effect::PollQueue {
-                                        worker_name,
+                                        worker_name: worker_key,
                                         list_command: queue_def.list.clone().unwrap_or_default(),
                                         cwd: project_root,
                                     }])
@@ -209,7 +205,7 @@ where
                     }
                     QueueType::Persisted => {
                         result_events.extend(self.poll_persisted_queue(
-                            &worker_name,
+                            &worker_key,
                             &queue_name,
                             &worker_namespace,
                         )?);

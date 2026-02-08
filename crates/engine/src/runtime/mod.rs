@@ -227,24 +227,25 @@ where
     /// persistence.  Returns `Ok(None)` when the runbook is unchanged.
     pub(crate) fn refresh_worker_runbook(
         &self,
-        worker_name: &str,
+        worker_key: &str,
     ) -> Result<Option<oj_core::Event>, RuntimeError> {
         let project_root = {
             let workers = self.worker_states.lock();
-            match workers.get(worker_name) {
+            match workers.get(worker_key) {
                 Some(s) => s.project_root.clone(),
                 None => return Ok(None),
             }
         };
 
         // Load runbook from disk
+        let (_, bare_name) = oj_core::split_scoped_name(worker_key);
         let runbook_dir = project_root.join(".oj/runbooks");
-        let runbook = oj_runbook::find_runbook_by_worker(&runbook_dir, worker_name)
+        let runbook = oj_runbook::find_runbook_by_worker(&runbook_dir, bare_name)
             .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
             .ok_or_else(|| {
                 RuntimeError::RunbookLoadError(format!(
                     "no runbook found containing worker '{}'",
-                    worker_name
+                    bare_name
                 ))
             })?;
 
@@ -264,7 +265,7 @@ where
         let old_hash = {
             let workers = self.worker_states.lock();
             workers
-                .get(worker_name)
+                .get(worker_key)
                 .map(|s| s.runbook_hash.clone())
                 .unwrap_or_default()
         };
@@ -274,7 +275,7 @@ where
         }
 
         tracing::info!(
-            worker = worker_name,
+            worker = worker_key,
             old_hash = old_hash.short(12),
             new_hash = runbook_hash.short(12),
             "runbook changed on disk, refreshing"
@@ -283,7 +284,7 @@ where
         // Update worker state
         {
             let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_name) {
+            if let Some(state) = workers.get_mut(worker_key) {
                 state.runbook_hash = runbook_hash.clone();
             }
         }

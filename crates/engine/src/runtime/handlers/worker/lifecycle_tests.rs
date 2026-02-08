@@ -5,7 +5,7 @@
 
 use crate::runtime::handlers::worker::WorkerStatus;
 use crate::test_helpers::{load_runbook_hash, setup_with_runbook, TestContext};
-use oj_core::{Clock, Event, JobId, TimerId};
+use oj_core::{scoped_name, Clock, Event, JobId, TimerId};
 use oj_storage::QueueItemStatus;
 use std::collections::HashMap;
 
@@ -1050,7 +1050,7 @@ async fn started_with_namespace_stores_namespace() {
     start_worker(&ctx, EXTERNAL_RUNBOOK, "myproject").await;
 
     let workers = ctx.runtime.worker_states.lock();
-    let state = workers.get("fixer").unwrap();
+    let state = workers.get("myproject/fixer").unwrap();
     assert_eq!(state.namespace, "myproject");
 }
 
@@ -1196,4 +1196,115 @@ async fn reconcile_external_queue_terminal_job_releases_slot() {
         !state.item_job_map.contains_key(&JobId::new("pipe-done")),
         "terminal job should be removed from item_job_map after reconciliation"
     );
+}
+
+// ============================================================================
+// Cross-namespace isolation tests
+// ============================================================================
+
+#[tokio::test]
+async fn two_namespaces_same_worker_name_do_not_collide() {
+    let ctx = setup_with_runbook(EXTERNAL_RUNBOOK).await;
+
+    // Start "fixer" in namespace "alpha"
+    start_worker(&ctx, EXTERNAL_RUNBOOK, "alpha").await;
+    // Start "fixer" in namespace "beta"
+    start_worker(&ctx, EXTERNAL_RUNBOOK, "beta").await;
+
+    // Both should exist independently
+    let workers = ctx.runtime.worker_states.lock();
+    assert!(
+        workers.contains_key("alpha/fixer"),
+        "alpha/fixer should exist"
+    );
+    assert!(
+        workers.contains_key("beta/fixer"),
+        "beta/fixer should exist"
+    );
+    assert_eq!(workers.len(), 2, "should have exactly 2 worker entries");
+
+    // Both should be running
+    assert_eq!(workers["alpha/fixer"].status, WorkerStatus::Running);
+    assert_eq!(workers["beta/fixer"].status, WorkerStatus::Running);
+    assert_eq!(workers["alpha/fixer"].namespace, "alpha");
+    assert_eq!(workers["beta/fixer"].namespace, "beta");
+    drop(workers);
+
+    // Wake alpha's fixer — should not affect beta
+    ctx.runtime
+        .handle_event(Event::WorkerWake {
+            worker_name: "fixer".to_string(),
+            namespace: "alpha".to_string(),
+        })
+        .await
+        .unwrap();
+
+    // Stop alpha's fixer — beta should still be running
+    ctx.runtime
+        .handle_event(Event::WorkerStopped {
+            worker_name: "fixer".to_string(),
+            namespace: "alpha".to_string(),
+        })
+        .await
+        .unwrap();
+
+    let workers = ctx.runtime.worker_states.lock();
+    assert_eq!(
+        workers["alpha/fixer"].status,
+        WorkerStatus::Stopped,
+        "alpha/fixer should be stopped"
+    );
+    assert_eq!(
+        workers["beta/fixer"].status,
+        WorkerStatus::Running,
+        "beta/fixer should still be running"
+    );
+}
+
+#[tokio::test]
+async fn queue_push_only_wakes_matching_namespace_workers() {
+    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
+
+    // Start "fixer" in namespace "alpha" and "beta"
+    start_worker(&ctx, PERSISTED_RUNBOOK, "alpha").await;
+    start_worker(&ctx, PERSISTED_RUNBOOK, "beta").await;
+
+    // Push to alpha's queue
+    let events = ctx
+        .runtime
+        .handle_event(Event::QueuePushed {
+            queue_name: "bugs".to_string(),
+            item_id: "item-1".to_string(),
+            data: {
+                let mut m = HashMap::new();
+                m.insert("title".to_string(), "alpha bug".to_string());
+                m
+            },
+            pushed_at_epoch_ms: 1000,
+            namespace: "alpha".to_string(),
+        })
+        .await
+        .unwrap();
+
+    // Should emit WorkerWake for alpha's fixer only
+    let wake_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::WorkerWake { .. }))
+        .collect();
+    assert_eq!(
+        wake_events.len(),
+        1,
+        "should wake exactly one worker, got: {:?}",
+        wake_events
+    );
+    match &wake_events[0] {
+        Event::WorkerWake {
+            worker_name,
+            namespace,
+        } => {
+            assert_eq!(worker_name, "fixer");
+            assert_eq!(namespace, "alpha");
+        }
+        _ => unreachable!(),
+    }
 }

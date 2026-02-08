@@ -9,7 +9,9 @@ use super::CreateJobParams;
 use crate::error::RuntimeError;
 use crate::runtime::agent_run::SpawnAgentParams;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, IdGen, JobId, ShortId, TimerId, UuidIdGen};
+use oj_core::{
+    scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, ShortId, TimerId, UuidIdGen,
+};
 use std::collections::HashMap;
 
 pub(crate) use super::cron_types::{
@@ -59,9 +61,10 @@ where
             concurrency,
         };
 
+        let cron_key = scoped_name(namespace, cron_name);
         {
             let mut crons = self.cron_states.lock();
-            crons.insert(cron_name.to_string(), state);
+            crons.insert(cron_key, state);
         }
 
         // Set the first interval timer
@@ -92,9 +95,10 @@ where
         cron_name: &str,
         namespace: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        let cron_key = scoped_name(namespace, cron_name);
         {
             let mut crons = self.cron_states.lock();
-            if let Some(state) = crons.get_mut(cron_name) {
+            if let Some(state) = crons.get_mut(&cron_key) {
                 state.status = CronStatus::Stopped;
             }
         }
@@ -272,14 +276,14 @@ where
         &self,
         rest: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Parse cron name and namespace from timer ID rest (after "cron:" prefix)
-        // Format: "cron_name" or "namespace/cron_name"
-        let cron_name = rest.rsplit('/').next().unwrap_or(rest);
-        let timer_namespace = rest.strip_suffix(&format!("/{}", cron_name)).unwrap_or("");
+        // Timer ID rest is "cron_name" or "namespace/cron_name" —
+        // this is already a scoped key matching the cron_states HashMap key.
+        let cron_key = rest;
+        let (_, cron_name) = split_scoped_name(cron_key);
 
         let (project_root, runbook_hash, run_target, interval, namespace, concurrency) = {
             let crons = self.cron_states.lock();
-            match crons.get(cron_name) {
+            match crons.get(cron_key) {
                 Some(s) if s.status == CronStatus::Running => (
                     s.project_root.clone(),
                     s.runbook_hash.clone(),
@@ -290,10 +294,11 @@ where
                 ),
                 _ => {
                     tracing::debug!(cron = cron_name, "cron timer fired but cron not running");
+                    let (timer_ns, _) = split_scoped_name(cron_key);
                     append_cron_log(
                         self.logger.log_dir(),
                         cron_name,
-                        timer_namespace,
+                        timer_ns,
                         "skip: cron not in running state",
                     );
                     return Ok(vec![]);
@@ -302,7 +307,7 @@ where
         };
 
         // Refresh runbook from disk
-        if let Some(loaded_event) = self.refresh_cron_runbook(cron_name)? {
+        if let Some(loaded_event) = self.refresh_cron_runbook(cron_key)? {
             // Process the loaded event to update caches
             let _ = self
                 .executor
@@ -316,7 +321,7 @@ where
         let (runbook_hash, concurrency) = {
             let crons = self.cron_states.lock();
             crons
-                .get(cron_name)
+                .get(cron_key)
                 .map(|s| (s.runbook_hash.clone(), s.concurrency))
                 .unwrap_or((runbook_hash, concurrency))
         };
@@ -652,13 +657,11 @@ where
     /// If the content has changed since last cached, updates the in-process
     /// cache and cron state, and returns a `RunbookLoaded` event for WAL
     /// persistence. Returns `Ok(None)` when the runbook is unchanged.
-    fn refresh_cron_runbook(
-        &self,
-        cron_name: &str,
-    ) -> Result<Option<oj_core::Event>, RuntimeError> {
+    fn refresh_cron_runbook(&self, cron_key: &str) -> Result<Option<oj_core::Event>, RuntimeError> {
+        let (_, cron_name) = split_scoped_name(cron_key);
         let (project_root, namespace) = {
             let crons = self.cron_states.lock();
-            match crons.get(cron_name) {
+            match crons.get(cron_key) {
                 Some(s) => (s.project_root.clone(), s.namespace.clone()),
                 None => return Ok(None),
             }
@@ -704,7 +707,7 @@ where
         let old_hash = {
             let crons = self.cron_states.lock();
             crons
-                .get(cron_name)
+                .get(cron_key)
                 .map(|s| s.runbook_hash.clone())
                 .unwrap_or_default()
         };
@@ -727,7 +730,7 @@ where
             .unwrap_or(1);
         {
             let mut crons = self.cron_states.lock();
-            if let Some(state) = crons.get_mut(cron_name) {
+            if let Some(state) = crons.get_mut(cron_key) {
                 state.runbook_hash = runbook_hash.clone();
                 state.concurrency = new_concurrency;
             }
