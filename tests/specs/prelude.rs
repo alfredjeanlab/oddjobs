@@ -410,14 +410,8 @@ impl Project {
 
 impl Drop for Project {
     fn drop(&mut self) {
-        // Kill isolated tmux server (cleanup any leaked test sessions)
-        let tmux_dir = self.state_path().join("tmux");
-        let _ = std::process::Command::new("tmux")
-            .env("TMUX_TMPDIR", &tmux_dir)
-            .args(["kill-server"])
-            .output();
-
-        // Always try to stop daemon (no-op if not running)
+        // Always try to stop daemon (no-op if not running).
+        // --kill terminates any tmux sessions the test daemon spawned.
         let mut cmd = self.oj().args(&["daemon", "stop", "--kill"]).command();
         cmd.stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());

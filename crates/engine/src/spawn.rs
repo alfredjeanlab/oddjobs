@@ -287,6 +287,13 @@ pub fn build_spawn_effects(
         ));
     }
 
+    // Prevent TMUX_TMPDIR leakage — the daemon sets this to isolate its tmux
+    // server, but agents must not inherit it.  If they do, `cargo test --all`
+    // (or any child that calls tmux) operates on the daemon's real tmux server,
+    // letting test cleanup (`tmux kill-server`, `kill-session`) destroy live
+    // agent sessions.
+    unset_env.push("TMUX_TMPDIR".to_string());
+
     // Forward CLAUDE_CONFIG_DIR only if explicitly set — never fabricate a default.
     //
     // Claude Code stores auth (OAuth tokens) in $HOME/.claude.json and config
