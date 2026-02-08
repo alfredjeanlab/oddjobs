@@ -85,7 +85,9 @@ where
                     {
                         let workers = self.worker_states.lock();
                         if let Some(state) = workers.get(worker_name) {
-                            if state.inflight_items.contains(&item_id) {
+                            if state.inflight_items.contains(&item_id)
+                                || state.item_job_map.values().any(|id| id == &item_id)
+                            {
                                 continue;
                             }
                         }
@@ -258,6 +260,23 @@ where
                 Some(s) if s.status != WorkerStatus::Stopped => s,
                 _ => return Ok(result_events),
             };
+
+            // Defense in depth: if a job is already active for this item_id,
+            // skip dispatch to prevent duplicate jobs.
+            if state.item_job_map.values().any(|id| id == &item_id) {
+                tracing::warn!(
+                    worker = worker_name,
+                    item_id = item_id.as_str(),
+                    "skipping dispatch: item already has an active job"
+                );
+                let scoped = scoped_name(&state.namespace, worker_name);
+                self.worker_logger.append(
+                    &scoped,
+                    &format!("skipped duplicate dispatch for item {}", item_id),
+                );
+                return Ok(result_events);
+            }
+
             (
                 state.job_kind.clone(),
                 state.runbook_hash.clone(),
@@ -363,3 +382,7 @@ fn json_item_id(item: &serde_json::Value) -> String {
         None => "unknown".to_string(),
     }
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;
