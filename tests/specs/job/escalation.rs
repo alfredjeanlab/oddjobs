@@ -98,8 +98,8 @@ fn extract_decision_id(output: &str) -> Option<String> {
 ///
 /// Uses claudeless with -p (print mode) which exits after one response.
 /// In -p mode, there's a race between idle detection and exit detection,
-/// so the decision source may be "idle" or "error". Both are valid escalation
-/// paths, and option 2 (Done for idle, Skip for error) completes the step.
+/// so the decision source may be "idle", "error", or "dead". All are valid
+/// escalation paths, and option 2 (Done/Skip/Complete) completes the step.
 #[test]
 fn full_escalation_chain_from_on_dead_to_decision_resolution() {
     let temp = Project::empty();
@@ -140,12 +140,14 @@ fn full_escalation_chain_from_on_dead_to_decision_resolution() {
     );
     let decision_id = decision_id.unwrap();
 
-    // Verify decision source is either "error" (from on_dead) or "idle" (from on_idle)
-    // Both are valid escalation paths in -p mode
-    let valid_source = decision_list.contains("error") || decision_list.contains("idle");
+    // Verify decision source is "error", "idle", or "dead" — all valid escalation paths
+    // in -p mode where idle/exit detection race
+    let valid_source = decision_list.contains("error")
+        || decision_list.contains("idle")
+        || decision_list.contains("dead");
     assert!(
         valid_source,
-        "decision source should be 'error' or 'idle', got:\n{}",
+        "decision source should be 'error', 'idle', or 'dead', got:\n{}",
         decision_list
     );
 
