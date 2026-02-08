@@ -44,6 +44,8 @@ pub enum EscalationTrigger {
     },
     /// Agent called ExitPlanMode — carries the plan content
     Plan { assistant_context: Option<String> },
+    /// Agent explicitly signaled escalation via agent:signal
+    Signal { message: String },
 }
 
 impl EscalationTrigger {
@@ -56,6 +58,7 @@ impl EscalationTrigger {
             EscalationTrigger::Prompt { .. } => DecisionSource::Approval,
             EscalationTrigger::Question { .. } => DecisionSource::Question,
             EscalationTrigger::Plan { .. } => DecisionSource::Plan,
+            EscalationTrigger::Signal { .. } => DecisionSource::Signal,
         }
     }
 }
@@ -258,6 +261,13 @@ impl EscalationDecisionBuilder {
                 ));
                 assistant_context.as_deref()
             }
+            EscalationTrigger::Signal { message } => {
+                parts.push(format!(
+                    "Agent in job \"{}\" requested escalation: {}",
+                    self.display_name, message
+                ));
+                None
+            }
         };
 
         // Assistant context from session transcript
@@ -347,6 +357,15 @@ impl EscalationDecisionBuilder {
 
                 options
             }
+            EscalationTrigger::Signal { .. } => vec![
+                DecisionOption::new("Nudge")
+                    .description("Send a message prompting the agent to continue")
+                    .recommended(),
+                DecisionOption::new("Done").description("Mark as complete"),
+                DecisionOption::new("Cancel").description("Cancel and fail"),
+                DecisionOption::new("Dismiss")
+                    .description("Dismiss this notification without taking action"),
+            ],
             EscalationTrigger::Plan { .. } => vec![
                 DecisionOption::new("Accept (clear context)")
                     .description("Approve and auto-accept edits, clearing context")

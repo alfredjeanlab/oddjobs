@@ -8,6 +8,7 @@ use crate::error::RuntimeError;
 use crate::monitor;
 use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use oj_core::{AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, OwnerId, TimerId};
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -112,21 +113,37 @@ where
                 Ok(vec![])
             }
             AgentSignalKind::Escalate => {
-                let msg = message.as_deref().unwrap_or("Agent requested escalation");
-                tracing::info!(job_id = %job.id, message = msg, "agent:signal escalate");
+                let msg = message
+                    .as_deref()
+                    .unwrap_or("Agent requested escalation")
+                    .to_string();
+                tracing::info!(job_id = %job.id, message = %msg, "agent:signal escalate");
                 self.logger
                     .append(&job.id, &job.step, &format!("agent:signal: {}", msg));
+
+                let trigger = EscalationTrigger::Signal {
+                    message: msg.clone(),
+                };
+                let (decision_id, decision_event) =
+                    EscalationDecisionBuilder::for_job(job_id.clone(), job.name.clone(), trigger)
+                        .agent_id(job.session_id.clone().unwrap_or_default())
+                        .namespace(job.namespace.clone())
+                        .build();
+
                 let effects = vec![
+                    Effect::Emit {
+                        event: decision_event,
+                    },
                     Effect::Notify {
-                        title: job.name.clone(),
-                        message: msg.to_string(),
+                        title: format!("Job needs attention: {}", job.name),
+                        message: msg,
                     },
                     Effect::Emit {
                         event: Event::StepWaiting {
                             job_id: job_id.clone(),
                             step: job.step.clone(),
-                            reason: Some(msg.to_string()),
-                            decision_id: None,
+                            reason: Some("agent:signal escalate".to_string()),
+                            decision_id: Some(decision_id),
                         },
                     },
                     // Cancel exit-deferred timer (agent is still alive; liveness continues)

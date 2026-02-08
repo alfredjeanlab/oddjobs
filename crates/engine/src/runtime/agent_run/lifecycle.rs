@@ -3,6 +3,7 @@
 
 //! Standalone agent lifecycle state handling and attempt tracking
 
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
 use crate::monitor::{self, MonitorState};
 use crate::runtime::Runtime;
@@ -345,22 +346,41 @@ where
                 Ok(vec![])
             }
             AgentSignalKind::Escalate => {
-                let msg = message.as_deref().unwrap_or("Agent requested escalation");
+                let msg = message
+                    .as_deref()
+                    .unwrap_or("Agent requested escalation")
+                    .to_string();
                 tracing::info!(
                     agent_run_id = %agent_run.id,
-                    message = msg,
+                    message = %msg,
                     "standalone agent:signal escalate"
                 );
+
+                let trigger = EscalationTrigger::Signal {
+                    message: msg.clone(),
+                };
+                let (_, decision_event) = EscalationDecisionBuilder::for_agent_run(
+                    agent_run_id.clone(),
+                    agent_run.command_name.clone(),
+                    trigger,
+                )
+                .agent_id(agent_run.agent_id.clone().unwrap_or_default())
+                .namespace(agent_run.namespace.clone())
+                .build();
+
                 let effects = vec![
+                    Effect::Emit {
+                        event: decision_event,
+                    },
                     Effect::Notify {
                         title: agent_run.command_name.clone(),
-                        message: msg.to_string(),
+                        message: msg,
                     },
                     Effect::Emit {
                         event: Event::AgentRunStatusChanged {
                             id: agent_run_id.clone(),
                             status: AgentRunStatus::Escalated,
-                            reason: Some(msg.to_string()),
+                            reason: Some("agent:signal escalate".to_string()),
                         },
                     },
                     // Cancel exit-deferred timer (agent is still alive; liveness continues)

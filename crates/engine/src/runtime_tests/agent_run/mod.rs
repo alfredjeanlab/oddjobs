@@ -18,7 +18,7 @@ mod signals;
 
 use super::*;
 use oj_adapters::SessionCall;
-use oj_core::{AgentRunId, AgentRunStatus, AgentSignalKind, OwnerId, TimerId};
+use oj_core::{AgentRunId, AgentRunStatus, AgentSignalKind, DecisionSource, OwnerId, TimerId};
 
 // =============================================================================
 // Runbook definitions for standalone agent tests

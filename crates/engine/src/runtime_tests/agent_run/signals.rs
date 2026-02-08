@@ -66,6 +66,18 @@ async fn standalone_signal_escalate_preserves_session() {
         kills.is_empty(),
         "session should NOT be killed on escalate signal"
     );
+
+    // A decision should be created for the escalation
+    let decision_count = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(
+        decision_count, 1,
+        "escalate signal should create a decision"
+    );
+    let decision = ctx
+        .runtime
+        .lock_state(|s| s.decisions.values().next().cloned().unwrap());
+    assert_eq!(decision.source, DecisionSource::Signal);
+    assert!(!decision.is_resolved());
 }
 
 #[tokio::test]

@@ -233,7 +233,7 @@ fn resolve_decision_action(
     }
 
     match source {
-        DecisionSource::Idle => match choice {
+        DecisionSource::Idle | DecisionSource::Signal => match choice {
             1 => ResolvedAction::Nudge,
             2 => ResolvedAction::Complete,
             3 => ResolvedAction::Cancel,

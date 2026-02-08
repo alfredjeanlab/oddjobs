@@ -23,6 +23,7 @@ pub enum DecisionSource {
     Dead,
     Idle,
     Plan,
+    Signal,
 }
 
 /// A single option the user can choose.
