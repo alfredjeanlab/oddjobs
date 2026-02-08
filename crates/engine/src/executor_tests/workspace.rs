@@ -7,7 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn create_folder_workspace() {
-    let harness = setup().await;
+    let mut harness = setup().await;
     let tmp = std::env::temp_dir().join("oj_test_create_ws_folder");
     let _ = std::fs::remove_dir_all(&tmp);
 
@@ -25,8 +25,23 @@ async fn create_folder_workspace() {
         .await
         .unwrap();
 
-    // Should return WorkspaceReady
-    assert!(matches!(result, Some(Event::WorkspaceReady { .. })));
+    // Should return WorkspaceCreated (deferred: background task does filesystem work)
+    assert!(
+        matches!(result, Some(Event::WorkspaceCreated { .. })),
+        "expected WorkspaceCreated, got: {:?}",
+        result
+    );
+
+    // WorkspaceReady arrives via event channel from background task
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceReady")
+        .expect("channel closed");
+    assert!(
+        matches!(ready, Event::WorkspaceReady { .. }),
+        "expected WorkspaceReady, got: {:?}",
+        ready
+    );
 
     // Directory should exist
     assert!(tmp.exists(), "workspace directory should be created");
@@ -37,12 +52,13 @@ async fn create_folder_workspace() {
     assert!(state.workspaces.contains_key("ws-folder-1"));
 
     // Cleanup
+    drop(state);
     let _ = std::fs::remove_dir_all(&tmp);
 }
 
 #[tokio::test]
 async fn create_folder_workspace_none_type() {
-    let harness = setup().await;
+    let mut harness = setup().await;
     let tmp = std::env::temp_dir().join("oj_test_create_ws_none_type");
     let _ = std::fs::remove_dir_all(&tmp);
 
@@ -61,8 +77,63 @@ async fn create_folder_workspace_none_type() {
         .await
         .unwrap();
 
-    assert!(matches!(result, Some(Event::WorkspaceReady { .. })));
+    assert!(
+        matches!(result, Some(Event::WorkspaceCreated { .. })),
+        "expected WorkspaceCreated, got: {:?}",
+        result
+    );
+
+    // WorkspaceReady arrives via event channel
+    let ready = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceReady")
+        .expect("channel closed");
+    assert!(matches!(ready, Event::WorkspaceReady { .. }));
+
     assert!(tmp.exists());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[tokio::test]
+async fn create_workspace_failure_sends_failed_event() {
+    let mut harness = setup().await;
+
+    // Use a worktree workspace with an invalid repo_root to trigger failure
+    let tmp = std::env::temp_dir().join("oj_test_create_ws_fail");
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    let result = harness
+        .executor
+        .execute(Effect::CreateWorkspace {
+            workspace_id: WorkspaceId::new("ws-fail-1"),
+            path: tmp.join("workspace"),
+            owner: Some(oj_core::OwnerId::Job(oj_core::JobId::new("job-fail"))),
+            workspace_type: Some("worktree".to_string()),
+            repo_root: Some(tmp.join("nonexistent-repo")),
+            branch: Some("test-branch".to_string()),
+            start_point: Some("HEAD".to_string()),
+        })
+        .await
+        .unwrap();
+
+    // Should return WorkspaceCreated immediately
+    assert!(
+        matches!(result, Some(Event::WorkspaceCreated { .. })),
+        "expected WorkspaceCreated, got: {:?}",
+        result
+    );
+
+    // WorkspaceFailed arrives via event channel from background task
+    let failed = tokio::time::timeout(std::time::Duration::from_secs(5), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for WorkspaceFailed")
+        .expect("channel closed");
+    assert!(
+        matches!(failed, Event::WorkspaceFailed { .. }),
+        "expected WorkspaceFailed, got: {:?}",
+        failed
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }

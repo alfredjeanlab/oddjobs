@@ -222,7 +222,7 @@ where
             } => {
                 let is_worktree = workspace_type.as_deref() == Some("worktree");
 
-                // Create workspace record first via state event
+                // Phase 1: Create workspace record immediately so job.workspace_path is set
                 let create_event = Event::WorkspaceCreated {
                     id: workspace_id.clone(),
                     path: path.clone(),
@@ -235,81 +235,30 @@ where
                     state.apply_event(&create_event);
                 }
 
-                if is_worktree {
-                    // Create parent directory
-                    if let Some(parent) = path.parent() {
-                        tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                            ExecuteError::Shell(format!(
-                                "failed to create workspace parent dir: {}",
-                                e
-                            ))
-                        })?;
+                // Phase 2: Spawn background task for filesystem work
+                let event_tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    let result = if is_worktree {
+                        create_worktree(&path, repo_root, branch, start_point).await
+                    } else {
+                        create_folder(&path).await
+                    };
+
+                    let event = match result {
+                        Ok(()) => Event::WorkspaceReady { id: workspace_id },
+                        Err(reason) => Event::WorkspaceFailed {
+                            id: workspace_id,
+                            reason,
+                        },
+                    };
+
+                    if let Err(e) = event_tx.send(event).await {
+                        tracing::error!("failed to send workspace event: {}", e);
                     }
+                });
 
-                    // Run: git -C <repo_root> worktree add -b <branch> <path> <start_point>
-                    let repo_root = repo_root.ok_or_else(|| {
-                        ExecuteError::Shell("repo_root required for worktree workspace".to_string())
-                    })?;
-                    let branch = branch.ok_or_else(|| {
-                        ExecuteError::Shell("branch required for worktree workspace".to_string())
-                    })?;
-                    let start_point = start_point.unwrap_or_else(|| "HEAD".to_string());
-
-                    let path_str = path.display().to_string();
-                    let mut cmd = tokio::process::Command::new("git");
-                    cmd.args([
-                        "-C",
-                        &repo_root.display().to_string(),
-                        "worktree",
-                        "add",
-                        "-b",
-                        &branch,
-                        &path_str,
-                        &start_point,
-                    ])
-                    .env_remove("GIT_DIR")
-                    .env_remove("GIT_WORK_TREE");
-                    let output = oj_adapters::subprocess::run_with_timeout(
-                        cmd,
-                        oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-                        "git worktree add",
-                    )
-                    .await
-                    .map_err(ExecuteError::Shell)?;
-
-                    if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        let fail_event = Event::WorkspaceFailed {
-                            id: workspace_id.clone(),
-                            reason: format!("git worktree add failed: {}", stderr.trim()),
-                        };
-                        {
-                            let mut state = self.state.lock();
-                            state.apply_event(&fail_event);
-                        }
-                        return Err(ExecuteError::Shell(format!(
-                            "git worktree add failed: {}",
-                            stderr.trim()
-                        )));
-                    }
-                } else {
-                    // Create empty directory (folder workspace)
-                    tokio::fs::create_dir_all(&path).await.map_err(|e| {
-                        ExecuteError::Shell(format!("failed to create workspace dir: {}", e))
-                    })?;
-                }
-
-                // Update status to Ready
-                let ready_event = Event::WorkspaceReady {
-                    id: workspace_id.clone(),
-                };
-                {
-                    let mut state = self.state.lock();
-                    state.apply_event(&ready_event);
-                }
-
-                // Return the ready event for WAL persistence
-                Ok(Some(ready_event))
+                // Return WorkspaceCreated for WAL persistence (background task sends Ready/Failed)
+                Ok(Some(create_event))
             }
 
             Effect::DeleteWorkspace { workspace_id } => {
@@ -742,6 +691,61 @@ where
     pub async fn get_last_assistant_message(&self, agent_id: &oj_core::AgentId) -> Option<String> {
         self.agents.last_assistant_message(agent_id).await
     }
+}
+
+/// Create a git worktree at the given path.
+async fn create_worktree(
+    path: &std::path::Path,
+    repo_root: Option<std::path::PathBuf>,
+    branch: Option<String>,
+    start_point: Option<String>,
+) -> Result<(), String> {
+    // Create parent directory
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| format!("failed to create workspace parent dir: {}", e))?;
+    }
+
+    let repo_root = repo_root.ok_or("repo_root required for worktree workspace")?;
+    let branch = branch.ok_or("branch required for worktree workspace")?;
+    let start_point = start_point.unwrap_or_else(|| "HEAD".to_string());
+
+    let path_str = path.display().to_string();
+    let mut cmd = tokio::process::Command::new("git");
+    cmd.args([
+        "-C",
+        &repo_root.display().to_string(),
+        "worktree",
+        "add",
+        "-b",
+        &branch,
+        &path_str,
+        &start_point,
+    ])
+    .env_remove("GIT_DIR")
+    .env_remove("GIT_WORK_TREE");
+    let output = oj_adapters::subprocess::run_with_timeout(
+        cmd,
+        oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,
+        "git worktree add",
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git worktree add failed: {}", stderr.trim()));
+    }
+
+    Ok(())
+}
+
+/// Create a plain directory workspace.
+async fn create_folder(path: &std::path::Path) -> Result<(), String> {
+    tokio::fs::create_dir_all(path)
+        .await
+        .map_err(|e| format!("failed to create workspace dir: {}", e))
 }
 
 #[cfg(test)]

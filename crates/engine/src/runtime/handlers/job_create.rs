@@ -405,20 +405,15 @@ where
             }
         }
 
-        // Phase 2: Attempt workspace setup (fails → job marked Failed)
+        // Phase 2: Kick off workspace creation (deferred — runs in background)
         if !workspace_effects.is_empty() {
-            match self.executor.execute_all(workspace_effects).await {
-                Ok(ws_events) => result_events.extend(ws_events),
-                Err(e) => {
-                    let job = self.require_job(job_id.as_str())?;
-                    result_events.extend(self.fail_job(&job, &e.to_string()).await?);
-                    return Ok(result_events);
-                }
-            }
-        }
-
-        // Start the first step
-        if let Some(step_name) = first_step_name {
+            // execute_all returns WorkspaceCreated immediately; the background task
+            // will send WorkspaceReady or WorkspaceFailed via event_tx later.
+            let ws_events = self.executor.execute_all(workspace_effects).await?;
+            result_events.extend(ws_events);
+            // Don't start_step here — WorkspaceReady handler will do it.
+        } else if let Some(step_name) = first_step_name {
+            // No workspace: start the first step immediately
             result_events.extend(
                 self.start_step(&job_id, &step_name, &vars, &execution_path)
                     .await?,

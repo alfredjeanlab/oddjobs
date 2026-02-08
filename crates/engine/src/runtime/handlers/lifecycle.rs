@@ -6,7 +6,9 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, Clock, Effect, Event, JobId, SessionId, StepOutcome, WorkspaceId};
+use oj_core::{
+    AgentId, Clock, Effect, Event, JobId, OwnerId, SessionId, StepOutcome, StepStatus, WorkspaceId,
+};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -242,6 +244,106 @@ where
             self.fail_job(&job, &format!("shell exit code: {}", exit_code))
                 .await
         }
+    }
+
+    /// Handle WorkspaceReady: workspace filesystem setup completed successfully.
+    ///
+    /// Looks up the owning job and calls start_step() to begin the first step.
+    /// Idempotent: no-op if the job is already past Pending (e.g. already running).
+    pub(crate) async fn handle_workspace_ready(
+        &self,
+        workspace_id: &WorkspaceId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        // Find the owning job via workspace record
+        let owner_job_id = self.lock_state(|s| {
+            s.workspaces
+                .get(workspace_id.as_str())
+                .and_then(|ws| ws.owner.as_ref())
+                .and_then(|owner| match owner {
+                    OwnerId::Job(id) => Some(id.clone()),
+                    _ => None,
+                })
+        });
+
+        let Some(job_id) = owner_job_id else {
+            tracing::debug!(
+                workspace_id = %workspace_id,
+                "workspace_ready: no owning job found"
+            );
+            return Ok(vec![]);
+        };
+
+        let Some(job) = self.get_job(job_id.as_str()) else {
+            tracing::debug!(
+                job_id = %job_id,
+                "workspace_ready: job not found"
+            );
+            return Ok(vec![]);
+        };
+
+        // Guard: only start the step if it's still pending (idempotent)
+        if job.step_status != StepStatus::Pending {
+            tracing::debug!(
+                job_id = %job_id,
+                step_status = %job.step_status,
+                "workspace_ready: step already started, skipping"
+            );
+            return Ok(vec![]);
+        }
+
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook
+            .get_job(&job.kind)
+            .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
+
+        let first_step_name = job_def.first_step().map(|p| p.name.clone());
+        let execution_dir = self.execution_dir(&job);
+
+        if let Some(step_name) = first_step_name {
+            self.start_step(&job_id, &step_name, &job.vars, &execution_dir)
+                .await
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// Handle WorkspaceFailed: workspace filesystem setup failed.
+    ///
+    /// Looks up the owning job and calls fail_job().
+    /// Idempotent: no-op if the job is already terminal.
+    pub(crate) async fn handle_workspace_failed(
+        &self,
+        workspace_id: &WorkspaceId,
+        reason: &str,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        // Find the owning job via workspace record
+        let owner_job_id = self.lock_state(|s| {
+            s.workspaces
+                .get(workspace_id.as_str())
+                .and_then(|ws| ws.owner.as_ref())
+                .and_then(|owner| match owner {
+                    OwnerId::Job(id) => Some(id.clone()),
+                    _ => None,
+                })
+        });
+
+        let Some(job_id) = owner_job_id else {
+            tracing::debug!(
+                workspace_id = %workspace_id,
+                "workspace_failed: no owning job found"
+            );
+            return Ok(vec![]);
+        };
+
+        let Some(job) = self.get_active_job(job_id.as_str()) else {
+            tracing::debug!(
+                job_id = %job_id,
+                "workspace_failed: job not found or already terminal"
+            );
+            return Ok(vec![]);
+        };
+
+        self.fail_job(&job, reason).await
     }
 
     /// Handle JobDeleted event with cascading cleanup.

@@ -89,9 +89,9 @@ run = "echo init"
 
 #[tokio::test]
 async fn workspace_job_creates_directory() {
-    // With the refactored workspace approach, workspace creation uses mkdir
-    // which is very unlikely to fail, so we test the happy path instead.
-    let ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
+    // Workspace creation is deferred: the job starts with step_status=Pending,
+    // and WorkspaceReady arrives asynchronously via event_tx.
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
 
     let result = ctx
         .runtime
@@ -108,12 +108,28 @@ async fn workspace_job_creates_directory() {
 
     assert!(result.is_ok(), "expected Ok, got: {:?}", result);
 
-    // Job should exist and be running
+    // Job should exist with step_status=Pending (waiting for workspace)
     let job = ctx
         .runtime
         .get_job("pipe-1")
         .expect("job should exist in state");
     assert_eq!(job.step, "init");
+    assert_eq!(
+        job.step_status,
+        oj_core::StepStatus::Pending,
+        "step should be pending until workspace is ready"
+    );
+
+    // Wait for WorkspaceReady from the background task
+    let event = tokio::time::timeout(std::time::Duration::from_secs(5), ctx.event_rx.recv())
+        .await
+        .expect("timed out waiting for workspace event")
+        .expect("channel closed");
+    assert!(
+        matches!(event, Event::WorkspaceReady { .. }),
+        "expected WorkspaceReady, got: {:?}",
+        event
+    );
 
     // Workspace directory should have been created
     let workspaces_dir = ctx.project_root.join("workspaces");
