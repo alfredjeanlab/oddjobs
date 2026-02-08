@@ -417,6 +417,14 @@ where
                 result_events.extend(self.handle_job_deleted(id).await?);
             }
 
+            Event::WorkspaceReady { id } => {
+                result_events.extend(self.handle_workspace_ready(id).await?);
+            }
+
+            Event::WorkspaceFailed { id, reason } => {
+                result_events.extend(self.handle_workspace_failed(id, reason).await?);
+            }
+
             // No-op: signals and state mutations handled elsewhere
             Event::Shutdown
             | Event::Custom
@@ -429,8 +437,6 @@ where
             | Event::SessionCreated { .. }
             | Event::SessionDeleted { .. }
             | Event::WorkspaceCreated { .. }
-            | Event::WorkspaceReady { .. }
-            | Event::WorkspaceFailed { .. }
             | Event::WorkspaceDeleted { .. }
             | Event::WorkerDeleted { .. }
             | Event::JobCancelling { .. }
