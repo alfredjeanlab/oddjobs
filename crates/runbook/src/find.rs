@@ -91,6 +91,26 @@ pub fn extract_file_comment(content: &str) -> Option<FileComment> {
     Some(split_comment_lines(&lines))
 }
 
+/// Try to extract a command name from a single line matching `command "name" ...`.
+fn parse_command_name(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix("command ")?;
+    let after_quote = rest.trim().strip_prefix('"')?;
+    let end = after_quote.find('"')?;
+    Some(&after_quote[..end])
+}
+
+/// Extract command names from raw HCL text by scanning for `command "name"` patterns.
+///
+/// This works on unparseable files (e.g., those containing `%{ if }` template
+/// directives) by operating on raw text rather than the HCL AST.
+fn extract_command_names(content: &str) -> Vec<String> {
+    content
+        .lines()
+        .filter_map(parse_command_name)
+        .map(String::from)
+        .collect()
+}
+
 /// Extract comment blocks preceding each `command "name"` block in HCL content.
 ///
 /// Scans the raw text (not the HCL AST) for lines matching `command "name" {`
@@ -102,19 +122,8 @@ pub fn extract_block_comments(content: &str) -> HashMap<String, FileComment> {
     let mut result = HashMap::new();
 
     for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-
-        // Match: command "name" { (with optional trailing content)
-        let Some(rest) = trimmed.strip_prefix("command ") else {
+        let Some(name) = parse_command_name(line) else {
             continue;
-        };
-        let rest = rest.trim();
-        let name = match rest.strip_prefix('"') {
-            Some(after_quote) => match after_quote.find('"') {
-                Some(end) => &after_quote[..end],
-                None => continue,
-            },
-            None => continue,
         };
 
         // Walk backwards from line i-1 collecting # comment lines.
@@ -176,16 +185,12 @@ fn extract_import_command_comments(
         for (_filename, file_content) in &library_files {
             let block_comments = extract_block_comments(file_content);
             let file_comment = extract_file_comment(file_content);
-            let file_rb = match crate::parser::parse_runbook_no_xref(file_content, Format::Hcl) {
-                Ok(rb) => rb,
-                Err(_) => continue,
-            };
-            for cmd_name in file_rb.commands.keys() {
+            for cmd_name in extract_command_names(file_content) {
                 let aliased_name = match alias {
                     Some(a) => format!("{}:{}", a, cmd_name),
                     None => cmd_name.clone(),
                 };
-                let comment = block_comments.get(cmd_name).or(file_comment.as_ref());
+                let comment = block_comments.get(&cmd_name).or(file_comment.as_ref());
                 if let Some(c) = comment {
                     result.insert(
                         aliased_name,

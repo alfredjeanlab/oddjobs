@@ -862,6 +862,41 @@ command "test" {
     assert_eq!(test.2.as_deref(), Some("Run local tests"));
 }
 
+// Libraries with HCL conditional templates (bug: oj-9552e697)
+
+const LIB_WITH_TEMPLATES: &str = r#"const "check" { default = "true" }
+# Deploy to production
+command "deploy" {
+  run = <<-SHELL
+    %{ if const.check != "true" }
+    ${raw(const.check)}
+    %{ endif }
+    echo deploy
+  SHELL
+}
+"#;
+
+#[test]
+fn imported_command_comments_survive_conditional_templates() {
+    let base = "import \"mylib\" {}\n";
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", LIB_WITH_TEMPLATES)]);
+    let commands = collect_all_commands(&runbooks).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "deploy");
+    assert_eq!(commands[0].2.as_deref(), Some("Deploy to production"));
+}
+
+#[test]
+fn find_command_with_comment_from_templated_library() {
+    let base = "import \"mylib\" {}\n";
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", LIB_WITH_TEMPLATES)]);
+    let (cmd, comment) = find_command_with_comment(&runbooks, "deploy")
+        .unwrap()
+        .unwrap();
+    assert_eq!(cmd.name, "deploy");
+    assert_eq!(comment.unwrap().short, "Deploy to production");
+}
+
 // ============================================================================
 // Aliased import duplicate detection (exact vs suffix matching)
 // ============================================================================
