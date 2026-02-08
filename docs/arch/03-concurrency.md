@@ -96,45 +96,46 @@ two categories:
 │  ┌─────────────────────────────┐  ┌────────────────────────────────────┐ │
 │  │  Inline (awaited)           │  │  Background (spawned)              │ │
 │  │                             │  │                                    │ │
-│  │  Emit          ~µs          │  │  Shell        tokio::spawn         │ │
-│  │  SetTimer      ~µs          │  │  PollQueue    tokio::spawn         │ │
-│  │  CancelTimer   ~µs          │  │                                    │ │
-│  │  Notify        ~1ms  [1]    │  │  Result events emitted via         │ │
-│  │  SendToSession ~100ms       │  │  mpsc → EventBus on completion     │ │
-│  │  KillSession   ~100ms       │  │                                    │ │
-│  │  SendToAgent   ~200ms-2.2s  │  └────────────────────────────────────┘ │
-│  │  KillAgent     ~100-300ms   │                                        │
-│  │  SpawnAgent    ~1-9s  [2]   │                                        │
-│  │  CreateWorkspace ~1-30s [3] │                                        │
-│  │  DeleteWorkspace ~1-30s [3] │                                        │
-│  │  TakeQueueItem  variable    │                                        │
-│  │                             │                                        │
-│  │  [1] fire-and-forget via    │                                        │
-│  │      spawn_blocking         │                                        │
-│  │  [2] prompt polling loops   │                                        │
-│  │  [3] git subprocess         │                                        │
-│  └─────────────────────────────┘                                        │
+│  │  Emit          ~µs          │  │  Shell           tokio::spawn      │ │
+│  │  SetTimer      ~µs          │  │  PollQueue       tokio::spawn      │ │
+│  │  CancelTimer   ~µs          │  │  TakeQueueItem   tokio::spawn      │ │
+│  │  Notify        ~1ms  [1]    │  │  CreateWorkspace tokio::spawn      │ │
+│  │                             │  │  DeleteWorkspace tokio::spawn      │ │
+│  │  [1] fire-and-forget via    │  │  SpawnAgent      tokio::spawn      │ │
+│  │      spawn_blocking         │  │  SendToAgent     tokio::spawn  [2] │ │
+│  │                             │  │  KillAgent       tokio::spawn  [2] │ │
+│  └─────────────────────────────┘  │  SendToSession   tokio::spawn  [2] │ │
+│                                   │  KillSession     tokio::spawn  [2] │ │
+│                                   │                                    │ │
+│                                   │  Result events emitted via         │ │
+│                                   │  mpsc → EventBus on completion     │ │
+│                                   │                                    │ │
+│                                   │  [2] fire-and-forget (no result    │ │
+│                                   │      event; errors logged)         │ │
+│                                   └────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-Inline effects block the event loop for their full duration. A `CommandRun`
-event that creates a workspace and spawns an agent executes this chain
-sequentially:
+All subprocess and I/O effects are spawned as background tasks. Inline effects
+complete in microseconds and never block the event loop. A `CommandRun` event
+that creates a workspace and spawns an agent now returns in ~µs, with the
+actual work proceeding asynchronously:
 
 ```diagram
 process_event(CommandRun)
   └─ handle_command()
        ├─ load runbook from disk               ~100ms   (blocking file I/O)
        ├─ evaluate workspace.ref expression     ~50-500ms (bash subprocess)
-       ├─ CreateWorkspace effect                ~1-30s   (git worktree add)
-       ├─ SpawnAgent effect                     ~1-9s    (tmux + prompt polls)
+       ├─ CreateWorkspace effect                ~µs (spawns background task)
        ├─ SetTimer effect                       ~µs
        └─ Notify effect                         ~1ms
-                                        Total:  ~3-40s
+
+Background: CreateWorkspace task      ~1-30s   (git worktree add)
+  ──► emits WorkspaceReady → SpawnAgent task   ~1-9s    (tmux + prompt polls)
+  ──► emits SessionCreated → timer setup       ~µs
 ```
 
-During this window, the event loop cannot process timers, signals, or other
-events.
+The event loop remains responsive throughout.
 
 ## Listener and IPC
 
@@ -250,17 +251,12 @@ boundary.
 These are the paths where the event loop or IPC handlers are blocked for
 extended periods in the current implementation:
 
-### Event loop blocked by inline effects
+### Event loop — no inline blocking effects
 
-The longest-blocking effects in `execute_all()`:
-
-| Effect | What blocks | Worst case |
-|--------|-------------|------------|
-| `CreateWorkspace` | `git worktree add` subprocess | 5-30+s |
-| `DeleteWorkspace` | `git worktree remove` + `remove_dir_all` | 5-30+s |
-| `SpawnAgent` | tmux spawn + 3 prompt polls (200ms x 15 each) | 1-9s |
-| `SendToAgent` | 2x Esc + literal send + settle sleep (1ms/char, cap 2s) | ~2.2s |
-| `TakeQueueItem` | bash subprocess (same pattern as Shell but not spawned) | variable |
+All I/O effects are now deferred to background tasks. The event loop processes
+only microsecond-scale inline effects (`Emit`, `SetTimer`, `CancelTimer`) and
+the ~1ms `Notify` effect. No effect blocks the event loop for more than a few
+milliseconds.
 
 ### Queries blocked by state lock
 
@@ -277,22 +273,22 @@ connection task on external process I/O for seconds, with no timeout.
 
 A single `CommandRun` produces result events (`WorkspaceReady`,
 `SessionCreated`) that feed back through the WAL. Each result event triggers
-another `process_event()` iteration that may execute more inline effects.
-The full chain for a workspace+agent job:
+another `process_event()` iteration. Because all I/O effects are deferred,
+each iteration completes in microseconds:
 
 ```diagram
-CommandRun ─► CreateWorkspace (5-30s) ─► WorkspaceReady
-  ─► SpawnAgent (1-9s) ─► SessionCreated ─► SetTimer (~µs)
+CommandRun ─► CreateWorkspace (spawned) ─► returns ~µs
+WorkspaceReady ─► SpawnAgent (spawned) ─► returns ~µs
+SessionCreated ─► SetTimer (~µs)
 ```
 
-Total: 6-39s of sequential blocking across multiple event iterations.
+The actual work (git worktree, tmux spawn) runs concurrently in background
+tasks. The event loop remains available for timers and other events throughout.
 
-### Timer starvation
+### Timer resolution
 
-The `tokio::select!` timer branch only runs when the event reader branch
-yields. During multi-second effect execution, the timer branch cannot fire.
-Timer resolution degrades from the configured 1s interval to the duration of
-the longest effect chain.
+With all I/O effects deferred, the `tokio::select!` timer branch fires at
+the configured interval (default 1s) without degradation.
 
 ## See Also
 

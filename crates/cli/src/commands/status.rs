@@ -346,7 +346,8 @@ fn format_text(
             ns.escalated_jobs.iter().collect();
         escalated_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
-        let mut suspended_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.suspended_jobs.iter().collect();
+        let mut suspended_jobs: Vec<&oj_daemon::JobStatusEntry> =
+            ns.suspended_jobs.iter().collect();
         suspended_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
 
         let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.orphaned_jobs.iter().collect();

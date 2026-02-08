@@ -170,7 +170,7 @@ async fn send_to_agent_delegates_to_adapter() {
 }
 
 #[tokio::test]
-async fn send_to_agent_error_propagates() {
+async fn send_to_agent_error_is_fire_and_forget() {
     let harness = setup().await;
 
     harness
@@ -185,8 +185,9 @@ async fn send_to_agent_error_propagates() {
         })
         .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("agent-missing"));
+    // Deferred fire-and-forget: returns Ok(None) even on adapter failure
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -226,7 +227,7 @@ async fn kill_agent_delegates_to_adapter() {
 }
 
 #[tokio::test]
-async fn kill_agent_error_propagates() {
+async fn kill_agent_error_is_fire_and_forget() {
     let harness = setup().await;
 
     harness
@@ -240,5 +241,7 @@ async fn kill_agent_error_propagates() {
         })
         .await;
 
-    assert!(result.is_err());
+    // Deferred fire-and-forget: returns Ok(None) even on adapter failure
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
 }

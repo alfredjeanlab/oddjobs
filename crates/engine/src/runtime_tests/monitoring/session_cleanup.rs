@@ -34,6 +34,9 @@ async fn standalone_agent_signal_complete_kills_session() {
         .unwrap();
     assert_eq!(agent_run.status, oj_core::AgentRunStatus::Completed);
 
+    // Yield to let fire-and-forget KillSession task complete
+    tokio::task::yield_now().await;
+
     // Verify the session was killed
     let kills: Vec<_> = ctx
         .sessions
@@ -73,6 +76,9 @@ async fn standalone_agent_on_idle_done_kills_session() {
         .unwrap();
     assert_eq!(agent_run.status, oj_core::AgentRunStatus::Completed);
 
+    // Yield to let fire-and-forget KillSession task complete
+    tokio::task::yield_now().await;
+
     // Verify the session was killed
     let kills: Vec<_> = ctx
         .sessions
@@ -110,6 +116,9 @@ async fn standalone_agent_signal_escalate_keeps_session() {
         .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
         .unwrap();
     assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+
+    // Yield to let any fire-and-forget tasks complete before checking
+    tokio::task::yield_now().await;
 
     // Verify the session was NOT killed (agent stays alive for user interaction)
     let kills: Vec<_> = ctx
@@ -168,6 +177,9 @@ async fn job_agent_signal_complete_kills_session() {
     // Job advanced
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
+
+    // Yield to let fire-and-forget KillSession task complete
+    tokio::task::yield_now().await;
 
     // Session was killed
     let kills: Vec<_> = ctx
@@ -238,6 +250,9 @@ async fn job_agent_signal_escalate_creates_decision() {
     assert_eq!(decision.source, oj_core::DecisionSource::Signal);
     assert!(!decision.is_resolved());
     assert!(decision.context.contains("Need help with merge conflicts"));
+
+    // Yield to let any fire-and-forget tasks complete before checking
+    tokio::task::yield_now().await;
 
     // Session should NOT be killed (agent stays alive)
     let kills: Vec<_> = ctx

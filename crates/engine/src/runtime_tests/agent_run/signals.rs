@@ -58,6 +58,9 @@ async fn standalone_signal_escalate_preserves_session() {
         .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
     assert_eq!(agent_run.status, AgentRunStatus::Escalated);
 
+    // Yield to let any fire-and-forget tasks complete before checking
+    tokio::task::yield_now().await;
+
     // Session should NOT be killed (agent stays alive for interaction)
     let kills: Vec<_> = ctx
         .sessions

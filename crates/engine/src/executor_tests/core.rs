@@ -94,7 +94,7 @@ async fn cancel_timer_effect() {
 }
 
 #[tokio::test]
-async fn send_to_session_effect_fails_for_nonexistent_session() {
+async fn send_to_session_is_fire_and_forget() {
     let harness = setup().await;
 
     let result = harness
@@ -105,9 +105,9 @@ async fn send_to_session_effect_fails_for_nonexistent_session() {
         })
         .await;
 
-    // Send should fail because session doesn't exist
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("not found"));
+    // Deferred fire-and-forget: returns Ok(None) even for nonexistent sessions
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
 }
 
 #[tokio::test]

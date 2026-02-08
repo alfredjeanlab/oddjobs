@@ -183,23 +183,43 @@ where
             }
 
             Effect::SendToAgent { agent_id, input } => {
-                self.agents.send(&agent_id, &input).await?;
+                let agents = self.agents.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = agents.send(&agent_id, &input).await {
+                        tracing::warn!(%agent_id, error = %e, "SendToAgent failed (fire-and-forget)");
+                    }
+                });
                 Ok(None)
             }
 
             Effect::KillAgent { agent_id } => {
-                self.agents.kill(&agent_id).await?;
+                let agents = self.agents.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = agents.kill(&agent_id).await {
+                        tracing::warn!(%agent_id, error = %e, "KillAgent failed (fire-and-forget)");
+                    }
+                });
                 Ok(None)
             }
 
             // === Session-level effects ===
             Effect::SendToSession { session_id, input } => {
-                self.sessions.send(session_id.as_str(), &input).await?;
+                let sessions = self.sessions.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = sessions.send(session_id.as_str(), &input).await {
+                        tracing::warn!(%session_id, error = %e, "SendToSession failed (fire-and-forget)");
+                    }
+                });
                 Ok(None)
             }
 
             Effect::KillSession { session_id } => {
-                self.sessions.kill(session_id.as_str()).await?;
+                let sessions = self.sessions.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = sessions.kill(session_id.as_str()).await {
+                        tracing::warn!(%session_id, error = %e, "KillSession failed (fire-and-forget)");
+                    }
+                });
                 Ok(None)
             }
 
@@ -228,7 +248,7 @@ where
             }
 
             Effect::DeleteWorkspace { workspace_id } => {
-                crate::workspace::delete(&self.state, workspace_id).await
+                crate::workspace::delete(&self.state, &self.event_tx, workspace_id).await
             }
 
             // === Timer effects ===

@@ -73,13 +73,16 @@ pub(crate) async fn create(
 
 /// Execute a DeleteWorkspace effect.
 ///
-/// Looks up the workspace, removes the worktree/directory, and returns
-/// the `WorkspaceDeleted` event for WAL persistence.
+/// Looks up the workspace synchronously and spawns a background task
+/// for the filesystem work (worktree remove, directory deletion).
+/// The background task emits `WorkspaceDeleted` via `event_tx` on
+/// completion.
 pub(crate) async fn delete(
     state: &Arc<Mutex<MaterializedState>>,
+    event_tx: &mpsc::Sender<Event>,
     workspace_id: oj_core::WorkspaceId,
 ) -> Result<Option<Event>, ExecuteError> {
-    // Look up workspace path and branch
+    // Look up workspace path and branch (synchronous, fast)
     let (workspace_path, workspace_branch) = {
         let state = state.lock();
         let ws = state
@@ -97,6 +100,31 @@ pub(crate) async fn delete(
         }
     }
 
+    // Spawn background task for filesystem work
+    let event_tx = event_tx.clone();
+    tokio::spawn(async move {
+        delete_workspace_files(&workspace_path, &workspace_branch).await;
+
+        let event = Event::WorkspaceDeleted {
+            id: workspace_id.clone(),
+        };
+
+        if let Err(e) = event_tx.send(event).await {
+            tracing::error!("failed to send WorkspaceDeleted: {}", e);
+        }
+    });
+
+    Ok(None)
+}
+
+/// Remove workspace files from disk (git worktree + directory).
+///
+/// All operations are best-effort — errors are logged but don't
+/// prevent the `WorkspaceDeleted` event from being emitted.
+async fn delete_workspace_files(
+    workspace_path: &std::path::Path,
+    workspace_branch: &Option<String>,
+) {
     // If the workspace is a git worktree, unregister it first
     let dot_git = workspace_path.join(".git");
     if tokio::fs::symlink_metadata(&dot_git)
@@ -110,8 +138,8 @@ pub(crate) async fn delete(
         cmd.arg("worktree")
             .arg("remove")
             .arg("--force")
-            .arg(&workspace_path)
-            .current_dir(&workspace_path);
+            .arg(workspace_path)
+            .current_dir(workspace_path);
         let _ = oj_adapters::subprocess::run_with_timeout(
             cmd,
             oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,
@@ -156,22 +184,14 @@ pub(crate) async fn delete(
 
     // Remove workspace directory (in case worktree remove left remnants)
     if workspace_path.exists() {
-        tokio::fs::remove_dir_all(&workspace_path)
-            .await
-            .map_err(|e| ExecuteError::Shell(format!("failed to remove workspace dir: {}", e)))?;
+        if let Err(e) = tokio::fs::remove_dir_all(workspace_path).await {
+            tracing::warn!(
+                path = %workspace_path.display(),
+                error = %e,
+                "failed to remove workspace directory (best-effort)"
+            );
+        }
     }
-
-    // Delete workspace record
-    let delete_event = Event::WorkspaceDeleted {
-        id: workspace_id.clone(),
-    };
-    {
-        let mut state = state.lock();
-        state.apply_event(&delete_event);
-    }
-
-    // Return the delete event for WAL persistence
-    Ok(Some(delete_event))
 }
 
 /// Create a git worktree at the given path.

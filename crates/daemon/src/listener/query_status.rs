@@ -57,7 +57,10 @@ pub(super) fn handle_status_overview(
                 waiting_reason: None,
                 escalate_source: None,
             };
-            ns_suspended.entry(p.namespace.clone()).or_default().push(entry);
+            ns_suspended
+                .entry(p.namespace.clone())
+                .or_default()
+                .push(entry);
             continue;
         }
         if p.is_terminal() {
