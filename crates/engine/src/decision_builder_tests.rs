@@ -476,6 +476,80 @@ fn test_multi_question_options_from_all_questions() {
     }
 }
 
+// ===================== Tests for Signal trigger =====================
+
+#[test]
+fn test_signal_trigger_builds_correct_options() {
+    let (id, event) = EscalationDecisionBuilder::for_job(
+        JobId::new("pipe-1"),
+        "test-job".to_string(),
+        EscalationTrigger::Signal {
+            message: "Need human help with merge conflicts".to_string(),
+        },
+    )
+    .build();
+
+    assert!(!id.is_empty());
+
+    match event {
+        Event::DecisionCreated {
+            options,
+            source,
+            context,
+            ..
+        } => {
+            assert_eq!(source, DecisionSource::Signal);
+            assert_eq!(options.len(), 4);
+            assert_eq!(options[0].label, "Nudge");
+            assert!(options[0].recommended);
+            assert_eq!(options[1].label, "Done");
+            assert_eq!(options[2].label, "Cancel");
+            assert_eq!(options[3].label, "Dismiss");
+            assert!(context.contains("requested escalation"));
+            assert!(context.contains("Need human help with merge conflicts"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
+#[test]
+fn test_signal_trigger_maps_to_signal_source() {
+    let trigger = EscalationTrigger::Signal {
+        message: "help".to_string(),
+    };
+    assert_eq!(trigger.to_source(), DecisionSource::Signal);
+}
+
+#[test]
+fn test_signal_trigger_for_agent_run() {
+    let (_, event) = EscalationDecisionBuilder::for_agent_run(
+        AgentRunId::new("ar-sig"),
+        "my-worker".to_string(),
+        EscalationTrigger::Signal {
+            message: "Stuck on tests".to_string(),
+        },
+    )
+    .namespace("test-ns")
+    .build();
+
+    match event {
+        Event::DecisionCreated {
+            owner,
+            source,
+            context,
+            namespace,
+            ..
+        } => {
+            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-sig")));
+            assert_eq!(source, DecisionSource::Signal);
+            assert_eq!(namespace, "test-ns");
+            assert!(context.contains("my-worker"));
+            assert!(context.contains("Stuck on tests"));
+        }
+        _ => panic!("expected DecisionCreated"),
+    }
+}
+
 // ===================== Tests for for_agent_run() =====================
 
 #[test]

@@ -179,3 +179,112 @@ async fn job_agent_signal_complete_kills_session() {
         "session should be killed when job agent signals complete"
     );
 }
+
+#[tokio::test]
+async fn job_agent_signal_escalate_creates_decision() {
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    let session_id = job.session_id.clone().unwrap();
+
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent signals escalate
+    ctx.runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Escalate,
+            message: Some("Need help with merge conflicts".to_string()),
+        })
+        .await
+        .unwrap();
+
+    // Job step should be waiting with a decision_id
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    assert!(
+        matches!(job.step_status, StepStatus::Waiting(Some(_))),
+        "step should be Waiting with decision_id, got {:?}",
+        job.step_status
+    );
+
+    // A decision should exist
+    let decision_count = ctx.runtime.lock_state(|s| s.decisions.len());
+    assert_eq!(
+        decision_count, 1,
+        "escalate signal should create a decision"
+    );
+    let decision = ctx
+        .runtime
+        .lock_state(|s| s.decisions.values().next().cloned().unwrap());
+    assert_eq!(decision.source, oj_core::DecisionSource::Signal);
+    assert!(!decision.is_resolved());
+    assert!(decision.context.contains("Need help with merge conflicts"));
+
+    // Session should NOT be killed (agent stays alive)
+    let kills: Vec<_> = ctx
+        .sessions
+        .calls()
+        .into_iter()
+        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .collect();
+    assert!(
+        kills.is_empty(),
+        "session should NOT be killed on escalate (agent stays alive)"
+    );
+}
+
+#[tokio::test]
+async fn job_agent_signal_escalate_default_message() {
+    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+
+    ctx.runtime
+        .handle_event(command_event(
+            "pipe-1",
+            "build",
+            "build",
+            [("name".to_string(), "test".to_string())]
+                .into_iter()
+                .collect(),
+            &ctx.project_root,
+        ))
+        .await
+        .unwrap();
+
+    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let agent_id = get_agent_id(&ctx, &job_id).unwrap();
+    let job = ctx.runtime.get_job(&job_id).unwrap();
+    let session_id = job.session_id.clone().unwrap();
+
+    ctx.sessions.add_session(&session_id, true);
+
+    // Agent signals escalate without a message
+    ctx.runtime
+        .handle_event(Event::AgentSignal {
+            agent_id: agent_id.clone(),
+            kind: AgentSignalKind::Escalate,
+            message: None,
+        })
+        .await
+        .unwrap();
+
+    // Decision should use default message
+    let decision = ctx
+        .runtime
+        .lock_state(|s| s.decisions.values().next().cloned().unwrap());
+    assert!(decision.context.contains("Agent requested escalation"));
+}
