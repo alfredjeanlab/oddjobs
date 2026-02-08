@@ -300,15 +300,16 @@ fn question_decision_shows_options() {
         "decision should show 'Option B' option, got:\n{}",
         show_output
     );
-    // Cancel and Dismiss should always be appended after user options
+    // Cancel should always be appended after user options
     assert!(
         show_output.contains("Cancel"),
         "decision should show 'Cancel' option, got:\n{}",
         show_output
     );
+    // Other (custom response) should be shown
     assert!(
-        show_output.contains("Dismiss"),
-        "decision should show 'Dismiss' option, got:\n{}",
+        show_output.contains("Other"),
+        "decision should show 'Other' option, got:\n{}",
         show_output
     );
 }
@@ -352,9 +353,9 @@ fn resolve_question_with_cancel_cancels_job() {
     let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
-    // With 2 user options + Cancel + Dismiss, Cancel is option 3
+    // With 2 user options + Other + Cancel + Dismiss, Cancel is option 4
     temp.oj()
-        .args(&["decision", "resolve", &decision_id, "3"])
+        .args(&["decision", "resolve", &decision_id, "4"])
         .passes();
 
     // Job should be cancelled

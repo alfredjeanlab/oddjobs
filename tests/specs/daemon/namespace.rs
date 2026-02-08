@@ -192,9 +192,17 @@ fn jobs_with_same_name_in_different_namespaces_dont_interfere() {
     }
     assert!(both_done, "jobs should complete in both namespaces");
 
-    // Verify each project only sees its own job (namespace scoping)
-    let jobs_a = pair.oj_a().args(&["job", "list"]).passes().stdout();
-    let jobs_b = pair.oj_b().args(&["job", "list"]).passes().stdout();
+    // Verify each project only sees its own job (namespace scoping via --project)
+    let jobs_a = pair
+        .oj_a()
+        .args(&["--project", "alpha", "job", "list"])
+        .passes()
+        .stdout();
+    let jobs_b = pair
+        .oj_b()
+        .args(&["--project", "beta", "job", "list"])
+        .passes()
+        .stdout();
 
     // Jobs should be scoped - project A shouldn't see project B's jobs and vice versa
     // Count how many completed jobs each project sees

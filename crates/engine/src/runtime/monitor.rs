@@ -362,6 +362,13 @@ where
             }
         };
 
+        // Don't execute on_dead/on_idle actions when job is already waiting
+        // for a human decision. The decision resolution is authoritative.
+        // (Capture/logging above still runs for observability.)
+        if job.step_status.is_waiting() {
+            return Ok(vec![]);
+        }
+
         self.execute_action_with_attempts(
             job,
             &ActionContext {
@@ -503,23 +510,13 @@ where
 
         match run_with_timeout(cmd, GATE_TIMEOUT, "gate command").await {
             Ok(output) if output.status.success() => {
-                tracing::info!(
-                    job_id = %job.id,
-                    gate = %command,
-                    "gate passed, advancing job"
-                );
+                tracing::info!(job_id = %job.id, "gate passed");
                 Ok(())
             }
             Ok(output) => {
                 let exit_code = output.status.code().unwrap_or(-1);
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                tracing::info!(
-                    job_id = %job.id,
-                    gate = %command,
-                    exit_code,
-                    stderr = %stderr,
-                    "gate failed, escalating"
-                );
+                tracing::info!(job_id = %job.id, exit_code, "gate failed");
                 let stderr_trimmed = stderr.trim();
                 let error = if stderr_trimmed.is_empty() {
                     format!("gate `{}` failed (exit {})", command, exit_code)
@@ -532,11 +529,7 @@ where
                 Err(error)
             }
             Err(e) => {
-                tracing::warn!(
-                    job_id = %job.id,
-                    error = %e,
-                    "gate execution error, escalating"
-                );
+                tracing::warn!(job_id = %job.id, error = %e, "gate execution error");
                 Err(format!("gate `{}` execution error: {}", command, e))
             }
         }
