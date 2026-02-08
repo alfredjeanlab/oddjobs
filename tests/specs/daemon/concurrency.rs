@@ -17,11 +17,11 @@ handler = { job = "process" }
 concurrency = 2
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 /// Runbook with two independent queue/worker/job sets.
@@ -45,18 +45,18 @@ handler = { job = "beta_job" }
 concurrency = 1
 
 [job.alpha_job]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.alpha_job.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 
 [job.beta_job]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.beta_job.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 // =============================================================================
@@ -180,11 +180,11 @@ handler = { job = "process" }
 concurrency = 1
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 #[test]

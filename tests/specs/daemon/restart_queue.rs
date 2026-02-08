@@ -20,11 +20,11 @@ handler = { job = "process" }
 concurrency = 1
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 /// Queue-only runbook for testing WAL persistence without worker interference.

@@ -26,11 +26,11 @@ handler = { job = "process" }
 concurrency = 4
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 /// Tests recovery after daemon crash with many events in the WAL.

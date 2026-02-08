@@ -18,11 +18,11 @@ handler = { job = "process" }
 concurrency = 1
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
 
 /// Scenario for an agent that runs a slow command.
@@ -331,11 +331,11 @@ handler = { job = "process" }
 concurrency = 3
 
 [job.process]
-vars = ["cmd"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "${item.cmd}"
+run = "${var.task.cmd}"
 "#;
     temp.file(".oj/runbooks/queue.toml", multi_worker_runbook);
 

@@ -18,11 +18,11 @@ handler = { job = "process" }
 concurrency = 1
 
 [job.process]
-vars = ["msg"]
+vars = ["task"]
 
 [[job.process.step]]
 name = "work"
-run = "echo ${item.msg}"
+run = "echo ${var.task.msg}"
 "#;
 
 /// Runbook with a command that runs a job echoing OJ_NAMESPACE.
