@@ -7,7 +7,9 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::{ClientKind, DaemonClient};
-use crate::output::{display_log, print_prune_results, print_start_results, OutputFormat};
+use crate::output::{
+    display_log, print_prune_results, print_start_results, print_stop_results, OutputFormat,
+};
 use crate::table::{project_cell, should_show_project, Column, Table};
 
 #[derive(Args)]
@@ -30,8 +32,11 @@ pub enum CronCommand {
     },
     /// Stop a cron (cancels interval timer)
     Stop {
-        /// Cron name from runbook
-        name: String,
+        /// Cron name from runbook (required unless --all)
+        name: Option<String>,
+        /// Stop all running crons
+        #[arg(long)]
+        all: bool,
     },
     /// Restart a cron (stop, reload runbook, start)
     Restart {
@@ -94,11 +99,15 @@ pub async fn handle(
                 .await?;
             print_start_results(&result, "Cron", "crons", namespace);
         }
-        CronCommand::Stop { name } => {
-            client
-                .cron_stop(&name, namespace, Some(project_root))
+        CronCommand::Stop { name, all } => {
+            if !all && name.is_none() {
+                anyhow::bail!("cron name required (or use --all)");
+            }
+            let cron_name = name.unwrap_or_default();
+            let result = client
+                .cron_stop(&cron_name, namespace, Some(project_root), all)
                 .await?;
-            println!("Cron '{}' stopped ({})", name, namespace);
+            print_stop_results(&result, "Cron", "crons", namespace);
         }
         CronCommand::Restart { name } => {
             let cron_name = client.cron_restart(project_root, namespace, &name).await?;

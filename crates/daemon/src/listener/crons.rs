@@ -147,7 +147,12 @@ pub(super) fn handle_cron_stop(
     cron_name: &str,
     namespace: &str,
     project_root: Option<&Path>,
+    all: bool,
 ) -> Result<Response, ConnectionError> {
+    if all {
+        return handle_cron_stop_all(ctx, namespace);
+    }
+
     // Check if cron exists in state
     if let Err(resp) = super::require_scoped_resource(
         &ctx.state,
@@ -183,6 +188,39 @@ pub(super) fn handle_cron_stop(
     }
 
     Ok(Response::Ok)
+}
+
+/// Handle stopping all running crons in a namespace.
+fn handle_cron_stop_all(ctx: &ListenCtx, namespace: &str) -> Result<Response, ConnectionError> {
+    let running_crons: Vec<String> = {
+        let state = ctx.state.lock();
+        state
+            .crons
+            .values()
+            .filter(|c| c.namespace == namespace && c.status == "running")
+            .map(|c| c.name.clone())
+            .collect()
+    };
+
+    let mut stopped = Vec::new();
+    let mut skipped = Vec::new();
+
+    for name in running_crons {
+        let event = Event::CronStopped {
+            cron_name: name.clone(),
+            namespace: namespace.to_string(),
+        };
+        match emit(&ctx.event_bus, event.clone()) {
+            Ok(()) => {
+                let mut state = ctx.state.lock();
+                state.apply_event(&event);
+                stopped.push(name);
+            }
+            Err(e) => skipped.push((name, e.to_string())),
+        }
+    }
+
+    Ok(Response::CronsStopped { stopped, skipped })
 }
 
 /// Handle a CronOnce request — run the cron's job once immediately.

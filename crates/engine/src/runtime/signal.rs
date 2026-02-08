@@ -4,11 +4,11 @@
 //! Agent signal handling for explicit agent completion/escalation events.
 
 use super::Runtime;
+use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
 use crate::monitor;
 use oj_adapters::agent::find_session_log;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use oj_core::{AgentId, AgentSignalKind, Clock, Effect, Event, Job, JobId, OwnerId, TimerId};
 
 impl<S, A, N, C> Runtime<S, A, N, C>

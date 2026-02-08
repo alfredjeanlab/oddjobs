@@ -190,13 +190,27 @@ impl DaemonClient {
         name: &str,
         namespace: &str,
         project_root: Option<&Path>,
-    ) -> Result<(), ClientError> {
+        all: bool,
+    ) -> Result<StopResult, ClientError> {
         let request = Request::CronStop {
             cron_name: name.to_string(),
             namespace: namespace.to_string(),
             project_root: project_root.map(|p| p.to_path_buf()),
+            all,
         };
-        self.send_simple(&request).await
+        if all {
+            match self.send(&request).await? {
+                Response::CronsStopped { stopped, skipped } => {
+                    Ok(StopResult::Multiple { stopped, skipped })
+                }
+                other => Self::reject(other),
+            }
+        } else {
+            self.send_simple(&request).await?;
+            Ok(StopResult::Single {
+                name: name.to_string(),
+            })
+        }
     }
 
     /// Restart a cron

@@ -329,7 +329,8 @@ async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, C
             cron_name,
             namespace,
             project_root,
-        } => crons::handle_cron_stop(ctx, &cron_name, &namespace, project_root.as_deref()),
+            all,
+        } => crons::handle_cron_stop(ctx, &cron_name, &namespace, project_root.as_deref(), all),
 
         Request::CronRestart {
             project_root,

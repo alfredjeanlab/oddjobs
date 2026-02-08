@@ -174,7 +174,7 @@ fn stop_applies_state_before_responding() {
         );
     }
 
-    let result = handle_cron_stop(&ctx, "nightly", "", None).unwrap();
+    let result = handle_cron_stop(&ctx, "nightly", "", None, false).unwrap();
 
     assert_eq!(result, Response::Ok);
 
@@ -205,7 +205,7 @@ fn stop_with_namespace_uses_scoped_key() {
         );
     }
 
-    let result = handle_cron_stop(&ctx, "nightly", "my-project", None).unwrap();
+    let result = handle_cron_stop(&ctx, "nightly", "my-project", None, false).unwrap();
 
     assert_eq!(result, Response::Ok);
 
@@ -230,7 +230,7 @@ fn start_then_immediate_stop_both_visible() {
     assert_eq!(ctx.state.lock().crons["nightly"].status, "running");
 
     // Stop without WAL processing in between
-    let stop_result = handle_cron_stop(&ctx, "nightly", "", None).unwrap();
+    let stop_result = handle_cron_stop(&ctx, "nightly", "", None, false).unwrap();
     assert_eq!(stop_result, Response::Ok);
 
     // Immediately verify stopped
@@ -253,13 +253,95 @@ fn stop_preserves_last_fired_at() {
         state.crons.insert("nightly".to_string(), record);
     }
 
-    handle_cron_stop(&ctx, "nightly", "", None).unwrap();
+    handle_cron_stop(&ctx, "nightly", "", None, false).unwrap();
 
     let state = ctx.state.lock();
     let cron = state.crons.get("nightly").unwrap();
     assert_eq!(cron.status, "stopped");
     // last_fired_at_ms is preserved (CronStopped only changes status)
     assert_eq!(cron.last_fired_at_ms, Some(fired_at));
+}
+
+// ── Stop --all ───────────────────────────────────────────────────────────
+
+#[test]
+fn stop_all_stops_running_crons_in_namespace() {
+    let clock = FakeClock::new();
+    clock.set_epoch_ms(1_700_000_000_000);
+
+    let wal_dir = tempdir().unwrap();
+    let ctx = super::super::test_ctx(wal_dir.path());
+
+    // Pre-populate state with two running crons and one stopped cron
+    {
+        let mut state = ctx.state.lock();
+        state.crons.insert(
+            "my-project/nightly".to_string(),
+            make_cron_record(&clock, "nightly", "my-project", "running", "24h", "deploy"),
+        );
+        state.crons.insert(
+            "my-project/hourly".to_string(),
+            make_cron_record(&clock, "hourly", "my-project", "running", "1h", "sync"),
+        );
+        state.crons.insert(
+            "my-project/weekly".to_string(),
+            make_cron_record(&clock, "weekly", "my-project", "stopped", "168h", "cleanup"),
+        );
+    }
+
+    let result = handle_cron_stop(&ctx, "", "my-project", None, true).unwrap();
+
+    match result {
+        Response::CronsStopped { stopped, skipped } => {
+            assert_eq!(stopped.len(), 2);
+            assert!(stopped.contains(&"nightly".to_string()));
+            assert!(stopped.contains(&"hourly".to_string()));
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected CronsStopped, got {:?}", other),
+    }
+
+    // Verify all running crons are now stopped
+    let state = ctx.state.lock();
+    assert_eq!(state.crons["my-project/nightly"].status, "stopped");
+    assert_eq!(state.crons["my-project/hourly"].status, "stopped");
+    // Already-stopped cron is unchanged
+    assert_eq!(state.crons["my-project/weekly"].status, "stopped");
+}
+
+#[test]
+fn stop_all_only_affects_matching_namespace() {
+    let clock = FakeClock::new();
+    clock.set_epoch_ms(1_700_000_000_000);
+
+    let wal_dir = tempdir().unwrap();
+    let ctx = super::super::test_ctx(wal_dir.path());
+
+    {
+        let mut state = ctx.state.lock();
+        state.crons.insert(
+            "proj-a/nightly".to_string(),
+            make_cron_record(&clock, "nightly", "proj-a", "running", "24h", "deploy"),
+        );
+        state.crons.insert(
+            "proj-b/nightly".to_string(),
+            make_cron_record(&clock, "nightly", "proj-b", "running", "24h", "deploy"),
+        );
+    }
+
+    let result = handle_cron_stop(&ctx, "", "proj-a", None, true).unwrap();
+
+    match result {
+        Response::CronsStopped { stopped, skipped } => {
+            assert_eq!(stopped, vec!["nightly".to_string()]);
+            assert!(skipped.is_empty());
+        }
+        other => panic!("expected CronsStopped, got {:?}", other),
+    }
+
+    // proj-b cron should still be running
+    let state = ctx.state.lock();
+    assert_eq!(state.crons["proj-b/nightly"].status, "running");
 }
 
 // ── Existing restart tests ───────────────────────────────────────────────

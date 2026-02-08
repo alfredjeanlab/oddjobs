@@ -235,11 +235,15 @@ pub enum Request {
 
     /// Stop a cron timer
     CronStop {
+        /// Cron name (empty string when `all` is true)
         cron_name: String,
         #[serde(default)]
         namespace: String,
         #[serde(default)]
         project_root: Option<PathBuf>,
+        /// Stop all running crons in the namespace
+        #[serde(default)]
+        all: bool,
     },
 
     /// Restart a cron (stop, reload runbook, start)
@@ -577,6 +581,14 @@ pub enum Response {
     CronsStarted {
         /// Crons that were started
         started: Vec<String>,
+        /// Crons that were skipped with reasons
+        skipped: Vec<(String, String)>,
+    },
+
+    /// Multiple crons stopped (--all mode)
+    CronsStopped {
+        /// Crons that were stopped
+        stopped: Vec<String>,
         /// Crons that were skipped with reasons
         skipped: Vec<(String, String)>,
     },
