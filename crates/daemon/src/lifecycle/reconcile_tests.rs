@@ -5,15 +5,21 @@ use super::super::test_helpers::*;
 
 #[tokio::test]
 async fn reconcile_state_resumes_running_workers() {
-    // Workers with status "running" should be re-emitted as WorkerStarted
-    // events during reconciliation so the runtime recreates their in-memory
-    // state and triggers an initial queue poll.
+    // Workers with status "running" should be re-emitted as RunbookLoaded +
+    // WorkerStarted events during reconciliation so the runtime recreates
+    // their in-memory state and triggers an initial queue poll.
     let dir = tempdir().unwrap();
     let dir_path = dir.path().to_owned();
     let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
 
     // Build state with a running worker and a stopped worker
     let mut test_state = MaterializedState::default();
+    // Populate runbooks via apply_event (same path as WAL replay)
+    test_state.apply_event(&Event::RunbookLoaded {
+        hash: "abc123".to_string(),
+        version: 1,
+        runbook: serde_json::json!({"test": true}),
+    });
     test_state.workers.insert(
         "myns/running-worker".to_string(),
         WorkerRecord {
@@ -42,6 +48,40 @@ async fn reconcile_state_resumes_running_workers() {
     );
 
     let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    // Should have emitted RunbookLoaded before WorkerStarted
+    let runbook_loaded_events: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::RunbookLoaded { .. }))
+        .collect();
+    assert_eq!(
+        runbook_loaded_events.len(),
+        1,
+        "should emit RunbookLoaded for the running worker's hash, got: {:?}",
+        runbook_loaded_events
+    );
+    match &runbook_loaded_events[0] {
+        Event::RunbookLoaded { hash, .. } => {
+            assert_eq!(hash, "abc123");
+        }
+        _ => unreachable!(),
+    }
+
+    // RunbookLoaded must come before WorkerStarted
+    let runbook_pos = events
+        .iter()
+        .position(|e| matches!(e, Event::RunbookLoaded { hash, .. } if hash == "abc123"))
+        .expect("RunbookLoaded should be in events");
+    let worker_pos = events
+        .iter()
+        .position(|e| matches!(e, Event::WorkerStarted { worker_name, .. } if worker_name == "running-worker"))
+        .expect("WorkerStarted should be in events");
+    assert!(
+        runbook_pos < worker_pos,
+        "RunbookLoaded (pos={}) must come before WorkerStarted (pos={})",
+        runbook_pos,
+        worker_pos
+    );
 
     // Should have emitted exactly one WorkerStarted for the running worker
     let worker_started_events: Vec<_> = events
@@ -74,6 +114,61 @@ async fn reconcile_state_resumes_running_workers() {
         }
         _ => unreachable!(),
     }
+}
+
+#[tokio::test]
+async fn reconcile_deduplicates_runbook_loaded_for_shared_hash() {
+    // When multiple workers share the same runbook hash, only one
+    // RunbookLoaded event should be emitted (dedup by hash).
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.apply_event(&Event::RunbookLoaded {
+        hash: "shared-hash".to_string(),
+        version: 1,
+        runbook: serde_json::json!({"shared": true}),
+    });
+    // Two workers sharing the same runbook hash
+    for name in &["worker-a", "worker-b"] {
+        test_state.workers.insert(
+            format!("ns/{}", name),
+            WorkerRecord {
+                name: name.to_string(),
+                namespace: "ns".to_string(),
+                project_root: dir_path.clone(),
+                runbook_hash: "shared-hash".to_string(),
+                status: "running".to_string(),
+                active_job_ids: vec![],
+                queue_name: "q".to_string(),
+                concurrency: 1,
+            },
+        );
+    }
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let runbook_loaded: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::RunbookLoaded { .. }))
+        .collect();
+    assert_eq!(
+        runbook_loaded.len(),
+        1,
+        "should emit exactly one RunbookLoaded for shared hash, got {}",
+        runbook_loaded.len()
+    );
+
+    let worker_started: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::WorkerStarted { .. }))
+        .collect();
+    assert_eq!(
+        worker_started.len(),
+        2,
+        "should emit WorkerStarted for both workers"
+    );
 }
 
 #[tokio::test]

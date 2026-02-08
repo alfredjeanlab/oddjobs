@@ -83,8 +83,9 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
     let state = &ctx.state_snapshot;
 
     // Resume workers that were running before the daemon restarted.
-    // Re-emitting WorkerStarted recreates the in-memory WorkerState and
-    // triggers an initial queue poll so the worker picks up where it left off.
+    // Re-emitting RunbookLoaded + WorkerStarted (matching the manual start path)
+    // recreates the in-memory WorkerState and triggers an initial queue poll so
+    // the worker picks up where it left off.
     let running_workers: Vec<_> = state
         .workers
         .values()
@@ -93,6 +94,25 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
 
     if !running_workers.is_empty() {
         info!("Resuming {} running workers", running_workers.len());
+    }
+
+    // Emit RunbookLoaded for each unique hash referenced by running workers.
+    // This populates the in-process runbook cache so WorkerStarted handlers
+    // can find the runbook without falling back to disk.
+    let mut emitted_hashes = HashSet::new();
+    for worker in &running_workers {
+        if emitted_hashes.insert(worker.runbook_hash.clone()) {
+            if let Some(stored) = state.runbooks.get(&worker.runbook_hash) {
+                let _ = ctx
+                    .event_tx
+                    .send(Event::RunbookLoaded {
+                        hash: worker.runbook_hash.clone(),
+                        version: stored.version,
+                        runbook: stored.data.clone(),
+                    })
+                    .await;
+            }
+        }
     }
 
     for worker in &running_workers {
