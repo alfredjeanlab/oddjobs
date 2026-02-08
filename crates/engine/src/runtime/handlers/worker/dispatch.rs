@@ -371,14 +371,23 @@ where
     }
 }
 
-/// Extract an item's `id` field as a string, handling both string and numeric
-/// JSON values. Falls back to `"unknown"` when the field is missing.
+/// Extract a dedup identifier from a queue item.
+///
+/// Tries `id` then `number`, falling back to a content-based fingerprint
+/// so items without a conventional identifier field still get unique keys.
 fn json_item_id(item: &serde_json::Value) -> String {
-    match item.get("id") {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        Some(v) => v.to_string(),
-        None => "unknown".to_string(),
+    for field in &["id", "number"] {
+        match item.get(field) {
+            Some(serde_json::Value::String(s)) => return s.clone(),
+            Some(v) => return v.to_string(),
+            None => {}
+        }
     }
+    use std::hash::{Hash, Hasher};
+    let canonical = serde_json::to_string(item).unwrap_or_default();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    canonical.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 #[cfg(test)]

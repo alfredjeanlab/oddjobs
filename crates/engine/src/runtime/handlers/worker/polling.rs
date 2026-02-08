@@ -61,21 +61,10 @@ where
 
         match queue_type {
             QueueType::External => {
-                let runbook = self.cached_runbook(&runbook_hash)?;
-                let queue_def = runbook.get_queue(&queue_name).ok_or_else(|| {
-                    RuntimeError::WorkerNotFound(format!("queue '{}' not found", queue_name))
-                })?;
-
-                let poll_effect = Effect::PollQueue {
-                    worker_name: worker_key.to_string(),
-                    list_command: queue_def.list.clone().unwrap_or_default(),
-                    cwd: project_root,
-                };
-                result_events.extend(self.executor.execute_all(vec![poll_effect]).await?);
-
-                // Ensure poll timer is set so periodic polling continues.
-                // This is the sole owner of the timer — both timer-fired and
-                // direct wakes (WorkerWake, resize) converge here.
+                // Re-arm poll timer FIRST so periodic polling survives even if
+                // this particular poll attempt fails (e.g., runbook parse error).
+                // The timer was already removed from the scheduler when it fired,
+                // so we must re-arm before any fallible operations.
                 if let Some(ref poll) = poll_interval {
                     let duration = crate::monitor::parse_duration(poll).map_err(|e| {
                         RuntimeError::InvalidFormat(format!(
@@ -91,6 +80,18 @@ where
                         })
                         .await?;
                 }
+
+                let runbook = self.cached_runbook(&runbook_hash)?;
+                let queue_def = runbook.get_queue(&queue_name).ok_or_else(|| {
+                    RuntimeError::WorkerNotFound(format!("queue '{}' not found", queue_name))
+                })?;
+
+                let poll_effect = Effect::PollQueue {
+                    worker_name: worker_key.to_string(),
+                    list_command: queue_def.list.clone().unwrap_or_default(),
+                    cwd: project_root,
+                };
+                result_events.extend(self.executor.execute_all(vec![poll_effect]).await?);
             }
             QueueType::Persisted => {
                 result_events.extend(self.poll_persisted_queue(
