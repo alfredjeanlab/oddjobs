@@ -4,6 +4,8 @@
 #   - Branch protection on main requiring CI to pass
 #   - strict=false: branches don't need to be up-to-date before merging
 #   - Merge queue with squash merges so CI runs on the merged result
+#   - "Automatically delete head branches" enabled (Settings → General)
+#     (--delete-branch is incompatible with merge queue; use the repo setting)
 #
 # Examples:
 #   oj run setup

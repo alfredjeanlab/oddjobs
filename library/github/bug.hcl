@@ -19,10 +19,12 @@ command "fix" {
     _blocked="${args.blocked}"
     ${raw(const.blocked)}
     if [ -n "$body" ]; then
-      gh issue create --label "$labels" --title "${args.title}" --body "$body"
+      url=$(gh issue create --label "$labels" --title "${args.title}" --body "$body")
     else
-      gh issue create --label "$labels" --title "${args.title}"
+      url=$(gh issue create --label "$labels" --title "${args.title}")
     fi
+    issue=$(basename "$url")
+    gh issue lock "$issue" 2>/dev/null || true
     oj worker start bug
   SHELL
 
@@ -35,7 +37,7 @@ command "fix" {
 queue "bugs" {
   type = "external"
   list = "gh issue list --label type:bug --state open --json number,title --search '-label:blocked -label:in-progress'"
-  take = "gh issue edit ${item.number} --add-label in-progress"
+  take = "gh issue edit ${item.number} --add-label in-progress; gh issue lock ${item.number} 2>/dev/null || true"
   poll = "30s"
 }
 
@@ -85,7 +87,7 @@ job "bug" {
         branch="${workspace.branch}"
         git push origin "$branch"
         gh pr create --title "${local.title}" --body "Closes #${var.bug.number}" --head "$branch" --label merge:auto
-        gh pr merge --squash --auto
+        gh pr merge --squash --delete-branch --auto
       elif gh issue view ${var.bug.number} --json state -q '.state' | grep -q 'CLOSED'; then
         echo "Issue already resolved, no changes needed"
       else
@@ -124,15 +126,6 @@ agent "bugs" {
       Keep working. Fix the bug, write tests, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Bug: #${var.bug.number}"
-    status {
-      left  = "#${var.bug.number}: ${var.bug.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

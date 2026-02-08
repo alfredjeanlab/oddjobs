@@ -19,10 +19,12 @@ command "chore" {
     _blocked="${args.blocked}"
     ${raw(const.blocked)}
     if [ -n "$body" ]; then
-      gh issue create --label "$labels" --title "${args.title}" --body "$body"
+      url=$(gh issue create --label "$labels" --title "${args.title}" --body "$body")
     else
-      gh issue create --label "$labels" --title "${args.title}"
+      url=$(gh issue create --label "$labels" --title "${args.title}")
     fi
+    issue=$(basename "$url")
+    gh issue lock "$issue" 2>/dev/null || true
     oj worker start chore
   SHELL
 
@@ -35,7 +37,7 @@ command "chore" {
 queue "chores" {
   type = "external"
   list = "gh issue list --label type:chore --state open --json number,title --search '-label:blocked -label:in-progress'"
-  take = "gh issue edit ${item.number} --add-label in-progress"
+  take = "gh issue edit ${item.number} --add-label in-progress; gh issue lock ${item.number} 2>/dev/null || true"
   poll = "30s"
 }
 
@@ -85,7 +87,7 @@ job "chore" {
         branch="${workspace.branch}"
         git push origin "$branch"
         gh pr create --title "${local.title}" --body "Closes #${var.task.number}" --head "$branch" --label merge:auto
-        gh pr merge --squash --auto
+        gh pr merge --squash --delete-branch --auto
       elif gh issue view ${var.task.number} --json state -q '.state' | grep -q 'CLOSED'; then
         echo "Issue already resolved, no changes needed"
       else
@@ -124,15 +126,6 @@ agent "chores" {
       Keep working. Complete the task, write tests, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Chore: #${var.task.number}"
-    status {
-      left  = "#${var.task.number}: ${var.task.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

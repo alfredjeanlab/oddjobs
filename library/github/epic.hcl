@@ -23,10 +23,12 @@ command "epic" {
     _blocked="${args.blocked}"
     ${raw(const.blocked)}
     if [ -n "$body" ]; then
-      gh issue create --label "$labels" --title "${args.title}" --body "$body"
+      url=$(gh issue create --label "$labels" --title "${args.title}" --body "$body")
     else
-      gh issue create --label "$labels" --title "${args.title}"
+      url=$(gh issue create --label "$labels" --title "${args.title}")
     fi
+    issue=$(basename "$url")
+    gh issue lock "$issue" 2>/dev/null || true
     oj worker start plan
     oj worker start epic
   SHELL
@@ -46,10 +48,12 @@ command "idea" {
   args = "<title> [body]"
   run  = <<-SHELL
     if [ -n "${args.body}" ]; then
-      gh issue create --label type:epic,plan:needed --title "${args.title}" --body "${args.body}"
+      url=$(gh issue create --label type:epic,plan:needed --title "${args.title}" --body "${args.body}")
     else
-      gh issue create --label type:epic,plan:needed --title "${args.title}"
+      url=$(gh issue create --label type:epic,plan:needed --title "${args.title}")
     fi
+    issue=$(basename "$url")
+    gh issue lock "$issue" 2>/dev/null || true
     oj worker start plan
   SHELL
 
@@ -103,7 +107,7 @@ command "build" {
 queue "plans" {
   type = "external"
   list = "gh issue list --label type:epic,plan:needed --state open --json number,title --search '-label:blocked -label:in-progress'"
-  take = "gh issue edit ${item.number} --add-label in-progress"
+  take = "gh issue edit ${item.number} --add-label in-progress; gh issue lock ${item.number} 2>/dev/null || true"
   poll = "30s"
 }
 
@@ -165,7 +169,7 @@ job "plan" {
 queue "epics" {
   type = "external"
   list = "gh issue list --label type:epic,plan:ready,build:needed --state open --json number,title --search '-label:blocked -label:in-progress'"
-  take = "gh issue edit ${item.number} --add-label in-progress"
+  take = "gh issue edit ${item.number} --add-label in-progress; gh issue lock ${item.number} 2>/dev/null || true"
   poll = "30s"
 }
 
@@ -244,12 +248,6 @@ agent "plan" {
   run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_dead = { action = "resume", attempts = 1 }
 
-  session "tmux" {
-    color = "blue"
-    title = "Plan: #${var.epic.number}"
-    status { left = "#${var.epic.number}: ${var.epic.title}" }
-  }
-
   prime = [
     "gh issue view ${var.epic.number}",
     <<-PRIME
@@ -283,15 +281,6 @@ agent "implement" {
       Follow the plan, implement, test, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Epic: #${var.epic.number}"
-    status {
-      left  = "#${var.epic.number}: ${var.epic.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [
