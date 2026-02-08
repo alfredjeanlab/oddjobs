@@ -60,13 +60,8 @@
 
 // Existing modules from shell-common
 mod error;
-mod exec;
 mod span;
 mod validation;
-
-// Shell executor types - re-exported from internal exec module
-pub use exec::result::{CommandTrace, ExecOutput};
-pub use exec::{ExecError, ShellExecutor};
 
 // Moved modules from runbook::shell
 mod ast;
