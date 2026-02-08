@@ -27,8 +27,9 @@ run = "echo ${local.branch} ${local.title}"
 async fn locals_interpolate_var_references() {
     let ctx = setup_with_runbook(RUNBOOK_WITH_LOCALS).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -39,9 +40,9 @@ async fn locals_interpolate_var_references() {
             .into_iter()
             .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -80,8 +81,9 @@ run = "echo ${local.branch}"
 async fn locals_interpolate_workspace_variables() {
     let ctx = setup_with_runbook(RUNBOOK_LOCALS_WITH_WORKSPACE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -89,9 +91,9 @@ async fn locals_interpolate_workspace_variables() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -130,8 +132,9 @@ run = "echo ${local.repo}"
 async fn locals_eagerly_evaluate_shell_expressions() {
     let ctx = setup_with_runbook(RUNBOOK_LOCALS_SHELL_SUBST).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -139,9 +142,9 @@ async fn locals_eagerly_evaluate_shell_expressions() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -177,8 +180,9 @@ run = "echo ${local.branch}"
 async fn workspace_variables_interpolate_at_runtime() {
     let ctx = setup_with_runbook(RUNBOOK_WORKSPACE_VAR_INTERPOLATION).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -186,9 +190,9 @@ async fn workspace_variables_interpolate_at_runtime() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();

@@ -13,8 +13,9 @@ use super::*;
 async fn duplicate_idle_creates_only_one_decision() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -22,9 +23,9 @@ async fn duplicate_idle_creates_only_one_decision() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -95,8 +96,9 @@ async fn duplicate_idle_creates_only_one_decision() {
 async fn prompt_hook_noop_when_step_already_waiting() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -104,9 +106,9 @@ async fn prompt_hook_noop_when_step_already_waiting() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -158,8 +160,9 @@ async fn prompt_hook_noop_when_step_already_waiting() {
 async fn standalone_duplicate_idle_creates_only_one_escalation() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -167,9 +170,9 @@ async fn standalone_duplicate_idle_creates_only_one_escalation() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
         let ar = state.agent_runs.values().next().unwrap();
@@ -226,8 +229,9 @@ async fn standalone_duplicate_idle_creates_only_one_escalation() {
 async fn standalone_prompt_noop_when_agent_escalated() {
     let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -235,9 +239,9 @@ async fn standalone_prompt_noop_when_agent_escalated() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
         let ar = state.agent_runs.values().next().unwrap();
@@ -291,8 +295,9 @@ async fn standalone_prompt_noop_when_agent_escalated() {
 async fn prompt_fires_without_exhaustion_after_resolution() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -300,9 +305,9 @@ async fn prompt_fires_without_exhaustion_after_resolution() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

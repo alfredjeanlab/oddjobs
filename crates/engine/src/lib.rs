@@ -10,6 +10,7 @@
 
 mod activity_logger;
 mod agent_logger;
+mod agent_setup;
 pub mod breadcrumb;
 mod decision_builder;
 pub mod env;
@@ -23,7 +24,6 @@ mod spawn;
 mod steps;
 mod time_fmt;
 pub mod usage_metrics;
-mod agent_setup;
 mod vars;
 mod workspace;
 

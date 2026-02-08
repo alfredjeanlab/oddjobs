@@ -9,8 +9,9 @@ use super::*;
 async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -18,9 +19,9 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -98,8 +99,9 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
 async fn standalone_on_idle_cooldown_schedules_timer() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_COOLDOWN).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -107,9 +109,9 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 

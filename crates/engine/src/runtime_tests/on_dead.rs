@@ -212,8 +212,9 @@ on_dead = "done"
 async fn agent_exited_advances_when_on_dead_is_done() {
     let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DONE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -221,9 +222,9 @@ async fn agent_exited_advances_when_on_dead_is_done() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -269,8 +270,9 @@ on_dead = "fail"
 async fn agent_exited_fails_when_on_dead_is_fail() {
     let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -278,9 +280,9 @@ async fn agent_exited_fails_when_on_dead_is_fail() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -322,8 +324,9 @@ prompt = "Test"
 async fn agent_exited_escalates_by_default() {
     let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DEFAULT).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -331,9 +334,9 @@ async fn agent_exited_escalates_by_default() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -387,8 +390,9 @@ on_dead = { action = "gate", run = "true" }
 async fn gate_dead_advances_when_command_passes() {
     let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_PASS).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -396,9 +400,9 @@ async fn gate_dead_advances_when_command_passes() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -458,8 +462,9 @@ prompt = "Implement"
 async fn gate_dead_result_events_advance_past_shell_step() {
     let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_CHAIN).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -467,9 +472,9 @@ async fn gate_dead_result_events_advance_past_shell_step() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -505,8 +510,9 @@ async fn gate_dead_result_events_advance_past_shell_step() {
 async fn agent_exited_ignores_non_agent_step() {
     let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_CHAIN).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -514,9 +520,9 @@ async fn agent_exited_ignores_non_agent_step() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -576,8 +582,9 @@ on_dead = { action = "gate", run = "false" }
 async fn gate_dead_escalates_when_command_fails() {
     let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -585,9 +592,9 @@ async fn gate_dead_escalates_when_command_fails() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();

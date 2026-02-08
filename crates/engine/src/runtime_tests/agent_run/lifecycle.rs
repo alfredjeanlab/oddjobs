@@ -33,8 +33,9 @@ async fn register_agent_adds_mapping() {
 async fn standalone_liveness_timer_reschedules_when_alive() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -42,9 +43,9 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -101,8 +102,9 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
 async fn standalone_working_clears_idle_grace() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -110,9 +112,9 @@ async fn standalone_working_clears_idle_grace() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 

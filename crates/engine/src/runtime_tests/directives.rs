@@ -23,8 +23,9 @@ run = "echo init"
 async fn command_with_shell_directive_creates_job() {
     let ctx = setup_with_runbook(RUNBOOK_SHELL_COMMAND).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "shell_cmd",
@@ -32,9 +33,9 @@ async fn command_with_shell_directive_creates_job() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     // Job should be created with kind = command name
     let job = ctx.runtime.get_job("pipe-1").unwrap();
@@ -46,8 +47,9 @@ async fn command_with_shell_directive_creates_job() {
 async fn command_with_shell_directive_completes_on_exit() {
     let mut ctx = setup_with_runbook(RUNBOOK_SHELL_COMMAND).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "shell_cmd",
@@ -55,9 +57,9 @@ async fn command_with_shell_directive_completes_on_exit() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     // Shell runs async - wait for ShellExited event
     let event = ctx.event_rx.recv().await.unwrap();
@@ -89,8 +91,9 @@ run = "echo init"
 async fn command_shell_directive_interpolates_args_namespace() {
     let mut ctx = setup_with_runbook(RUNBOOK_SHELL_ARGS_NAMESPACE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "file_bug",
@@ -98,9 +101,9 @@ async fn command_shell_directive_interpolates_args_namespace() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     // The shell command `test '${args.description}' = 'button broken'` should succeed
     // (exit 0) only if args.description was interpolated to "button broken".
@@ -259,8 +262,9 @@ run = "echo nested"
 async fn step_with_job_directive_errors() {
     let ctx = setup_with_runbook(RUNBOOK_JOB_STEP).await;
 
-    // This will error when it tries to start the init step
-    let result = ctx
+    // CommandRun creates the job; the error happens when JobCreated
+    // triggers start_step which rejects the nested job directive.
+    let events = ctx
         .runtime
         .handle_event(command_event(
             "pipe-1",
@@ -271,7 +275,15 @@ async fn step_with_job_directive_errors() {
                 .collect(),
             &ctx.project_root,
         ))
-        .await;
+        .await
+        .unwrap();
+
+    // Process the JobCreated event — start_step should fail
+    let job_created = events
+        .into_iter()
+        .find(|e| matches!(e, Event::JobCreated { .. }))
+        .expect("should have JobCreated event");
+    let result = ctx.runtime.handle_event(job_created).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();

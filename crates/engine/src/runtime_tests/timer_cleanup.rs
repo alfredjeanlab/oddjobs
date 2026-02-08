@@ -69,8 +69,9 @@ on_dead = "done"
 async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -78,9 +79,9 @@ async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -116,8 +117,9 @@ async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
 async fn liveness_timer_cancelled_on_job_failure() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -125,9 +127,9 @@ async fn liveness_timer_cancelled_on_job_failure() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -158,8 +160,9 @@ async fn liveness_timer_cancelled_on_job_failure() {
 async fn liveness_timer_cancelled_on_job_cancellation() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -167,9 +170,9 @@ async fn liveness_timer_cancelled_on_job_cancellation() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -199,8 +202,9 @@ async fn liveness_timer_cancelled_on_job_cancellation() {
 async fn exit_deferred_timer_cancelled_when_job_advances() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -208,9 +212,9 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -255,8 +259,9 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
 async fn exit_deferred_timer_cancelled_on_job_failure() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -264,9 +269,9 @@ async fn exit_deferred_timer_cancelled_on_job_failure() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -303,8 +308,9 @@ async fn exit_deferred_timer_cancelled_on_job_failure() {
 async fn exit_deferred_timer_cancelled_on_job_cancellation() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -312,9 +318,9 @@ async fn exit_deferred_timer_cancelled_on_job_cancellation() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -350,8 +356,9 @@ async fn exit_deferred_timer_cancelled_on_job_cancellation() {
 async fn cooldown_timer_noop_when_job_becomes_terminal() {
     let mut ctx = setup_with_runbook(RUNBOOK_COOLDOWN).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -359,9 +366,9 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -455,8 +462,9 @@ async fn cooldown_timer_noop_when_job_missing() {
 async fn all_job_timers_cancelled_after_on_dead_done_completes() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -464,9 +472,9 @@ async fn all_job_timers_cancelled_after_on_dead_done_completes() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -508,8 +516,9 @@ async fn all_job_timers_cancelled_after_on_dead_done_completes() {
 async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     let mut ctx = setup_with_runbook(RUNBOOK_CLEANUP).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -517,9 +526,9 @@ async fn all_job_timers_cancelled_after_on_idle_done_completes() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();

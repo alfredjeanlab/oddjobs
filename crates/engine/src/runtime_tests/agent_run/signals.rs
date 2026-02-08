@@ -13,8 +13,9 @@ use super::*;
 async fn standalone_signal_escalate_preserves_session() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -22,9 +23,9 @@ async fn standalone_signal_escalate_preserves_session() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -86,8 +87,9 @@ async fn standalone_signal_escalate_preserves_session() {
 async fn standalone_signal_complete_on_terminal_is_noop() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -95,9 +97,9 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -158,8 +160,9 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
 async fn standalone_nudge_records_timestamp() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -167,9 +170,9 @@ async fn standalone_nudge_records_timestamp() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -218,8 +221,9 @@ async fn standalone_nudge_records_timestamp() {
 async fn standalone_auto_resume_suppressed_after_nudge() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -227,9 +231,9 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 
@@ -297,8 +301,9 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
 async fn standalone_auto_resume_allowed_after_cooldown() {
     let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "run-1",
             "build",
             "agent_cmd",
@@ -306,9 +311,9 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     ctx.process_background_events().await;
 

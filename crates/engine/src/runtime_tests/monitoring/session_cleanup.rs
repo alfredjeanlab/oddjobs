@@ -132,8 +132,9 @@ async fn standalone_agent_signal_escalate_keeps_session() {
 async fn job_agent_signal_complete_kills_session() {
     let mut ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -141,9 +142,9 @@ async fn job_agent_signal_complete_kills_session() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -185,8 +186,9 @@ async fn job_agent_signal_complete_kills_session() {
 async fn job_agent_signal_escalate_creates_decision() {
     let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -194,9 +196,9 @@ async fn job_agent_signal_escalate_creates_decision() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
@@ -254,8 +256,9 @@ async fn job_agent_signal_escalate_creates_decision() {
 async fn job_agent_signal_escalate_default_message() {
     let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -263,9 +266,9 @@ async fn job_agent_signal_escalate_default_message() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();

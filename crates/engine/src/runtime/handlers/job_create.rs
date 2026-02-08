@@ -6,7 +6,7 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, JobId, OwnerId, WorkspaceId};
+use oj_core::{Clock, Effect, Event, JobId};
 use oj_runbook::{NotifyConfig, Runbook};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -81,13 +81,11 @@ where
 
         // Determine execution path and workspace metadata (path, id, type)
         let is_worktree;
-        let workspace_id_str;
-        let (execution_path, has_workspace) = match (&job_def.cwd, &job_def.workspace) {
+        let execution_path = match (&job_def.cwd, &job_def.workspace) {
             (Some(cwd), None) => {
                 // cwd set, workspace omitted: run directly in cwd (interpolated)
                 is_worktree = false;
-                workspace_id_str = String::new();
-                (PathBuf::from(oj_runbook::interpolate(cwd, &vars)), false)
+                PathBuf::from(oj_runbook::interpolate(cwd, &vars))
             }
             (Some(_), Some(_)) | (None, Some(_)) => {
                 // Create workspace directory
@@ -110,25 +108,31 @@ where
                     .unwrap_or(false);
 
                 // Inject workspace template variables
-                vars.insert("workspace.id".to_string(), ws_id.clone());
+                vars.insert("workspace.id".to_string(), ws_id);
                 vars.insert(
                     "workspace.root".to_string(),
                     workspace_path.display().to_string(),
                 );
                 vars.insert("workspace.nonce".to_string(), nonce.to_string());
 
-                workspace_id_str = ws_id;
-                (workspace_path, true)
+                // Store workspace type in vars so handle_job_created can rebuild CreateWorkspace
+                vars.insert(
+                    "workspace.type".to_string(),
+                    if is_worktree {
+                        "worktree".to_string()
+                    } else {
+                        "folder".to_string()
+                    },
+                );
+
+                workspace_path
             }
             // Default: run in cwd (where oj CLI was invoked)
             (None, None) => {
                 is_worktree = false;
-                workspace_id_str = String::new();
-                let cwd = vars
-                    .get("invoke.dir")
+                vars.get("invoke.dir")
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-                (cwd, false)
+                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
             }
         };
 
@@ -196,6 +200,37 @@ where
                 };
                 vars.insert("workspace.ref".to_string(), value);
             }
+
+            // Resolve repo root now so it's persisted in vars for handle_job_created
+            let invoke_dir = vars
+                .get("invoke.dir")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+            let mut cmd = tokio::process::Command::new("git");
+            cmd.args([
+                "-C",
+                &invoke_dir.display().to_string(),
+                "rev-parse",
+                "--show-toplevel",
+            ])
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE");
+            let repo_root_output = oj_adapters::subprocess::run_with_timeout(
+                cmd,
+                oj_adapters::subprocess::SHELL_EVAL_TIMEOUT,
+                "git rev-parse",
+            )
+            .await
+            .map_err(RuntimeError::ShellError)?;
+            if !repo_root_output.status.success() {
+                return Err(RuntimeError::ShellError(
+                    "git rev-parse --show-toplevel failed: not a git repository".to_string(),
+                ));
+            }
+            let repo_root = String::from_utf8_lossy(&repo_root_output.stdout)
+                .trim()
+                .to_string();
+            vars.insert("workspace.repo_root".to_string(), repo_root);
         }
 
         // Evaluate locals: interpolate each value with current vars, then add as local.*
@@ -263,84 +298,15 @@ where
             }
         }
 
-        // Build workspace effects using workspace.branch and workspace.ref from vars
-        let workspace_effects = if has_workspace {
-            let (repo_root, branch, start_point) = if is_worktree {
-                let invoke_dir = vars
-                    .get("invoke.dir")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
-                let mut cmd = tokio::process::Command::new("git");
-                cmd.args([
-                    "-C",
-                    &invoke_dir.display().to_string(),
-                    "rev-parse",
-                    "--show-toplevel",
-                ])
-                .env_remove("GIT_DIR")
-                .env_remove("GIT_WORK_TREE");
-                let repo_root_output = oj_adapters::subprocess::run_with_timeout(
-                    cmd,
-                    oj_adapters::subprocess::SHELL_EVAL_TIMEOUT,
-                    "git rev-parse",
-                )
-                .await
-                .map_err(RuntimeError::ShellError)?;
-                if !repo_root_output.status.success() {
-                    return Err(RuntimeError::ShellError(
-                        "git rev-parse --show-toplevel failed: not a git repository".to_string(),
-                    ));
-                }
-                let repo_root = PathBuf::from(
-                    String::from_utf8_lossy(&repo_root_output.stdout)
-                        .trim()
-                        .to_string(),
-                );
-
-                // Safety: workspace.branch is always injected above when is_worktree
-                let branch_name = vars
-                    .get("workspace.branch")
-                    .cloned()
-                    .unwrap_or_else(|| format!("ws-{}", job_id.short(8)));
-                let start_point = vars
-                    .get("workspace.ref")
-                    .cloned()
-                    .unwrap_or_else(|| "HEAD".to_string());
-
-                (Some(repo_root), Some(branch_name), Some(start_point))
-            } else {
-                (None, None, None)
-            };
-
-            let workspace_type_str = if is_worktree {
-                Some("worktree".to_string())
-            } else {
-                Some("folder".to_string())
-            };
-
-            vec![Effect::CreateWorkspace {
-                workspace_id: WorkspaceId::new(workspace_id_str),
-                path: execution_path.clone(),
-                owner: Some(OwnerId::Job(job_id.clone())),
-                workspace_type: workspace_type_str,
-                repo_root,
-                branch,
-                start_point,
-            }]
-        } else {
-            vec![]
-        };
-
         // Compute initial step
         let initial_step = job_def
             .first_step()
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "init".to_string());
 
-        // Extract first step info before releasing borrow on runbook
-        let first_step_name = job_def.first_step().map(|p| p.name.clone());
-
-        // Phase 1: Persist job record before workspace setup
+        // Persist job record — workspace creation and step start are handled
+        // asynchronously by handle_job_created() when the JobCreated event
+        // is processed by the event loop.
         let mut creation_effects = Vec::new();
         if let Some(json) = runbook_json {
             creation_effects.push(Effect::Emit {
@@ -403,21 +369,6 @@ where
             {
                 result_events.push(event);
             }
-        }
-
-        // Phase 2: Kick off workspace creation (deferred — runs in background)
-        if !workspace_effects.is_empty() {
-            // execute_all returns WorkspaceCreated immediately; the background task
-            // will send WorkspaceReady or WorkspaceFailed via event_tx later.
-            let ws_events = self.executor.execute_all(workspace_effects).await?;
-            result_events.extend(ws_events);
-            // Don't start_step here — WorkspaceReady handler will do it.
-        } else if let Some(step_name) = first_step_name {
-            // No workspace: start the first step immediately
-            result_events.extend(
-                self.start_step(&job_id, &step_name, &vars, &execution_path)
-                    .await?,
-            );
         }
 
         Ok(result_events)

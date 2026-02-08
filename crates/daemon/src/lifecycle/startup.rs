@@ -193,7 +193,10 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                         kind: bc.kind.clone(),
                         name: bc.name.clone(),
                         runbook_hash: bc.runbook_hash.clone(),
-                        cwd: bc.cwd.clone().unwrap_or_else(|| std::path::PathBuf::from("/")),
+                        cwd: bc
+                            .cwd
+                            .clone()
+                            .unwrap_or_else(|| std::path::PathBuf::from("/")),
                         vars: bc.vars.clone(),
                         initial_step: bc.current_step.clone(),
                         created_at_epoch_ms: now_ms,

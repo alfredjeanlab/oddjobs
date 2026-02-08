@@ -50,8 +50,9 @@ async fn job_deleted_cancels_timers() {
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     // Create a job that will be on an agent step (creates timers)
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -59,9 +60,9 @@ async fn job_deleted_cancels_timers() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
@@ -98,8 +99,9 @@ async fn job_deleted_cancels_timers() {
 async fn job_deleted_deregisters_agent_mapping() {
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -107,9 +109,9 @@ async fn job_deleted_deregisters_agent_mapping() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
@@ -152,8 +154,9 @@ async fn job_deleted_deregisters_agent_mapping() {
 async fn job_deleted_kills_session() {
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -161,9 +164,9 @@ async fn job_deleted_kills_session() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
@@ -224,8 +227,9 @@ async fn job_deleted_idempotent_for_missing_job() {
 async fn job_deleted_idempotent_when_resources_already_gone() {
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -233,9 +237,9 @@ async fn job_deleted_idempotent_when_resources_already_gone() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
@@ -267,8 +271,9 @@ async fn job_deleted_idempotent_when_resources_already_gone() {
 async fn job_deleted_handles_terminal_job() {
     let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        &ctx,
+        command_event(
             "pipe-1",
             "build",
             "build",
@@ -276,9 +281,9 @@ async fn job_deleted_handles_terminal_job() {
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
     ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();

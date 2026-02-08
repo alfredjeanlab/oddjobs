@@ -46,8 +46,9 @@ async fn setup_job_at_agent_step(ctx: &mut TestContext) -> (String, String, Agen
 
 /// Helper: spawn a standalone agent and return (agent_run_id, session_id, agent_id)
 async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, String, AgentId) {
-    ctx.runtime
-        .handle_event(command_event(
+    handle_event_chain(
+        ctx,
+        command_event(
             "pipe-1",
             "build",
             "agent_cmd",
@@ -55,9 +56,9 @@ async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, String, Agent
                 .into_iter()
                 .collect(),
             &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+        ),
+    )
+    .await;
 
     // SpawnAgent is now deferred; drain background events to apply SessionCreated
     ctx.process_background_events().await;

@@ -13,6 +13,28 @@
 
 use super::*;
 
+/// Helper: create a job via the standard command event chain.
+async fn run_job(ctx: &TestContext, job_id: &str, command: &str, args: HashMap<String, String>) {
+    handle_event_chain(
+        ctx,
+        command_event(job_id, command, command, args, &ctx.project_root),
+    )
+    .await;
+}
+
+/// Shorthand: create a job with a single "name" arg.
+async fn run_job_named(ctx: &TestContext, job_id: &str, command: &str, name: &str) {
+    run_job(
+        ctx,
+        job_id,
+        command,
+        [("name".to_string(), name.to_string())]
+            .into_iter()
+            .collect(),
+    )
+    .await;
+}
+
 // =============================================================================
 // Job with explicit cwd, no workspace
 // =============================================================================
@@ -35,18 +57,7 @@ run = "echo init"
 async fn job_with_cwd_uses_interpolated_path() {
     let ctx = setup_with_runbook(CWD_ONLY_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "deploy",
-            "deploy",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "deploy", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     // cwd should be the interpolated path
@@ -87,18 +98,7 @@ run = "echo init"
 async fn job_without_cwd_or_workspace_uses_invoke_dir() {
     let ctx = setup_with_runbook(NO_CWD_NO_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "simple",
-            "simple",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "simple", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     // cwd should be the invoke directory (project_root in our test)
@@ -134,18 +134,7 @@ run = "echo init"
 async fn job_with_folder_workspace_creates_workspace() {
     let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
 
@@ -180,18 +169,7 @@ async fn job_with_folder_workspace_creates_workspace() {
 async fn folder_workspace_path_is_under_state_dir() {
     let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     let ws_root = job.vars.get("workspace.root").unwrap();
@@ -225,18 +203,7 @@ run = "echo init"
 async fn job_name_template_is_interpolated() {
     let ctx = setup_with_runbook(NAME_TEMPLATE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "auth-module".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "auth-module").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     // The name should contain the interpolated value and a nonce suffix
@@ -251,18 +218,7 @@ async fn job_name_template_is_interpolated() {
 async fn job_without_name_template_uses_args_name() {
     let ctx = setup_with_runbook(NO_CWD_NO_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "simple",
-            "simple",
-            [("name".to_string(), "my-feature".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "simple", "my-feature").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     assert_eq!(
@@ -322,18 +278,7 @@ async fn job_namespace_is_propagated() {
 async fn runbook_is_cached_after_creation() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
 
@@ -359,18 +304,7 @@ async fn runbook_is_cached_after_creation() {
 async fn runbook_loaded_event_is_emitted() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     // Verify the runbook was stored in materialized state (via RunbookLoaded event)
     let job = ctx.runtime.get_job("pipe-1").unwrap();
@@ -392,34 +326,12 @@ async fn second_job_reuses_cached_runbook() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
     // Create first job
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "first".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "first").await;
 
     let job1 = ctx.runtime.get_job("pipe-1").unwrap();
 
     // Create second job with same command (same runbook)
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-2",
-            "build",
-            "build",
-            [("name".to_string(), "second".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-2", "build", "second").await;
 
     let job2 = ctx.runtime.get_job("pipe-2").unwrap();
 
@@ -475,18 +387,7 @@ async fn job_def_not_found_returns_error() {
 async fn job_starts_at_first_step() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     assert_eq!(job.step, "init", "job should start at first step");
@@ -520,18 +421,7 @@ run = "echo init"
 async fn cwd_with_workspace_creates_workspace() {
     let ctx = setup_with_runbook(CWD_AND_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     // When both cwd and workspace are set, workspace takes precedence
@@ -549,31 +439,9 @@ async fn cwd_with_workspace_creates_workspace() {
 async fn multiple_jobs_get_distinct_workspaces() {
     let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "first".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "first").await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-2",
-            "build",
-            "build",
-            [("name".to_string(), "second".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-2", "build", "second").await;
 
     let job1 = ctx.runtime.get_job("pipe-1").unwrap();
     let job2 = ctx.runtime.get_job("pipe-2").unwrap();
@@ -597,18 +465,7 @@ async fn multiple_jobs_get_distinct_workspaces() {
 async fn job_vars_are_namespaced() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test-feature".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test-feature").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
 
@@ -638,18 +495,7 @@ async fn job_created_at_uses_clock() {
     // Advance the fake clock
     ctx.clock.advance(std::time::Duration::from_secs(1000));
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     // Job should exist and be in running state (verifying clock didn't break creation)
@@ -680,18 +526,7 @@ run = "echo init"
 async fn on_start_notification_uses_resolved_name() {
     let ctx = setup_with_runbook(NOTIFY_NAME_TEMPLATE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "auth".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "auth").await;
 
     let calls = ctx.notifier.calls();
     assert_eq!(calls.len(), 1, "on_start should emit one notification");
@@ -716,18 +551,7 @@ async fn on_start_notification_uses_resolved_name() {
 async fn workspace_nonce_is_derived_from_job_id() {
     let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "oj-abc12345-deadbeef",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "oj-abc12345-deadbeef", "build", "test").await;
 
     let job = ctx.runtime.get_job("oj-abc12345-deadbeef").unwrap();
     let nonce = job.vars.get("workspace.nonce").unwrap();
@@ -763,18 +587,7 @@ run = "echo init"
 async fn name_template_with_workspace_creates_matching_ws_id() {
     let ctx = setup_with_runbook(NAME_TEMPLATE_WITH_WORKSPACE_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "my-feature".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "my-feature").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     let ws_id = job.workspace_id.as_ref().unwrap().to_string();
@@ -815,18 +628,7 @@ run = "echo ${local.branch}"
 async fn multiple_locals_are_evaluated() {
     let ctx = setup_with_runbook(MULTI_LOCALS_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "auth".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "auth").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
 
@@ -850,18 +652,7 @@ async fn multiple_locals_are_evaluated() {
 async fn job_without_locals_has_no_local_vars() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
 
@@ -885,18 +676,7 @@ async fn job_without_locals_has_no_local_vars() {
 async fn job_kind_matches_definition_name() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     assert_eq!(
@@ -931,18 +711,7 @@ run = "echo execute"
 async fn job_starts_at_first_defined_step() {
     let ctx = setup_with_runbook(MULTI_STEP_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "pipeline",
-            "pipeline",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "pipeline", "test").await;
 
     let job = ctx.runtime.get_job("pipe-1").unwrap();
     assert_eq!(
@@ -959,18 +728,7 @@ async fn job_starts_at_first_defined_step() {
 async fn breadcrumb_is_written_after_creation() {
     let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
 
-    ctx.runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ))
-        .await
-        .unwrap();
+    run_job_named(&ctx, "pipe-1", "build", "test").await;
 
     // Breadcrumb file should exist in the log dir
     let breadcrumb_dir = ctx.project_root.join("logs/breadcrumbs");

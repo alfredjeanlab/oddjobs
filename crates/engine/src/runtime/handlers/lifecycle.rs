@@ -259,9 +259,80 @@ where
         }
     }
 
+    /// Handle JobCreated: kick off workspace creation or start first step.
+    ///
+    /// Called when the event loop processes a `JobCreated` event emitted by
+    /// `create_and_start_job()`. Reads workspace metadata from job vars to
+    /// decide whether to build a `CreateWorkspace` effect (background task
+    /// fires `WorkspaceReady` → `start_first_step()`) or start directly.
+    ///
+    /// Idempotent: no-op if the step is already past Pending.
+    pub(crate) async fn handle_job_created(
+        &self,
+        job_id: &JobId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let Some(job) = self.get_job(job_id.as_str()) else {
+            tracing::debug!(job_id = %job_id, "job_created: job not found");
+            return Ok(vec![]);
+        };
+
+        // Idempotency guard: skip if step already started (e.g. WAL replay)
+        if job.step_status != StepStatus::Pending {
+            tracing::debug!(
+                job_id = %job_id,
+                step_status = %job.step_status,
+                "job_created: step already started, skipping"
+            );
+            return Ok(vec![]);
+        }
+
+        // Check if this job has a workspace to create
+        if let Some(ws_id) = job.vars.get("workspace.id") {
+            let workspace_type = job.vars.get("workspace.type").cloned();
+            let is_worktree = workspace_type.as_deref() == Some("worktree");
+
+            let (repo_root, branch, start_point) = if is_worktree {
+                (
+                    job.vars
+                        .get("workspace.repo_root")
+                        .map(std::path::PathBuf::from),
+                    job.vars.get("workspace.branch").cloned(),
+                    Some(
+                        job.vars
+                            .get("workspace.ref")
+                            .cloned()
+                            .unwrap_or_else(|| "HEAD".to_string()),
+                    ),
+                )
+            } else {
+                (None, None, None)
+            };
+
+            let ws_events = self
+                .executor
+                .execute_all(vec![Effect::CreateWorkspace {
+                    workspace_id: WorkspaceId::new(ws_id),
+                    path: job.cwd.clone(),
+                    owner: Some(OwnerId::Job(job_id.clone())),
+                    workspace_type,
+                    repo_root,
+                    branch,
+                    start_point,
+                }])
+                .await?;
+
+            // WorkspaceCreated is returned immediately; the background task
+            // will fire WorkspaceReady → start_first_step().
+            return Ok(ws_events);
+        }
+
+        // No workspace — start the first step directly
+        self.start_first_step(job_id, &job).await
+    }
+
     /// Handle WorkspaceReady: workspace filesystem setup completed successfully.
     ///
-    /// Looks up the owning job and calls start_step() to begin the first step.
+    /// Looks up the owning job and calls start_first_step() to begin execution.
     /// Idempotent: no-op if the job is already past Pending (e.g. already running).
     pub(crate) async fn handle_workspace_ready(
         &self,
@@ -304,16 +375,27 @@ where
             return Ok(vec![]);
         }
 
+        self.start_first_step(&job_id, &job).await
+    }
+
+    /// Shared helper: look up the first step from the runbook and start it.
+    ///
+    /// Used by both `handle_job_created` (no-workspace path) and
+    /// `handle_workspace_ready` (after workspace setup completes).
+    async fn start_first_step(
+        &self,
+        job_id: &JobId,
+        job: &oj_core::Job,
+    ) -> Result<Vec<Event>, RuntimeError> {
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook
             .get_job(&job.kind)
             .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
-        let first_step_name = job_def.first_step().map(|p| p.name.clone());
-        let execution_dir = self.execution_dir(&job);
+        let execution_dir = self.execution_dir(job);
 
-        if let Some(step_name) = first_step_name {
-            self.start_step(&job_id, &step_name, &job.vars, &execution_dir)
+        if let Some(step) = job_def.first_step() {
+            self.start_step(job_id, &step.name, &job.vars, &execution_dir)
                 .await
         } else {
             Ok(vec![])

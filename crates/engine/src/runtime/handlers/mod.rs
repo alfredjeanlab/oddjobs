@@ -447,10 +447,13 @@ where
                 );
             }
 
+            Event::JobCreated { id, .. } => {
+                result_events.extend(self.handle_job_created(id).await?);
+            }
+
             // No-op: signals and state mutations handled elsewhere
             Event::Shutdown
             | Event::Custom
-            | Event::JobCreated { .. }
             | Event::JobAdvanced { .. }
             | Event::StepStarted { .. }
             | Event::StepWaiting { .. }

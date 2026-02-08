@@ -17,6 +17,8 @@ use tokio::sync::mpsc;
 /// Immediately records the workspace in state and spawns a background task
 /// for the filesystem work (worktree add or mkdir). Returns the
 /// `WorkspaceCreated` event for WAL persistence.
+// TODO(refactor): group workspace creation params into a context struct
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create(
     state: &Arc<Mutex<MaterializedState>>,
     event_tx: &mpsc::Sender<Event>,
@@ -156,9 +158,7 @@ pub(crate) async fn delete(
     if workspace_path.exists() {
         tokio::fs::remove_dir_all(&workspace_path)
             .await
-            .map_err(|e| {
-                ExecuteError::Shell(format!("failed to remove workspace dir: {}", e))
-            })?;
+            .map_err(|e| ExecuteError::Shell(format!("failed to remove workspace dir: {}", e)))?;
     }
 
     // Delete workspace record
