@@ -11,8 +11,8 @@ use super::*;
 
 #[tokio::test]
 async fn standalone_agent_signal_complete_kills_session() {
-    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
-    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&mut ctx).await;
 
     // Register the session as alive
     ctx.sessions.add_session(&session_id, true);
@@ -49,8 +49,8 @@ async fn standalone_agent_signal_complete_kills_session() {
 
 #[tokio::test]
 async fn standalone_agent_on_idle_done_kills_session() {
-    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
-    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&mut ctx).await;
 
     // Register the session as alive
     ctx.sessions.add_session(&session_id, true);
@@ -88,8 +88,8 @@ async fn standalone_agent_on_idle_done_kills_session() {
 
 #[tokio::test]
 async fn standalone_agent_signal_escalate_keeps_session() {
-    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
-    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&ctx).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (_agent_run_id, session_id, agent_id) = setup_standalone_agent(&mut ctx).await;
 
     // Register the session as alive
     ctx.sessions.add_session(&session_id, true);
@@ -130,7 +130,7 @@ async fn standalone_agent_signal_escalate_keeps_session() {
 
 #[tokio::test]
 async fn job_agent_signal_complete_kills_session() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -144,6 +144,7 @@ async fn job_agent_signal_complete_kills_session() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -182,7 +183,7 @@ async fn job_agent_signal_complete_kills_session() {
 
 #[tokio::test]
 async fn job_agent_signal_escalate_creates_decision() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -196,6 +197,7 @@ async fn job_agent_signal_escalate_creates_decision() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -250,7 +252,7 @@ async fn job_agent_signal_escalate_creates_decision() {
 
 #[tokio::test]
 async fn job_agent_signal_escalate_default_message() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -264,6 +266,7 @@ async fn job_agent_signal_escalate_default_message() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

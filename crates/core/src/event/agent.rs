@@ -124,6 +124,9 @@ pub(super) fn log_summary(event: &Event, t: &str) -> String {
             prompt_type,
             ..
         } => format!("{t} agent={agent_id} prompt_type={prompt_type:?}"),
+        Event::AgentSpawnFailed {
+            agent_id, reason, ..
+        } => format!("{t} agent={agent_id} reason={reason}"),
         _ => unreachable!("not an agent event"),
     }
 }

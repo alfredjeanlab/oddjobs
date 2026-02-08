@@ -11,7 +11,7 @@ use super::*;
 
 #[tokio::test]
 async fn standalone_on_dead_fail_fails_agent_run() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -25,6 +25,8 @@ async fn standalone_on_dead_fail_fails_agent_run() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -71,7 +73,7 @@ async fn standalone_on_dead_fail_fails_agent_run() {
 
 #[tokio::test]
 async fn standalone_on_dead_gate_pass_completes_agent_run() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_PASS).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_PASS).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -85,6 +87,8 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -122,7 +126,7 @@ async fn standalone_on_dead_gate_pass_completes_agent_run() {
 
 #[tokio::test]
 async fn standalone_on_dead_gate_fail_escalates_agent_run() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_GATE_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -136,6 +140,8 @@ async fn standalone_on_dead_gate_fail_escalates_agent_run() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -192,7 +198,7 @@ prompt = "Do the work"
 on_idle = { action = "gate", run = "true" }
 "#;
 
-    let ctx = setup_with_runbook(runbook).await;
+    let mut ctx = setup_with_runbook(runbook).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -206,6 +212,8 @@ on_idle = { action = "gate", run = "true" }
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -248,7 +256,7 @@ on_idle = { action = "gate", run = "true" }
 
 #[tokio::test]
 async fn standalone_on_error_fail_fails_agent_run() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_ERROR_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_ERROR_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -262,6 +270,8 @@ async fn standalone_on_error_fail_fails_agent_run() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx

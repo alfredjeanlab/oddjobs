@@ -27,8 +27,8 @@ async fn agent_state_changed_unknown_agent_is_noop() {
 
 #[tokio::test]
 async fn agent_state_changed_terminal_job_is_noop() {
-    let ctx = setup().await;
-    let (job_id, _session_id, agent_id) = setup_job_at_agent_step(&ctx).await;
+    let mut ctx = setup().await;
+    let (job_id, _session_id, agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
     // Fail the job to make it terminal
     ctx.runtime
@@ -288,8 +288,8 @@ async fn agent_signal_continue_no_job_state_change() {
 
 #[tokio::test]
 async fn standalone_agent_signal_continue_no_state_change() {
-    let ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
-    let (agent_run_id, _session_id, agent_id) = setup_standalone_agent(&ctx).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_STANDALONE_AGENT).await;
+    let (agent_run_id, _session_id, agent_id) = setup_standalone_agent(&mut ctx).await;
 
     // Verify agent run is Running
     let agent_run = ctx

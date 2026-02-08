@@ -11,7 +11,7 @@ use super::*;
 
 #[tokio::test]
 async fn standalone_signal_escalate_preserves_session() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -25,6 +25,8 @@ async fn standalone_signal_escalate_preserves_session() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -82,7 +84,7 @@ async fn standalone_signal_escalate_preserves_session() {
 
 #[tokio::test]
 async fn standalone_signal_complete_on_terminal_is_noop() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_DEAD_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -96,6 +98,8 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -152,7 +156,7 @@ async fn standalone_signal_complete_on_terminal_is_noop() {
 
 #[tokio::test]
 async fn standalone_nudge_records_timestamp() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -166,6 +170,8 @@ async fn standalone_nudge_records_timestamp() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -210,7 +216,7 @@ async fn standalone_nudge_records_timestamp() {
 
 #[tokio::test]
 async fn standalone_auto_resume_suppressed_after_nudge() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -224,6 +230,8 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx
@@ -287,7 +295,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
 
 #[tokio::test]
 async fn standalone_auto_resume_allowed_after_cooldown() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -301,6 +309,8 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx

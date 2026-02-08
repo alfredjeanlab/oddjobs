@@ -297,7 +297,7 @@ async fn check_process_running_returns_false_by_default() {
 
 #[tokio::test]
 async fn get_agent_state_returns_state() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     // Spawn an agent first so it has state
     harness
@@ -316,6 +316,9 @@ async fn get_agent_state_returns_state() {
         })
         .await
         .unwrap();
+
+    // Wait for the background spawn task to complete
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
     let state = harness
         .executor
@@ -337,7 +340,7 @@ async fn get_session_log_size_returns_none_for_unknown() {
 
 #[tokio::test]
 async fn get_session_log_size_returns_value_when_set() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     let agent_id = AgentId::new("agent-log");
 
@@ -358,6 +361,9 @@ async fn get_session_log_size_returns_value_when_set() {
         })
         .await
         .unwrap();
+
+    // Wait for the background spawn task to complete
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
     harness.agents.set_session_log_size(&agent_id, Some(42));
 

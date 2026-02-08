@@ -161,16 +161,10 @@ where
                 .append_agent_pointer(job_id.as_str(), &job.step, aid.as_str());
         }
 
-        let mut result_events = self.executor.execute_all(effects).await?;
+        let result_events = self.executor.execute_all(effects).await?;
 
-        // Emit agent on_start notification if configured
-        if let Some(effect) =
-            monitor::build_agent_notify_effect(&job, agent_def, agent_def.notify.on_start.as_ref())
-        {
-            if let Some(event) = self.executor.execute(effect).await? {
-                result_events.push(event);
-            }
-        }
+        // on_start notification is emitted by handle_session_created() when
+        // the background SpawnAgent task completes successfully.
 
         Ok(result_events)
     }

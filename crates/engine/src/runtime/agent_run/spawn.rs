@@ -61,40 +61,11 @@ where
             self.register_agent(aid.clone(), OwnerId::agent_run(agent_run_id.clone()));
         }
 
-        // Execute spawn effects, handling spawn failures gracefully
-        let mut result_events = match self.executor.execute_all(effects).await {
-            Ok(events) => events,
-            Err(e) => {
-                // Spawn failed - emit failure event and log the error
-                let error_msg = e.to_string();
-                tracing::error!(
-                    agent_run_id = %agent_run_id,
-                    error = %error_msg,
-                    "standalone agent spawn failed"
-                );
-
-                // Write error to agent log (watcher isn't started, so we write directly)
-                if let Some(ref aid) = agent_id {
-                    self.logger.append_agent_error(aid.as_str(), &error_msg);
-                }
-
-                // Emit failure event so agent_run status is updated
-                let fail_event = Event::AgentRunStatusChanged {
-                    id: agent_run_id.clone(),
-                    status: AgentRunStatus::Failed,
-                    reason: Some(error_msg.clone()),
-                };
-                let _ = self
-                    .executor
-                    .execute(Effect::Emit { event: fail_event })
-                    .await;
-
-                // Return the original error so callers know spawn failed
-                return Err(e.into());
-            }
-        };
+        // Execute spawn effects (SpawnAgent fires a background task and returns immediately)
+        let mut result_events = self.executor.execute_all(effects).await?;
 
         // Emit AgentRunStarted event if we have an agent_id
+        // (records the agent_id immediately in state for queries)
         if let Some(ref aid) = agent_id {
             let started_event = Event::AgentRunStarted {
                 id: agent_run_id.clone(),
@@ -111,22 +82,10 @@ where
             }
         }
 
-        // Emit agent on_start notification if configured
-        if let Some(effect) = agent_def.notify.on_start.as_ref().map(|template| {
-            let mut vars = crate::vars::namespace_vars(input);
-            vars.insert("agent_run_id".to_string(), agent_run_id.to_string());
-            vars.insert("name".to_string(), agent_name.to_string());
-            vars.insert("agent".to_string(), agent_def.name.clone());
-            let message = oj_runbook::NotifyConfig::render(template, &vars);
-            Effect::Notify {
-                title: agent_def.name.clone(),
-                message,
-            }
-        }) {
-            if let Some(ev) = self.executor.execute(effect).await? {
-                result_events.push(ev);
-            }
-        }
+        // on_start notification and liveness timer are set by
+        // handle_session_created() when the background spawn completes.
+        // Spawn failures arrive as AgentSpawnFailed events and are
+        // handled by handle_agent_spawn_failed().
 
         Ok(result_events)
     }

@@ -72,6 +72,30 @@ pub(crate) async fn setup_with_runbook(runbook_content: &str) -> TestContext {
     }
 }
 
+impl TestContext {
+    /// Drain background events (like SessionCreated from deferred SpawnAgent)
+    /// and process them through state + handle_event.
+    ///
+    /// Call after operations that spawn agents (e.g. handle_event for CommandRun
+    /// or ShellExited that advances to an agent step).
+    pub(crate) async fn process_background_events(&mut self) {
+        // Yield to let tokio::spawn tasks complete (FakeAgentAdapter is synchronous)
+        tokio::task::yield_now().await;
+
+        let mut events = Vec::new();
+        while let Ok(event) = self.event_rx.try_recv() {
+            events.push(event);
+        }
+
+        for event in events {
+            self.runtime.lock_state_mut(|state| {
+                state.apply_event(&event);
+            });
+            let _ = self.runtime.handle_event(event).await;
+        }
+    }
+}
+
 /// Parse a runbook, load it into cache + state, and return its hash.
 pub(crate) fn load_runbook_hash(ctx: &TestContext, content: &str) -> String {
     let runbook = oj_runbook::parse_runbook(content).unwrap();

@@ -6,7 +6,7 @@
 use crate::error::RuntimeError;
 use crate::executor::ExecuteError;
 use oj_adapters::agent::find_session_log;
-use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId, ShortId, TimerId};
+use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId, ShortId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -397,31 +397,18 @@ pub fn build_spawn_effects(
         config
     };
 
-    // Build liveness timer keyed to the right owner
-    let liveness_timer_id = match &ctx.owner {
-        OwnerId::Job(job_id) => TimerId::liveness(job_id),
-        OwnerId::AgentRun(ar_id) => TimerId::liveness_agent_run(ar_id),
-    };
-
-    Ok(vec![
-        Effect::SpawnAgent {
-            agent_id: AgentId::new(agent_id),
-            agent_name: agent_name.to_string(),
-            owner: ctx.owner.clone(),
-            workspace_path: workspace_path.to_path_buf(),
-            input: vars,
-            command,
-            env,
-            unset_env,
-            cwd: Some(effective_cwd),
-            session_config,
-        },
-        // Start liveness monitoring timer
-        Effect::SetTimer {
-            id: liveness_timer_id,
-            duration: LIVENESS_INTERVAL,
-        },
-    ])
+    Ok(vec![Effect::SpawnAgent {
+        agent_id: AgentId::new(agent_id),
+        agent_name: agent_name.to_string(),
+        owner: ctx.owner.clone(),
+        workspace_path: workspace_path.to_path_buf(),
+        input: vars,
+        command,
+        env,
+        unset_env,
+        cwd: Some(effective_cwd),
+        session_config,
+    }])
 }
 
 #[cfg(test)]

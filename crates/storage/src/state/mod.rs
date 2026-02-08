@@ -177,6 +177,7 @@ impl MaterializedState {
             | Event::TimerStart { .. }
             | Event::SessionInput { .. }
             | Event::AgentInput { .. }
+            | Event::AgentSpawnFailed { .. }
             | Event::JobResume { .. }
             | Event::JobCancel { .. }
             | Event::AgentRunResume { .. }

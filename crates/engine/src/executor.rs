@@ -77,21 +77,12 @@ where
     ///
     /// Returns an optional event that should be fed back into the event loop.
     pub async fn execute(&self, effect: Effect) -> Result<Option<Event>, ExecuteError> {
-        // Format the fields as `key=val`
-        let info = {
-            let fields = effect.fields();
-            let cap = fields.iter().map(|(a, b)| a.len() + b.len() + 2).sum();
-            let mut fmt = String::with_capacity(cap);
-            for (key, val) in fields {
-                fmt.push_str(key);
-                fmt.push('=');
-                fmt.push_str(&val);
-                fmt.push(' ');
-            }
-            fmt.pop();
-            fmt
-        };
-
+        let info: String = effect
+            .fields()
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let op = effect.name();
         let verbose = effect.verbose();
         if verbose {
@@ -101,24 +92,11 @@ where
         let start = std::time::Instant::now();
         let result = self.execute_inner(effect).await;
         let elapsed_ms = start.elapsed().as_millis() as u64;
-        if verbose {
-            match &result {
-                Ok(event) => tracing::info!(event = event.is_some(), elapsed_ms, "completed"),
-                Err(e) => tracing::error!(error = %e, elapsed_ms, "failed"),
-            }
-        } else {
-            match &result {
-                Ok(event) => tracing::info!(
-                    event = event.is_some(),
-                    elapsed_ms,
-                    "executed effect={} {}",
-                    op,
-                    info
-                ),
-                Err(e) => tracing::error!(error = %e, elapsed_ms, "error effect={} {}", op, info),
-            }
+        match &result {
+            Ok(ev) if verbose => tracing::info!(event = ev.is_some(), elapsed_ms, "completed"),
+            Ok(ev) => tracing::info!(event = ev.is_some(), elapsed_ms, "effect={} {}", op, info),
+            Err(e) => tracing::error!(error = %e, elapsed_ms, "error effect={} {}", op, info),
         }
-
         result
     }
 
@@ -174,19 +152,34 @@ where
                     config = config.cwd(cwd);
                 }
 
-                // Spawn agent (this starts the watcher that emits events)
-                let handle = self.agents.spawn(config, self.event_tx.clone()).await?;
+                // Spawn agent in background task (follows CreateWorkspace pattern)
+                let agents = self.agents.clone();
+                let event_tx = self.event_tx.clone();
+                tokio::spawn(async move {
+                    match agents.spawn(config, event_tx.clone()).await {
+                        Ok(handle) => {
+                            let event = Event::SessionCreated {
+                                id: oj_core::SessionId::new(handle.session_id),
+                                owner,
+                            };
+                            if let Err(e) = event_tx.send(event).await {
+                                tracing::error!("failed to send SessionCreated: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            let event = Event::AgentSpawnFailed {
+                                agent_id,
+                                owner,
+                                reason: e.to_string(),
+                            };
+                            if let Err(e) = event_tx.send(event).await {
+                                tracing::error!("failed to send AgentSpawnFailed: {}", e);
+                            }
+                        }
+                    }
+                });
 
-                // Emit SessionCreated so state tracks the session_id
-                let event = Event::SessionCreated {
-                    id: oj_core::SessionId::new(handle.session_id),
-                    owner,
-                };
-                {
-                    let mut state = self.state.lock();
-                    state.apply_event(&event);
-                }
-                Ok(Some(event))
+                Ok(None)
             }
 
             Effect::SendToAgent { agent_id, input } => {

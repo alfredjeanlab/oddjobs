@@ -15,7 +15,7 @@ use oj_core::{JobId, OwnerId, TimerId};
 
 #[tokio::test]
 async fn session_death_triggers_on_dead_action() {
-    let ctx = setup().await;
+    let mut ctx = setup().await;
     let job_id = create_job(&ctx).await;
 
     // Advance to plan (agent step) — spawn_agent registers in agent_jobs
@@ -29,6 +29,7 @@ async fn session_death_triggers_on_dead_action() {
         })
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -115,7 +116,7 @@ async fn session_death_timer_on_terminal_job_is_noop() {
 
 #[tokio::test]
 async fn agent_exited_on_terminal_job_is_noop() {
-    let ctx = setup().await;
+    let mut ctx = setup().await;
     let job_id = create_job(&ctx).await;
 
     // Advance to plan (agent step)
@@ -129,6 +130,7 @@ async fn agent_exited_on_terminal_job_is_noop() {
         })
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -208,7 +210,7 @@ on_dead = "done"
 
 #[tokio::test]
 async fn agent_exited_advances_when_on_dead_is_done() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DONE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DONE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -222,6 +224,7 @@ async fn agent_exited_advances_when_on_dead_is_done() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -264,7 +267,7 @@ on_dead = "fail"
 
 #[tokio::test]
 async fn agent_exited_fails_when_on_dead_is_fail() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_DEAD_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -278,6 +281,7 @@ async fn agent_exited_fails_when_on_dead_is_fail() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -316,7 +320,7 @@ prompt = "Test"
 
 #[tokio::test]
 async fn agent_exited_escalates_by_default() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DEFAULT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_ON_DEAD_DEFAULT).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -330,6 +334,7 @@ async fn agent_exited_escalates_by_default() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -380,7 +385,7 @@ on_dead = { action = "gate", run = "true" }
 
 #[tokio::test]
 async fn gate_dead_advances_when_command_passes() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_PASS).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_PASS).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -394,6 +399,7 @@ async fn gate_dead_advances_when_command_passes() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -464,6 +470,7 @@ async fn gate_dead_result_events_advance_past_shell_step() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
@@ -496,7 +503,7 @@ async fn gate_dead_result_events_advance_past_shell_step() {
 
 #[tokio::test]
 async fn agent_exited_ignores_non_agent_step() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_CHAIN).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_CHAIN).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -510,6 +517,7 @@ async fn agent_exited_ignores_non_agent_step() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -566,7 +574,7 @@ on_dead = { action = "gate", run = "false" }
 
 #[tokio::test]
 async fn gate_dead_escalates_when_command_fails() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_DEAD_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -580,6 +588,7 @@ async fn gate_dead_escalates_when_command_fails() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let job = ctx.runtime.get_job(&job_id).unwrap();

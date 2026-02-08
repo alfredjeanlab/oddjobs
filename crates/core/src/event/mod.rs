@@ -198,6 +198,14 @@ pub enum Event {
         owner: OwnerId,
     },
 
+    /// Agent spawn failed (background task couldn't create the session)
+    #[serde(rename = "agent:spawn_failed")]
+    AgentSpawnFailed {
+        agent_id: AgentId,
+        owner: OwnerId,
+        reason: String,
+    },
+
     #[serde(rename = "session:input")]
     SessionInput { id: SessionId, input: String },
 

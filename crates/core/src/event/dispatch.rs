@@ -44,6 +44,7 @@ impl Event {
             Event::JobDeleted { .. } => "job:deleted",
             Event::RunbookLoaded { .. } => "runbook:loaded",
             Event::SessionCreated { .. } => "session:created",
+            Event::AgentSpawnFailed { .. } => "agent:spawn_failed",
             Event::SessionInput { .. } => "session:input",
             Event::SessionDeleted { .. } => "session:deleted",
             Event::ShellExited { .. } => "shell:exited",
@@ -102,7 +103,8 @@ impl Event {
             | Event::AgentSignal { .. }
             | Event::AgentIdle { .. }
             | Event::AgentStop { .. }
-            | Event::AgentPrompt { .. } => agent::log_summary(self, t),
+            | Event::AgentPrompt { .. }
+            | Event::AgentSpawnFailed { .. } => agent::log_summary(self, t),
 
             // Job events
             Event::JobCreated { .. }
@@ -205,6 +207,12 @@ impl Event {
             Event::CommandRun { .. } | Event::ShellExited { .. } | Event::SessionCreated { .. } => {
                 core_types::job_id(self)
             }
+
+            // Agent spawn failed
+            Event::AgentSpawnFailed { owner, .. } => match owner {
+                OwnerId::Job(id) => Some(id),
+                OwnerId::AgentRun(_) => None,
+            },
 
             _ => None,
         }

@@ -11,8 +11,8 @@ use super::*;
 
 #[tokio::test]
 async fn liveness_timer_reschedules_when_session_alive() {
-    let ctx = setup().await;
-    let (job_id, session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
+    let mut ctx = setup().await;
+    let (job_id, session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
     // Register the session as alive in the fake adapter
     ctx.sessions.add_session(&session_id, true);
@@ -48,8 +48,8 @@ async fn liveness_timer_reschedules_when_session_alive() {
 
 #[tokio::test]
 async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
-    let ctx = setup().await;
-    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
+    let mut ctx = setup().await;
+    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
     // Don't add the session to FakeSessionAdapter — is_alive returns false for unknown sessions
 
@@ -87,8 +87,8 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
 
 #[tokio::test]
 async fn exit_deferred_timer_noop_when_job_terminal() {
-    let ctx = setup().await;
-    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&ctx).await;
+    let mut ctx = setup().await;
+    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
     // Fail the job to make it terminal
     ctx.runtime
@@ -119,7 +119,7 @@ async fn exit_deferred_timer_noop_when_job_terminal() {
 
 #[tokio::test]
 async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
-    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
@@ -133,6 +133,7 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
         })
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -159,7 +160,7 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
 
 #[tokio::test]
 async fn exit_deferred_timer_on_error_when_agent_failed() {
-    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
@@ -173,6 +174,7 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
         })
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -201,7 +203,7 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
 
 #[tokio::test]
 async fn exit_deferred_timer_on_dead_for_exited_state() {
-    let ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_MONITORING).await;
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
@@ -215,6 +217,7 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
         })
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");

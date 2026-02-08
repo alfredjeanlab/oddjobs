@@ -425,6 +425,21 @@ where
                 result_events.extend(self.handle_workspace_failed(id, reason).await?);
             }
 
+            Event::SessionCreated { id, owner } => {
+                result_events.extend(self.handle_session_created(id, owner).await?);
+            }
+
+            Event::AgentSpawnFailed {
+                agent_id,
+                owner,
+                reason,
+            } => {
+                result_events.extend(
+                    self.handle_agent_spawn_failed(agent_id, owner, reason)
+                        .await?,
+                );
+            }
+
             // No-op: signals and state mutations handled elsewhere
             Event::Shutdown
             | Event::Custom
@@ -434,7 +449,6 @@ where
             | Event::StepWaiting { .. }
             | Event::StepCompleted { .. }
             | Event::StepFailed { .. }
-            | Event::SessionCreated { .. }
             | Event::SessionDeleted { .. }
             | Event::WorkspaceCreated { .. }
             | Event::WorkspaceDeleted { .. }

@@ -47,7 +47,7 @@ on_dead = "done"
 
 #[tokio::test]
 async fn job_deleted_cancels_timers() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     // Create a job that will be on an agent step (creates timers)
     ctx.runtime
@@ -62,6 +62,7 @@ async fn job_deleted_cancels_timers() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -95,7 +96,7 @@ async fn job_deleted_cancels_timers() {
 
 #[tokio::test]
 async fn job_deleted_deregisters_agent_mapping() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -109,6 +110,7 @@ async fn job_deleted_deregisters_agent_mapping() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
 
@@ -148,7 +150,7 @@ async fn job_deleted_deregisters_agent_mapping() {
 
 #[tokio::test]
 async fn job_deleted_kills_session() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -162,6 +164,7 @@ async fn job_deleted_kills_session() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -219,7 +222,7 @@ async fn job_deleted_idempotent_for_missing_job() {
 
 #[tokio::test]
 async fn job_deleted_idempotent_when_resources_already_gone() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -233,6 +236,7 @@ async fn job_deleted_idempotent_when_resources_already_gone() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
 
@@ -261,7 +265,7 @@ async fn job_deleted_idempotent_when_resources_already_gone() {
 
 #[tokio::test]
 async fn job_deleted_handles_terminal_job() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -275,6 +279,7 @@ async fn job_deleted_handles_terminal_job() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = "pipe-1".to_string();
 
