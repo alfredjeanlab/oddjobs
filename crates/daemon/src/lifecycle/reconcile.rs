@@ -14,6 +14,10 @@ use tracing::{info, warn};
 
 use super::ReconcileCtx;
 
+#[cfg(test)]
+#[path = "reconcile_tests.rs"]
+mod tests;
+
 /// Reconcile sessions with actual tmux state after daemon restart.
 ///
 /// Builds a set of session IDs referenced by active (non-prunable) entities,

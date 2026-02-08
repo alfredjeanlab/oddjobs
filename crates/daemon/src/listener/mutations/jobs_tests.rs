@@ -10,8 +10,8 @@ use oj_core::StepStatus;
 use crate::protocol::Response;
 
 use super::super::test_helpers::{
-    load_runbook_into_state, load_runbook_json_into_state, make_agent_runbook_json, make_breadcrumb,
-    make_job, make_job_ns, make_shell_runbook_json, test_ctx,
+    load_runbook_into_state, load_runbook_json_into_state, make_agent_runbook_json,
+    make_breadcrumb, make_job, make_job_ns, make_shell_runbook_json, test_ctx,
 };
 use super::super::PruneFlags;
 use super::{handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all};

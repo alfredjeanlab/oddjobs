@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::*;
+use super::super::test_helpers::*;
 
 #[test]
 fn reconcile_context_counts_non_terminal_jobs() {
@@ -78,7 +78,7 @@ async fn startup_lock_failed_does_not_remove_existing_files() {
     std::fs::write(&config.lock_path, b"12345").unwrap();
 
     // Attempt startup -- should fail with LockFailed
-    match startup(&config).await {
+    match super::startup(&config).await {
         Err(LifecycleError::LockFailed(_)) => {} // expected
         Err(e) => panic!("expected LockFailed, got: {e}"),
         Ok(_) => panic!("expected LockFailed, but startup succeeded"),
@@ -149,7 +149,7 @@ fn cleanup_on_failure_removes_created_files() {
     std::fs::write(&config.version_path, b"0.1.0").unwrap();
     std::fs::write(&config.lock_path, b"12345").unwrap();
 
-    cleanup_on_failure(&config);
+    super::cleanup_on_failure(&config);
 
     assert!(
         !config.socket_path.exists(),
@@ -204,58 +204,4 @@ fn reconcile_context_counts_running_workers() {
         .count();
 
     assert_eq!(worker_count, 1, "only running workers should be counted");
-}
-
-#[tokio::test]
-async fn shutdown_saves_final_snapshot() {
-    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_job_and_reader().await;
-    let snapshot_path = daemon.config.snapshot_path.clone();
-
-    // Process an event so the WAL has entries
-    daemon
-        .process_event(Event::ShellExited {
-            job_id: JobId::new("pipe-1"),
-            step: "only-step".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
-
-    // Simulate the main loop: read events from WAL and mark processed
-    daemon.event_bus.flush().unwrap();
-    loop {
-        match tokio::time::timeout(std::time::Duration::from_millis(50), event_reader.recv()).await
-        {
-            Ok(Ok(Some(entry))) => event_reader.mark_processed(entry.seq),
-            _ => break,
-        }
-    }
-
-    // No snapshot should exist yet
-    assert!(
-        !snapshot_path.exists(),
-        "snapshot should not exist before shutdown"
-    );
-
-    // Shutdown should save a final snapshot
-    daemon.shutdown().unwrap();
-
-    assert!(
-        snapshot_path.exists(),
-        "shutdown must save a final snapshot"
-    );
-
-    // Verify the snapshot contains the correct state
-    let snapshot = load_snapshot(&snapshot_path).unwrap().unwrap();
-    assert!(
-        snapshot.seq > 0,
-        "snapshot seq should be non-zero after processing events"
-    );
-    let job = snapshot.state.jobs.get("pipe-1").unwrap();
-    assert!(
-        job.is_terminal(),
-        "snapshot should contain the terminal job state"
-    );
 }

@@ -164,7 +164,10 @@ fn agent_prune_all_removes_terminal_standalone_agent_runs() {
             assert_eq!(pruned.len(), 2, "should prune 2 terminal agent runs");
             assert_eq!(skipped, 1, "should skip 1 running agent run");
             for entry in &pruned {
-                assert!(entry.job_id.is_empty(), "standalone agents have empty job_id");
+                assert!(
+                    entry.job_id.is_empty(),
+                    "standalone agents have empty job_id"
+                );
             }
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
@@ -210,7 +213,10 @@ fn agent_prune_dry_run_does_not_delete_standalone_agent_runs() {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
             assert_eq!(pruned.len(), 1, "should report 1 agent");
             assert_eq!(skipped, 0);
-            assert!(pruned[0].job_id.is_empty(), "standalone agent has empty job_id");
+            assert!(
+                pruned[0].job_id.is_empty(),
+                "standalone agent has empty job_id"
+            );
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
     }

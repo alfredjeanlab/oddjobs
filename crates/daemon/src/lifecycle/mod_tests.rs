@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::*;
+use super::test_helpers::*;
 
 #[tokio::test]
 async fn process_event_persists_result_events_to_wal() {
@@ -264,5 +264,59 @@ fn parking_lot_mutex_reentrant_lock_is_detected() {
     assert!(
         mutex.try_lock().is_none(),
         "re-entrant lock on parking_lot::Mutex must fail (not silently deadlock)"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_saves_final_snapshot() {
+    let (mut daemon, mut event_reader, _wal_path) = setup_daemon_with_job_and_reader().await;
+    let snapshot_path = daemon.config.snapshot_path.clone();
+
+    // Process an event so the WAL has entries
+    daemon
+        .process_event(Event::ShellExited {
+            job_id: JobId::new("pipe-1"),
+            step: "only-step".to_string(),
+            exit_code: 0,
+            stdout: None,
+            stderr: None,
+        })
+        .await
+        .unwrap();
+
+    // Simulate the main loop: read events from WAL and mark processed
+    daemon.event_bus.flush().unwrap();
+    loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(50), event_reader.recv()).await
+        {
+            Ok(Ok(Some(entry))) => event_reader.mark_processed(entry.seq),
+            _ => break,
+        }
+    }
+
+    // No snapshot should exist yet
+    assert!(
+        !snapshot_path.exists(),
+        "snapshot should not exist before shutdown"
+    );
+
+    // Shutdown should save a final snapshot
+    daemon.shutdown().unwrap();
+
+    assert!(
+        snapshot_path.exists(),
+        "shutdown must save a final snapshot"
+    );
+
+    // Verify the snapshot contains the correct state
+    let snapshot = load_snapshot(&snapshot_path).unwrap().unwrap();
+    assert!(
+        snapshot.seq > 0,
+        "snapshot seq should be non-zero after processing events"
+    );
+    let job = snapshot.state.jobs.get("pipe-1").unwrap();
+    assert!(
+        job.is_terminal(),
+        "snapshot should contain the terminal job state"
     );
 }

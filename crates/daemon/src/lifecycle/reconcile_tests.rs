@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::*;
+use super::super::test_helpers::*;
 
 #[tokio::test]
 async fn reconcile_state_resumes_running_workers() {
@@ -10,26 +10,7 @@ async fn reconcile_state_resumes_running_workers() {
     // state and triggers an initial queue poll.
     let dir = tempdir().unwrap();
     let dir_path = dir.path().to_owned();
-
-    let session_adapter = TracedSession::new(TmuxAdapter::new());
-    let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
-    let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
-
-    let state = Arc::new(Mutex::new(MaterializedState::default()));
-    let runtime = Arc::new(Runtime::new(
-        RuntimeDeps {
-            sessions: session_adapter.clone(),
-            agents: agent_adapter,
-            notifier: DesktopNotifyAdapter::new(),
-            state: Arc::clone(&state),
-        },
-        SystemClock,
-        RuntimeConfig {
-            state_dir: dir_path.clone(),
-            log_dir: dir_path.join("logs"),
-        },
-        internal_tx,
-    ));
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
 
     // Build state with a running worker and a stopped worker
     let mut test_state = MaterializedState::default();

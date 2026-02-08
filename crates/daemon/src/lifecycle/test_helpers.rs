@@ -1,34 +1,36 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use super::*;
+// Re-export commonly used types for sibling test modules
+pub use std::collections::HashMap;
+pub use std::path::PathBuf;
+pub use std::sync::Arc;
 
-use crate::event_bus::{EventBus, EventReader};
+pub use parking_lot::Mutex;
+pub use tempfile::tempdir;
+
+pub use oj_core::{
+    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, SessionId, StepStatus,
+    SystemClock,
+};
+pub use oj_storage::{load_snapshot, MaterializedState, Session, Wal, WorkerRecord};
+
+pub use super::{Config, DaemonRuntime, DaemonState, LifecycleError, ReconcileCtx};
+pub(crate) use crate::event_bus::{EventBus, EventReader};
+
+use std::path::Path;
+
 use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
 };
-use oj_core::{
-    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, SessionId, StepOutcome,
-    StepRecord, StepStatus, SystemClock,
-};
+use oj_core::{StepOutcome, StepRecord};
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
-use oj_storage::{load_snapshot, MaterializedState, Session, Wal, WorkerRecord};
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-use parking_lot::Mutex;
-use tempfile::tempdir;
 use tokio::sync::mpsc;
 
-mod event_processing;
-mod reconciliation;
-mod startup_shutdown;
-
 /// Build a minimal runbook with a single-step job.
-fn test_runbook() -> Runbook {
+pub fn test_runbook() -> Runbook {
     let mut jobs = HashMap::new();
     jobs.insert(
         "test".to_string(),
@@ -66,7 +68,7 @@ fn test_runbook() -> Runbook {
 }
 
 /// Hash a runbook the same way the runtime does.
-fn runbook_hash(runbook: &Runbook) -> String {
+pub fn runbook_hash(runbook: &Runbook) -> String {
     let json = serde_json::to_value(runbook).unwrap();
     let canonical = serde_json::to_string(&json).unwrap();
     let digest = Sha256::digest(canonical.as_bytes());
@@ -76,14 +78,14 @@ fn runbook_hash(runbook: &Runbook) -> String {
 /// Set up a DaemonState with a job ready for step completion.
 ///
 /// Returns the state and a WAL path for verification.
-async fn setup_daemon_with_job() -> (DaemonState, PathBuf) {
+pub async fn setup_daemon_with_job() -> (DaemonState, PathBuf) {
     let (daemon, _, wal_path) = setup_daemon_with_job_and_reader().await;
     (daemon, wal_path)
 }
 
 /// Like `setup_daemon_with_job` but also returns the EventReader
 /// so callers can simulate the main loop (mark_processed, etc.).
-async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, PathBuf) {
+pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, PathBuf) {
     let dir = tempdir().unwrap();
     let dir_path = dir.keep();
 
@@ -164,7 +166,7 @@ async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, PathBu
 }
 
 /// Helper to create a Config pointing at a temp directory.
-fn test_config(dir: &Path) -> Config {
+pub fn test_config(dir: &Path) -> Config {
     Config {
         state_dir: dir.to_path_buf(),
         socket_path: dir.join("test.sock"),
@@ -179,7 +181,9 @@ fn test_config(dir: &Path) -> Config {
 }
 
 /// Helper to create a runtime for reconciliation tests.
-fn setup_reconcile_runtime(dir_path: &Path) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
+pub fn setup_reconcile_runtime(
+    dir_path: &Path,
+) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
     let session_adapter = TracedSession::new(TmuxAdapter::new());
     let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
@@ -204,7 +208,7 @@ fn setup_reconcile_runtime(dir_path: &Path) -> (Arc<DaemonRuntime>, TracedSessio
 }
 
 /// Run reconciliation on a state snapshot and collect all emitted events.
-async fn run_reconcile(
+pub async fn run_reconcile(
     runtime: &Arc<DaemonRuntime>,
     session_adapter: &TracedSession<TmuxAdapter>,
     state: MaterializedState,
@@ -227,7 +231,7 @@ async fn run_reconcile(
         .count();
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
-    let ctx = crate::lifecycle::ReconcileCtx {
+    let ctx = ReconcileCtx {
         runtime: Arc::clone(runtime),
         state_snapshot: state,
         session_adapter: session_adapter.clone(),
@@ -248,7 +252,7 @@ async fn run_reconcile(
 }
 
 /// Helper to create a job with an agent_id in step_history and a session_id.
-fn make_job_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Job {
+pub fn make_job_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Job {
     Job::builder()
         .id(id)
         .kind("test")
