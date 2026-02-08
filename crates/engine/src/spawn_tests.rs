@@ -50,14 +50,11 @@ fn build_spawn_effects_creates_agent_and_timer() {
     )
     .unwrap();
 
-    // Should produce 2 effects: SpawnAgent, SetTimer
-    assert_eq!(effects.len(), 2);
+    // Should produce 1 effect: SpawnAgent (liveness timer is set by handle_session_created)
+    assert_eq!(effects.len(), 1);
 
-    // First effect is SpawnAgent
+    // Only effect is SpawnAgent
     assert!(matches!(&effects[0], Effect::SpawnAgent { .. }));
-
-    // Second effect is SetTimer for liveness monitoring
-    assert!(matches!(&effects[1], Effect::SetTimer { id, .. } if id.is_liveness()));
 }
 
 #[test]
@@ -223,7 +220,7 @@ fn build_spawn_effects_carries_full_config() {
 }
 
 #[test]
-fn build_spawn_effects_timer_uses_liveness_interval() {
+fn build_spawn_effects_returns_only_spawn_agent() {
     let workspace = TempDir::new().unwrap();
     let agent = test_agent_def();
     let job = test_job();
@@ -233,12 +230,9 @@ fn build_spawn_effects_timer_uses_liveness_interval() {
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
 
-    if let Effect::SetTimer { id, duration } = &effects[1] {
-        assert_eq!(id, "liveness:pipe-1");
-        assert_eq!(duration, &LIVENESS_INTERVAL);
-    } else {
-        panic!("Expected SetTimer effect");
-    }
+    // Liveness timer is now set by handle_session_created, not build_spawn_effects
+    assert_eq!(effects.len(), 1);
+    assert!(matches!(&effects[0], Effect::SpawnAgent { .. }));
 }
 
 #[test]
@@ -395,8 +389,8 @@ fn build_spawn_effects_with_prime_succeeds() {
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
 
-    // Should still produce 2 effects: SpawnAgent, SetTimer
-    assert_eq!(effects.len(), 2);
+    // Should still produce 1 effect: SpawnAgent
+    assert_eq!(effects.len(), 1);
     assert!(matches!(&effects[0], Effect::SpawnAgent { .. }));
 }
 
@@ -412,10 +406,9 @@ fn build_spawn_effects_with_prime_script_succeeds() {
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
 
-    // Should produce standard effects
-    assert_eq!(effects.len(), 2);
+    // Should produce 1 effect: SpawnAgent
+    assert_eq!(effects.len(), 1);
     assert!(matches!(&effects[0], Effect::SpawnAgent { .. }));
-    assert!(matches!(&effects[1], Effect::SetTimer { .. }));
 }
 
 #[test]

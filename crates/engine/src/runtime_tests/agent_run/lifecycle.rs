@@ -31,7 +31,7 @@ async fn register_agent_adds_mapping() {
 
 #[tokio::test]
 async fn standalone_liveness_timer_reschedules_when_alive() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -45,6 +45,8 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, _agent_id) = {
         let ar = ctx
@@ -97,7 +99,7 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
 
 #[tokio::test]
 async fn standalone_working_clears_idle_grace() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_RECOVERY).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -111,6 +113,8 @@ async fn standalone_working_clears_idle_grace() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, session_id, agent_id) = {
         let ar = ctx

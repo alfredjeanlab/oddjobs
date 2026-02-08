@@ -7,7 +7,7 @@ use super::*;
 
 #[tokio::test]
 async fn standalone_on_idle_exhausts_attempts_then_escalates() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_ATTEMPTS).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -21,6 +21,8 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (agent_run_id, _session_id, agent_id) = {
         let ar = ctx
@@ -94,7 +96,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
 
 #[tokio::test]
 async fn standalone_on_idle_cooldown_schedules_timer() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_COOLDOWN).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_AGENT_IDLE_COOLDOWN).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -108,6 +110,8 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
         ))
         .await
         .unwrap();
+
+    ctx.process_background_events().await;
 
     let (_agent_run_id, session_id, agent_id) = {
         let ar = ctx

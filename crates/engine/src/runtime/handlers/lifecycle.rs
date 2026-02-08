@@ -7,7 +7,8 @@ use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{
-    AgentId, Clock, Effect, Event, JobId, OwnerId, SessionId, StepOutcome, StepStatus, WorkspaceId,
+    AgentId, AgentRunStatus, Clock, Effect, Event, JobId, OwnerId, SessionId, StepOutcome,
+    StepStatus, TimerId, WorkspaceId,
 };
 use std::collections::HashMap;
 
@@ -344,6 +345,165 @@ where
         };
 
         self.fail_job(&job, reason).await
+    }
+
+    /// Handle SessionCreated: agent spawn completed successfully.
+    ///
+    /// Sets up the liveness timer and emits on_start notifications.
+    /// This handler fires asynchronously after the background SpawnAgent task
+    /// completes. Idempotent: no-op if the job/agent_run is already terminal.
+    pub(crate) async fn handle_session_created(
+        &self,
+        session_id: &SessionId,
+        owner: &OwnerId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let mut result_events = Vec::new();
+
+        match owner {
+            OwnerId::Job(job_id) => {
+                let Some(job) = self.get_active_job(job_id.as_str()) else {
+                    // Job is terminal (e.g. cancelled during spawn) — kill the new session
+                    tracing::info!(
+                        job_id = %job_id,
+                        session_id = %session_id,
+                        "session_created: job terminal, killing orphan session"
+                    );
+                    let _ = self
+                        .executor
+                        .execute(Effect::KillSession {
+                            session_id: session_id.clone(),
+                        })
+                        .await;
+                    return Ok(vec![]);
+                };
+
+                // Set liveness timer
+                self.executor
+                    .execute(Effect::SetTimer {
+                        id: TimerId::liveness(job_id),
+                        duration: crate::spawn::LIVENESS_INTERVAL,
+                    })
+                    .await?;
+
+                // Emit on_start notification if configured
+                let runbook = self.cached_runbook(&job.runbook_hash)?;
+                if let Some(agent_name) = job
+                    .step_history
+                    .iter()
+                    .rfind(|r| r.name == job.step)
+                    .and_then(|r| r.agent_name.as_deref())
+                {
+                    if let Some(agent_def) = runbook.get_agent(agent_name) {
+                        if let Some(effect) = crate::monitor::build_agent_notify_effect(
+                            &job,
+                            agent_def,
+                            agent_def.notify.on_start.as_ref(),
+                        ) {
+                            if let Some(ev) = self.executor.execute(effect).await? {
+                                result_events.push(ev);
+                            }
+                        }
+                    }
+                }
+            }
+            OwnerId::AgentRun(agent_run_id) => {
+                let agent_run =
+                    self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
+
+                let Some(agent_run) = agent_run else {
+                    tracing::debug!(
+                        agent_run_id = %agent_run_id,
+                        "session_created: agent_run not found"
+                    );
+                    return Ok(vec![]);
+                };
+
+                // Set liveness timer
+                self.executor
+                    .execute(Effect::SetTimer {
+                        id: TimerId::liveness_agent_run(agent_run_id),
+                        duration: crate::spawn::LIVENESS_INTERVAL,
+                    })
+                    .await?;
+
+                // Emit on_start notification if configured
+                if let Ok(runbook) = self.cached_runbook(&agent_run.runbook_hash) {
+                    if let Some(agent_def) = runbook.get_agent(&agent_run.agent_name) {
+                        if let Some(effect) = agent_def.notify.on_start.as_ref().map(|template| {
+                            let mut vars = crate::vars::namespace_vars(&agent_run.vars);
+                            vars.insert("agent_run_id".to_string(), agent_run_id.to_string());
+                            vars.insert("name".to_string(), agent_run.command_name.clone());
+                            vars.insert("agent".to_string(), agent_def.name.clone());
+                            let message = oj_runbook::NotifyConfig::render(template, &vars);
+                            Effect::Notify {
+                                title: agent_def.name.clone(),
+                                message,
+                            }
+                        }) {
+                            if let Some(ev) = self.executor.execute(effect).await? {
+                                result_events.push(ev);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result_events)
+    }
+
+    /// Handle AgentSpawnFailed: background agent spawn task failed.
+    ///
+    /// For job-owned agents: deregisters the agent mapping and fails the job.
+    /// For standalone agent runs: emits AgentRunStatusChanged::Failed.
+    pub(crate) async fn handle_agent_spawn_failed(
+        &self,
+        agent_id: &AgentId,
+        owner: &OwnerId,
+        reason: &str,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        // Deregister agent mapping (was registered before spawn was dispatched)
+        self.deregister_agent(agent_id);
+
+        // Write error to agent log
+        self.logger.append_agent_error(agent_id.as_str(), reason);
+
+        match owner {
+            OwnerId::Job(job_id) => {
+                let Some(job) = self.get_active_job(job_id.as_str()) else {
+                    tracing::debug!(
+                        job_id = %job_id,
+                        "agent_spawn_failed: job not found or already terminal"
+                    );
+                    return Ok(vec![]);
+                };
+
+                self.logger.append(
+                    job_id.as_str(),
+                    &job.step,
+                    &format!("agent spawn failed: {}", reason),
+                );
+                self.fail_job(&job, reason).await
+            }
+            OwnerId::AgentRun(agent_run_id) => {
+                tracing::error!(
+                    agent_run_id = %agent_run_id,
+                    error = %reason,
+                    "standalone agent spawn failed"
+                );
+
+                let fail_event = Event::AgentRunStatusChanged {
+                    id: agent_run_id.clone(),
+                    status: AgentRunStatus::Failed,
+                    reason: Some(reason.to_string()),
+                };
+                let result = self
+                    .executor
+                    .execute(Effect::Emit { event: fail_event })
+                    .await?;
+                Ok(result.into_iter().collect())
+            }
+        }
     }
 
     /// Handle JobDeleted event with cascading cleanup.

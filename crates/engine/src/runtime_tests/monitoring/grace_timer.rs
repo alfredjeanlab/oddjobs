@@ -12,7 +12,7 @@ use super::*;
 /// AgentIdle sets a grace timer and records log size; doesn't immediately trigger on_idle.
 #[tokio::test]
 async fn idle_grace_timer_set_on_agent_idle() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -26,6 +26,7 @@ async fn idle_grace_timer_set_on_agent_idle() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -77,7 +78,7 @@ async fn idle_grace_timer_set_on_agent_idle() {
 /// Second AgentIdle while grace timer is pending is a no-op (deduplication).
 #[tokio::test]
 async fn idle_grace_timer_deduplicates() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -91,6 +92,7 @@ async fn idle_grace_timer_deduplicates() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -130,7 +132,7 @@ async fn idle_grace_timer_deduplicates() {
 /// Working state cancels pending idle grace timer.
 #[tokio::test]
 async fn idle_grace_timer_cancelled_on_working() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -144,6 +146,7 @@ async fn idle_grace_timer_cancelled_on_working() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -180,7 +183,7 @@ async fn idle_grace_timer_cancelled_on_working() {
 /// Grace timer fires but log grew -> no action (agent was active during grace period).
 #[tokio::test]
 async fn idle_grace_timer_noop_when_log_grew() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -194,6 +197,7 @@ async fn idle_grace_timer_noop_when_log_grew() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -235,7 +239,7 @@ async fn idle_grace_timer_noop_when_log_grew() {
 /// Grace timer fires, log unchanged but agent is Working -> no action (race guard).
 #[tokio::test]
 async fn idle_grace_timer_noop_when_agent_working() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -249,6 +253,7 @@ async fn idle_grace_timer_noop_when_agent_working() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -289,7 +294,7 @@ async fn idle_grace_timer_noop_when_agent_working() {
 /// Grace timer fires, log unchanged + agent WaitingForInput -> proceeds with on_idle.
 #[tokio::test]
 async fn idle_grace_timer_proceeds_when_genuinely_idle() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -303,6 +308,7 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -339,7 +345,7 @@ async fn idle_grace_timer_proceeds_when_genuinely_idle() {
 /// Working state within 60s of nudge doesn't auto-resume or reset attempts.
 #[tokio::test]
 async fn auto_resume_suppressed_after_nudge() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -353,6 +359,7 @@ async fn auto_resume_suppressed_after_nudge() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -406,7 +413,7 @@ async fn auto_resume_suppressed_after_nudge() {
 /// Working state after 60s of nudge allows normal auto-resume.
 #[tokio::test]
 async fn auto_resume_allowed_after_nudge_cooldown() {
-    let ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_GATE_IDLE_FAIL).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -420,6 +427,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
@@ -468,7 +476,7 @@ async fn auto_resume_allowed_after_nudge_cooldown() {
 /// Rapid AgentIdle/Working cycling (simulating inter-tool-call gaps) never triggers nudge.
 #[tokio::test]
 async fn rapid_idle_working_cycling_no_nudge() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
+    let mut ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
 
     ctx.runtime
         .handle_event(command_event(
@@ -482,6 +490,7 @@ async fn rapid_idle_working_cycling_no_nudge() {
         ))
         .await
         .unwrap();
+    ctx.process_background_events().await;
 
     let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();

@@ -6,8 +6,8 @@
 use super::*;
 
 #[tokio::test]
-async fn spawn_agent_returns_session_created() {
-    let harness = setup().await;
+async fn spawn_agent_returns_none_and_sends_session_created() {
+    let mut harness = setup().await;
 
     let mut input = HashMap::new();
     input.insert("prompt".to_string(), "do the thing".to_string());
@@ -30,15 +30,18 @@ async fn spawn_agent_returns_session_created() {
         .await
         .unwrap();
 
-    // Should return SessionCreated event
-    assert!(matches!(result, Some(Event::SessionCreated { .. })));
+    // SpawnAgent is now deferred — returns None immediately
+    assert!(result.is_none(), "expected None, got: {:?}", result);
 
-    // Verify state was updated with the session
-    let state = harness.executor.state();
-    let state = state.lock();
+    // SessionCreated arrives via the event channel
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for event")
+        .expect("channel closed");
     assert!(
-        !state.sessions.is_empty(),
-        "session should be tracked in state"
+        matches!(event, Event::SessionCreated { .. }),
+        "expected SessionCreated, got: {:?}",
+        event
     );
 
     // Verify agent adapter was called
@@ -48,7 +51,7 @@ async fn spawn_agent_returns_session_created() {
 
 #[tokio::test]
 async fn spawn_agent_with_agent_run_owner() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     let result = harness
         .executor
@@ -67,17 +70,24 @@ async fn spawn_agent_with_agent_run_owner() {
         .await
         .unwrap();
 
-    assert!(matches!(result, Some(Event::SessionCreated { .. })));
+    // Deferred — returns None
+    assert!(result.is_none());
 
-    // Verify the event has the correct owner
-    if let Some(Event::SessionCreated { owner, .. }) = result {
+    // Receive SessionCreated with correct owner
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for event")
+        .expect("channel closed");
+    if let Event::SessionCreated { owner, .. } = &event {
         assert!(matches!(owner, OwnerId::AgentRun(_)));
+    } else {
+        panic!("expected SessionCreated, got: {:?}", event);
     }
 }
 
 #[tokio::test]
-async fn spawn_agent_error_propagates() {
-    let harness = setup().await;
+async fn spawn_agent_error_sends_agent_spawn_failed() {
+    let mut harness = setup().await;
 
     // Inject a spawn error
     harness
@@ -100,15 +110,31 @@ async fn spawn_agent_error_propagates() {
         })
         .await;
 
-    assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("test failure"));
+    // Deferred — returns Ok(None) even on failure
+    assert!(result.is_ok());
+    assert!(result.unwrap().is_none());
+
+    // AgentSpawnFailed arrives via the event channel
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv())
+        .await
+        .expect("timed out waiting for event")
+        .expect("channel closed");
+    if let Event::AgentSpawnFailed {
+        agent_id, reason, ..
+    } = &event
+    {
+        assert_eq!(agent_id.as_str(), "agent-err");
+        assert!(reason.contains("test failure"));
+    } else {
+        panic!("expected AgentSpawnFailed, got: {:?}", event);
+    }
 }
 
 // === SendToAgent / KillAgent tests ===
 
 #[tokio::test]
 async fn send_to_agent_delegates_to_adapter() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     // First spawn an agent so it exists
     harness
@@ -127,6 +153,9 @@ async fn send_to_agent_delegates_to_adapter() {
         })
         .await
         .unwrap();
+
+    // Drain the SessionCreated event from spawn
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
     let result = harness
         .executor
@@ -162,7 +191,7 @@ async fn send_to_agent_error_propagates() {
 
 #[tokio::test]
 async fn kill_agent_delegates_to_adapter() {
-    let harness = setup().await;
+    let mut harness = setup().await;
 
     // Spawn an agent first so it can be killed
     harness
@@ -181,6 +210,9 @@ async fn kill_agent_delegates_to_adapter() {
         })
         .await
         .unwrap();
+
+    // Drain the SessionCreated event from spawn
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
     let result = harness
         .executor

@@ -17,7 +17,7 @@ use oj_core::{AgentRunId, AgentSignalKind, JobId, OwnerId, StepStatus, TimerId};
 /// Helper: create a job and advance it to the "plan" agent step.
 ///
 /// Returns (job_id, session_id, agent_id).
-async fn setup_job_at_agent_step(ctx: &TestContext) -> (String, String, AgentId) {
+async fn setup_job_at_agent_step(ctx: &mut TestContext) -> (String, String, AgentId) {
     let job_id = create_job(ctx).await;
 
     // Advance past init (shell) to plan (agent)
@@ -32,6 +32,9 @@ async fn setup_job_at_agent_step(ctx: &TestContext) -> (String, String, AgentId)
         .await
         .unwrap();
 
+    // SpawnAgent is now deferred; drain background events to apply SessionCreated
+    ctx.process_background_events().await;
+
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
 
@@ -42,7 +45,7 @@ async fn setup_job_at_agent_step(ctx: &TestContext) -> (String, String, AgentId)
 }
 
 /// Helper: spawn a standalone agent and return (agent_run_id, session_id, agent_id)
-async fn setup_standalone_agent(ctx: &TestContext) -> (String, String, AgentId) {
+async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, String, AgentId) {
     ctx.runtime
         .handle_event(command_event(
             "pipe-1",
@@ -55,6 +58,9 @@ async fn setup_standalone_agent(ctx: &TestContext) -> (String, String, AgentId) 
         ))
         .await
         .unwrap();
+
+    // SpawnAgent is now deferred; drain background events to apply SessionCreated
+    ctx.process_background_events().await;
 
     let agent_run_id = "pipe-1".to_string();
     let agent_run = ctx
