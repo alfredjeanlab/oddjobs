@@ -188,6 +188,76 @@ fn worker_shows_full_at_max_concurrency() {
     );
 }
 
+// ── cron layout ─────────────────────────────────────────────────────
+
+#[test]
+#[serial]
+fn cron_columns_are_aligned_across_rows() {
+    setup_no_color();
+
+    let mut ns = empty_ns("myproject");
+    ns.crons.push(oj_daemon::CronSummary {
+        name: "a".to_string(),
+        namespace: "myproject".to_string(),
+        interval: "30m".to_string(),
+        job: "job:check".to_string(),
+        status: "running".to_string(),
+        time: "in 12m".to_string(),
+    });
+    ns.crons.push(oj_daemon::CronSummary {
+        name: "long-cron-name".to_string(),
+        namespace: "myproject".to_string(),
+        interval: "1h".to_string(),
+        job: "job:deploy".to_string(),
+        status: "stopped".to_string(),
+        time: "3h ago".to_string(),
+    });
+
+    let output = format_text(30, &[ns], None, None);
+
+    let lines: Vec<&str> = output
+        .lines()
+        .filter(|l| l.contains("30m") || l.contains("1h"))
+        .collect();
+    assert_eq!(lines.len(), 2, "should find exactly 2 cron rows");
+
+    let st_pos_0 = lines[0].find("on").unwrap();
+    let st_pos_1 = lines[1].find("off").unwrap();
+    assert_eq!(
+        st_pos_0, st_pos_1,
+        "status columns should be aligned:\n  {}\n  {}",
+        lines[0], lines[1]
+    );
+}
+
+#[test]
+#[serial]
+fn crons_sorted_alphabetically() {
+    setup_no_color();
+
+    let mut ns = empty_ns("myproject");
+    for name in ["zebra", "alpha", "mid"] {
+        ns.crons.push(oj_daemon::CronSummary {
+            name: name.to_string(),
+            namespace: "myproject".to_string(),
+            interval: "1h".to_string(),
+            job: "job:check".to_string(),
+            status: "running".to_string(),
+            time: "in 5m".to_string(),
+        });
+    }
+
+    let output = format_text(30, &[ns], None, None);
+
+    let alpha_pos = output.find("alpha").unwrap();
+    let mid_pos = output.find("mid").unwrap();
+    let zebra_pos = output.find("zebra").unwrap();
+    assert!(
+        alpha_pos < mid_pos && mid_pos < zebra_pos,
+        "crons should be sorted alphabetically: alpha < mid < zebra\n{output}"
+    );
+}
+
 // ── queue layout ────────────────────────────────────────────────────
 
 #[test]

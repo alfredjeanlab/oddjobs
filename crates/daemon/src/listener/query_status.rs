@@ -15,8 +15,8 @@ use oj_engine::MetricsHealth;
 use oj_storage::{MaterializedState, QueueItemStatus};
 
 use crate::protocol::{
-    AgentStatusEntry, JobStatusEntry, MetricsHealthSummary, NamespaceStatus, QueueStatus, Response,
-    WorkerSummary,
+    AgentStatusEntry, CronSummary, JobStatusEntry, MetricsHealthSummary, NamespaceStatus,
+    QueueStatus, Response, WorkerSummary,
 };
 
 pub(super) fn handle_status_overview(
@@ -165,6 +165,23 @@ pub(super) fn handle_status_overview(
             });
     }
 
+    // Collect crons grouped by namespace
+    let mut ns_crons: BTreeMap<String, Vec<CronSummary>> = BTreeMap::new();
+    for c in state.crons.values() {
+        let time = super::query_crons::cron_time_display(c, now_ms);
+        ns_crons
+            .entry(c.namespace.clone())
+            .or_default()
+            .push(CronSummary {
+                name: c.name.clone(),
+                namespace: c.namespace.clone(),
+                interval: c.interval.clone(),
+                job: c.run_target.clone(),
+                status: c.status.clone(),
+                time,
+            });
+    }
+
     // Collect queue stats grouped by namespace
     let mut ns_queues: BTreeMap<String, Vec<QueueStatus>> = BTreeMap::new();
     for (scoped_key, items) in &state.queue_items {
@@ -219,6 +236,9 @@ pub(super) fn handle_status_overview(
     for ns in ns_workers.keys() {
         all_namespaces.insert(ns.clone());
     }
+    for ns in ns_crons.keys() {
+        all_namespaces.insert(ns.clone());
+    }
     for ns in ns_queues.keys() {
         all_namespaces.insert(ns.clone());
     }
@@ -236,6 +256,7 @@ pub(super) fn handle_status_overview(
             escalated_jobs: ns_escalated.remove(&ns).unwrap_or_default(),
             orphaned_jobs: ns_orphaned.remove(&ns).unwrap_or_default(),
             workers: ns_workers.remove(&ns).unwrap_or_default(),
+            crons: ns_crons.remove(&ns).unwrap_or_default(),
             queues: ns_queues.remove(&ns).unwrap_or_default(),
             active_agents: ns_agents.remove(&ns).unwrap_or_default(),
             pending_decisions: ns_pending_decisions.remove(&ns).unwrap_or_default(),

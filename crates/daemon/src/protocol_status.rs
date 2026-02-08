@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::WorkerSummary;
 
-/// Summary of a cron for listing
+/// Summary of a cron for listing and status display
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CronSummary {
     pub name: String,
@@ -36,6 +36,9 @@ pub struct NamespaceStatus {
     pub orphaned_jobs: Vec<JobStatusEntry>,
     /// Workers and their status
     pub workers: Vec<WorkerSummary>,
+    /// Crons and their status
+    #[serde(default)]
+    pub crons: Vec<CronSummary>,
     /// Queue depths: (queue_name, pending_count, active_count, dead_count)
     pub queues: Vec<QueueStatus>,
     /// Currently running agents

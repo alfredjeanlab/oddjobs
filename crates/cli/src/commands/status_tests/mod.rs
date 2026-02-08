@@ -47,6 +47,7 @@ pub(super) fn empty_ns(name: &str) -> NamespaceStatus {
         escalated_jobs: vec![],
         orphaned_jobs: vec![],
         workers: vec![],
+        crons: vec![],
         queues: vec![],
         active_agents: vec![],
         pending_decisions: 0,

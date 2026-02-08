@@ -316,6 +316,7 @@ fn format_text(
             || !ns.escalated_jobs.is_empty()
             || !ns.orphaned_jobs.is_empty()
             || !ns.workers.is_empty()
+            || !ns.crons.is_empty()
             || has_non_empty_queues
             || !ns.active_agents.is_empty();
 
@@ -451,6 +452,32 @@ fn format_text(
                     color::status(&format!("{:<w_st$}", label)),
                     w.active,
                     w.concurrency,
+                );
+            }
+            out.push('\n');
+        }
+
+        // Crons
+        if !ns.crons.is_empty() {
+            let mut crons: Vec<&oj_daemon::CronSummary> = ns.crons.iter().collect();
+            crons.sort_by(|a, b| a.name.cmp(&b.name));
+
+            let _ = writeln!(out, "  {}", color::header("Crons:"));
+            let c_name = crons.iter().map(|c| c.name.len()).max().unwrap_or(0);
+            let c_int = crons.iter().map(|c| c.interval.len()).max().unwrap_or(0);
+            let labels: Vec<&str> = crons
+                .iter()
+                .map(|c| if c.status == "running" { "on" } else { "off" })
+                .collect();
+            let c_st = labels.iter().map(|l: &&str| l.len()).max().unwrap_or(0);
+            for (c, label) in crons.iter().zip(labels.iter()) {
+                let _ = writeln!(
+                    out,
+                    "    {:<c_name$}  {:<c_int$}  {}  {}",
+                    c.name,
+                    c.interval,
+                    color::status(&format!("{:<c_st$}", label)),
+                    c.time,
                 );
             }
             out.push('\n');
