@@ -206,23 +206,28 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                     },
                 ];
 
-                // Try to find and fail the associated queue item.
-                // Worker-dispatched jobs have name format "{kind}-{item_id}".
-                if let Some(item_id) = bc.name.strip_prefix(&format!("{}-", bc.kind)) {
-                    for items in state.queue_items.values() {
-                        if let Some(item) = items.iter().find(|i| i.id == item_id) {
-                            events.push(Event::QueueFailed {
-                                queue_name: item.queue_name.clone(),
-                                item_id: item_id.to_string(),
-                                error: "job orphaned after daemon crash".to_string(),
-                                namespace: bc.project.clone(),
-                            });
-                            events.push(Event::QueueItemDead {
-                                queue_name: item.queue_name.clone(),
-                                item_id: item_id.to_string(),
-                                namespace: bc.project.clone(),
-                            });
-                            break;
+                // For shell-based orphans (no agents), mark the queue item
+                // as dead so it isn't re-dispatched (the shell process died
+                // with the daemon and re-running it is not safe).
+                // Agent-based orphans are left for reconciliation which can
+                // invoke on_dead handlers from the runbook.
+                if bc.agents.is_empty() {
+                    if let Some(item_id) = bc.name.strip_prefix(&format!("{}-", bc.kind)) {
+                        for items in state.queue_items.values() {
+                            if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                                events.push(Event::QueueFailed {
+                                    queue_name: item.queue_name.clone(),
+                                    item_id: item_id.to_string(),
+                                    error: "job orphaned after daemon crash".to_string(),
+                                    namespace: bc.project.clone(),
+                                });
+                                events.push(Event::QueueItemDead {
+                                    queue_name: item.queue_name.clone(),
+                                    item_id: item_id.to_string(),
+                                    namespace: bc.project.clone(),
+                                });
+                                break;
+                            }
                         }
                     }
                 }

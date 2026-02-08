@@ -163,14 +163,14 @@ pub fn build_spawn_effects(
 
     // Prepare workspace directory (no longer writes settings)
     tracing::debug!(workspace_path = %workspace_path.display(), "preparing workspace");
-    crate::workspace::prepare_for_agent(workspace_path).map_err(|e| {
+    crate::agent_setup::prepare_for_agent(workspace_path).map_err(|e| {
         tracing::error!(error = %e, "workspace preparation failed");
         RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
     })?;
 
     // Write prime script(s) if agent has prime config
     let prime_paths = if let Some(ref prime) = agent_def.prime {
-        crate::workspace::prepare_agent_prime(&agent_id, prime, &prompt_vars, state_dir).map_err(
+        crate::agent_setup::prepare_agent_prime(&agent_id, prime, &prompt_vars, state_dir).map_err(
             |e| {
                 tracing::error!(error = %e, "agent prime preparation failed");
                 RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
@@ -181,7 +181,7 @@ pub fn build_spawn_effects(
     };
 
     // Prepare settings file with hooks in OJ state directory
-    let settings_path = crate::workspace::prepare_agent_settings(
+    let settings_path = crate::agent_setup::prepare_agent_settings(
         &agent_id,
         workspace_path,
         &prime_paths,
@@ -210,7 +210,7 @@ pub fn build_spawn_effects(
         StopAction::Ask => "ask",
     };
     let on_stop_message = on_stop_config.and_then(|c| c.message());
-    crate::workspace::write_agent_config(&agent_id, on_stop_str, on_stop_message, state_dir)
+    crate::agent_setup::write_agent_config(&agent_id, on_stop_str, on_stop_message, state_dir)
         .map_err(|e| {
             tracing::error!(error = %e, "agent config write failed");
             RuntimeError::Execute(ExecuteError::Shell(e.to_string()))

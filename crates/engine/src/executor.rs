@@ -213,144 +213,22 @@ where
                 branch,
                 start_point,
             } => {
-                let is_worktree = workspace_type.as_deref() == Some("worktree");
-
-                // Phase 1: Create workspace record immediately so job.workspace_path is set
-                let create_event = Event::WorkspaceCreated {
-                    id: workspace_id.clone(),
-                    path: path.clone(),
-                    branch: branch.clone(),
-                    owner: owner.clone(),
+                crate::workspace::create(
+                    &self.state,
+                    &self.event_tx,
+                    workspace_id,
+                    path,
+                    owner,
                     workspace_type,
-                };
-                {
-                    let mut state = self.state.lock();
-                    state.apply_event(&create_event);
-                }
-
-                // Phase 2: Spawn background task for filesystem work
-                let event_tx = self.event_tx.clone();
-                tokio::spawn(async move {
-                    let result = if is_worktree {
-                        crate::workspace_fs::create_worktree(&path, repo_root, branch, start_point)
-                            .await
-                    } else {
-                        crate::workspace_fs::create_folder(&path).await
-                    };
-
-                    let event = match result {
-                        Ok(()) => Event::WorkspaceReady { id: workspace_id },
-                        Err(reason) => Event::WorkspaceFailed {
-                            id: workspace_id,
-                            reason,
-                        },
-                    };
-
-                    if let Err(e) = event_tx.send(event).await {
-                        tracing::error!("failed to send workspace event: {}", e);
-                    }
-                });
-
-                // Return WorkspaceCreated for WAL persistence (background task sends Ready/Failed)
-                Ok(Some(create_event))
+                    repo_root,
+                    branch,
+                    start_point,
+                )
+                .await
             }
 
             Effect::DeleteWorkspace { workspace_id } => {
-                // Look up workspace path and branch
-                let (workspace_path, workspace_branch) = {
-                    let state = self.state.lock();
-                    let ws = state
-                        .workspaces
-                        .get(workspace_id.as_str())
-                        .ok_or_else(|| ExecuteError::WorkspaceNotFound(workspace_id.to_string()))?;
-                    (ws.path.clone(), ws.branch.clone())
-                };
-
-                // Update status to Cleaning (transient, not persisted)
-                {
-                    let mut state = self.state.lock();
-                    if let Some(workspace) = state.workspaces.get_mut(workspace_id.as_str()) {
-                        workspace.status = oj_core::WorkspaceStatus::Cleaning;
-                    }
-                }
-
-                // If the workspace is a git worktree, unregister it first
-                let dot_git = workspace_path.join(".git");
-                if tokio::fs::symlink_metadata(&dot_git)
-                    .await
-                    .map(|m| m.is_file())
-                    .unwrap_or(false)
-                {
-                    // Best-effort: git worktree remove --force
-                    // Run from within the worktree so git can locate the parent repo.
-                    let mut cmd = tokio::process::Command::new("git");
-                    cmd.arg("worktree")
-                        .arg("remove")
-                        .arg("--force")
-                        .arg(&workspace_path)
-                        .current_dir(&workspace_path);
-                    let _ = oj_adapters::subprocess::run_with_timeout(
-                        cmd,
-                        oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-                        "git worktree remove",
-                    )
-                    .await;
-
-                    // Best-effort: clean up the branch
-                    if let Some(ref branch) = workspace_branch {
-                        // Find the repo root from the worktree's .git file
-                        if let Ok(contents) = tokio::fs::read_to_string(&dot_git).await {
-                            // .git file contains: gitdir: /path/to/repo/.git/worktrees/<name>
-                            if let Some(gitdir) = contents.trim().strip_prefix("gitdir: ") {
-                                // Navigate up from .git/worktrees/<name> to .git, then parent
-                                let gitdir_path = std::path::Path::new(gitdir);
-                                if let Some(repo_root) = gitdir_path
-                                    .parent()
-                                    .and_then(|p| p.parent())
-                                    .and_then(|p| p.parent())
-                                {
-                                    let mut cmd = tokio::process::Command::new("git");
-                                    cmd.args([
-                                        "-C",
-                                        &repo_root.display().to_string(),
-                                        "branch",
-                                        "-D",
-                                        branch,
-                                    ])
-                                    .env_remove("GIT_DIR")
-                                    .env_remove("GIT_WORK_TREE");
-                                    let _ = oj_adapters::subprocess::run_with_timeout(
-                                        cmd,
-                                        oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-                                        "git branch delete",
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Remove workspace directory (in case worktree remove left remnants)
-                if workspace_path.exists() {
-                    tokio::fs::remove_dir_all(&workspace_path)
-                        .await
-                        .map_err(|e| {
-                            ExecuteError::Shell(format!("failed to remove workspace dir: {}", e))
-                        })?;
-                }
-
-                // Delete workspace record
-                let delete_event = Event::WorkspaceDeleted {
-                    id: workspace_id.clone(),
-                };
-                {
-                    let mut state = self.state.lock();
-                    state.apply_event(&delete_event);
-                }
-
-                // Return the delete event for WAL persistence
-                Ok(Some(delete_event))
+                crate::workspace::delete(&self.state, workspace_id).await
             }
 
             // === Timer effects ===
