@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-use super::{print_prune_results, OutputFormat};
+use super::{print_capture_frame, print_prune_results, OutputFormat};
 
 #[derive(Debug, Clone, Serialize)]
 struct FakeEntry {
@@ -70,4 +70,15 @@ fn print_prune_results_text_real_run() {
         |e: &FakeEntry| e.name.clone(),
     );
     assert!(result.is_ok());
+}
+
+#[test]
+fn print_capture_frame_does_not_panic() {
+    // Smoke test: just verify it doesn't panic with typical input
+    print_capture_frame("abc12345", "some terminal output\n");
+}
+
+#[test]
+fn print_capture_frame_empty_output() {
+    print_capture_frame("deadbeef", "");
 }

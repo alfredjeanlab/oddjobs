@@ -3,6 +3,10 @@
 
 //! Display handlers for agent commands: List, Show, Peek, Attach, Send, Logs, Prune, Resume.
 
+#[cfg(test)]
+#[path = "display_tests.rs"]
+mod tests;
+
 use anyhow::Result;
 
 use oj_core::ShortId;
