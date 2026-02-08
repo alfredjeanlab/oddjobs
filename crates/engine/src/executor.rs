@@ -77,7 +77,6 @@ where
     ///
     /// Returns an optional event that should be fed back into the event loop.
     pub async fn execute(&self, effect: Effect) -> Result<Option<Event>, ExecuteError> {
-
         // Format the fields as `key=val`
         let info = {
             let fields = effect.fields();
@@ -93,45 +92,30 @@ where
             fmt
         };
 
-        let effect_name = effect.name();
+        let op = effect.name();
         let verbose = effect.verbose();
         if verbose {
-            tracing::info!("executing effect={} {}", effect_name, info);
+            tracing::info!("executing effect={} {}", op, info);
         }
 
         let start = std::time::Instant::now();
         let result = self.execute_inner(effect).await;
-        let elapsed = start.elapsed();
-
+        let elapsed_ms = start.elapsed().as_millis() as u64;
         if verbose {
             match &result {
-                Ok(event) => tracing::info!(
-                    elapsed_ms = elapsed.as_millis() as u64,
-                    has_event = event.is_some(),
-                    "completed"
-                ),
-                Err(e) => tracing::error!(
-                    elapsed_ms = elapsed.as_millis() as u64,
-                    error = %e,
-                    "failed"
-                ),
+                Ok(event) => tracing::info!(event = event.is_some(), elapsed_ms, "completed"),
+                Err(e) => tracing::error!(error = %e, elapsed_ms, "failed"),
             }
         } else {
             match &result {
                 Ok(event) => tracing::info!(
-                    event = ?event.is_some(),
-                    elapsed_ms = ?elapsed.as_millis() as u64,
+                    event = event.is_some(),
+                    elapsed_ms,
                     "executed effect={} {}",
-                    effect_name,
+                    op,
                     info
                 ),
-                Err(e) => tracing::error!(
-                    error = %e,
-                    elapsed_ms = ?elapsed.as_millis() as u64,
-                    "errored effect={} {}",
-                    effect_name,
-                    info
-                ),
+                Err(e) => tracing::error!(error = %e, elapsed_ms, "error effect={} {}", op, info),
             }
         }
 
