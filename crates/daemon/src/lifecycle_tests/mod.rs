@@ -8,12 +8,12 @@ use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
 };
 use oj_core::{
-    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, StepOutcome, StepRecord,
-    StepStatus, SystemClock,
+    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, SessionId, StepOutcome,
+    StepRecord, StepStatus, SystemClock,
 };
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
-use oj_storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
+use oj_storage::{load_snapshot, MaterializedState, Session, Wal, WorkerRecord};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

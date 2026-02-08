@@ -6,6 +6,8 @@
 //! Checks persisted state against actual tmux sessions and reconnects
 //! monitoring or triggers appropriate exit handling for each entity.
 
+use std::collections::HashSet;
+
 use oj_adapters::SessionAdapter;
 use oj_core::{AgentId, AgentRunId, AgentRunStatus, Event, JobId, OwnerId, SessionId};
 use tracing::{info, warn};
@@ -14,60 +16,54 @@ use super::ReconcileCtx;
 
 /// Reconcile sessions with actual tmux state after daemon restart.
 ///
-/// Cleans up orphaned sessions whose jobs are terminal or missing from state.
-/// This prevents stale sessions from accumulating across daemon restarts.
+/// Builds a set of session IDs referenced by active (non-prunable) entities,
+/// then cleans up any sessions not in that set. Only `done` and `cancelled`
+/// jobs are considered finished — `failed` jobs are kept because they may be
+/// resumed.
 async fn reconcile_sessions(ctx: &ReconcileCtx) {
-    let sessions_to_check: Vec<_> = ctx
-        .state_snapshot
-        .sessions
-        .values()
-        .map(|s| (s.id.clone(), s.job_id.clone()))
-        .collect();
-
-    if sessions_to_check.is_empty() {
+    let state = &ctx.state_snapshot;
+    if state.sessions.is_empty() {
         return;
     }
 
-    let state = &ctx.state_snapshot;
-    let mut orphaned = 0;
-    for (session_id, job_id) in sessions_to_check {
-        // Check if the associated job is terminal or missing
-        let should_prune = match state.jobs.get(&job_id) {
-            Some(job) => job.is_terminal(),
-            None => {
-                // Job doesn't exist - check if it's a standalone agent run
-                // Sessions can also be associated with agent_runs
-                let has_agent_run = state.agent_runs.values().any(|ar| {
-                    ar.session_id.as_deref() == Some(session_id.as_str()) && !ar.is_terminal()
-                });
-                !has_agent_run
+    // Build set of session IDs referenced by resumable entities.
+    // Only done/cancelled jobs are truly finished; failed jobs may resume.
+    let mut in_use: HashSet<&str> = HashSet::new();
+    for job in state.jobs.values() {
+        if job.step != "done" && job.step != "cancelled" {
+            if let Some(sid) = &job.session_id {
+                in_use.insert(sid.as_str());
             }
-        };
+        }
+    }
+    for ar in state.agent_runs.values() {
+        if !ar.is_terminal() {
+            if let Some(sid) = &ar.session_id {
+                in_use.insert(sid.as_str());
+            }
+        }
+    }
 
-        if should_prune {
+    // Prune sessions not in use
+    let mut orphaned = 0;
+    for session_id in state.sessions.keys() {
+        if !in_use.contains(session_id.as_str()) {
             orphaned += 1;
-
-            // Kill the tmux session (best effort)
             let _ = tokio::process::Command::new("tmux")
-                .args(["kill-session", "-t", &session_id])
+                .args(["kill-session", "-t", session_id])
                 .output()
                 .await;
-
-            // Emit SessionDeleted to clean up state
             let _ = ctx
                 .event_tx
                 .send(Event::SessionDeleted {
-                    id: SessionId::new(&session_id),
+                    id: SessionId::new(session_id),
                 })
                 .await;
         }
     }
 
     if orphaned > 0 {
-        info!(
-            "Reconciled {} orphaned session(s) from terminal/missing jobs",
-            orphaned
-        );
+        info!("Reconciled {orphaned} orphaned session(s) from terminal/missing jobs");
     }
 }
 

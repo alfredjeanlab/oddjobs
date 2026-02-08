@@ -422,3 +422,260 @@ async fn reconcile_agent_run_no_session_id_marks_failed() {
         _ => unreachable!(),
     }
 }
+
+// --- reconcile_sessions tests ---
+
+#[tokio::test]
+async fn reconcile_sessions_preserves_nonterminal_job_sessions() {
+    // A session referenced by a non-terminal job should NOT be pruned.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-1".to_string(),
+        Session {
+            id: "oj-sess-1".to_string(),
+            job_id: "pipe-1".to_string(),
+        },
+    );
+    test_state.jobs.insert(
+        "pipe-1".to_string(),
+        Job::builder()
+            .id("pipe-1")
+            .step("build")
+            .session_id("oj-sess-1")
+            .build(),
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert!(
+        deleted.is_empty(),
+        "should not prune session for non-terminal job, got: {:?}",
+        deleted
+    );
+}
+
+#[tokio::test]
+async fn reconcile_sessions_prunes_done_job_sessions() {
+    // A session referenced only by a done job should be pruned.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-done".to_string(),
+        Session {
+            id: "oj-sess-done".to_string(),
+            job_id: "pipe-done".to_string(),
+        },
+    );
+    test_state.jobs.insert(
+        "pipe-done".to_string(),
+        Job::builder()
+            .id("pipe-done")
+            .step("done")
+            .session_id("oj-sess-done")
+            .build(),
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert_eq!(deleted.len(), 1, "should prune session for done job");
+    match &deleted[0] {
+        Event::SessionDeleted { id } => {
+            assert_eq!(id, &SessionId::new("oj-sess-done"));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_sessions_preserves_failed_job_sessions() {
+    // A session referenced by a failed job should NOT be pruned (may resume).
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-fail".to_string(),
+        Session {
+            id: "oj-sess-fail".to_string(),
+            job_id: "pipe-fail".to_string(),
+        },
+    );
+    test_state.jobs.insert(
+        "pipe-fail".to_string(),
+        Job::builder()
+            .id("pipe-fail")
+            .step("failed")
+            .session_id("oj-sess-fail")
+            .build(),
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert!(
+        deleted.is_empty(),
+        "should not prune session for failed job (may resume), got: {:?}",
+        deleted
+    );
+}
+
+#[tokio::test]
+async fn reconcile_sessions_preserves_nonterminal_agent_run_sessions() {
+    // A session referenced by a non-terminal agent run should NOT be pruned.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-ar".to_string(),
+        Session {
+            id: "oj-sess-ar".to_string(),
+            job_id: String::new(),
+        },
+    );
+    test_state.agent_runs.insert(
+        "ar-active".to_string(),
+        AgentRun {
+            id: "ar-active".to_string(),
+            agent_name: "test-agent".to_string(),
+            command_name: "do-work".to_string(),
+            namespace: "proj".to_string(),
+            cwd: dir_path.clone(),
+            runbook_hash: "hash123".to_string(),
+            status: AgentRunStatus::Running,
+            agent_id: Some("some-uuid".to_string()),
+            session_id: Some("oj-sess-ar".to_string()),
+            error: None,
+            created_at_ms: 1000,
+            updated_at_ms: 2000,
+            action_tracker: Default::default(),
+            vars: HashMap::new(),
+            idle_grace_log_size: None,
+            last_nudge_at: None,
+        },
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert!(
+        deleted.is_empty(),
+        "should not prune session for non-terminal agent run, got: {:?}",
+        deleted
+    );
+}
+
+#[tokio::test]
+async fn reconcile_sessions_prunes_orphaned_sessions() {
+    // A session with no matching job or agent run should be pruned.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-orphan".to_string(),
+        Session {
+            id: "oj-sess-orphan".to_string(),
+            job_id: "nonexistent-job".to_string(),
+        },
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert_eq!(deleted.len(), 1, "should prune orphaned session");
+    match &deleted[0] {
+        Event::SessionDeleted { id } => {
+            assert_eq!(id, &SessionId::new("oj-sess-orphan"));
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn reconcile_sessions_preserves_session_if_any_nonterminal_ref() {
+    // Core bug fix: a session referenced by BOTH a terminal job AND a
+    // non-terminal agent run should NOT be pruned.
+    let dir = tempdir().unwrap();
+    let dir_path = dir.path().to_owned();
+    let (runtime, session_adapter) = setup_reconcile_runtime(&dir_path);
+
+    let mut test_state = MaterializedState::default();
+    test_state.sessions.insert(
+        "oj-sess-shared".to_string(),
+        Session {
+            id: "oj-sess-shared".to_string(),
+            job_id: "pipe-terminal".to_string(),
+        },
+    );
+    // Terminal (done) job referencing the session
+    test_state.jobs.insert(
+        "pipe-terminal".to_string(),
+        Job::builder()
+            .id("pipe-terminal")
+            .step("done")
+            .session_id("oj-sess-shared")
+            .build(),
+    );
+    // Non-terminal agent run also referencing the same session
+    test_state.agent_runs.insert(
+        "ar-alive".to_string(),
+        AgentRun {
+            id: "ar-alive".to_string(),
+            agent_name: "test-agent".to_string(),
+            command_name: "do-work".to_string(),
+            namespace: "proj".to_string(),
+            cwd: dir_path.clone(),
+            runbook_hash: "hash123".to_string(),
+            status: AgentRunStatus::Running,
+            agent_id: Some("agent-uuid".to_string()),
+            session_id: Some("oj-sess-shared".to_string()),
+            error: None,
+            created_at_ms: 1000,
+            updated_at_ms: 2000,
+            action_tracker: Default::default(),
+            vars: HashMap::new(),
+            idle_grace_log_size: None,
+            last_nudge_at: None,
+        },
+    );
+
+    let events = run_reconcile(&runtime, &session_adapter, test_state).await;
+
+    let deleted: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, Event::SessionDeleted { .. }))
+        .collect();
+    assert!(
+        deleted.is_empty(),
+        "should not prune session when non-terminal agent run references it, got: {:?}",
+        deleted
+    );
+}
