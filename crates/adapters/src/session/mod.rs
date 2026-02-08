@@ -40,6 +40,7 @@ pub trait SessionAdapter: Clone + Send + Sync + 'static {
         cwd: &Path,
         cmd: &str,
         env: &[(String, String)],
+        unset_env: &[String],
     ) -> Result<String, SessionError>;
 
     /// Send input to a session

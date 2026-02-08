@@ -33,11 +33,12 @@ impl<S: SessionAdapter> SessionAdapter for TracedSession<S> {
         cwd: &Path,
         cmd: &str,
         env: &[(String, String)],
+        unset_env: &[String],
     ) -> Result<String, SessionError> {
         async {
             tracing::info!(cmd, env_count = env.len(), "starting");
             let start = std::time::Instant::now();
-            let result = self.inner.spawn(name, cwd, cmd, env).await;
+            let result = self.inner.spawn(name, cwd, cmd, env, unset_env).await;
             let elapsed_ms = start.elapsed().as_millis() as u64;
             match &result {
                 Ok(id) => tracing::info!(session_id = id.as_str(), elapsed_ms, "session created"),

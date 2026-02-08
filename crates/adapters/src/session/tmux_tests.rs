@@ -53,7 +53,7 @@ async fn spawn_creates_session_and_returns_id() {
     let name = unique_name("spawn");
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
@@ -72,7 +72,7 @@ async fn spawn_with_env_passes_environment() {
     let env = vec![("TEST_VAR".to_string(), "test_value".to_string())];
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "echo $TEST_VAR && sleep 60", &env)
+        .spawn(&name, Path::new("/tmp"), "echo $TEST_VAR && sleep 60", &env, &[])
         .await
         .unwrap();
 
@@ -95,13 +95,13 @@ async fn spawn_replaces_existing_session() {
 
     // Create first session
     let id1 = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
     // Create second session with same name (should replace)
     let id2 = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
@@ -120,7 +120,7 @@ async fn send_sends_keys_to_session() {
     let name = unique_name("send");
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "cat", &[])
+        .spawn(&name, Path::new("/tmp"), "cat", &[], &[])
         .await
         .unwrap();
 
@@ -159,7 +159,7 @@ async fn kill_terminates_session() {
     let name = unique_name("kill");
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
@@ -192,7 +192,7 @@ async fn is_alive_returns_true_for_running_session() {
     let name = unique_name("alive");
 
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
@@ -225,6 +225,7 @@ async fn capture_output_returns_pane_content() {
             &name,
             Path::new("/tmp"),
             "echo 'capture-test-output' && sleep 60",
+            &[],
             &[],
         )
         .await
@@ -260,7 +261,7 @@ async fn is_process_running_detects_child_process() {
     // Use background + wait to ensure sleep is a child of bash (the pane process)
     // Without this, bash would exec the command directly, making sleep the pane itself
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[])
+        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[], &[])
         .await
         .unwrap();
 
@@ -283,7 +284,7 @@ async fn is_process_running_detects_direct_pane_process() {
 
     // Launch sleep directly (not via bash), so sleep IS the pane process, not a child
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "sleep 60", &[])
+        .spawn(&name, Path::new("/tmp"), "sleep 60", &[], &[])
         .await
         .unwrap();
 
@@ -306,7 +307,7 @@ async fn is_process_running_returns_false_for_no_match() {
 
     // Use background + wait to ensure sleep is a child of bash
     let id = adapter
-        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[])
+        .spawn(&name, Path::new("/tmp"), "bash -c 'sleep 60 & wait'", &[], &[])
         .await
         .unwrap();
 
@@ -343,7 +344,7 @@ async fn spawn_rejects_nonexistent_cwd() {
     let name = unique_name("badcwd");
 
     let result = adapter
-        .spawn(&name, Path::new("/nonexistent/path"), "sleep 1", &[])
+        .spawn(&name, Path::new("/nonexistent/path"), "sleep 1", &[], &[])
         .await;
 
     assert!(matches!(result, Err(SessionError::SpawnFailed(_))));
@@ -373,7 +374,7 @@ async fn spawn_fails_when_tmux_unavailable() {
 
     let adapter = TmuxAdapter::new();
     let result = adapter
-        .spawn("test-no-tmux", Path::new("/tmp"), "sleep 1", &[])
+        .spawn("test-no-tmux", Path::new("/tmp"), "sleep 1", &[], &[])
         .await;
 
     env::set_var("PATH", &original_path);

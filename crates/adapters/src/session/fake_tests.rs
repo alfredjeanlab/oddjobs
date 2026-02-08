@@ -12,6 +12,7 @@ async fn fake_session_spawn() {
             Path::new("/tmp"),
             "echo hello",
             &[("KEY".to_string(), "value".to_string())],
+            &[],
         )
         .await
         .unwrap();
@@ -27,7 +28,7 @@ async fn fake_session_spawn() {
 async fn fake_session_lifecycle() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 
@@ -41,7 +42,7 @@ async fn fake_session_lifecycle() {
 async fn fake_session_send_success() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 
@@ -64,7 +65,7 @@ async fn fake_session_send_not_found() {
 async fn fake_session_kill() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 
@@ -80,7 +81,7 @@ async fn fake_session_kill() {
 async fn fake_session_set_output_and_capture() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 
@@ -104,7 +105,7 @@ async fn fake_session_capture_output_not_found() {
 async fn fake_session_set_process_running() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 
@@ -130,7 +131,7 @@ async fn fake_session_is_process_running_not_found() {
 async fn fake_session_configure_records_call() {
     let adapter = FakeSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
 

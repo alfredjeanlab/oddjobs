@@ -21,6 +21,7 @@ fn effect_serialization_roundtrip() {
             command: "claude".to_string(),
             env: vec![("KEY".to_string(), "value".to_string())],
             cwd: Some(PathBuf::from("/work")),
+            unset_env: vec![],
             session_config: HashMap::new(),
         },
         Effect::SendToAgent {
@@ -109,6 +110,7 @@ fn traced_effect_names() {
                 command: "claude".to_string(),
                 env: vec![],
                 cwd: None,
+                unset_env: vec![],
                 session_config: HashMap::new(),
             },
             "spawn_agent",
@@ -234,6 +236,7 @@ fn traced_effect_fields() {
         command: "claude".to_string(),
         env: vec![],
         cwd: Some(PathBuf::from("/work")),
+        unset_env: vec![],
         session_config: HashMap::new(),
     };
     let fields = effect.fields();
@@ -406,6 +409,7 @@ fn spawn_agent_session_config_roundtrip() {
         command: "claude".to_string(),
         env: vec![],
         cwd: None,
+        unset_env: vec![],
         session_config: session_config.clone(),
     };
 
@@ -437,6 +441,7 @@ fn spawn_agent_empty_session_config_skipped_in_serialization() {
         command: "claude".to_string(),
         env: vec![],
         cwd: None,
+        unset_env: vec![],
         session_config: HashMap::new(),
     };
 

@@ -8,7 +8,7 @@ use std::path::Path;
 async fn noop_session_spawn_returns_noop_id() {
     let adapter = NoOpSessionAdapter::new();
     let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[])
+        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
         .await
         .unwrap();
     assert_eq!(id, "noop");

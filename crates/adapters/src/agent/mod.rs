@@ -79,6 +79,8 @@ pub struct AgentSpawnConfig {
     pub command: String,
     /// Environment variables
     pub env: Vec<(String, String)>,
+    /// Environment variables to explicitly unset in the spawned session
+    pub unset_env: Vec<String>,
     /// Path to the workspace directory
     pub workspace_path: PathBuf,
     /// Optional working directory override
@@ -111,6 +113,7 @@ impl AgentSpawnConfig {
             owner,
             agent_name: String::new(),
             env: Vec::new(),
+            unset_env: Vec::new(),
             cwd: None,
             prompt: String::new(),
             job_name: String::new(),
@@ -138,6 +141,10 @@ impl AgentSpawnConfig {
     }
     pub fn env(mut self, v: Vec<(String, String)>) -> Self {
         self.env = v;
+        self
+    }
+    pub fn unset_env(mut self, v: Vec<String>) -> Self {
+        self.unset_env = v;
         self
     }
     pub fn cwd(mut self, v: PathBuf) -> Self {

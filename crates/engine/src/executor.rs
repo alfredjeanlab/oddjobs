@@ -145,6 +145,7 @@ where
                 input,
                 command,
                 env,
+                unset_env,
                 cwd,
                 session_config,
             } => {
@@ -159,6 +160,7 @@ where
                     AgentSpawnConfig::new(agent_id.clone(), command, workspace_path, owner.clone())
                         .agent_name(agent_name)
                         .env(env)
+                        .unset_env(unset_env)
                         .prompt(input.get("prompt").cloned().unwrap_or_default())
                         .job_name(
                             input

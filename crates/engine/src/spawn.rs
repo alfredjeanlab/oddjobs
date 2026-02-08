@@ -258,6 +258,7 @@ pub fn build_spawn_effects(
         )
     };
     let mut env = agent_def.build_env(&vars);
+    let mut unset_env: Vec<String> = Vec::new();
 
     // Pass OJ_NAMESPACE so nested `oj` calls inherit the project namespace
     if !ctx.namespace.is_empty() {
@@ -305,6 +306,10 @@ pub fn build_spawn_effects(
     if !env.iter().any(|(k, _)| k == "CLAUDE_CONFIG_DIR") {
         if let Ok(claude_state) = std::env::var("CLAUDE_CONFIG_DIR") {
             env.push(("CLAUDE_CONFIG_DIR".to_string(), claude_state));
+        } else {
+            // Prevent tmux server env leakage — stale CLAUDE_CONFIG_DIR
+            // values cause agents to look for auth at the wrong path.
+            unset_env.push("CLAUDE_CONFIG_DIR".to_string());
         }
     }
 
@@ -400,6 +405,7 @@ pub fn build_spawn_effects(
             input: vars,
             command,
             env,
+            unset_env,
             cwd: Some(effective_cwd),
             session_config,
         },

@@ -27,6 +27,7 @@ impl SessionAdapter for TmuxAdapter {
         cwd: &Path,
         cmd: &str,
         env: &[(String, String)],
+        unset_env: &[String],
     ) -> Result<String, SessionError> {
         // Precondition: cwd must exist
         if !cwd.exists() {
@@ -65,7 +66,17 @@ impl SessionAdapter for TmuxAdapter {
             tmux_cmd.arg("-e").arg(format!("{}={}", key, value));
         }
 
-        tmux_cmd.arg(cmd);
+        if unset_env.is_empty() {
+            tmux_cmd.arg(cmd);
+        } else {
+            let mut sanitized = String::from("env");
+            for var in unset_env {
+                sanitized.push_str(&format!(" -u {var}"));
+            }
+            sanitized.push(' ');
+            sanitized.push_str(cmd);
+            tmux_cmd.arg(sanitized);
+        }
 
         let output = run_with_timeout(tmux_cmd, TMUX_TIMEOUT, "tmux new-session")
             .await

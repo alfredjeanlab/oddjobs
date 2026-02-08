@@ -27,6 +27,7 @@ impl SessionAdapter for NoOpSessionAdapter {
         _cwd: &Path,
         _cmd: &str,
         _env: &[(String, String)],
+        _unset_env: &[String],
     ) -> Result<String, SessionError> {
         Ok("noop".to_string())
     }

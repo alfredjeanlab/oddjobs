@@ -162,6 +162,7 @@ impl SessionAdapter for FakeSessionAdapter {
         cwd: &Path,
         cmd: &str,
         env: &[(String, String)],
+        _unset_env: &[String],
     ) -> Result<String, SessionError> {
         let mut inner = self.inner.lock();
         inner.next_id += 1;

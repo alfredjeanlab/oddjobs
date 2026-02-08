@@ -87,7 +87,7 @@ async fn spawn_traced_session() -> (
     let fake = crate::session::FakeSessionAdapter::default();
     let traced = TracedSession::new(fake.clone());
     let session_id = traced
-        .spawn("test", Path::new("/tmp"), "echo", &[])
+        .spawn("test", Path::new("/tmp"), "echo", &[], &[])
         .await
         .unwrap();
     (fake, traced, session_id)
@@ -136,7 +136,7 @@ fn traced_session_spawn_logs_entry_and_completion() {
         let fake = crate::session::FakeSessionAdapter::default();
         let traced = TracedSession::new(fake);
         traced
-            .spawn("test-agent", Path::new("/tmp"), "echo hello", &[])
+            .spawn("test-agent", Path::new("/tmp"), "echo hello", &[], &[])
             .await
     });
 
@@ -214,6 +214,7 @@ async fn traced_session_delegates_spawn_to_inner() {
             Path::new("/tmp"),
             "echo hello",
             &[("KEY".to_string(), "VALUE".to_string())],
+            &[],
         )
         .await
         .unwrap();

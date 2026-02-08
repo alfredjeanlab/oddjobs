@@ -269,6 +269,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
 
         // 3. Use configured environment
         let env = config.env.clone();
+        let unset_env = config.unset_env.clone();
 
         // 4. Generate friendly session name (UUID still used for --session-id flag)
         let session_name = generate_session_name(&config.job_name, &config.agent_name);
@@ -277,7 +278,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
         let command = augment_command_for_skip_permissions(&config.command);
         let spawned_id = self
             .sessions
-            .spawn(&session_name, &cwd, &command, &env)
+            .spawn(&session_name, &cwd, &command, &env, &unset_env)
             .await
             .map_err(|e| AgentAdapterError::SessionError(e.to_string()))?;
 

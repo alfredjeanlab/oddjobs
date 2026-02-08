@@ -118,7 +118,7 @@ async fn resume_agent_alive_sends_nudge() {
     // Spawn a session for the job (simulating agent startup)
     let session_id = ctx
         .sessions
-        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[])
+        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[], &[])
         .await
         .unwrap();
 
@@ -322,7 +322,7 @@ async fn resume_agent_waiting_nudges() {
     // Spawn a session for the job
     let session_id = ctx
         .sessions
-        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[])
+        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[], &[])
         .await
         .unwrap();
 

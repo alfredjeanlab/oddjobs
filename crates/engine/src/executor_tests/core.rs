@@ -311,6 +311,7 @@ async fn get_agent_state_returns_state() {
             command: "claude".to_string(),
             env: vec![],
             cwd: None,
+            unset_env: vec![],
             session_config: HashMap::new(),
         })
         .await
@@ -352,6 +353,7 @@ async fn get_session_log_size_returns_value_when_set() {
             command: "claude".to_string(),
             env: vec![],
             cwd: None,
+            unset_env: vec![],
             session_config: HashMap::new(),
         })
         .await
