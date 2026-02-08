@@ -31,7 +31,7 @@ command "unblock" {
   run = <<-SHELL
     gh issue list --label blocked --state open --json number,body | jq -c '.[]' | while read -r obj; do
       num=$(echo "$obj" | jq -r .number)
-      deps=$(echo "$obj" | jq -r '.body' | grep -i 'Blocked by:' | grep -oE '#[0-9]+' | grep -oE '[0-9]+')
+      deps=$(echo "$obj" | jq -r '.body' | grep -iE 'Blocked by:?' | grep -oE '#[0-9]+' | grep -oE '[0-9]+' || true)
       if [ -z "$deps" ]; then
         gh issue edit "$num" --remove-label blocked
         echo "Unblocked #$num (no deps)"
@@ -65,7 +65,7 @@ job "unblock" {
     run = <<-SHELL
       gh issue list --label blocked --state open --json number,body | jq -c '.[]' | while read -r obj; do
         num=$(echo "$obj" | jq -r .number)
-        deps=$(echo "$obj" | jq -r '.body' | grep -i 'Blocked by:' | grep -oE '#[0-9]+' | grep -oE '[0-9]+')
+        deps=$(echo "$obj" | jq -r '.body' | grep -iE 'Blocked by:?' | grep -oE '#[0-9]+' | grep -oE '[0-9]+' || true)
         if [ -z "$deps" ]; then
           gh issue edit "$num" --remove-label blocked
           echo "Unblocked #$num (no deps)"

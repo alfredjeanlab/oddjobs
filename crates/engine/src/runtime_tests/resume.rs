@@ -74,7 +74,7 @@ async fn advance_to_agent_step(ctx: &TestContext, job_id: &str) {
 }
 
 #[tokio::test]
-async fn resume_agent_without_message_fails() {
+async fn resume_agent_without_message_uses_default() {
     let ctx = setup_resume().await;
     let job_id = create_test_job(&ctx, "pipe-resume-1").await;
 
@@ -85,7 +85,7 @@ async fn resume_agent_without_message_fails() {
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work");
 
-    // Try to resume without message - should fail
+    // Resume without message — should succeed with default
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
@@ -96,13 +96,7 @@ async fn resume_agent_without_message_fails() {
         })
         .await;
 
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("--message") || err.contains("agent steps require"),
-        "expected error about --message, got: {}",
-        err
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result);
 }
 
 #[tokio::test]

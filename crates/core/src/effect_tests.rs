@@ -350,7 +350,7 @@ fn traced_effect_fields() {
     assert_eq!(
         fields,
         vec![
-            ("worker_name", "fixer".to_string()),
+            ("worker", "fixer".to_string()),
             ("cwd", "/work".to_string())
         ]
     );
@@ -367,7 +367,7 @@ fn traced_effect_fields() {
     assert_eq!(
         fields,
         vec![
-            ("worker_name", "fixer".to_string()),
+            ("worker", "fixer".to_string()),
             ("cwd", "/work".to_string()),
             ("item_id", "item-1".to_string()),
         ]

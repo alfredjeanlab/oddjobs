@@ -6,7 +6,7 @@
 use super::super::Runtime;
 use crate::error::RuntimeError;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, Clock, Effect, Event, JobId, SessionId, ShortId, StepOutcome, WorkspaceId};
+use oj_core::{AgentId, Clock, Effect, Event, JobId, SessionId, StepOutcome, WorkspaceId};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -53,20 +53,12 @@ where
             .ok_or_else(|| RuntimeError::StepNotFound(resume_step.clone()))?;
 
         // Resolve message for agent steps BEFORE emitting any events.
-        // For failed jobs, default to "Retrying" if no message provided.
-        // For running jobs, require an explicit message.
         let resolved_message = if step_def.is_agent() {
-            match message {
-                Some(msg) => Some(msg.to_string()),
-                None if is_failed => Some("Retrying".to_string()),
-                None => {
-                    return Err(RuntimeError::InvalidRequest(format!(
-                        "agent steps require --message for resume. Example:\n  \
-                         oj job resume {} -m \"I fixed the import, try again\"",
-                        job.id.short(12)
-                    )));
-                }
-            }
+            Some(
+                message
+                    .unwrap_or("Please continue with the task.")
+                    .to_string(),
+            )
         } else {
             None
         };

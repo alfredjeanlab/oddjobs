@@ -474,24 +474,13 @@ pub async fn handle(
                 let id =
                     id.ok_or_else(|| anyhow::anyhow!("Either provide a job ID or use --all"))?;
                 let var_map: HashMap<String, String> = var.into_iter().collect();
-                match client
+                client
                     .job_resume(&id, message.as_deref(), &var_map, kill)
-                    .await
-                {
-                    Ok(()) => {
-                        if !var_map.is_empty() {
-                            println!("Updated vars and resumed job {}", id);
-                        } else {
-                            println!("Resumed job {}", id);
-                        }
-                    }
-                    Err(crate::client::ClientError::Rejected(msg))
-                        if msg.contains("--message") || msg.contains("agent steps require") =>
-                    {
-                        eprintln!("error: {}", msg);
-                        std::process::exit(1);
-                    }
-                    Err(e) => return Err(e.into()),
+                    .await?;
+                if !var_map.is_empty() {
+                    println!("Updated vars and resumed job {}", id);
+                } else {
+                    println!("Resumed job {}", id);
                 }
             }
         }

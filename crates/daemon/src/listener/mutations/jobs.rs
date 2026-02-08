@@ -1,13 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use std::sync::Arc;
-
-use parking_lot::Mutex;
-
-use oj_core::{Event, JobId, OwnerId, ShortId};
-use oj_runbook::Runbook;
-use oj_storage::MaterializedState;
+use oj_core::{Event, JobId, OwnerId};
 
 use crate::protocol::{JobEntry, Response};
 
@@ -45,33 +39,13 @@ pub(crate) fn handle_job_resume(
     vars: std::collections::HashMap<String, String>,
     kill: bool,
 ) -> Result<Response, ConnectionError> {
-    // Check if job exists in state and get relevant info for validation
-    let job_info = {
+    // Check if job exists in state
+    let job_id = {
         let state_guard = ctx.state.lock();
-        state_guard.get_job(&id).map(|p| {
-            (
-                p.id.clone(),
-                p.kind.clone(),
-                p.step.clone(),
-                p.runbook_hash.clone(),
-            )
-        })
+        state_guard.get_job(&id).map(|p| p.id.clone())
     };
 
-    if let Some((job_id, job_kind, current_step, runbook_hash)) = job_info {
-        // Validate agent steps require --message before emitting event
-        if message.is_none() && current_step != "failed" {
-            if let Err(err_msg) = validate_resume_message(
-                &ctx.state,
-                &job_id,
-                &job_kind,
-                &current_step,
-                &runbook_hash,
-            ) {
-                return Ok(Response::Error { message: err_msg });
-            }
-        }
-
+    if let Some(job_id) = job_id {
         // Auto-dismiss any pending decisions for this job
         auto_dismiss_decisions_for_job(ctx, &job_id)?;
 
@@ -432,54 +406,3 @@ fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), C
     Ok(())
 }
 
-/// Validate that agent steps have a message for resume.
-///
-/// Returns `Ok(())` if validation passes, or `Err(message)` with an error message
-/// if the step is an agent step and no message was provided.
-fn validate_resume_message(
-    state: &Arc<Mutex<MaterializedState>>,
-    job_id: &str,
-    job_kind: &str,
-    current_step: &str,
-    runbook_hash: &str,
-) -> Result<(), String> {
-    // Get the stored runbook
-    let stored = {
-        let state_guard = state.lock();
-        state_guard.runbooks.get(runbook_hash).cloned()
-    };
-
-    let Some(stored) = stored else {
-        // If runbook is not found, let the engine handle it
-        return Ok(());
-    };
-
-    // Parse the runbook
-    let runbook: Runbook = match serde_json::from_value(stored.data) {
-        Ok(rb) => rb,
-        Err(_) => {
-            // If we can't parse, let the engine handle it
-            return Ok(());
-        }
-    };
-
-    // Get the job and step definitions
-    let Some(job_def) = runbook.get_job(job_kind) else {
-        return Ok(());
-    };
-    let Some(step_def) = job_def.get_step(current_step) else {
-        return Ok(());
-    };
-
-    // Check if it's an agent step
-    if step_def.is_agent() {
-        let short_id = job_id.short(12);
-        return Err(format!(
-            "agent steps require --message for resume. Example:\n  \
-             oj job resume {} -m \"I fixed the import, try again\"",
-            short_id
-        ));
-    }
-
-    Ok(())
-}

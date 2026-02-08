@@ -850,7 +850,7 @@ fn load_runbook_json_into_state(
 }
 
 #[test]
-fn resume_agent_step_without_message_returns_error() {
+fn resume_agent_step_without_message_succeeds() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
 
@@ -870,24 +870,18 @@ fn resume_agent_step_without_message_returns_error() {
         s.jobs.insert("pipe-agent".to_string(), job);
     }
 
-    // Try to resume without a message
+    // Resume without a message — should succeed with default message
     let result = handle_job_resume(
         &ctx,
         "pipe-agent".to_string(),
-        None, // No message provided
+        None,
         HashMap::new(),
         false,
     );
 
     match result {
-        Ok(Response::Error { message }) => {
-            assert!(
-                message.contains("--message") || message.contains("agent steps require"),
-                "expected error about --message, got: {}",
-                message
-            );
-        }
-        other => panic!("expected Response::Error about --message, got: {:?}", other),
+        Ok(Response::Ok) => {}
+        other => panic!("expected Response::Ok, got: {:?}", other),
     }
 }
 

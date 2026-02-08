@@ -151,11 +151,11 @@ async fn resume_failed_job_returns_job_advanced_event() {
 }
 
 // ============================================================================
-// handle_job_resume: running job with None message should error
+// handle_job_resume: running job with None message uses default
 // ============================================================================
 
 #[tokio::test]
-async fn resume_running_agent_job_without_message_errors() {
+async fn resume_running_agent_job_without_message_uses_default() {
     let ctx = setup_with_runbook(AGENT_RUNBOOK).await;
     let hash = load_runbook_hash(&ctx, AGENT_RUNBOOK);
     create_running_job(&ctx, "job-1", &hash);
@@ -164,52 +164,14 @@ async fn resume_running_agent_job_without_message_errors() {
     let job = ctx.runtime.lock_state(|s| s.jobs.get("job-1").cloned());
     assert_eq!(job.as_ref().unwrap().step, "plan");
 
-    // Resume with no message — should error
+    // Resume with no message — should succeed with default
     let job_id = JobId::new("job-1");
     let result = ctx
         .runtime
         .handle_job_resume(&job_id, None, &HashMap::new(), false)
         .await;
 
-    assert!(result.is_err());
-    let err_msg = result.unwrap_err().to_string();
-    assert!(
-        err_msg.contains("--message"),
-        "expected error about missing --message, got: {}",
-        err_msg
-    );
-}
-
-#[tokio::test]
-async fn resume_running_agent_job_without_message_does_not_mutate_state() {
-    let ctx = setup_with_runbook(AGENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, AGENT_RUNBOOK);
-    create_running_job(&ctx, "job-1", &hash);
-
-    // Snapshot step history before resume attempt
-    let history_before = ctx.runtime.lock_state(|s| {
-        s.jobs
-            .get("job-1")
-            .map(|j| j.step_history.clone())
-            .unwrap_or_default()
-    });
-
-    // Attempt resume with no message (should fail)
-    let job_id = JobId::new("job-1");
-    let _ = ctx
-        .runtime
-        .handle_job_resume(&job_id, None, &HashMap::new(), false)
-        .await;
-
-    // Verify state was NOT mutated (no JobAdvanced emitted)
-    let job = ctx.runtime.lock_state(|s| s.jobs.get("job-1").cloned());
-    let job = job.unwrap();
-    assert_eq!(job.step, "plan", "step should not have changed");
-    assert_eq!(
-        job.step_history.len(),
-        history_before.len(),
-        "step history should not have changed"
-    );
+    assert!(result.is_ok(), "expected Ok, got: {:?}", result);
 }
 
 // ============================================================================
