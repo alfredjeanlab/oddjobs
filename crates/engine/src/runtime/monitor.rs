@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Agent monitoring and lifecycle
-
 use super::Runtime;
 use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
@@ -39,7 +37,6 @@ where
                 ))
             })?;
         let agent_id = AgentId::new(agent_id_str);
-
         let session_id = job.session_id.as_ref().ok_or_else(|| {
             RuntimeError::JobNotFound(format!("job {} has no session_id", job.id))
         })?;
@@ -433,7 +430,6 @@ where
                 &job.step,
                 &format!("{} attempts exhausted, escalating", ctx.trigger),
             );
-            // Escalate
             let escalate_config =
                 oj_runbook::ActionConfig::simple(oj_runbook::AgentAction::Escalate);
             let exhausted_trigger = format!("{}:exhausted", ctx.trigger);
@@ -500,8 +496,7 @@ where
     /// Run a shell gate command for the `gate` on_dead action.
     ///
     /// The command should already be interpolated before calling this function.
-    /// Returns `Ok(())` if the command exits successfully (exit code 0),
-    /// `Err(message)` otherwise with a description of the failure including stderr.
+    /// Returns `Ok(())` on exit code 0 or `Err(message)` otherwise with failure including stderr.
     async fn run_gate_command(
         &self,
         job: &Job,
