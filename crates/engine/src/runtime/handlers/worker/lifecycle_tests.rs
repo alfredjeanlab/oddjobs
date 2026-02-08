@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Unit tests for worker lifecycle handling (start/stop/resize/reconcile)
+//! Unit tests for worker lifecycle handling (start/stop/resize)
 
 use crate::runtime::handlers::worker::WorkerStatus;
 use crate::test_helpers::{load_runbook_hash, setup_with_runbook, TestContext};
-use oj_core::{scoped_name, Clock, Event, JobId, TimerId};
-use oj_storage::QueueItemStatus;
+use oj_core::{Clock, Event, JobId, TimerId};
 use std::collections::HashMap;
 
 /// External queue runbook (default queue type)
@@ -75,34 +74,6 @@ run = "echo done"
 [queue.bugs]
 type = "persisted"
 vars = ["title"]
-
-[worker.fixer]
-source = { queue = "bugs" }
-handler = { job = "build" }
-concurrency = 2
-"#;
-
-/// Persisted queue with retry config
-const RETRY_RUNBOOK: &str = r#"
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[queue.bugs]
-type = "persisted"
-vars = ["title"]
-
-[queue.bugs.retry]
-attempts = 3
-cooldown = "10s"
 
 [worker.fixer]
 source = { queue = "bugs" }
@@ -488,60 +459,40 @@ async fn resized_from_full_to_capacity_triggers_repoll() {
     );
 }
 
-#[tokio::test]
-async fn resized_already_had_capacity_no_repoll() {
+/// Helper: resizing while already having spare capacity should not trigger a repoll.
+async fn assert_resize_with_existing_capacity_no_repoll(new_concurrency: u32) {
     let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
     start_worker(&ctx, PERSISTED_RUNBOOK, "").await;
 
-    // Worker has 0 active jobs and concurrency=2 (already has capacity)
-    // Resize to 3 — already had capacity, so no repoll needed
     let events = ctx
         .runtime
         .handle_event(Event::WorkerResized {
             worker_name: "fixer".to_string(),
-            concurrency: 3,
+            concurrency: new_concurrency,
             namespace: String::new(),
         })
         .await
         .unwrap();
 
-    // No repoll since we already had capacity
     let has_poll = events
         .iter()
         .any(|e| matches!(e, Event::WorkerPollComplete { .. }));
     assert!(
         !has_poll,
-        "resize when already having capacity should not trigger repoll"
+        "resize with existing capacity should not trigger repoll"
     );
+    let workers = ctx.runtime.worker_states.lock();
+    assert_eq!(workers["fixer"].concurrency, new_concurrency);
+}
+
+#[tokio::test]
+async fn resized_already_had_capacity_no_repoll() {
+    assert_resize_with_existing_capacity_no_repoll(3).await;
 }
 
 #[tokio::test]
 async fn resized_decrease_no_repoll() {
-    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
-    start_worker(&ctx, PERSISTED_RUNBOOK, "").await;
-
-    // Worker has 0 active jobs and concurrency=2
-    // Resize down to 1 — still has capacity, no state change for repoll
-    let events = ctx
-        .runtime
-        .handle_event(Event::WorkerResized {
-            worker_name: "fixer".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    let has_poll = events
-        .iter()
-        .any(|e| matches!(e, Event::WorkerPollComplete { .. }));
-    assert!(
-        !has_poll,
-        "decreasing concurrency should not trigger repoll"
-    );
-
-    let workers = ctx.runtime.worker_states.lock();
-    assert_eq!(workers["fixer"].concurrency, 1);
+    assert_resize_with_existing_capacity_no_repoll(1).await;
 }
 
 #[tokio::test]
@@ -635,413 +586,7 @@ async fn resized_with_pending_takes_counts_toward_capacity() {
 }
 
 // ============================================================================
-// reconcile_queue_items tests
-// ============================================================================
-
-#[tokio::test]
-async fn reconcile_terminal_job_emits_queue_completion() {
-    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
-
-    // Set up state: worker with an active job that's already terminal.
-    //
-    // Event ordering matters: JobAdvanced to a terminal step removes the
-    // job from workers.active_job_ids in MaterializedState.  To simulate
-    // a crash where the daemon knew about the job but never emitted
-    // QueueCompleted, we apply the job lifecycle events BEFORE the worker
-    // record exists (so the removal is a no-op), then create the worker
-    // and dispatch the item-to-job mapping.
-    ctx.runtime.lock_state_mut(|state| {
-        // Queue item: pushed and taken
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-1".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "bug 1".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-1".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        // Job created and already at terminal step (before worker record exists,
-        // so JobAdvanced's active_job_ids removal is a no-op)
-        state.apply_event(&Event::JobCreated {
-            id: JobId::new("pipe-done"),
-            kind: "build".to_string(),
-            name: "test".to_string(),
-            runbook_hash: hash.clone(),
-            cwd: ctx.project_root.clone(),
-            vars: {
-                let mut m = HashMap::new();
-                m.insert("item.id".to_string(), "item-1".to_string());
-                m
-            },
-            initial_step: "init".to_string(),
-            created_at_epoch_ms: 1000,
-            namespace: String::new(),
-            cron_name: None,
-        });
-        state.apply_event(&Event::JobAdvanced {
-            id: JobId::new("pipe-done"),
-            step: "done".to_string(),
-        });
-        // Now create worker record and dispatch mapping
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
-            item_id: "item-1".to_string(),
-            job_id: JobId::new("pipe-done"),
-            namespace: String::new(),
-        });
-    });
-
-    // Restart the worker — reconciliation should detect the terminal job
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // After reconciliation, the queue item should be Completed
-    let status = ctx.runtime.lock_state(|state| {
-        state
-            .queue_items
-            .get("bugs")
-            .and_then(|items| items.iter().find(|i| i.id == "item-1"))
-            .map(|i| i.status.clone())
-    });
-    assert_eq!(
-        status,
-        Some(QueueItemStatus::Completed),
-        "reconcile should complete queue item for terminal job"
-    );
-}
-
-#[tokio::test]
-async fn reconcile_untracked_active_item_adds_to_worker() {
-    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
-
-    // Set up: a queue item is Active assigned to worker, but worker's item_job_map
-    // doesn't have it (e.g. daemon crashed after QueueTaken but before WorkerItemDispatched
-    // was persisted). However a running job exists with matching item.id.
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-orphan".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "orphan".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-orphan".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        // Worker started but no WorkerItemDispatched in WAL
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-        // Job exists with matching item.id
-        state.apply_event(&Event::JobCreated {
-            id: JobId::new("pipe-orphan"),
-            kind: "build".to_string(),
-            name: "test".to_string(),
-            runbook_hash: hash.clone(),
-            cwd: ctx.project_root.clone(),
-            vars: {
-                let mut m = HashMap::new();
-                m.insert("item.id".to_string(), "item-orphan".to_string());
-                m
-            },
-            initial_step: "init".to_string(),
-            created_at_epoch_ms: 1000,
-            namespace: String::new(),
-            cron_name: None,
-        });
-    });
-
-    // Restart worker — reconciliation should detect the untracked job
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // Worker should now track this job
-    let workers = ctx.runtime.worker_states.lock();
-    let state = workers.get("fixer").unwrap();
-    assert!(
-        state.active_jobs.contains(&JobId::new("pipe-orphan")),
-        "reconcile should add untracked job to worker active list"
-    );
-    assert_eq!(
-        state.item_job_map.get(&JobId::new("pipe-orphan")),
-        Some(&"item-orphan".to_string()),
-        "reconcile should add item mapping"
-    );
-}
-
-#[tokio::test]
-async fn reconcile_orphaned_item_no_retry_goes_dead() {
-    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
-
-    // Set up: queue item is Active assigned to worker, but NO corresponding job exists
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-lost".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "lost".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-lost".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-    });
-
-    // Restart worker — reconciliation should detect orphaned item
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // With no retry config, item should go Dead
-    let status = ctx.runtime.lock_state(|state| {
-        state
-            .queue_items
-            .get("bugs")
-            .and_then(|items| items.iter().find(|i| i.id == "item-lost"))
-            .map(|i| i.status.clone())
-    });
-    assert_eq!(
-        status,
-        Some(QueueItemStatus::Dead),
-        "orphaned item with no retry config should go Dead"
-    );
-}
-
-#[tokio::test]
-async fn reconcile_orphaned_item_with_retry_schedules_retry() {
-    let ctx = setup_with_runbook(RETRY_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, RETRY_RUNBOOK);
-
-    // Set up: queue item is Active assigned to worker, but NO corresponding job
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-retry".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "retry me".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-retry".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-    });
-
-    // Restart worker — reconciliation should detect orphaned item and schedule retry
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // Item should be Failed (not Dead) since retry is configured
-    let status = ctx.runtime.lock_state(|state| {
-        state
-            .queue_items
-            .get("bugs")
-            .and_then(|items| items.iter().find(|i| i.id == "item-retry"))
-            .map(|i| i.status.clone())
-    });
-    assert_eq!(
-        status,
-        Some(QueueItemStatus::Failed),
-        "orphaned item with retry config should be Failed (awaiting retry)"
-    );
-
-    // A retry timer should be set
-    let timer_ids = pending_timer_ids(&ctx);
-    let retry_timer = TimerId::queue_retry("bugs", "item-retry");
-    assert!(
-        timer_ids.iter().any(|id| id == retry_timer.as_str()),
-        "retry timer should be scheduled for orphaned item, found: {:?}",
-        timer_ids
-    );
-}
-
-#[tokio::test]
-async fn reconcile_orphaned_item_exhausted_retries_goes_dead() {
-    let ctx = setup_with_runbook(RETRY_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, RETRY_RUNBOOK);
-
-    // Set up: orphaned item with failure_count already at max_attempts - 1.
-    //
-    // QueueItemRetry resets failure_count to 0, so we use QueueFailed +
-    // QueueTaken cycles (without retry) to accumulate failure_count.
-    // With max_attempts = 3, we need failure_count = 2 before reconciliation
-    // so that the reconciliation QueueFailed bumps it to 3 (>= max_attempts).
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-exhausted".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "exhausted".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
-        });
-        // Cycle 1: fail (Pending→Failed, fc 0→1), then retake (Active, fc stays 1)
-        state.apply_event(&Event::QueueFailed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-exhausted".to_string(),
-            error: "prior failure 1".to_string(),
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-exhausted".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        // Cycle 2: fail (Active→Failed, fc 1→2), then retake (Active, fc stays 2)
-        state.apply_event(&Event::QueueFailed {
-            queue_name: "bugs".to_string(),
-            item_id: "item-exhausted".to_string(),
-            error: "prior failure 2".to_string(),
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "item-exhausted".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        });
-        // Item is now Active with failure_count = 2, assigned to "fixer"
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-    });
-
-    // Restart — reconcile should detect orphaned item with exhausted retries
-    // Reconciliation emits QueueFailed (fc 2→3), then checks 3 >= 3 → Dead
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // With failure_count >= max_attempts (3 >= 3), should go Dead
-    let status = ctx.runtime.lock_state(|state| {
-        state
-            .queue_items
-            .get("bugs")
-            .and_then(|items| items.iter().find(|i| i.id == "item-exhausted"))
-            .map(|i| i.status.clone())
-    });
-    assert_eq!(
-        status,
-        Some(QueueItemStatus::Dead),
-        "orphaned item that exhausted retries should go Dead"
-    );
-}
-
-// ============================================================================
-// handle_worker_started with namespace tests
+// Namespace and cross-namespace isolation tests
 // ============================================================================
 
 #[tokio::test]
@@ -1053,154 +598,6 @@ async fn started_with_namespace_stores_namespace() {
     let state = workers.get("myproject/fixer").unwrap();
     assert_eq!(state.namespace, "myproject");
 }
-
-#[tokio::test]
-async fn reconcile_respects_namespace_scoping() {
-    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
-    let namespace = "proj";
-
-    // Set up: namespaced orphaned queue item
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
-            item_id: "ns-item".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "ns bug".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: namespace.to_string(),
-        });
-        state.apply_event(&Event::QueueTaken {
-            queue_name: "bugs".to_string(),
-            item_id: "ns-item".to_string(),
-            worker_name: "fixer".to_string(),
-            namespace: namespace.to_string(),
-        });
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: namespace.to_string(),
-        });
-    });
-
-    // Restart with namespace
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: namespace.to_string(),
-        })
-        .await
-        .unwrap();
-
-    // Orphaned item under namespace "proj/bugs" should be Dead
-    let scoped_queue = format!("{}/{}", namespace, "bugs");
-    let status = ctx.runtime.lock_state(|state| {
-        state
-            .queue_items
-            .get(&scoped_queue)
-            .and_then(|items| items.iter().find(|i| i.id == "ns-item"))
-            .map(|i| i.status.clone())
-    });
-    assert_eq!(
-        status,
-        Some(QueueItemStatus::Dead),
-        "orphaned namespaced item should go Dead"
-    );
-}
-
-// ============================================================================
-// reconcile_active_jobs tests (runs for all queue types)
-// ============================================================================
-
-#[tokio::test]
-async fn reconcile_external_queue_terminal_job_releases_slot() {
-    // External queue workers should also reconcile terminal jobs in their
-    // active set after daemon restart. Previously only persisted queues
-    // ran this reconciliation, so external queue workers accumulated
-    // zombie jobs that consumed no slots but were never cleaned up.
-    let ctx = setup_with_runbook(EXTERNAL_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_RUNBOOK);
-
-    // Pre-populate state as if daemon restarted with an active external queue job
-    // that already reached terminal state (done).
-    ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-        // Simulate a dispatched job with an item.id var
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
-            item_id: "ext-item-done".to_string(),
-            job_id: JobId::new("pipe-done"),
-            namespace: String::new(),
-        });
-        // Job created and already at terminal step
-        state.apply_event(&Event::JobCreated {
-            id: JobId::new("pipe-done"),
-            kind: "build".to_string(),
-            name: "terminal-job".to_string(),
-            runbook_hash: hash.clone(),
-            cwd: ctx.project_root.clone(),
-            vars: {
-                let mut m = HashMap::new();
-                m.insert("item.id".to_string(), "ext-item-done".to_string());
-                m
-            },
-            initial_step: "init".to_string(),
-            created_at_epoch_ms: 1000,
-            namespace: String::new(),
-            cron_name: None,
-        });
-        state.apply_event(&Event::JobAdvanced {
-            id: JobId::new("pipe-done"),
-            step: "done".to_string(),
-        });
-    });
-
-    // Restart the worker — reconcile_active_jobs should detect the terminal job
-    ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
-        .await
-        .unwrap();
-
-    // After reconciliation, the terminal job should be removed from active_jobs
-    let workers = ctx.runtime.worker_states.lock();
-    let state = workers.get("fixer").unwrap();
-    assert!(
-        !state.active_jobs.contains(&JobId::new("pipe-done")),
-        "terminal job should be removed from active_jobs after reconciliation"
-    );
-    assert!(
-        !state.item_job_map.contains_key(&JobId::new("pipe-done")),
-        "terminal job should be removed from item_job_map after reconciliation"
-    );
-}
-
-// ============================================================================
-// Cross-namespace isolation tests
-// ============================================================================
 
 #[tokio::test]
 async fn two_namespaces_same_worker_name_do_not_collide() {

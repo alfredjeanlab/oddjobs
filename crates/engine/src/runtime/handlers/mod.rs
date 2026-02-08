@@ -6,6 +6,7 @@
 mod agent;
 mod command;
 pub(crate) mod cron;
+mod cron_timer;
 mod cron_types;
 mod job_create;
 mod lifecycle;

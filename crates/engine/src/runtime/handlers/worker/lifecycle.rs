@@ -474,3 +474,7 @@ where
 #[cfg(test)]
 #[path = "lifecycle_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "reconcile_tests.rs"]
+mod reconcile_tests;
