@@ -808,7 +808,8 @@ fn plan_job_accept_sends_enter() {
     // First: StepStarted to transition from Waiting → Running
     assert!(
         matches!(&result[0], Event::StepStarted { job_id, step, .. } if job_id.as_str() == "pipe-1" && step == "step-1"),
-        "expected StepStarted, got {:?}", result[0]
+        "expected StepStarted, got {:?}",
+        result[0]
     );
     // Then: Enter to approve the plan
     match &result[1] {
