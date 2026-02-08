@@ -27,6 +27,8 @@ mod daemon_concurrency;
 mod daemon_cron_job;
 #[path = "specs/daemon/crons.rs"]
 mod daemon_crons;
+#[path = "specs/daemon/external_queue.rs"]
+mod daemon_external_queue;
 #[path = "specs/daemon/help.rs"]
 mod daemon_help;
 #[path = "specs/daemon/init_idempotency.rs"]

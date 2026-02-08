@@ -393,3 +393,191 @@ run = "${item.cmd}"
         "all in-flight items should complete after worker stop"
     );
 }
+
+// =============================================================================
+// Test 5: Poll timer survives daemon restart
+// =============================================================================
+
+/// After a daemon crash and restart, the recovered worker should automatically
+/// process new queue items without needing a manual `worker start`.
+/// The reconcile code re-emits WorkerStarted to recreate in-memory state
+/// and restart the poll timer.
+///
+/// Would have caught commit 721f48d where the poll timer died after a
+/// restart+wake race.
+#[test]
+fn poll_timer_survives_daemon_restart() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/queue.toml", SLOW_SHELL_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["worker", "start", "runner"]).passes();
+
+    // Push item and wait for completion (proves worker is functional)
+    temp.oj()
+        .args(&["queue", "push", "tasks", r#"{"cmd": "echo first"}"#])
+        .passes();
+
+    let first_done = wait_for(SPEC_WAIT_MAX_MS, || {
+        let out = temp
+            .oj()
+            .args(&["queue", "show", "tasks"])
+            .passes()
+            .stdout();
+        out.contains("completed")
+    });
+    assert!(first_done, "first item should complete before crash");
+
+    // Kill daemon with SIGKILL (simulates crash)
+    let killed = temp.daemon_kill();
+    assert!(killed, "should be able to kill daemon");
+
+    let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
+        let output = temp
+            .oj()
+            .args(&["daemon", "status"])
+            .command()
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        !stdout.contains("Status: running")
+    });
+    assert!(daemon_dead, "daemon should be dead after kill");
+
+    // Restart daemon — NO manual `worker start`
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Push new item — recovered worker should auto-process it
+    temp.oj()
+        .args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#])
+        .passes();
+
+    let second_done = wait_for(SPEC_WAIT_MAX_MS, || {
+        let out = temp
+            .oj()
+            .args(&["queue", "show", "tasks"])
+            .passes()
+            .stdout();
+        out.matches("completed").count() >= 2
+    });
+
+    if !second_done {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+        eprintln!(
+            "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
+            temp.oj()
+                .args(&["queue", "show", "tasks"])
+                .passes()
+                .stdout()
+        );
+    }
+    assert!(
+        second_done,
+        "new item should auto-process after daemon restart without manual worker start"
+    );
+}
+
+// =============================================================================
+// Test 6: Zombie shell job failed after crash frees worker slot
+// =============================================================================
+
+/// When the daemon crashes while a shell step is running, the shell process
+/// dies (child of daemon). After restart, WAL replay shows the job in
+/// "running" state with no session_id. The reconcile code detects this
+/// zombie and marks it as failed, freeing the worker slot for new items.
+///
+/// Would have caught commit e6c2197 where zombie jobs stayed "running"
+/// and blocked the worker from processing new items.
+#[test]
+fn zombie_shell_job_failed_after_crash_frees_worker_slot() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/queue.toml", SLOW_SHELL_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["worker", "start", "runner"]).passes();
+
+    // Push item with a long-running command so we can crash mid-execution
+    temp.oj()
+        .args(&[
+            "queue",
+            "push",
+            "tasks",
+            r#"{"cmd": "sleep 30 && echo slow"}"#,
+        ])
+        .passes();
+
+    // Wait for the job to start running
+    let running = wait_for(SPEC_WAIT_MAX_MS, || {
+        let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
+        jobs.contains("running")
+    });
+    assert!(running, "job should be running before crash");
+
+    // Kill daemon (crash — shell process dies as child of daemon)
+    let killed = temp.daemon_kill();
+    assert!(killed, "should be able to kill daemon");
+
+    let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
+        let output = temp
+            .oj()
+            .args(&["daemon", "status"])
+            .command()
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        !stdout.contains("Status: running")
+    });
+    assert!(daemon_dead, "daemon should be dead after kill");
+
+    // Restart daemon — reconcile detects zombie job (no session_id) and fails it
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Zombie job should be failed, not stuck "running"
+    let job_failed = wait_for(SPEC_WAIT_MAX_MS, || {
+        let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
+        jobs.contains("failed")
+    });
+
+    if !job_failed {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+        eprintln!(
+            "=== JOBS ===\n{}\n=== END JOBS ===",
+            temp.oj().args(&["job", "list"]).passes().stdout()
+        );
+    }
+    assert!(
+        job_failed,
+        "zombie job should be failed after crash recovery, not stuck running"
+    );
+
+    // Push a new quick item — worker slot should be freed
+    temp.oj()
+        .args(&["queue", "push", "tasks", r#"{"cmd": "echo after-crash"}"#])
+        .passes();
+
+    let new_done = wait_for(SPEC_WAIT_MAX_MS * 2, || {
+        let out = temp
+            .oj()
+            .args(&["queue", "show", "tasks"])
+            .passes()
+            .stdout();
+        out.contains("completed")
+    });
+
+    if !new_done {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+        eprintln!(
+            "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
+            temp.oj()
+                .args(&["queue", "show", "tasks"])
+                .passes()
+                .stdout()
+        );
+    }
+    assert!(
+        new_done,
+        "new item should complete after zombie job freed worker slot"
+    );
+}
