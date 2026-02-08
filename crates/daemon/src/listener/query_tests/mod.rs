@@ -96,6 +96,7 @@ fn make_worker(name: &str, namespace: &str, queue: &str, active: usize) -> Worke
         active_job_ids: (0..active).map(|i| format!("p{}", i)).collect(),
         queue_name: queue.to_string(),
         concurrency: 3,
+        item_job_map: HashMap::new(),
     }
 }
 

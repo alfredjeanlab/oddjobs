@@ -28,7 +28,6 @@ fn already_prefixed_keys_are_kept() {
         ("workspace.root".into(), "/ws".into()),
         ("local.repo".into(), "/repo".into()),
         ("args.name".into(), "test".into()),
-        ("item.id".into(), "abc".into()),
     ]
     .into_iter()
     .collect();

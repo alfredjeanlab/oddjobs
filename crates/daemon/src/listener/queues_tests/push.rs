@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -108,6 +109,7 @@ fn push_wakes_running_worker() {
             active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
             namespace: String::new(),
         },
     );
@@ -172,6 +174,7 @@ fn push_external_queue_wakes_workers() {
             active_job_ids: vec![],
             queue_name: "issues".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
             namespace: String::new(),
         },
     );
@@ -493,6 +496,7 @@ fn push_with_wrong_project_root_falls_back_to_namespace() {
             active_job_ids: vec![],
             queue_name: "tasks".to_string(),
             concurrency: 1,
+            item_job_map: HashMap::new(),
             namespace: "my-project".to_string(),
         },
     );

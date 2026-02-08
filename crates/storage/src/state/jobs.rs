@@ -105,11 +105,12 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 }
             }
 
-            // Remove from worker active_job_ids on terminal states
+            // Remove from worker active_job_ids and item_job_map on terminal states
             if step == "done" || step == "failed" || step == "cancelled" {
                 let job_id_str = id.to_string();
                 for record in state.workers.values_mut() {
                     record.active_job_ids.retain(|pid| pid != &job_id_str);
+                    record.item_job_map.remove(&job_id_str);
                 }
                 // Clean up unresolved decisions for the completed job
                 let pid = id.as_str();

@@ -704,13 +704,12 @@ fn var_scope_order(key: &str) -> (usize, &str) {
             "var" => 0,
             "local" => 1,
             "workspace" => 2,
-            "item" => 3,
-            "invoke" => 4,
-            _ => 5, // other namespaced vars
+            "invoke" => 3,
+            _ => 4, // other namespaced vars
         };
         (priority, scope)
     } else {
-        (6, "") // unnamespaced vars last
+        (5, "") // unnamespaced vars last
     }
 }
 

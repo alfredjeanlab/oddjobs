@@ -187,8 +187,8 @@ fn apply_worker_started(ctx: &TestContext, hash: &str, namespace: &str) {
     });
 }
 
-/// Apply a JobCreated event with an `item.id` var mapping.
-fn apply_job_with_item(ctx: &TestContext, hash: &str, job_id: &str, item_id: &str, ns: &str) {
+/// Apply a JobCreated event for a queue-dispatched job.
+fn apply_job_with_item(ctx: &TestContext, hash: &str, job_id: &str, _item_id: &str, ns: &str) {
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::JobCreated {
             id: JobId::new(job_id),
@@ -196,7 +196,7 @@ fn apply_job_with_item(ctx: &TestContext, hash: &str, job_id: &str, item_id: &st
             name: "test".to_string(),
             runbook_hash: hash.to_string(),
             cwd: ctx.project_root.clone(),
-            vars: HashMap::from([("item.id".to_string(), item_id.to_string())]),
+            vars: HashMap::new(),
             initial_step: "init".to_string(),
             created_at_epoch_ms: 1000,
             namespace: ns.to_string(),
@@ -284,14 +284,16 @@ async fn reconcile_terminal_job_emits_queue_completion() {
 }
 
 #[tokio::test]
-async fn reconcile_untracked_active_item_adds_to_worker() {
+async fn reconcile_recovers_item_mapping_from_persisted_record() {
     let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
     let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
 
-    // Queue item taken but no WorkerItemDispatched in WAL — job exists with matching item.id
+    // Queue item dispatched with WorkerItemDispatched in WAL — runtime
+    // item_job_map is rebuilt from the materialized WorkerRecord.
     setup_queue_item(&ctx, "item-orphan", "");
     apply_worker_started(&ctx, &hash, "");
     apply_job_with_item(&ctx, &hash, "pipe-orphan", "item-orphan", "");
+    apply_item_dispatched(&ctx, "item-orphan", "pipe-orphan", "");
 
     start_worker(&ctx, PERSISTED_RUNBOOK, "").await;
 
@@ -304,7 +306,7 @@ async fn reconcile_untracked_active_item_adds_to_worker() {
     assert_eq!(
         state.item_job_map.get(&JobId::new("pipe-orphan")),
         Some(&"item-orphan".to_string()),
-        "reconcile should add item mapping"
+        "reconcile should restore item mapping from persisted record"
     );
 }
 

@@ -19,11 +19,11 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             namespace,
         } => {
             let key = scoped_name(namespace, worker_name);
-            // Preserve active_job_ids from before restart
-            let existing_job_ids = state
+            // Preserve active_job_ids and item_job_map from before restart
+            let (existing_job_ids, existing_item_job_map) = state
                 .workers
                 .get(&key)
-                .map(|w| w.active_job_ids.clone())
+                .map(|w| (w.active_job_ids.clone(), w.item_job_map.clone()))
                 .unwrap_or_default();
 
             if !namespace.is_empty() {
@@ -42,22 +42,24 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     active_job_ids: existing_job_ids,
                     queue_name: queue_name.clone(),
                     concurrency: *concurrency,
+                    item_job_map: existing_item_job_map,
                 },
             );
         }
 
         Event::WorkerItemDispatched {
             worker_name,
+            item_id,
             job_id,
             namespace,
-            ..
         } => {
             let key = scoped_name(namespace, worker_name);
             if let Some(record) = state.workers.get_mut(&key) {
                 let pid = job_id.to_string();
                 if !record.active_job_ids.contains(&pid) {
-                    record.active_job_ids.push(pid);
+                    record.active_job_ids.push(pid.clone());
                 }
+                record.item_job_map.insert(pid, item_id.clone());
             }
         }
 
