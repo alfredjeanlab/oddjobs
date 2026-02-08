@@ -54,7 +54,7 @@ pub enum AgentCommand {
     },
     /// View agent activity log
     Logs {
-        /// Job ID (or prefix)
+        /// Agent ID or job ID (or prefix)
         id: String,
         /// Show only a specific step's log
         #[arg(long, short = 's')]

@@ -26,6 +26,50 @@ pub(super) fn handle_get_agent_logs(
     // Look up job to find agent_ids from step history
     let job = state.get_job(&id);
 
+    // If no job found, try resolving `id` as an agent ID (prefix match)
+    if job.is_none() {
+        // Check unified agents map
+        let agent = state.agents.get(&id).or_else(|| {
+            let matches: Vec<_> = state
+                .agents
+                .iter()
+                .filter(|(k, _)| k.starts_with(&id))
+                .collect();
+            if matches.len() == 1 {
+                Some(matches[0].1)
+            } else {
+                None
+            }
+        });
+
+        if let Some(record) = agent {
+            let path = agent_log_path(logs_path, &record.agent_id);
+            let content = read_log_file(&path, lines);
+            return Response::AgentLogs {
+                log_path: path,
+                content,
+                steps: vec![],
+            };
+        }
+
+        // Fallback: search step_history across all jobs for matching agent_id
+        for p in state.jobs.values() {
+            for r in &p.step_history {
+                if let Some(ref aid) = r.agent_id {
+                    if *aid == id || aid.starts_with(&id) {
+                        let path = agent_log_path(logs_path, aid);
+                        let content = read_log_file(&path, lines);
+                        return Response::AgentLogs {
+                            log_path: path,
+                            content,
+                            steps: vec![r.name.clone()],
+                        };
+                    }
+                }
+            }
+        }
+    }
+
     let (content, steps, log_path) = if let Some(step_name) = step {
         // Single step: find agent_id for that step
         let agent_id = job.and_then(|p| {

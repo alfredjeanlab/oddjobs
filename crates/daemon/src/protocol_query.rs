@@ -30,7 +30,7 @@ pub enum Query {
         lines: usize,
     },
     GetAgentLogs {
-        /// Job ID (not agent_id anymore)
+        /// Job ID or agent ID (prefix match supported)
         id: String,
         /// Optional step filter (None = all steps)
         #[serde(default)]
