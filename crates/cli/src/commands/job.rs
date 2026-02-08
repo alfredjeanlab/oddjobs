@@ -15,8 +15,8 @@ use oj_core::{ShortId, StepOutcomeKind};
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::output::{
-    display_log, format_time_ago, print_peek_frame, print_prune_results, should_use_color,
-    OutputFormat,
+    display_log, format_time_ago, print_capture_frame, print_peek_frame, print_prune_results,
+    should_use_color, OutputFormat,
 };
 use crate::table::{project_cell, should_show_project, Column, Table};
 
@@ -559,6 +559,23 @@ pub async fn handle(
                 }
                 None => {
                     let short_id = job.id.short(8);
+
+                    // Try saved capture: find agent_id from current step, then
+                    // fall back to the most recent agent in the job.
+                    let agent_id = job
+                        .steps
+                        .iter()
+                        .rfind(|s| s.name == job.step)
+                        .and_then(|s| s.agent_id.as_deref())
+                        .or_else(|| job.agents.last().map(|a| a.agent_id.as_str()));
+                    if let Some(aid) = agent_id {
+                        if let Some(content) = super::agent::display::try_read_agent_capture(aid) {
+                            let label = aid.short(8);
+                            print_capture_frame(label, &content);
+                            return Ok(());
+                        }
+                    }
+
                     let is_terminal =
                         job.step == "done" || job.step == "failed" || job.step == "cancelled";
 

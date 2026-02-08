@@ -3,7 +3,7 @@
 
 //! Agent management commands
 
-mod display;
+pub(crate) mod display;
 mod hooks;
 mod utils;
 mod wait;

@@ -26,6 +26,16 @@ pub fn print_peek_frame(session_id: &str, output: &str) {
     println!("╰────── {} ──────", crate::color::header("end peek"));
 }
 
+/// Print a saved terminal capture with distinct framing from live peek.
+pub fn print_capture_frame(label: &str, output: &str) {
+    println!(
+        "╭── {} ──",
+        crate::color::header(&format!("last capture: {}", label))
+    );
+    print!("{}", output);
+    println!("╰── {} ──", crate::color::header("end capture"));
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, ValueEnum)]
 pub enum OutputFormat {
     #[default]

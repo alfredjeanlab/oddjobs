@@ -10,7 +10,8 @@ use oj_core::ShortId;
 use crate::client::DaemonClient;
 use crate::color;
 use crate::output::{
-    display_log, print_peek_frame, print_prune_results, should_use_color, OutputFormat,
+    display_log, print_capture_frame, print_peek_frame, print_prune_results, should_use_color,
+    OutputFormat,
 };
 use crate::table::{project_cell, should_show_project, Column, Table};
 
@@ -184,9 +185,18 @@ pub(super) async fn handle_peek(client: &DaemonClient, id: &str) -> Result<()> {
         .await?
         .ok_or_else(|| anyhow::anyhow!("Agent not found: {}", id))?;
 
-    let session_id = agent
-        .session_id
-        .ok_or_else(|| anyhow::anyhow!("Agent has no active session"))?;
+    let session_id = match agent.session_id {
+        Some(ref id) => id.clone(),
+        None => {
+            // No session — try saved capture before giving up
+            let short_id = agent.agent_id.short(8);
+            if let Some(content) = try_read_agent_capture(&agent.agent_id) {
+                print_capture_frame(short_id, &content);
+                return Ok(());
+            }
+            anyhow::bail!("Agent has no active session");
+        }
+    };
 
     let with_color = should_use_color();
     match client.peek_session(&session_id, with_color).await {
@@ -195,6 +205,13 @@ pub(super) async fn handle_peek(client: &DaemonClient, id: &str) -> Result<()> {
         }
         Err(crate::client::ClientError::Rejected(msg)) if msg.starts_with("Session not found") => {
             let short_id = agent.agent_id.short(8);
+
+            // Try reading saved terminal capture
+            if let Some(content) = try_read_agent_capture(&agent.agent_id) {
+                print_capture_frame(short_id, &content);
+                return Ok(());
+            }
+
             let is_terminal = agent.status == "completed"
                 || agent.status == "failed"
                 || agent.status == "cancelled";
@@ -292,6 +309,14 @@ pub(super) async fn handle_prune(
         },
     )?;
     Ok(())
+}
+
+/// Try to read a saved terminal capture for an agent. Returns `None` if
+/// the state dir or capture file is unavailable.
+pub(crate) fn try_read_agent_capture(agent_id: &str) -> Option<String> {
+    let logs_dir = crate::env::state_dir().ok()?.join("logs");
+    let path = oj_engine::log_paths::agent_capture_path(&logs_dir, agent_id);
+    std::fs::read_to_string(path).ok()
 }
 
 pub(super) async fn handle_resume(
