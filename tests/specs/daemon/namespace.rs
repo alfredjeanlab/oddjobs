@@ -180,10 +180,19 @@ fn jobs_with_same_name_in_different_namespaces_dont_interfere() {
         .args(&["queue", "push", "tasks", r#"{"msg": "from-beta"}"#])
         .passes();
 
-    // Wait for jobs to complete in both namespaces
+    // Wait for jobs to complete in both namespaces (must use --project to scope
+    // by namespace; without it, `oj job list` returns ALL jobs across namespaces)
     let both_done = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        let out_a = pair.oj_a().args(&["job", "list"]).passes().stdout();
-        let out_b = pair.oj_b().args(&["job", "list"]).passes().stdout();
+        let out_a = pair
+            .oj_a()
+            .args(&["--project", "alpha", "job", "list"])
+            .passes()
+            .stdout();
+        let out_b = pair
+            .oj_b()
+            .args(&["--project", "beta", "job", "list"])
+            .passes()
+            .stdout();
         out_a.contains("completed") && out_b.contains("completed")
     });
 

@@ -12,7 +12,7 @@ use fs2::FileExt;
 use oj_adapters::{
     ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
 };
-use oj_core::{Event, SystemClock};
+use oj_core::{Event, JobId, SystemClock};
 use oj_engine::breadcrumb;
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
 use oj_storage::{load_snapshot, MaterializedState, Wal};
@@ -148,7 +148,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     // 7b. Detect orphaned jobs from breadcrumb files
     let breadcrumbs = breadcrumb::scan_breadcrumbs(&config.logs_path);
     let stale_threshold = std::time::Duration::from_secs(7 * 24 * 60 * 60); // 7 days
-    let mut orphans = Vec::new();
+    let orphans = Vec::new();
     for bc in breadcrumbs {
         if let Some(job) = state.jobs.get(&bc.job_id) {
             // Job exists in recovered state — clean up stale breadcrumbs
@@ -179,17 +179,76 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                 let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             } else {
-                warn!(
+                // Emit synthetic events to fail the orphaned job so it
+                // appears as "failed" in state rather than being invisible.
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+
+                let job_id = JobId(bc.job_id.clone());
+                let mut events = vec![
+                    Event::JobCreated {
+                        id: job_id.clone(),
+                        kind: bc.kind.clone(),
+                        name: bc.name.clone(),
+                        runbook_hash: bc.runbook_hash.clone(),
+                        cwd: bc.cwd.clone().unwrap_or_else(|| std::path::PathBuf::from("/")),
+                        vars: bc.vars.clone(),
+                        initial_step: bc.current_step.clone(),
+                        created_at_epoch_ms: now_ms,
+                        namespace: bc.project.clone(),
+                        cron_name: None,
+                    },
+                    Event::JobAdvanced {
+                        id: job_id,
+                        step: "failed".to_string(),
+                    },
+                ];
+
+                // Try to find and fail the associated queue item.
+                // Worker-dispatched jobs have name format "{kind}-{item_id}".
+                if let Some(item_id) = bc.name.strip_prefix(&format!("{}-", bc.kind)) {
+                    for items in state.queue_items.values() {
+                        if let Some(item) = items.iter().find(|i| i.id == item_id) {
+                            events.push(Event::QueueFailed {
+                                queue_name: item.queue_name.clone(),
+                                item_id: item_id.to_string(),
+                                error: "job orphaned after daemon crash".to_string(),
+                                namespace: bc.project.clone(),
+                            });
+                            events.push(Event::QueueItemDead {
+                                queue_name: item.queue_name.clone(),
+                                item_id: item_id.to_string(),
+                                namespace: bc.project.clone(),
+                            });
+                            break;
+                        }
+                    }
+                }
+
+                for event in &events {
+                    state.apply_event(event);
+                }
+                for event in events {
+                    event_bus.send(event)?;
+                }
+
+                info!(
                     job_id = %bc.job_id,
                     project = %bc.project,
-                    kind = %bc.kind,
-                    step = %bc.current_step,
-                    "orphaned job detected"
+                    "failed orphaned job from breadcrumb"
                 );
-                orphans.push(bc);
+
+                // Delete breadcrumb now that the job is properly failed
+                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
+                let _ = std::fs::remove_file(&path);
             }
         }
     }
+    // Flush synthetic orphan events to WAL before continuing
+    event_bus.flush()?;
+
     if !orphans.is_empty() {
         warn!(
             "{} orphaned job(s) detected from breadcrumbs",
