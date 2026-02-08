@@ -147,6 +147,25 @@ pub(crate) async fn workspace_prune_inner(
             .collect()
     });
 
+    // Compute workspace IDs owned by suspended jobs (exempt from prune)
+    let suspended_ws_ids: std::collections::HashSet<String> = {
+        let state_guard = state.lock();
+        state_guard
+            .workspaces
+            .iter()
+            .filter(|(_, ws)| {
+                ws.owner.as_ref().is_some_and(|owner| match owner {
+                    oj_core::OwnerId::Job(job_id) => state_guard
+                        .jobs
+                        .get(job_id.as_str())
+                        .is_some_and(|j| j.is_suspended()),
+                    _ => false,
+                })
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    };
+
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
 
@@ -179,6 +198,12 @@ pub(crate) async fn workspace_prune_inner(
             if !allowed_ids.contains(&id) {
                 continue;
             }
+        }
+
+        // Never prune workspaces owned by suspended jobs — preserved for resume
+        if suspended_ws_ids.contains(&id) {
+            skipped += 1;
+            continue;
         }
 
         // Check age via directory mtime (skip if < 12h unless --all)

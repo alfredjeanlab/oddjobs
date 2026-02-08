@@ -98,6 +98,11 @@ pub enum AgentCommand {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Suspend an agent's job (preserves workspace for later resume)
+    Suspend {
+        /// Agent ID (or prefix)
+        id: String,
+    },
     /// Resume a dead agent's session (re-spawn with --resume to preserve conversation)
     Resume {
         /// Agent ID (or prefix). Required unless --all is used.
@@ -119,9 +124,11 @@ pub enum AgentCommand {
 impl AgentCommand {
     pub fn client_kind(&self) -> ClientKind {
         match self {
-            Self::Send { .. } | Self::Kill { .. } | Self::Resume { .. } | Self::Prune { .. } => {
-                ClientKind::Action
-            }
+            Self::Send { .. }
+            | Self::Kill { .. }
+            | Self::Suspend { .. }
+            | Self::Resume { .. }
+            | Self::Prune { .. } => ClientKind::Action,
             Self::Hook { .. } => ClientKind::Signal,
             _ => ClientKind::Query,
         }
@@ -176,6 +183,9 @@ pub async fn handle(
         }
         AgentCommand::Kill { id } => {
             display::handle_kill(client, &id).await?;
+        }
+        AgentCommand::Suspend { id } => {
+            display::handle_suspend(client, &id).await?;
         }
         AgentCommand::Send { agent_id, message } => {
             display::handle_send(client, &agent_id, &message).await?;

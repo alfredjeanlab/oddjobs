@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use oj_daemon::{Query, Request, Response};
 
-use super::super::{CancelResult, ClientError, DaemonClient};
+use super::super::{CancelResult, ClientError, DaemonClient, SuspendResult};
 
 /// Result from running a command — either a job or a standalone agent
 pub enum RunCommandResult {
@@ -117,6 +117,23 @@ impl DaemonClient {
                 not_found,
             } => Ok(CancelResult {
                 cancelled,
+                already_terminal,
+                not_found,
+            }),
+            other => Self::reject(other),
+        }
+    }
+
+    /// Suspend one or more jobs by ID
+    pub async fn job_suspend(&self, ids: &[String]) -> Result<SuspendResult, ClientError> {
+        let request = Request::JobSuspend { ids: ids.to_vec() };
+        match self.send(&request).await? {
+            Response::JobsSuspended {
+                suspended,
+                already_terminal,
+                not_found,
+            } => Ok(SuspendResult {
+                suspended,
                 already_terminal,
                 not_found,
             }),

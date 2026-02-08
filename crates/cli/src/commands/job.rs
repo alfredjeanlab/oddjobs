@@ -20,6 +20,11 @@ use crate::output::{
 };
 use crate::table::{project_cell, should_show_project, Column, Table};
 
+pub(crate) use super::job_display::print_job_commands;
+use super::job_display::{
+    format_agent_summary, format_var_value, group_vars_by_scope, is_var_truncated, truncate,
+};
+
 #[derive(Args)]
 pub struct JobArgs {
     #[command(subcommand)]
@@ -77,6 +82,12 @@ pub enum JobCommand {
     },
     /// Cancel one or more running jobs
     Cancel {
+        /// Job IDs or names (prefix match)
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
+    /// Suspend one or more running jobs (preserves workspace for later resume)
+    Suspend {
         /// Job IDs or names (prefix match)
         #[arg(required = true)]
         ids: Vec<String>,
@@ -502,6 +513,24 @@ pub async fn handle(
                 std::process::exit(1);
             }
         }
+        JobCommand::Suspend { ids } => {
+            let result = client.job_suspend(&ids).await?;
+
+            for id in &result.suspended {
+                println!("Suspended job {}", id);
+            }
+            for id in &result.already_terminal {
+                println!("Job {} was already terminal", id);
+            }
+            for id in &result.not_found {
+                eprintln!("Job not found: {}", id);
+            }
+
+            // Exit with error if any jobs were not found
+            if !result.not_found.is_empty() {
+                std::process::exit(1);
+            }
+        }
         JobCommand::Attach { id } => {
             let job = client
                 .get_job(&id)
@@ -565,10 +594,17 @@ pub async fn handle(
                         }
                     }
 
-                    let is_terminal =
-                        job.step == "done" || job.step == "failed" || job.step == "cancelled";
+                    let is_terminal = job.step == "done"
+                        || job.step == "failed"
+                        || job.step == "cancelled"
+                        || job.step == "suspended";
 
-                    if is_terminal {
+                    if job.step == "suspended" {
+                        println!(
+                            "Job {} is suspended. Use `oj resume {}` to continue.",
+                            short_id, short_id
+                        );
+                    } else if is_terminal {
                         println!("Job {} is {}. No active session.", short_id, job.step);
                     } else {
                         println!(
@@ -620,111 +656,6 @@ pub async fn handle(
     }
 
     Ok(())
-}
-
-/// Print follow-up commands for a job.
-pub(crate) fn print_job_commands(short_id: &str) {
-    println!("    oj job show {short_id}");
-    println!(
-        "    oj job wait {short_id}      {}",
-        color::muted("# Wait until job ends")
-    );
-    println!(
-        "    oj job logs {short_id} -f   {}",
-        color::muted("# Follow logs")
-    );
-    println!(
-        "    oj job peek {short_id}      {}",
-        color::muted("# Capture tmux pane")
-    );
-    println!(
-        "    oj job attach {short_id}    {}",
-        color::muted("# Attach to tmux")
-    );
-}
-
-fn format_agent_summary(agent: &oj_daemon::AgentSummary) -> String {
-    let mut parts = Vec::new();
-    if agent.files_read > 0 {
-        parts.push(format!(
-            "{} file{} read",
-            agent.files_read,
-            if agent.files_read == 1 { "" } else { "s" }
-        ));
-    }
-    if agent.files_written > 0 {
-        parts.push(format!(
-            "{} file{} written",
-            agent.files_written,
-            if agent.files_written == 1 { "" } else { "s" }
-        ));
-    }
-    if agent.commands_run > 0 {
-        parts.push(format!(
-            "{} command{}",
-            agent.commands_run,
-            if agent.commands_run == 1 { "" } else { "s" }
-        ));
-    }
-    if let Some(ref reason) = agent.exit_reason {
-        parts.push(format!("exit: {}", reason));
-    }
-    parts.join(", ")
-}
-
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
-    }
-}
-
-fn format_var_value(value: &str, max_len: usize) -> String {
-    let escaped = value.replace('\n', "\\n");
-    if escaped.chars().count() <= max_len {
-        escaped
-    } else {
-        let truncated: String = escaped.chars().take(max_len).collect();
-        format!("{}...", truncated)
-    }
-}
-
-fn is_var_truncated(value: &str, max_len: usize) -> bool {
-    let escaped = value.replace('\n', "\\n");
-    escaped.chars().count() > max_len
-}
-
-/// Variable scope ordering for grouped display.
-/// Returns (order_priority, scope_name) for sorting.
-fn var_scope_order(key: &str) -> (usize, &str) {
-    if let Some(dot_pos) = key.find('.') {
-        let scope = &key[..dot_pos];
-        let priority = match scope {
-            "var" => 0,
-            "local" => 1,
-            "workspace" => 2,
-            "invoke" => 3,
-            _ => 4, // other namespaced vars
-        };
-        (priority, scope)
-    } else {
-        (5, "") // unnamespaced vars last
-    }
-}
-
-/// Group and sort variables by scope for display.
-fn group_vars_by_scope(vars: &HashMap<String, String>) -> Vec<(&String, &String)> {
-    let mut sorted: Vec<_> = vars.iter().collect();
-    sorted.sort_by(|(a, _), (b, _)| {
-        let (order_a, scope_a) = var_scope_order(a);
-        let (order_b, scope_b) = var_scope_order(b);
-        order_a
-            .cmp(&order_b)
-            .then_with(|| scope_a.cmp(scope_b))
-            .then_with(|| a.cmp(b))
-    });
-    sorted
 }
 
 #[cfg(test)]

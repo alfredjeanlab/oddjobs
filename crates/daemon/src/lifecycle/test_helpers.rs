@@ -184,8 +184,7 @@ pub fn test_config(dir: &Path) -> Config {
 pub fn setup_reconcile_runtime(
     dir_path: &Path,
 ) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
-    let session_adapter =
-        TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
+    let session_adapter = TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
     let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
 

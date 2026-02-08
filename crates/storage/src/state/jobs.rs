@@ -65,17 +65,20 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 }
                 // Clear stale error and session when resuming from terminal state
                 let was_terminal = job.is_terminal();
-                let target_is_nonterminal =
-                    step != "done" && step != "failed" && step != "cancelled";
+                let target_is_nonterminal = step != "done"
+                    && step != "failed"
+                    && step != "cancelled"
+                    && step != "suspended";
                 if was_terminal && target_is_nonterminal {
                     job.error = None;
                     job.session_id = None;
+                    job.suspending = false;
                 }
 
                 let now = helpers::epoch_ms_now();
                 // Finalize the previous step
                 let outcome = match step.as_str() {
-                    "failed" | "cancelled" => {
+                    "failed" | "cancelled" | "suspended" => {
                         StepOutcome::Failed(job.error.clone().unwrap_or_default())
                     }
                     _ => StepOutcome::Completed,
@@ -84,7 +87,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
 
                 job.step = step.clone();
                 job.step_status = match step.as_str() {
-                    "failed" | "cancelled" => StepStatus::Failed,
+                    "failed" | "cancelled" | "suspended" => StepStatus::Failed,
                     "done" => StepStatus::Completed,
                     _ => StepStatus::Pending,
                 };
@@ -99,14 +102,15 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 job.clear_agent_signal();
 
                 // Push new step record and track visits (unless terminal)
-                if step != "done" && step != "failed" && step != "cancelled" {
+                if step != "done" && step != "failed" && step != "cancelled" && step != "suspended"
+                {
                     job.record_step_visit(step);
                     job.push_step(step, now);
                 }
             }
 
             // Remove from worker active_job_ids and item_job_map on terminal states
-            if step == "done" || step == "failed" || step == "cancelled" {
+            if step == "done" || step == "failed" || step == "cancelled" || step == "suspended" {
                 let job_id_str = id.to_string();
                 for record in state.workers.values_mut() {
                     record.active_job_ids.retain(|pid| pid != &job_id_str);
@@ -195,6 +199,12 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
         Event::JobCancelling { id } => {
             if let Some(job) = state.jobs.get_mut(id.as_str()) {
                 job.cancelling = true;
+            }
+        }
+
+        Event::JobSuspending { id } => {
+            if let Some(job) = state.jobs.get_mut(id.as_str()) {
+                job.suspending = true;
             }
         }
 

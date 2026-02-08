@@ -28,10 +28,11 @@ where
         let job = self.require_job(job_id.as_str())?;
 
         let is_failed = job.step == "failed";
+        let is_suspended = job.step == "suspended";
 
-        // If job is in terminal "failed" state, find the last failed step
+        // If job is in terminal "failed" or "suspended" state, find the last failed step
         // from history so we can reset the job to that step for retry.
-        let resume_step = if is_failed {
+        let resume_step = if is_failed || is_suspended {
             job.step_history
                 .iter()
                 .rev()
@@ -68,12 +69,13 @@ where
         // All validation passed — now safe to mutate state.
         let mut result_events = Vec::new();
 
-        // If resuming from "failed", reset the job to the failed step
-        if is_failed {
+        // If resuming from "failed" or "suspended", reset the job to the target step
+        if is_failed || is_suspended {
             tracing::info!(
                 job_id = %job.id,
                 failed_step = %resume_step,
-                "resuming from terminal failure: resetting to failed step"
+                from = if is_suspended { "suspended" } else { "failed" },
+                "resuming from terminal state: resetting to step"
             );
 
             let events = self
@@ -142,6 +144,16 @@ where
         }
 
         Ok(result_events)
+    }
+
+    pub(crate) async fn handle_job_suspend(
+        &self,
+        job_id: &JobId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let job = self
+            .get_job(job_id.as_str())
+            .ok_or_else(|| RuntimeError::JobNotFound(job_id.to_string()))?;
+        self.suspend_job(&job).await
     }
 
     pub(crate) async fn handle_job_cancel(

@@ -60,6 +60,7 @@ fn all_commands_assigned_to_section() {
             Commands::Env(_) => "System",
             Commands::Logs { .. } => "System",
             Commands::Emit(_) => "System",
+            Commands::Suspend { .. } => "Actions",
             Commands::Daemon(_) => "System",
         }
     }

@@ -497,6 +497,19 @@ where
         let mut new_inputs = input.clone();
         new_inputs.insert("resume_message".to_string(), message.to_string());
 
+        // When killing a live agent, emit JobSuspending as a WAL-durable intermediate
+        // so the intent is recorded. If the daemon crashes between kill and respawn,
+        // the job can be detected as suspending and resumed later.
+        if kill && is_alive {
+            self.executor
+                .execute(Effect::Emit {
+                    event: Event::JobSuspending {
+                        id: JobId::new(&job.id),
+                    },
+                })
+                .await?;
+        }
+
         // Capture terminal + session log before killing old session
         self.capture_before_kill_job(job).await;
 

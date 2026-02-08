@@ -103,6 +103,13 @@ pub struct CancelResult {
     pub not_found: Vec<String>,
 }
 
+/// Result of a bulk suspend operation
+pub struct SuspendResult {
+    pub suspended: Vec<String>,
+    pub already_terminal: Vec<String>,
+    pub not_found: Vec<String>,
+}
+
 /// Daemon client
 pub struct DaemonClient {
     socket_path: PathBuf,

@@ -25,6 +25,7 @@ mod time_fmt;
 pub mod usage_metrics;
 mod vars;
 mod workspace;
+mod workspace_fs;
 
 #[cfg(test)]
 pub(crate) mod test_helpers;

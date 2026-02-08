@@ -14,7 +14,8 @@ pub(super) use self::agents::{
     handle_agent_kill, handle_agent_prune, handle_agent_resume, handle_agent_send,
 };
 pub(super) use self::jobs::{
-    handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all, handle_status,
+    handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all,
+    handle_job_suspend, handle_status,
 };
 pub(super) use self::resources::{handle_cron_prune, handle_worker_prune};
 pub(super) use self::sessions::{handle_session_kill, handle_session_prune, handle_session_send};

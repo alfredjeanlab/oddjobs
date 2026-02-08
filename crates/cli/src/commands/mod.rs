@@ -10,6 +10,7 @@ pub mod decision;
 pub mod emit;
 pub mod env;
 pub mod job;
+pub(crate) mod job_display;
 mod job_wait;
 pub mod project;
 pub mod queue;
