@@ -164,6 +164,10 @@ where
                 result_events.extend(self.handle_job_cancel(id).await?);
             }
 
+            Event::JobSuspend { id } => {
+                result_events.extend(self.handle_job_suspend(id).await?);
+            }
+
             Event::WorkspaceDrop { id } => {
                 result_events.extend(self.handle_workspace_drop(id).await?);
             }
@@ -297,7 +301,10 @@ where
             // fail_job/cancel_job/complete_job for immediate queue
             // item updates. This handler is a no-op safety net (idempotent).
             Event::JobAdvanced { id, step }
-                if step == "done" || step == "failed" || step == "cancelled" =>
+                if step == "done"
+                    || step == "failed"
+                    || step == "cancelled"
+                    || step == "suspended" =>
             {
                 result_events.extend(self.check_worker_job_complete(id, step).await?);
             }
@@ -454,6 +461,7 @@ where
             | Event::WorkspaceDeleted { .. }
             | Event::WorkerDeleted { .. }
             | Event::JobCancelling { .. }
+            | Event::JobSuspending { .. }
             | Event::JobUpdated { .. }
             | Event::WorkerItemDispatched { .. }
             | Event::CronFired { .. }

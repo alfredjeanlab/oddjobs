@@ -89,6 +89,9 @@ pub enum Request {
     /// Cancel one or more running jobs
     JobCancel { ids: Vec<String> },
 
+    /// Suspend one or more running jobs
+    JobSuspend { ids: Vec<String> },
+
     /// Run a command from a project's runbook
     RunCommand {
         /// Path to the project root (.oj directory parent)
@@ -542,6 +545,16 @@ pub enum Response {
     JobsCancelled {
         /// IDs of successfully cancelled jobs
         cancelled: Vec<String>,
+        /// IDs of jobs that were already terminal (no-op)
+        already_terminal: Vec<String>,
+        /// IDs that were not found
+        not_found: Vec<String>,
+    },
+
+    /// Response for bulk suspend operations
+    JobsSuspended {
+        /// IDs of successfully suspended jobs
+        suspended: Vec<String>,
         /// IDs of jobs that were already terminal (no-op)
         already_terminal: Vec<String>,
         /// IDs that were not found

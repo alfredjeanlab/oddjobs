@@ -172,7 +172,8 @@ pub(crate) fn handle_job_resume_all(
         let mut skipped: Vec<(String, String)> = Vec::new();
 
         for job in state_guard.jobs.values() {
-            if job.is_terminal() {
+            // Include suspended jobs in resume_all (they're terminal but resumable)
+            if job.is_terminal() && !job.is_suspended() {
                 continue;
             }
 
@@ -259,6 +260,47 @@ pub(crate) fn handle_job_cancel(
     })
 }
 
+/// Handle a job suspend request.
+pub(crate) fn handle_job_suspend(
+    ctx: &ListenCtx,
+    ids: Vec<String>,
+) -> Result<Response, ConnectionError> {
+    let mut suspended = Vec::new();
+    let mut already_terminal = Vec::new();
+    let mut not_found = Vec::new();
+
+    for id in ids {
+        let is_valid = {
+            let state_guard = ctx.state.lock();
+            state_guard.get_job(&id).map(|p| !p.is_terminal())
+        };
+
+        match is_valid {
+            Some(true) => {
+                emit(
+                    &ctx.event_bus,
+                    Event::JobSuspend {
+                        id: JobId::new(id.clone()),
+                    },
+                )?;
+                suspended.push(id);
+            }
+            Some(false) => {
+                already_terminal.push(id);
+            }
+            None => {
+                not_found.push(id);
+            }
+        }
+    }
+
+    Ok(Response::JobsSuspended {
+        suspended,
+        already_terminal,
+        not_found,
+    })
+}
+
 /// Handle job prune requests.
 ///
 /// Removes terminal jobs (failed/cancelled/done) from state and
@@ -294,6 +336,12 @@ pub(crate) fn handle_job_prune(
             }
 
             if !job.is_terminal() {
+                skipped += 1;
+                continue;
+            }
+
+            // Never prune suspended jobs — they are preserved for later resume
+            if job.is_suspended() {
                 skipped += 1;
                 continue;
             }

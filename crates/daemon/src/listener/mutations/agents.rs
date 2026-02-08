@@ -373,6 +373,12 @@ pub(crate) fn handle_agent_prune(
                 continue;
             }
 
+            // Never prune agents from suspended jobs — preserved for resume
+            if job.is_suspended() {
+                skipped += 1;
+                continue;
+            }
+
             // Check age via step history
             if !flags.all {
                 let created_at_ms = job

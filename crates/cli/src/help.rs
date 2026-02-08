@@ -43,6 +43,7 @@ pub fn commands() -> String {
 Actions:
   run         Run a command from the runbook
   cancel      Cancel one or more running jobs
+  suspend     Suspend one or more running jobs
   resume      Resume an escalated job
   status      Show overview of active work across all projects
   show        Show details of a job, agent, session, or queue

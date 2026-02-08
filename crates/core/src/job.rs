@@ -279,6 +279,9 @@ pub struct Job {
     /// True when running an on_cancel cleanup step. Prevents re-cancellation.
     #[serde(default)]
     pub cancelling: bool,
+    /// True when suspension is in progress. Prevents re-suspension.
+    #[serde(default)]
+    pub suspending: bool,
     /// Cumulative retry count across all steps (incremented each time an action
     /// is re-attempted, i.e. when attempt count > 1).
     #[serde(default)]
@@ -334,6 +337,7 @@ impl Job {
             }],
             action_tracker: ActionTracker::default(),
             cancelling: false,
+            suspending: false,
             total_retries: 0,
             step_visits: HashMap::new(),
             cron_name: config.cron_name,
@@ -393,7 +397,15 @@ impl Job {
 
     /// Check if the job is in a terminal state
     pub fn is_terminal(&self) -> bool {
-        self.step == "done" || self.step == "failed" || self.step == "cancelled"
+        self.step == "done"
+            || self.step == "failed"
+            || self.step == "cancelled"
+            || self.step == "suspended"
+    }
+
+    /// Check if the job is suspended (terminal but resumable, never pruned)
+    pub fn is_suspended(&self) -> bool {
+        self.step == "suspended"
     }
 
     /// Set the workspace ID and path
@@ -470,6 +482,7 @@ pub struct JobBuilder {
     error: Option<String>,
     action_tracker: ActionTracker,
     cancelling: bool,
+    suspending: bool,
     total_retries: u32,
     step_visits: HashMap<String, u32>,
     cron_name: Option<String>,
@@ -497,6 +510,7 @@ impl Default for JobBuilder {
             error: None,
             action_tracker: ActionTracker::default(),
             cancelling: false,
+            suspending: false,
             total_retries: 0,
             step_visits: HashMap::new(),
             cron_name: None,
@@ -564,6 +578,10 @@ impl JobBuilder {
         self.cancelling = v;
         self
     }
+    pub fn suspending(mut self, v: bool) -> Self {
+        self.suspending = v;
+        self
+    }
     pub fn total_retries(mut self, v: u32) -> Self {
         self.total_retries = v;
         self
@@ -596,6 +614,7 @@ impl JobBuilder {
             error: self.error,
             action_tracker: self.action_tracker,
             cancelling: self.cancelling,
+            suspending: self.suspending,
             total_retries: self.total_retries,
             step_visits: self.step_visits,
             cron_name: self.cron_name,

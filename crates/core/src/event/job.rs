@@ -25,6 +25,8 @@ pub(super) fn log_summary(event: &Event, t: &str) -> String {
         Event::JobResume { id, .. } => format!("{t} id={id}"),
         Event::JobCancelling { id } => format!("{t} id={id}"),
         Event::JobCancel { id } => format!("{t} id={id}"),
+        Event::JobSuspending { id } => format!("{t} id={id}"),
+        Event::JobSuspend { id } => format!("{t} id={id}"),
         Event::JobDeleted { id } => format!("{t} id={id}"),
         _ => unreachable!("not a job event"),
     }
@@ -38,6 +40,8 @@ pub(super) fn job_id(event: &Event) -> Option<&JobId> {
         | Event::JobResume { id, .. }
         | Event::JobCancelling { id, .. }
         | Event::JobCancel { id, .. }
+        | Event::JobSuspending { id, .. }
+        | Event::JobSuspend { id, .. }
         | Event::JobDeleted { id, .. } => Some(id),
         _ => unreachable!("not a job event"),
     }

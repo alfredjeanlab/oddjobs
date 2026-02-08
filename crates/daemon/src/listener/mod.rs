@@ -179,6 +179,8 @@ async fn handle_request(request: Request, ctx: &ListenCtx) -> Result<Response, C
 
         Request::JobCancel { ids } => mutations::handle_job_cancel(ctx, ids),
 
+        Request::JobSuspend { ids } => mutations::handle_job_suspend(ctx, ids),
+
         Request::RunCommand {
             project_root,
             invoke_dir,

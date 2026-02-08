@@ -258,6 +258,30 @@ pub(super) async fn handle_kill(client: &DaemonClient, id: &str) -> Result<()> {
     Ok(())
 }
 
+pub(super) async fn handle_suspend(client: &DaemonClient, id: &str) -> Result<()> {
+    // Resolve agent to its owning job
+    let agent = client
+        .get_agent(id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("agent not found: {}", id))?;
+    if agent.job_id.is_empty() {
+        anyhow::bail!("agent {} has no owning job", id);
+    }
+    let result = client
+        .job_suspend(std::slice::from_ref(&agent.job_id))
+        .await?;
+    for jid in &result.suspended {
+        println!("Suspended job {} (via agent {})", jid, id);
+    }
+    for jid in &result.already_terminal {
+        println!("Job {} was already terminal", jid);
+    }
+    for jid in &result.not_found {
+        eprintln!("Job not found: {}", jid);
+    }
+    Ok(())
+}
+
 pub(super) async fn handle_send(
     client: &DaemonClient,
     agent_id: &str,

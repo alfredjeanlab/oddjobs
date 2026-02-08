@@ -127,6 +127,12 @@ enum Commands {
         #[arg(required = true)]
         ids: Vec<String>,
     },
+    /// Suspend one or more running jobs (preserves workspace for later resume)
+    Suspend {
+        /// Job IDs or names (prefix match)
+        #[arg(required = true)]
+        ids: Vec<String>,
+    },
     /// Resume monitoring for an escalated job
     Resume {
         /// Job ID or name. Required unless --all is used.
@@ -401,6 +407,16 @@ async fn run() -> Result<()> {
             let client = DaemonClient::for_action()?;
             job::handle(
                 job::JobCommand::Cancel { ids },
+                &client,
+                cli.project.as_deref(),
+                format,
+            )
+            .await?
+        }
+        Commands::Suspend { ids } => {
+            let client = DaemonClient::for_action()?;
+            job::handle(
+                job::JobCommand::Suspend { ids },
                 &client,
                 cli.project.as_deref(),
                 format,

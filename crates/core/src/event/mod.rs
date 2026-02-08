@@ -179,6 +179,12 @@ pub enum Event {
     #[serde(rename = "job:cancel")]
     JobCancel { id: JobId },
 
+    #[serde(rename = "job:suspending")]
+    JobSuspending { id: JobId },
+
+    #[serde(rename = "job:suspend")]
+    JobSuspend { id: JobId },
+
     #[serde(rename = "job:deleted")]
     JobDeleted { id: JobId },
 

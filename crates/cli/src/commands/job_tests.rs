@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use super::super::job_display::var_scope_order;
 use super::super::job_wait::{print_step_progress, StepTracker};
 use super::{
     format_job_list, format_var_value, group_vars_by_scope, is_var_truncated, parse_duration,
-    var_scope_order,
 };
 use oj_core::{StepOutcomeKind, StepStatusKind};
 use oj_daemon::{JobDetail, JobSummary, StepRecordDetail};

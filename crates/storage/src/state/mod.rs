@@ -130,6 +130,7 @@ impl MaterializedState {
             | Event::StepCompleted { .. }
             | Event::StepFailed { .. }
             | Event::JobCancelling { .. }
+            | Event::JobSuspending { .. }
             | Event::JobDeleted { .. }
             | Event::ShellExited { .. }
             | Event::JobUpdated { .. } => jobs::apply(self, event),
@@ -180,6 +181,7 @@ impl MaterializedState {
             | Event::AgentSpawnFailed { .. }
             | Event::JobResume { .. }
             | Event::JobCancel { .. }
+            | Event::JobSuspend { .. }
             | Event::AgentRunResume { .. }
             | Event::WorkspaceDrop { .. }
             | Event::WorkerWake { .. }

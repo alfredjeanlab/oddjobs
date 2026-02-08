@@ -161,6 +161,53 @@ pub fn cancellation_effects(job: &Job) -> Vec<Effect> {
     effects
 }
 
+/// Build effects to suspend a running job.
+///
+/// Cancels timers, transitions to "suspended" terminal state, kills the session.
+/// Unlike cancellation, does NOT delete the workspace — preserves everything for resume.
+pub fn suspension_effects(job: &Job) -> Vec<Effect> {
+    let job_id = JobId::new(&job.id);
+    let mut effects = vec![];
+
+    // Cancel liveness and exit-deferred timers
+    effects.push(Effect::CancelTimer {
+        id: TimerId::liveness(&job_id),
+    });
+    effects.push(Effect::CancelTimer {
+        id: TimerId::exit_deferred(&job_id),
+    });
+
+    // Transition to suspended state
+    if !job.is_terminal() {
+        effects.push(Effect::Emit {
+            event: Event::JobAdvanced {
+                id: job_id.clone(),
+                step: "suspended".to_string(),
+            },
+        });
+    }
+    effects.push(Effect::Emit {
+        event: Event::StepFailed {
+            job_id,
+            step: job.step.clone(),
+            error: "suspended".to_string(),
+        },
+    });
+
+    // Kill session (covers both agent tmux sessions and shell sessions)
+    if let Some(session_id) = &job.session_id {
+        let session_id = SessionId::new(session_id);
+        effects.push(Effect::KillSession {
+            session_id: session_id.clone(),
+        });
+        effects.push(Effect::Emit {
+            event: Event::SessionDeleted { id: session_id },
+        });
+    }
+
+    effects
+}
+
 /// Build effects to complete a job
 pub fn completion_effects(job: &Job) -> Vec<Effect> {
     let job_id = JobId::new(&job.id);

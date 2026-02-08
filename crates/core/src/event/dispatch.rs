@@ -41,6 +41,8 @@ impl Event {
             Event::JobResume { .. } => "job:resume",
             Event::JobCancelling { .. } => "job:cancelling",
             Event::JobCancel { .. } => "job:cancel",
+            Event::JobSuspending { .. } => "job:suspending",
+            Event::JobSuspend { .. } => "job:suspend",
             Event::JobDeleted { .. } => "job:deleted",
             Event::RunbookLoaded { .. } => "runbook:loaded",
             Event::SessionCreated { .. } => "session:created",
@@ -113,6 +115,8 @@ impl Event {
             | Event::JobResume { .. }
             | Event::JobCancelling { .. }
             | Event::JobCancel { .. }
+            | Event::JobSuspending { .. }
+            | Event::JobSuspend { .. }
             | Event::JobDeleted { .. } => job::log_summary(self, t),
 
             // Step events
@@ -186,6 +190,8 @@ impl Event {
             | Event::JobResume { .. }
             | Event::JobCancelling { .. }
             | Event::JobCancel { .. }
+            | Event::JobSuspending { .. }
+            | Event::JobSuspend { .. }
             | Event::JobDeleted { .. } => job::job_id(self),
 
             // Step events

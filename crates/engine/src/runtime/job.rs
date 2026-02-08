@@ -477,6 +477,83 @@ where
         Ok(vec![])
     }
 
+    /// Suspend a running job.
+    ///
+    /// Kills the agent session and transitions to the "suspended" terminal state.
+    /// Unlike cancellation, does NOT clean up the workspace — preserves everything
+    /// for later resume. No on_cancel/on_suspend routing; goes straight to terminal.
+    pub(crate) async fn suspend_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
+        // Already terminal — no-op
+        if job.is_terminal() {
+            tracing::info!(job_id = %job.id, "suspend: job already terminal");
+            return Ok(vec![]);
+        }
+
+        // If already suspending, don't re-suspend
+        if job.suspending {
+            tracing::info!(job_id = %job.id, "suspend: already suspending, ignoring");
+            return Ok(vec![]);
+        }
+
+        let runbook = self.cached_runbook(&job.runbook_hash)?;
+        let job_def = runbook.get_job(&job.kind);
+        let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
+
+        let job_id = JobId::new(&job.id);
+
+        // Cancel timers and kill session for agent steps
+        let current_is_agent = current_step_def
+            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
+            .unwrap_or(false);
+        if current_is_agent {
+            self.executor
+                .execute(Effect::CancelTimer {
+                    id: TimerId::liveness(&job_id),
+                })
+                .await?;
+            self.executor
+                .execute(Effect::CancelTimer {
+                    id: TimerId::exit_deferred(&job_id),
+                })
+                .await?;
+
+            if let Some(agent_id) = job
+                .step_history
+                .iter()
+                .rfind(|r| r.name == job.step)
+                .and_then(|r| r.agent_id.as_ref())
+            {
+                self.deregister_agent(&oj_core::AgentId::new(agent_id));
+            }
+
+            // Capture terminal + session log before killing
+            self.capture_before_kill_job(job).await;
+
+            if let Some(session_id) = &job.session_id {
+                let sid = SessionId::new(session_id);
+                self.executor
+                    .execute(Effect::KillSession {
+                        session_id: sid.clone(),
+                    })
+                    .await?;
+                self.executor
+                    .execute(Effect::Emit {
+                        event: Event::SessionDeleted { id: sid },
+                    })
+                    .await?;
+            }
+        }
+
+        // Go directly to suspended terminal — no cleanup step routing
+        let effects = steps::suspension_effects(job);
+        // NOTE: no workspace cleanup — preserve for resume
+        let result_events = self.executor.execute_all(effects).await?;
+        self.breadcrumb.delete(&job.id);
+
+        tracing::info!(job_id = %job.id, "suspended job");
+        Ok(result_events)
+    }
+
     /// Cancel a running job.
     ///
     /// If the current step (or job) has `on_cancel` configured, routes to
