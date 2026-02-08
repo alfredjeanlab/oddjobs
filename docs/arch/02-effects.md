@@ -13,13 +13,8 @@ pub enum Effect {
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        owner: OwnerId,                    // Job or standalone agent run
-        workspace_path: PathBuf,
-        input: HashMap<String, String>,
-        command: String,
-        env: Vec<(String, String)>,
-        cwd: Option<PathBuf>,
-        session_config: HashMap<String, serde_json::Value>,  // Adapter-specific config
+        owner: OwnerId,
+        .. // and so on
     },
     SendToAgent { agent_id: AgentId, input: String },
     KillAgent { agent_id: AgentId },
@@ -33,10 +28,7 @@ pub enum Effect {
         workspace_id: WorkspaceId,
         path: PathBuf,
         owner: Option<OwnerId>,
-        workspace_type: Option<String>,  // "folder" or "worktree"
-        repo_root: Option<PathBuf>,      // For worktree: the repo root
-        branch: Option<String>,          // For worktree: the branch name
-        start_point: Option<String>,     // For worktree: the start point
+        .. // and so on
     },
     DeleteWorkspace { workspace_id: WorkspaceId },
 

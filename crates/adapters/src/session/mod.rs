@@ -68,10 +68,4 @@ pub trait SessionAdapter: Clone + Send + Sync + 'static {
     ///
     /// Returns `None` if the pane is still running or the exit code is unavailable.
     async fn get_exit_code(&self, id: &str) -> Result<Option<i32>, SessionError>;
-
-    /// Apply configuration to an existing session (styling, status bar, etc.)
-    /// Default implementation is a no-op.
-    async fn configure(&self, _id: &str, _config: &serde_json::Value) -> Result<(), SessionError> {
-        Ok(())
-    }
 }

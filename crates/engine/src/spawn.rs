@@ -6,7 +6,7 @@
 use crate::error::RuntimeError;
 use crate::executor::ExecuteError;
 use oj_adapters::agent::find_session_log;
-use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId, ShortId};
+use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId};
 use oj_runbook::{AgentDef, StopAction};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -367,36 +367,6 @@ pub fn build_spawn_effects(
         "spawn effects prepared"
     );
 
-    // Build session config with defaults
-    // Note: use prompt_vars (not vars) to avoid shell-escaped ${prompt}
-    let session_config = {
-        let mut config: HashMap<String, serde_json::Value> = HashMap::new();
-        if let Some(tmux_cfg) = agent_def.session.get("tmux") {
-            // Interpolate variables in session config (title, status left/right)
-            let interpolated = tmux_cfg.interpolate(&prompt_vars);
-            if let Ok(val) = serde_json::to_value(interpolated) {
-                config.insert("tmux".to_string(), val);
-            }
-        }
-        // Always ensure tmux has default status bars (even without explicit session block)
-        let tmux_value = config
-            .entry("tmux".to_string())
-            .or_insert_with(|| serde_json::json!({}));
-        if let serde_json::Value::Object(ref mut map) = tmux_value {
-            let status = map.entry("status").or_insert_with(|| serde_json::json!({}));
-            if let serde_json::Value::Object(ref mut status_map) = status {
-                let short_id = agent_id.short(8);
-                status_map.entry("left").or_insert_with(|| {
-                    serde_json::json!(format!("{} {}/{}", ctx.namespace, ctx.name, agent_name))
-                });
-                status_map
-                    .entry("right")
-                    .or_insert_with(|| serde_json::json!(short_id));
-            }
-        }
-        config
-    };
-
     Ok(vec![Effect::SpawnAgent {
         agent_id: AgentId::new(agent_id),
         agent_name: agent_name.to_string(),
@@ -407,7 +377,6 @@ pub fn build_spawn_effects(
         env,
         unset_env,
         cwd: Some(effective_cwd),
-        session_config,
     }])
 }
 

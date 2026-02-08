@@ -3,7 +3,7 @@
 
 //! Agent configuration tests: command recognition, prompt config, session config.
 
-use oj_runbook::{parse_runbook, parse_runbook_with_format, Format, ParseError};
+use oj_runbook::{parse_runbook, ParseError};
 
 // ============================================================================
 // Agent Command Recognition
@@ -104,76 +104,4 @@ fn session_id_equals_rejected() {
     let err = parse_runbook("[agent.plan]\nrun = \"claude --session-id=abc123\"").unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
     super::assert_err_contains(&err, &["session-id"]);
-}
-
-// ============================================================================
-// Session Configuration (HCL-specific and validation only)
-// ============================================================================
-
-#[test]
-fn session_hcl_with_color() {
-    let hcl = r#"
-agent "mayor" {
-  run = "claude"
-  session "tmux" {
-    color = "cyan"
-    title = "mayor"
-  }
-}
-"#;
-    let tmux = super::parse_hcl(hcl)
-        .get_agent("mayor")
-        .unwrap()
-        .session
-        .get("tmux")
-        .unwrap()
-        .clone();
-    assert_eq!(tmux.color.as_deref(), Some("cyan"));
-    assert_eq!(tmux.title.as_deref(), Some("mayor"));
-}
-
-#[test]
-fn session_hcl_with_status() {
-    let hcl = r#"
-agent "mayor" {
-  run = "claude"
-  session "tmux" {
-    color = "green"
-    status {
-      left  = "myproject merge/check"
-      right = "custom-id"
-    }
-  }
-}
-"#;
-    let tmux = super::parse_hcl(hcl)
-        .get_agent("mayor")
-        .unwrap()
-        .session
-        .get("tmux")
-        .unwrap()
-        .clone();
-    assert_eq!(tmux.color.as_deref(), Some("green"));
-    let status = tmux.status.unwrap();
-    assert_eq!(status.left.as_deref(), Some("myproject merge/check"));
-    assert_eq!(status.right.as_deref(), Some("custom-id"));
-}
-
-#[test]
-fn session_rejects_invalid_color() {
-    super::assert_hcl_err(
-        "agent \"w\" {\n  run = \"claude\"\n  session \"tmux\" {\n    color = \"purple\"\n  }\n}",
-        &["unknown color 'purple'"],
-    );
-}
-
-#[test]
-fn session_accepts_all_valid_colors() {
-    for color in ["red", "green", "blue", "cyan", "magenta", "yellow", "white"] {
-        let hcl = format!("agent \"w\" {{\n  run = \"claude\"\n  session \"tmux\" {{\n    color = \"{color}\"\n  }}\n}}");
-        assert!(
-            parse_runbook_with_format(&hcl, Format::Hcl).is_ok(),
-            "color '{color}' should be valid"
-        );
-    }
 }

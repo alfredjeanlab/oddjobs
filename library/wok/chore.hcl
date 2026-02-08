@@ -111,15 +111,6 @@ agent "chores" {
     MSG
   }
 
-  session "tmux" {
-    color = "blue"
-    title = "Chore: ${var.task.id}"
-    status {
-      left  = "${var.task.id}: ${var.task.title}"
-      right = "${workspace.branch}"
-    }
-  }
-
   prime = [
     "wok show ${var.task.id}",
     <<-PRIME

@@ -41,9 +41,6 @@ pub enum Effect {
         /// (prevents inheritance of stale values from the tmux server environment)
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         unset_env: Vec<String>,
-        /// Adapter-specific session configuration (provider -> config as JSON)
-        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-        session_config: HashMap<String, serde_json::Value>,
     },
 
     /// Send input to an agent

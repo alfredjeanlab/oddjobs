@@ -110,15 +110,6 @@ agent "bugs" {
     MSG
   }
 
-  session "tmux" {
-    color = "blue"
-    title = "Bug: ${var.bug.id}"
-    status {
-      left  = "${var.bug.id}: ${var.bug.title}"
-      right = "${workspace.branch}"
-    }
-  }
-
   prime = [
     "wok show ${var.bug.id}",
     <<-PRIME

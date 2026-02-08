@@ -125,7 +125,6 @@ where
                 env,
                 unset_env,
                 cwd,
-                session_config,
             } => {
                 // Extract job_id for backwards compatibility with AgentSpawnConfig
                 let job_id_str = match &owner {
@@ -146,8 +145,7 @@ where
                                 .cloned()
                                 .unwrap_or_else(|| job_id_str.clone()),
                         )
-                        .job_id(job_id_str)
-                        .session_config(session_config);
+                        .job_id(job_id_str);
                 if let Some(cwd) = cwd {
                     config = config.cwd(cwd);
                 }

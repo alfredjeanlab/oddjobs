@@ -93,8 +93,6 @@ pub struct AgentSpawnConfig {
     pub job_id: String,
     /// Root of the project
     pub project_root: PathBuf,
-    /// Adapter-specific session configuration (provider -> config as JSON)
-    pub session_config: std::collections::HashMap<String, serde_json::Value>,
     /// Owner of this agent (job or agent_run)
     pub owner: OwnerId,
 }
@@ -119,7 +117,6 @@ impl AgentSpawnConfig {
             job_name: String::new(),
             job_id: String::new(),
             project_root: workspace_path,
-            session_config: std::collections::HashMap::new(),
         }
     }
 
@@ -153,13 +150,6 @@ impl AgentSpawnConfig {
     }
     pub fn project_root(mut self, v: PathBuf) -> Self {
         self.project_root = v;
-        self
-    }
-    pub fn session_config(
-        mut self,
-        v: std::collections::HashMap<String, serde_json::Value>,
-    ) -> Self {
-        self.session_config = v;
         self
     }
 }

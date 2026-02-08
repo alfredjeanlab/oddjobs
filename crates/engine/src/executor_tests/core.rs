@@ -312,7 +312,6 @@ async fn get_agent_state_returns_state() {
             env: vec![],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();
@@ -357,7 +356,6 @@ async fn get_session_log_size_returns_value_when_set() {
             env: vec![],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();

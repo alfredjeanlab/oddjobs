@@ -289,12 +289,6 @@ agent "plan" {
   run = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_dead = { action = "resume", attempts = 1 }
 
-  session "tmux" {
-    color = "blue"
-    title = "Plan: ${var.epic.id}"
-    status { left = "${var.epic.id}: ${var.epic.title}" }
-  }
-
   prime = [
     "wok show ${var.epic.id}",
     <<-PRIME
@@ -328,15 +322,6 @@ agent "implement" {
       Follow the plan, implement, test, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Epic: ${var.epic.id}"
-    status {
-      left  = "${var.epic.id}: ${var.epic.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [
@@ -379,15 +364,6 @@ agent "draft" {
       Follow the plan, implement, test, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Draft: ${var.epic.id}"
-    status {
-      left  = "${var.epic.id}: ${var.epic.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

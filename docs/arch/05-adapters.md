@@ -85,9 +85,9 @@ pub enum AgentState {
 }
 ```
 
-`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, `workspace_path`, `cwd`, `prompt`, `job_name`, `job_id`, `project_root`, `session_config`, `owner`.
+`AgentSpawnConfig` bundles spawn parameters: `agent_id`, `agent_name`, `command`, `env`, and so on.
 
-`AgentReconnectConfig` bundles reconnect parameters: `agent_id`, `session_id`, `workspace_path`, `process_name`, `owner`.
+`AgentReconnectConfig` bundles reconnect parameters: `agent_id`, `session_id`, and so on.
 
 Liveness is detected via the background watcher (file-watching + periodic process checks), not a separate `is_alive()` method.
 

@@ -22,7 +22,6 @@ fn effect_serialization_roundtrip() {
             env: vec![("KEY".to_string(), "value".to_string())],
             cwd: Some(PathBuf::from("/work")),
             unset_env: vec![],
-            session_config: HashMap::new(),
         },
         Effect::SendToAgent {
             agent_id: AgentId::new("agent-1"),
@@ -111,7 +110,6 @@ fn traced_effect_names() {
                 env: vec![],
                 cwd: None,
                 unset_env: vec![],
-                session_config: HashMap::new(),
             },
             "spawn_agent",
         ),
@@ -237,7 +235,6 @@ fn traced_effect_fields() {
         env: vec![],
         cwd: Some(PathBuf::from("/work")),
         unset_env: vec![],
-        session_config: HashMap::new(),
     };
     let fields = effect.fields();
     assert_eq!(fields.len(), 6);
@@ -383,80 +380,4 @@ fn traced_effect_fields() {
     };
     let fields = effect.fields();
     assert_eq!(fields, vec![("title", "Build".to_string())]);
-}
-
-#[test]
-fn spawn_agent_session_config_roundtrip() {
-    let mut session_config = HashMap::new();
-    session_config.insert(
-        "tmux".to_string(),
-        serde_json::json!({
-            "color": "cyan",
-            "title": "test",
-            "status": {
-                "left": "project build/check",
-                "right": "abc12345"
-            }
-        }),
-    );
-
-    let effect = Effect::SpawnAgent {
-        agent_id: AgentId::new("agent-1"),
-        agent_name: "claude".to_string(),
-        owner: crate::OwnerId::Job(JobId::new("pipe-1")),
-        workspace_path: PathBuf::from("/work"),
-        input: HashMap::new(),
-        command: "claude".to_string(),
-        env: vec![],
-        cwd: None,
-        unset_env: vec![],
-        session_config: session_config.clone(),
-    };
-
-    let json = serde_json::to_string(&effect).unwrap();
-    let parsed: Effect = serde_json::from_str(&json).unwrap();
-
-    if let Effect::SpawnAgent {
-        session_config: parsed_config,
-        ..
-    } = parsed
-    {
-        assert_eq!(parsed_config, session_config);
-        let tmux = parsed_config.get("tmux").unwrap();
-        assert_eq!(tmux["color"], "cyan");
-        assert_eq!(tmux["status"]["left"], "project build/check");
-    } else {
-        panic!("Expected SpawnAgent effect");
-    }
-}
-
-#[test]
-fn spawn_agent_empty_session_config_skipped_in_serialization() {
-    let effect = Effect::SpawnAgent {
-        agent_id: AgentId::new("agent-1"),
-        agent_name: "claude".to_string(),
-        owner: crate::OwnerId::Job(JobId::new("pipe-1")),
-        workspace_path: PathBuf::from("/work"),
-        input: HashMap::new(),
-        command: "claude".to_string(),
-        env: vec![],
-        cwd: None,
-        unset_env: vec![],
-        session_config: HashMap::new(),
-    };
-
-    let json = serde_json::to_string(&effect).unwrap();
-    assert!(
-        !json.contains("session_config"),
-        "empty session_config should be skipped in serialization, got: {}",
-        json
-    );
-
-    // Should still round-trip correctly
-    let parsed: Effect = serde_json::from_str(&json).unwrap();
-    if let Effect::SpawnAgent { session_config, .. } = parsed {
-        assert!(session_config.is_empty());
-    } else {
-        panic!("Expected SpawnAgent effect");
-    }
 }

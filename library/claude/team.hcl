@@ -29,11 +29,6 @@ agent "leader" {
     CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = "1"
   }
 
-  session "tmux" {
-    color = "magenta"
-    title = "Claude Team"
-  }
-
   prime = {
     startup = <<-SHELL
       echo '## Reminders'

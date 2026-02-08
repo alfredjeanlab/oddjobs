@@ -128,50 +128,6 @@ async fn fake_session_is_process_running_not_found() {
 }
 
 #[tokio::test]
-async fn fake_session_configure_records_call() {
-    let adapter = FakeSessionAdapter::new();
-    let id = adapter
-        .spawn("test", Path::new("/tmp"), "cmd", &[], &[])
-        .await
-        .unwrap();
-
-    let config = serde_json::json!({
-        "color": "cyan",
-        "title": "test",
-        "status": {
-            "left": "project build/check",
-            "right": "abc12345"
-        }
-    });
-
-    adapter.configure(&id, &config).await.unwrap();
-
-    let calls = adapter.calls();
-    let configure_calls: Vec<_> = calls
-        .iter()
-        .filter(|c| matches!(c, SessionCall::Configure { .. }))
-        .collect();
-    assert_eq!(configure_calls.len(), 1);
-    if let SessionCall::Configure {
-        id: call_id,
-        config: call_config,
-    } = &configure_calls[0]
-    {
-        assert_eq!(call_id, &id);
-        assert_eq!(call_config, &config);
-    }
-}
-
-#[tokio::test]
-async fn fake_session_configure_not_found() {
-    let adapter = FakeSessionAdapter::new();
-
-    let config = serde_json::json!({"color": "red"});
-    let result = adapter.configure("nonexistent", &config).await;
-    assert!(matches!(result, Err(SessionError::NotFound(_))));
-}
-
-#[tokio::test]
 async fn fake_session_is_alive_not_found() {
     let adapter = FakeSessionAdapter::new();
     assert!(!adapter.is_alive("nonexistent").await.unwrap());

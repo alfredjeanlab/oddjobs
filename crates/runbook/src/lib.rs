@@ -24,8 +24,7 @@ mod worker;
 
 pub use agent::{
     ActionConfig, ActionTrigger, AgentAction, AgentDef, Attempts, ErrorActionConfig, ErrorMatch,
-    ErrorType, PrimeDef, SessionStatusConfig, StopAction, StopActionConfig, TmuxSessionConfig,
-    VALID_PRIME_SOURCES, VALID_SESSION_COLORS,
+    ErrorType, PrimeDef, StopAction, StopActionConfig, VALID_PRIME_SOURCES,
 };
 pub use command::{
     parse_arg_spec, ArgDef, ArgSpec, ArgSpecError, ArgValidationError, CommandDef, FlagDef,

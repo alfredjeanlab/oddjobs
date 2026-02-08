@@ -21,7 +21,6 @@ fn agent_build_command_with_prompt_field() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = HashMap::new();
@@ -48,7 +47,6 @@ fn agent_build_command_with_inline_prompt() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = [("prompt".to_string(), "Add login".to_string())]
@@ -75,7 +73,6 @@ fn agent_build_command_print_mode() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = HashMap::new();
@@ -106,7 +103,6 @@ fn agent_build_env() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = [
@@ -138,7 +134,6 @@ fn agent_get_prompt_from_field() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = [
@@ -169,7 +164,6 @@ fn agent_get_prompt_empty_when_unset() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars = HashMap::new();
@@ -200,7 +194,6 @@ fn agent_get_prompt_from_file() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars: HashMap<String, String> = [
@@ -231,7 +224,6 @@ fn agent_get_prompt_file_not_found() {
         on_stop: None,
         max_concurrency: None,
         notify: Default::default(),
-        session: HashMap::new(),
     };
 
     let vars = HashMap::new();

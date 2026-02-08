@@ -8,54 +8,6 @@ use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
 
-/// Valid tmux status bar colors
-pub const VALID_SESSION_COLORS: &[&str] =
-    &["red", "green", "blue", "cyan", "magenta", "yellow", "white"];
-
-/// Status bar text configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SessionStatusConfig {
-    pub left: Option<String>,
-    pub right: Option<String>,
-}
-
-/// Tmux-specific session configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TmuxSessionConfig {
-    /// Status bar background color (red, green, blue, cyan, magenta, yellow, white)
-    #[serde(default)]
-    pub color: Option<String>,
-    /// Window title string
-    #[serde(default)]
-    pub title: Option<String>,
-    /// Status bar left/right text
-    #[serde(default)]
-    pub status: Option<SessionStatusConfig>,
-}
-
-impl TmuxSessionConfig {
-    /// Interpolate all string fields with the provided variables
-    pub fn interpolate(&self, vars: &HashMap<String, String>) -> Self {
-        Self {
-            color: self.color.clone(), // Color is validated at parse-time, no interpolation needed
-            title: self
-                .title
-                .as_ref()
-                .map(|t| crate::template::interpolate(t, vars)),
-            status: self.status.as_ref().map(|s| SessionStatusConfig {
-                left: s
-                    .left
-                    .as_ref()
-                    .map(|l| crate::template::interpolate(l, vars)),
-                right: s
-                    .right
-                    .as_ref()
-                    .map(|r| crate::template::interpolate(r, vars)),
-            }),
-        }
-    }
-}
-
 /// Valid SessionStart source values for matcher filtering.
 pub const VALID_PRIME_SOURCES: &[&str] = &["startup", "resume", "clear", "compact"];
 
@@ -253,11 +205,6 @@ pub struct AgentDef {
     /// Notification messages for agent lifecycle events
     #[serde(default)]
     pub notify: crate::job::NotifyConfig,
-
-    /// Adapter-specific session configuration (e.g., session "tmux" { ... })
-    /// Keyed by provider name. Unknown providers are ignored.
-    #[serde(default)]
-    pub session: HashMap<String, TmuxSessionConfig>,
 }
 
 /// Action configuration - simple or with options
@@ -597,7 +544,6 @@ impl Default for AgentDef {
             on_stop: None,
             max_concurrency: None,
             notify: Default::default(),
-            session: HashMap::new(),
         }
     }
 }

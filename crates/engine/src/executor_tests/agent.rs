@@ -25,7 +25,6 @@ async fn spawn_agent_returns_none_and_sends_session_created() {
             env: vec![("FOO".to_string(), "bar".to_string())],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();
@@ -65,7 +64,6 @@ async fn spawn_agent_with_agent_run_owner() {
             env: vec![],
             cwd: Some(std::path::PathBuf::from("/tmp")),
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();
@@ -106,7 +104,6 @@ async fn spawn_agent_error_sends_agent_spawn_failed() {
             env: vec![],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await;
 
@@ -149,7 +146,6 @@ async fn send_to_agent_delegates_to_adapter() {
             env: vec![],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();
@@ -207,7 +203,6 @@ async fn kill_agent_delegates_to_adapter() {
             env: vec![],
             cwd: None,
             unset_env: vec![],
-            session_config: HashMap::new(),
         })
         .await
         .unwrap();

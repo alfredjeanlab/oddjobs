@@ -288,18 +288,7 @@ impl<S: SessionAdapter> AgentAdapter for ClaudeAgentAdapter<S> {
             "agent session spawned"
         );
 
-        // 5a. Apply session configuration (status bar, colors, title)
-        if let Some(tmux_config) = config.session_config.get("tmux") {
-            if let Err(e) = self.sessions.configure(&spawned_id, tmux_config).await {
-                tracing::warn!(
-                    agent_id = %config.agent_id,
-                    error = %e,
-                    "failed to configure session (non-fatal)"
-                );
-            }
-        }
-
-        // 5b. Handle interactive startup prompts (bypass permissions, workspace trust, login)
+        // 5a. Handle interactive startup prompts (bypass permissions, workspace trust, login)
         handle_startup_prompts(
             &self.sessions,
             &spawned_id,

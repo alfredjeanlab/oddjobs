@@ -382,24 +382,6 @@ fn parse_runbook_inner(
         }
     }
 
-    // 6.7. Validate tmux session config colors
-    for (agent_name, agent) in &runbook.agents {
-        if let Some(tmux_config) = agent.session.get("tmux") {
-            if let Some(ref color) = tmux_config.color {
-                if !crate::agent::VALID_SESSION_COLORS.contains(&color.as_str()) {
-                    return Err(ParseError::InvalidFormat {
-                        location: format!("agent.{}.session.tmux.color", agent_name),
-                        message: format!(
-                            "unknown color '{}'; valid colors: {}",
-                            color,
-                            crate::agent::VALID_SESSION_COLORS.join(", ")
-                        ),
-                    });
-                }
-            }
-        }
-    }
-
     // 7. Validate action-trigger compatibility
     for (agent_name, agent) in &runbook.agents {
         // Validate on_idle action
