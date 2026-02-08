@@ -30,6 +30,8 @@ pub(super) struct PreToolUseInput {
 struct StopHookInput {
     #[serde(default)]
     stop_hook_active: bool,
+    #[serde(default)]
+    transcript_path: Option<String>,
 }
 
 /// Output to Claude Code Stop hook
@@ -160,6 +162,18 @@ pub(super) async fn handle_stop(agent_id: &str, client: &DaemonClient) -> Result
         std::process::exit(0);
     }
 
+    // Best-effort: allow exit if agent hit an unrecoverable API error.
+    // The daemon's JSONL watcher handles recovery via on_error.
+    if let Some(ref path) = input.transcript_path {
+        if has_unrecoverable_error(std::path::Path::new(path)) {
+            append_agent_log(
+                agent_id,
+                "allowing exit, unrecoverable API error in transcript",
+            );
+            std::process::exit(0);
+        }
+    }
+
     append_agent_log(
         agent_id,
         &format!("blocking exit, on_stop={}, signaled=false", on_stop),
@@ -222,6 +236,66 @@ fn read_config_message(agent_id: &str) -> Option<String> {
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("message")?.as_str().map(String::from))
+}
+
+/// Best-effort check: does the transcript's tail contain an error
+/// that prevents the agent from making further API calls?
+///
+/// Searches the last ~10 non-empty JSONL lines in reverse. Returns `true` if
+/// an unrecoverable error (rate limit, out of credits, unauthorized) is found
+/// before any normal assistant message, indicating the agent cannot proceed.
+fn has_unrecoverable_error(path: &std::path::Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+
+    for line in content
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .take(10)
+    {
+        let Ok(json) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+            continue;
+        };
+
+        // Check for error field (same structure as watcher's detect_error)
+        let err = json.get("error").and_then(|v| v.as_str()).or_else(|| {
+            json.get("message")
+                .and_then(|m| m.get("error"))
+                .and_then(|v| v.as_str())
+        });
+
+        if let Some(err_text) = err {
+            let lower = err_text.to_lowercase();
+            return [
+                "rate limit",
+                "too many requests",
+                "credit",
+                "quota",
+                "billing",
+                "unauthorized",
+                "invalid api key",
+            ]
+            .iter()
+            .any(|p| lower.contains(p));
+        }
+
+        // Normal assistant message with content means the agent recovered
+        // from any earlier error — don't search further back.
+        if json.get("type").and_then(|v| v.as_str()) == Some("assistant") {
+            let has_content = json
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+                .is_some_and(|arr| !arr.is_empty());
+            if has_content {
+                return false;
+            }
+        }
+    }
+
+    false
 }
 
 /// Extract the last assistant text message from a Claude JSONL session log.
