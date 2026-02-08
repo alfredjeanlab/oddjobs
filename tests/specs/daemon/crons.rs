@@ -160,3 +160,92 @@ fn cron_once_sets_invoke_dir_to_project_root() {
         invoke_dir, project_root
     );
 }
+
+// =============================================================================
+// Shell Shorthand Tests
+// =============================================================================
+
+/// Runbook with a cron that uses shell shorthand: `run = "echo ..."` instead
+/// of `run = { job = "..." }`. No separate job definition needed.
+const SHELL_CRON_RUNBOOK: &str = r#"
+[cron.cleanup]
+interval = "500ms"
+run = "echo shell-shorthand"
+"#;
+
+/// Verifies that cron shell shorthand (`run = "echo ..."`) creates and
+/// completes an inline job when the cron fires on its interval timer.
+///
+/// Would have caught commit 6b9f1ce where shell shorthand was not
+/// supported for crons.
+#[test]
+fn cron_shell_shorthand_start_fires_and_completes_job() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/cron.toml", SHELL_CRON_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Start the cron
+    temp.oj()
+        .args(&["cron", "start", "cleanup"])
+        .passes()
+        .stdout_has("Cron 'cleanup' started");
+
+    // Verify cron appears in list as running
+    temp.oj()
+        .args(&["cron", "list"])
+        .passes()
+        .stdout_has("cleanup")
+        .stdout_has("running");
+
+    // Wait for the cron to fire and create a completed job
+    let fired = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
+        output.contains("cleanup") && output.contains("completed")
+    });
+
+    if !fired {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+        eprintln!(
+            "=== JOBS ===\n{}\n=== END JOBS ===",
+            temp.oj().args(&["job", "list"]).passes().stdout()
+        );
+    }
+    assert!(
+        fired,
+        "cron shell shorthand should create and complete a job"
+    );
+}
+
+/// Verifies that `oj cron once` works with shell shorthand, creating and
+/// completing an inline job immediately.
+#[test]
+fn cron_once_shell_shorthand_runs_immediately() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/runbooks/cron.toml", SHELL_CRON_RUNBOOK);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+
+    // Run the cron's job once
+    temp.oj()
+        .args(&["cron", "once", "cleanup"])
+        .passes()
+        .stdout_has("Job")
+        .stdout_has("started");
+
+    // Job should appear and complete quickly (no interval wait)
+    let completed = wait_for(SPEC_WAIT_MAX_MS, || {
+        let output = temp.oj().args(&["job", "list"]).passes().stdout();
+        output.contains("cleanup") && output.contains("completed")
+    });
+
+    if !completed {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+    }
+    assert!(
+        completed,
+        "cron once with shell shorthand should create and complete a job immediately"
+    );
+}
