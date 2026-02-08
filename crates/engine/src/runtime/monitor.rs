@@ -356,6 +356,7 @@ where
                 self.logger
                     .append(&job.id, &job.step, "agent session ended");
                 if let Some(agent_id) = step_agent_id(job) {
+                    self.capture_agent_terminal(&AgentId::new(agent_id)).await;
                     self.copy_session_log(agent_id, &self.execution_dir(job));
                 }
                 (&agent_def.on_dead, "exit", None)

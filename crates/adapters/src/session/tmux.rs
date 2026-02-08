@@ -81,6 +81,12 @@ impl SessionAdapter for TmuxAdapter {
             return Err(SessionError::SpawnFailed(stderr.to_string()));
         }
 
+        // Keep pane around after process exits so we can capture terminal
+        // output (e.g. error messages) and exit codes before cleanup.
+        let mut remain_cmd = Command::new("tmux");
+        remain_cmd.args(["set-option", "-t", &session_id, "remain-on-exit", "on"]);
+        let _ = run_with_timeout(remain_cmd, TMUX_TIMEOUT, "tmux set remain-on-exit").await;
+
         // Log stderr even on success - may contain useful warnings
         if !output.stderr.is_empty() {
             let stderr = String::from_utf8_lossy(&output.stderr);

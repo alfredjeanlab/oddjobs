@@ -200,6 +200,7 @@ where
             MonitorState::Gone => {
                 tracing::info!(agent_run_id = %agent_run.id, "standalone agent session ended");
                 if let Some(ref agent_id) = agent_run.agent_id {
+                    self.capture_agent_terminal(&AgentId::new(agent_id)).await;
                     self.copy_session_log(agent_id, &agent_run.cwd);
                 };
                 (&agent_def.on_dead, "exit", None)
