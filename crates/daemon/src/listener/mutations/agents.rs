@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use oj_adapters::subprocess::{run_with_timeout, TMUX_TIMEOUT};
+use oj_adapters::subprocess::{run_with_timeout, AGENT_KILL_TIMEOUT, TMUX_TIMEOUT};
 use oj_core::{AgentId, AgentRunId, Event, JobId, SessionId};
 
 use crate::protocol::{AgentEntry, Response};
@@ -92,7 +92,7 @@ pub(crate) async fn handle_agent_kill(
             // Kill the tmux session (ignore errors — session may already be dead)
             let mut cmd = tokio::process::Command::new("tmux");
             cmd.args(["kill-session", "-t", &session_id]);
-            let _ = run_with_timeout(cmd, TMUX_TIMEOUT, "tmux kill-session").await;
+            let _ = run_with_timeout(cmd, AGENT_KILL_TIMEOUT, "tmux kill-session").await;
 
             // Emit SessionDeleted to clean up state
             emit(
@@ -314,7 +314,7 @@ pub(crate) async fn handle_agent_resume(
                 // Kill the tmux session (ignore errors - session may already be dead)
                 let mut cmd = tokio::process::Command::new("tmux");
                 cmd.args(["kill-session", "-t", sid]);
-                let _ = run_with_timeout(cmd, TMUX_TIMEOUT, "tmux kill-session").await;
+                let _ = run_with_timeout(cmd, AGENT_KILL_TIMEOUT, "tmux kill-session").await;
 
                 // Emit SessionDeleted to clean up state
                 let event = Event::SessionDeleted {

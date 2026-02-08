@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_adapters::subprocess::{run_with_timeout, GIT_WORKTREE_TIMEOUT};
+use oj_adapters::subprocess::{run_with_timeout, WORKSPACE_PRUNE_TIMEOUT};
 use oj_core::{Event, WorkspaceId};
 use oj_storage::MaterializedState;
 
@@ -254,7 +254,7 @@ pub(crate) async fn workspace_prune_inner(
                         .arg(&ws.path)
                         .current_dir(&ws.path);
                     let _ =
-                        run_with_timeout(cmd, GIT_WORKTREE_TIMEOUT, "git worktree remove").await;
+                        run_with_timeout(cmd, WORKSPACE_PRUNE_TIMEOUT, "git worktree remove").await;
                 }
 
                 // Remove directory regardless
