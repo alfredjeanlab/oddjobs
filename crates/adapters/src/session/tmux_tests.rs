@@ -6,6 +6,7 @@ use serial_test::serial;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
+use tempfile::TempDir;
 
 /// Random prefix for this test run to avoid conflicts with parallel test runs.
 static TEST_PREFIX: LazyLock<String> = LazyLock::new(|| {
@@ -35,6 +36,13 @@ fn tmux_available() -> bool {
         .unwrap_or(false)
 }
 
+/// Create a `TmuxAdapter` isolated to a temporary socket directory.
+fn isolated_adapter() -> (TmuxAdapter, TempDir) {
+    let dir = TempDir::new().expect("failed to create temp dir for tmux socket");
+    let adapter = TmuxAdapter::with_socket_dir(dir.path().to_path_buf());
+    (adapter, dir)
+}
+
 macro_rules! fail_if_no_tmux {
     () => {
         if !tmux_available() {
@@ -49,7 +57,7 @@ macro_rules! fail_if_no_tmux {
 #[serial(tmux)]
 async fn spawn_creates_session_and_returns_id() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("spawn");
 
     let id = adapter
@@ -67,7 +75,7 @@ async fn spawn_creates_session_and_returns_id() {
 #[serial(tmux)]
 async fn spawn_with_env_passes_environment() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("env");
     let env = vec![("TEST_VAR".to_string(), "test_value".to_string())];
 
@@ -96,7 +104,7 @@ async fn spawn_with_env_passes_environment() {
 #[serial(tmux)]
 async fn spawn_replaces_existing_session() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("replace");
 
     // Create first session
@@ -122,7 +130,7 @@ async fn spawn_replaces_existing_session() {
 #[serial(tmux)]
 async fn send_sends_keys_to_session() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("send");
 
     let id = adapter
@@ -151,7 +159,7 @@ async fn send_sends_keys_to_session() {
 #[serial(tmux)]
 async fn send_to_nonexistent_session_returns_not_found() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
 
     let result = adapter.send("nonexistent-session-xyz", "test").await;
     assert!(matches!(result, Err(SessionError::NotFound(_))));
@@ -161,7 +169,7 @@ async fn send_to_nonexistent_session_returns_not_found() {
 #[serial(tmux)]
 async fn kill_terminates_session() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("kill");
 
     let id = adapter
@@ -183,7 +191,7 @@ async fn kill_terminates_session() {
 #[serial(tmux)]
 async fn kill_nonexistent_session_succeeds() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
 
     // Killing a non-existent session should not error
     let result = adapter.kill("nonexistent-session-xyz").await;
@@ -194,7 +202,7 @@ async fn kill_nonexistent_session_succeeds() {
 #[serial(tmux)]
 async fn is_alive_returns_true_for_running_session() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("alive");
 
     let id = adapter
@@ -212,7 +220,7 @@ async fn is_alive_returns_true_for_running_session() {
 #[serial(tmux)]
 async fn is_alive_returns_false_for_nonexistent_session() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
 
     let alive = adapter.is_alive("nonexistent-session-xyz").await.unwrap();
     assert!(!alive);
@@ -222,7 +230,7 @@ async fn is_alive_returns_false_for_nonexistent_session() {
 #[serial(tmux)]
 async fn capture_output_returns_pane_content() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("capture");
 
     // Use a command that outputs then stays running so we can capture
@@ -251,7 +259,7 @@ async fn capture_output_returns_pane_content() {
 #[serial(tmux)]
 async fn capture_output_nonexistent_session_returns_not_found() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
 
     let result = adapter.capture_output("nonexistent-session-xyz", 10).await;
     assert!(matches!(result, Err(SessionError::NotFound(_))));
@@ -261,7 +269,7 @@ async fn capture_output_nonexistent_session_returns_not_found() {
 #[serial(tmux)]
 async fn is_process_running_detects_child_process() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("proc");
 
     // Use background + wait to ensure sleep is a child of bash (the pane process)
@@ -291,7 +299,7 @@ async fn is_process_running_detects_child_process() {
 #[serial(tmux)]
 async fn is_process_running_detects_direct_pane_process() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("directproc");
 
     // Launch sleep directly (not via bash), so sleep IS the pane process, not a child
@@ -314,7 +322,7 @@ async fn is_process_running_detects_direct_pane_process() {
 #[serial(tmux)]
 async fn is_process_running_returns_false_for_no_match() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("noproc");
 
     // Use background + wait to ensure sleep is a child of bash
@@ -346,7 +354,7 @@ async fn is_process_running_returns_false_for_no_match() {
 #[serial(tmux)]
 async fn is_process_running_nonexistent_session_returns_not_found() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
 
     let result = adapter
         .is_process_running("nonexistent-session-xyz", "sleep")
@@ -358,7 +366,7 @@ async fn is_process_running_nonexistent_session_returns_not_found() {
 #[serial(tmux)]
 async fn spawn_rejects_nonexistent_cwd() {
     fail_if_no_tmux!();
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let name = unique_name("badcwd");
 
     let result = adapter
@@ -374,12 +382,6 @@ async fn spawn_rejects_nonexistent_cwd() {
     );
 }
 
-#[test]
-fn tmux_adapter_is_zero_sized() {
-    let adapter = TmuxAdapter;
-    assert!(std::mem::size_of_val(&adapter) == 0);
-}
-
 // Tests below modify PATH to simulate tmux being unavailable.
 
 #[tokio::test]
@@ -390,7 +392,7 @@ async fn spawn_fails_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter
         .spawn("test-no-tmux", Path::new("/tmp"), "sleep 1", &[], &[])
         .await;
@@ -408,7 +410,7 @@ async fn send_fails_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter.send("any-session", "test").await;
 
     env::set_var("PATH", &original_path);
@@ -424,7 +426,7 @@ async fn kill_succeeds_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter.kill("any-session").await;
 
     env::set_var("PATH", &original_path);
@@ -441,7 +443,7 @@ async fn is_alive_fails_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter.is_alive("any-session").await;
 
     env::set_var("PATH", &original_path);
@@ -457,7 +459,7 @@ async fn capture_output_fails_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter.capture_output("any-session", 10).await;
 
     env::set_var("PATH", &original_path);
@@ -473,7 +475,7 @@ async fn is_process_running_fails_when_tmux_unavailable() {
     let original_path = env::var("PATH").unwrap_or_default();
     env::set_var("PATH", "/nonexistent");
 
-    let adapter = TmuxAdapter::new();
+    let (adapter, _dir) = isolated_adapter();
     let result = adapter.is_process_running("any-session", "pattern").await;
 
     env::set_var("PATH", &original_path);

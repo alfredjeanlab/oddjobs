@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::LazyLock;
 
@@ -33,8 +34,9 @@ fn tmux_available() -> bool {
 }
 
 /// Create a tmux session directly (bypassing TmuxAdapter) for testing
-fn create_test_session(session_id: &str) -> bool {
+fn create_test_session(session_id: &str, tmux_dir: &Path) -> bool {
     std::process::Command::new("tmux")
+        .env("TMUX_TMPDIR", tmux_dir)
         .args(["new-session", "-d", "-s", session_id, "sleep", "60"])
         .status()
         .map(|s| s.success())
@@ -42,15 +44,17 @@ fn create_test_session(session_id: &str) -> bool {
 }
 
 /// Kill a tmux session
-fn kill_test_session(session_id: &str) {
+fn kill_test_session(session_id: &str, tmux_dir: &Path) {
     let _ = std::process::Command::new("tmux")
+        .env("TMUX_TMPDIR", tmux_dir)
         .args(["kill-session", "-t", session_id])
         .status();
 }
 
 /// Check if a tmux session exists
-fn session_exists(session_id: &str) -> bool {
+fn session_exists(session_id: &str, tmux_dir: &Path) -> bool {
     std::process::Command::new("tmux")
+        .env("TMUX_TMPDIR", tmux_dir)
         .args(["has-session", "-t", session_id])
         .status()
         .map(|s| s.success())
@@ -122,25 +126,27 @@ fn attach_uses_session_id_directly_without_prefix() {
         return;
     }
 
+    let tmux_dir = tempfile::tempdir().expect("failed to create temp dir for tmux socket");
+
     // Create a session with the oj- prefix (as TmuxAdapter.spawn() does)
     let name = unique_name("attach");
     let session_id = format!("oj-{}", name);
 
     assert!(
-        create_test_session(&session_id),
+        create_test_session(&session_id, tmux_dir.path()),
         "failed to create test session"
     );
 
     // Verify session exists with the prefixed name
     assert!(
-        session_exists(&session_id),
+        session_exists(&session_id, tmux_dir.path()),
         "session should exist with oj- prefix"
     );
 
     // Verify session does NOT exist with double prefix (the bug we fixed)
     let double_prefixed = format!("oj-{}", session_id);
     assert!(
-        !session_exists(&double_prefixed),
+        !session_exists(&double_prefixed, tmux_dir.path()),
         "session should NOT exist with double oj-oj- prefix"
     );
 
@@ -149,7 +155,7 @@ fn attach_uses_session_id_directly_without_prefix() {
     // that the session exists with the ID we would pass to attach().
 
     // Cleanup
-    kill_test_session(&session_id);
+    kill_test_session(&session_id, tmux_dir.path());
 }
 
 #[test]

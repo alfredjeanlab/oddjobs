@@ -119,7 +119,7 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
     let state = Arc::new(Mutex::new(state));
 
     // Create real adapters (won't be called for ShellExited -> completion path)
-    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    let session_adapter = TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
     let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
 
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
@@ -184,7 +184,8 @@ pub fn test_config(dir: &Path) -> Config {
 pub fn setup_reconcile_runtime(
     dir_path: &Path,
 ) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
-    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    let session_adapter =
+        TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
     let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
 
