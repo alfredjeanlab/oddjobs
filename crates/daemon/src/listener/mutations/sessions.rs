@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use oj_adapters::subprocess::{run_with_timeout, TMUX_TIMEOUT};
+use oj_adapters::subprocess::{run_with_timeout, SESSION_PRUNE_TIMEOUT, TMUX_TIMEOUT};
 use oj_core::{Event, SessionId};
 
 use crate::protocol::{Response, SessionEntry};
@@ -161,10 +161,9 @@ pub(crate) async fn handle_session_prune(
     if !flags.dry_run {
         for entry in &to_prune {
             // Kill the tmux session (best effort)
-            let _ = tokio::process::Command::new("tmux")
-                .args(["kill-session", "-t", &entry.id])
-                .output()
-                .await;
+            let mut cmd = tokio::process::Command::new("tmux");
+            cmd.args(["kill-session", "-t", &entry.id]);
+            let _ = run_with_timeout(cmd, SESSION_PRUNE_TIMEOUT, "tmux kill-session").await;
 
             // Emit SessionDeleted to clean up state
             emit(

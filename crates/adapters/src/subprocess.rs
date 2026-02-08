@@ -13,6 +13,18 @@ pub const TMUX_TIMEOUT: Duration = Duration::from_secs(10);
 /// Default timeout for git worktree operations.
 pub const GIT_WORKTREE_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Timeout for PeekSession handler (tmux capture-pane).
+pub const PEEK_SESSION_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Timeout for AgentKill/AgentResume handler (tmux kill-session per session).
+pub const AGENT_KILL_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Timeout for WorkspacePrune handler (git worktree remove per workspace).
+pub const WORKSPACE_PRUNE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Timeout for SessionPrune handler (tmux kill-session per session).
+pub const SESSION_PRUNE_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Default timeout for shell evaluation commands.
 pub const SHELL_EVAL_TIMEOUT: Duration = Duration::from_secs(10);
 

@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_adapters::subprocess::{run_with_timeout, TMUX_TIMEOUT};
+use oj_adapters::subprocess::{run_with_timeout, PEEK_SESSION_TIMEOUT, TMUX_TIMEOUT};
 use oj_storage::MaterializedState;
 
 /// Capture tmux pane output for a session.
@@ -24,7 +24,7 @@ pub(super) async fn capture_tmux_pane(
 
     let mut cmd = tokio::process::Command::new("tmux");
     cmd.args(&args);
-    let output = run_with_timeout(cmd, TMUX_TIMEOUT, "tmux capture-pane").await?;
+    let output = run_with_timeout(cmd, PEEK_SESSION_TIMEOUT, "tmux capture-pane").await?;
 
     if !output.status.success() {
         return Err(format!("Session not found: {}", session_id));
