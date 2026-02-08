@@ -13,6 +13,36 @@ use crate::prelude::*;
 // Scenarios
 // =============================================================================
 
+/// Agent that simulates the stop hook firing by calling `oj agent hook stop`
+/// directly. This emits an AgentStop event which triggers the on_stop escalation
+/// path in the daemon.
+fn scenario_trigger_stop_hook() -> &'static str {
+    r#"
+name = "stop-hook-trigger"
+trusted = true
+
+[[responses]]
+pattern = { type = "any" }
+
+[responses.response]
+text = "I'm done, trying to stop."
+
+[[responses.response.tool_calls]]
+tool = "Bash"
+input = { command = "echo '{}' | oj agent hook stop $AGENT_ID" }
+
+[[responses]]
+pattern = { type = "any" }
+response = "Waiting for further instructions."
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#
+}
+
 /// A slow agent that sleeps, keeping the job on the agent step long enough
 /// to cancel it mid-execution. Uses -p mode so on_dead fires if not cancelled.
 const SLOW_AGENT_SCENARIO: &str = r#"
@@ -39,6 +69,32 @@ auto_approve = true
 // =============================================================================
 // Runbooks
 // =============================================================================
+
+/// Runbook with an interactive agent that triggers the stop hook.
+/// on_stop = "escalate" causes the stop hook to create an escalation decision.
+fn runbook_on_stop_escalate(scenario_path: &std::path::Path) -> String {
+    format!(
+        r#"
+[command.work]
+args = "<name>"
+run = {{ job = "work" }}
+
+[job.work]
+vars  = ["name"]
+
+[[job.work.step]]
+name = "agent"
+run = {{ agent = "worker" }}
+
+[agent.worker]
+run = "claudeless --scenario {}"
+prompt = "Do the task."
+on_stop = "escalate"
+env = {{ AGENT_ID = "${{agent_id}}" }}
+"#,
+        scenario_path.display()
+    )
+}
 
 /// Runbook with a slow agent step and no on_cancel. Cancellation goes straight
 /// to terminal "cancelled" status.
@@ -721,5 +777,93 @@ on_dead = "done"
     assert!(
         ws_cleaned,
         "workspace directory should be cleaned up after cancel"
+    );
+}
+
+// =============================================================================
+// Test 9: on_stop=escalate creates decision, Done resolves it
+// =============================================================================
+
+/// Extract the first decision ID from `oj decision list` output.
+fn extract_decision_id(output: &str) -> Option<String> {
+    for line in output.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with("ID") || line.starts_with('-') {
+            continue;
+        }
+        if let Some(id) = line.split_whitespace().next() {
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()) {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Tests that on_stop='escalate' creates a decision when the agent tries to
+/// stop without signaling, and resolving with Done (option 2) completes the job.
+///
+/// Lifecycle: agent spawns → Bash tool simulates stop hook via
+/// `oj agent hook stop` → hook reads on_stop=escalate from config.json →
+/// emits AgentStop event → daemon creates decision → job goes to waiting →
+/// resolve with option 2 (Done) → StepCompleted → job completes.
+#[test]
+fn on_stop_escalate_creates_decision_and_done_completes_job() {
+    let temp = Project::empty();
+    temp.git_init();
+
+    temp.file(".oj/scenarios/stop.toml", scenario_trigger_stop_hook());
+    let scenario_path = temp.path().join(".oj/scenarios/stop.toml");
+    temp.file(
+        ".oj/runbooks/work.toml",
+        &runbook_on_stop_escalate(&scenario_path),
+    );
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "work", "stop-test"]).passes();
+
+    // Wait for job to escalate to waiting via stop hook
+    let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["job", "list"])
+            .passes()
+            .stdout()
+            .contains("waiting")
+    });
+    assert!(
+        waiting,
+        "job should escalate to waiting after stop hook fires\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
+    );
+
+    // Verify a decision was created
+    let decision_list = temp.oj().args(&["decision", "list"]).passes().stdout();
+    let decision_id = extract_decision_id(&decision_list);
+    assert!(
+        decision_id.is_some(),
+        "decision should be created when stop hook escalates, got:\n{}",
+        decision_list
+    );
+    let decision_id = decision_id.unwrap();
+
+    // Resolve with option 2 (Done/Complete)
+    temp.oj()
+        .args(&["decision", "resolve", &decision_id, "2"])
+        .passes();
+
+    // Job should complete after decision resolution
+    let completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
+        temp.oj()
+            .args(&["job", "list"])
+            .passes()
+            .stdout()
+            .contains("completed")
+    });
+    assert!(
+        completed,
+        "job should complete after Done resolution\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
     );
 }

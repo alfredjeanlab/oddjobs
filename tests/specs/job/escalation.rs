@@ -13,6 +13,35 @@ use crate::prelude::*;
 // Scenarios
 // =============================================================================
 
+/// Agent emits an escalate signal via `oj emit agent:signal` in a Bash tool call.
+/// Stays alive in interactive mode after signaling.
+fn scenario_signal_escalate() -> &'static str {
+    r#"
+name = "signal-escalate"
+trusted = true
+
+[[responses]]
+pattern = { type = "any" }
+
+[responses.response]
+text = "I need human help with this task."
+
+[[responses.response.tool_calls]]
+tool = "Bash"
+input = { command = "oj emit agent:signal --agent $AGENT_ID escalate" }
+
+[[responses]]
+pattern = { type = "any" }
+response = "Waiting for instructions."
+
+[tool_execution]
+mode = "live"
+
+[tool_execution.tools.Bash]
+auto_approve = true
+"#
+}
+
 /// Agent that exits immediately (via -p mode) without completing the task.
 /// Used to trigger on_dead handling.
 const FAILING_AGENT_SCENARIO: &str = r#"
@@ -32,6 +61,31 @@ mode = "live"
 // =============================================================================
 // Runbooks
 // =============================================================================
+
+/// Runbook with an interactive agent that emits escalate signal.
+/// AGENT_ID is injected so the agent can reference itself in `oj emit`.
+fn runbook_signal_escalate(scenario_path: &std::path::Path) -> String {
+    format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ job = "build" }}
+
+[job.build]
+vars  = ["name"]
+
+[[job.build.step]]
+name = "work"
+run = {{ agent = "worker" }}
+
+[agent.worker]
+run = "claudeless --scenario {}"
+prompt = "Do the task."
+env = {{ AGENT_ID = "${{agent_id}}" }}
+"#,
+        scenario_path.display()
+    )
+}
 
 /// Runbook with an agent that fails (exits via -p) and has limited resume attempts.
 /// After exhausting attempts, the job should escalate to waiting.
@@ -358,5 +412,79 @@ fn escalation_resolve_with_freeform_message() {
         resolved,
         "decision should be resolved after freeform message\ndecision list:\n{}",
         temp.oj().args(&["decision", "list"]).passes().stdout()
+    );
+}
+
+/// Tests that an agent emitting `oj emit agent:signal escalate` creates a
+/// decision with source='signal', and resolving with Done (option 2) completes
+/// the job.
+///
+/// Lifecycle: agent spawns → Bash tool runs `oj emit agent:signal escalate` →
+/// daemon creates decision with source=signal → job goes to waiting →
+/// resolve with option 2 (Done) → StepCompleted → job completes.
+#[test]
+fn signal_escalate_creates_decision_and_done_completes_job() {
+    let temp = Project::empty();
+    temp.git_init();
+
+    temp.file(".oj/scenarios/escalate.toml", scenario_signal_escalate());
+    let scenario_path = temp.path().join(".oj/scenarios/escalate.toml");
+    temp.file(
+        ".oj/runbooks/build.toml",
+        &runbook_signal_escalate(&scenario_path),
+    );
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "signal-test"]).passes();
+
+    // Wait for job to escalate to waiting via signal
+    let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["job", "list"])
+            .passes()
+            .stdout()
+            .contains("waiting")
+    });
+    assert!(
+        waiting,
+        "job should escalate to waiting after signal escalate\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
+    );
+
+    // Verify decision was created with source='signal'
+    let decision_list = temp.oj().args(&["decision", "list"]).passes().stdout();
+    assert!(
+        decision_list.contains("signal"),
+        "decision source should be 'signal', got:\n{}",
+        decision_list
+    );
+
+    let decision_id = extract_decision_id(&decision_list);
+    assert!(
+        decision_id.is_some(),
+        "should extract decision ID from list:\n{}",
+        decision_list
+    );
+    let decision_id = decision_id.unwrap();
+
+    // Resolve with option 2 (Done/Complete)
+    temp.oj()
+        .args(&["decision", "resolve", &decision_id, "2"])
+        .passes();
+
+    // Job should complete after decision resolution
+    let completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
+        temp.oj()
+            .args(&["job", "list"])
+            .passes()
+            .stdout()
+            .contains("completed")
+    });
+    assert!(
+        completed,
+        "job should complete after Done resolution\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
     );
 }

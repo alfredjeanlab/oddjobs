@@ -43,6 +43,31 @@ mode = "live"
 // Runbooks
 // =============================================================================
 
+/// Runbook for plan tests where agent proceeds after approval and completes via
+/// on_idle = "done". Used for Accept resolution tests.
+fn runbook_plan_accept(scenario_path: &std::path::Path) -> String {
+    format!(
+        r#"
+[command.build]
+args = "<name>"
+run = {{ job = "build" }}
+
+[job.build]
+vars  = ["name"]
+
+[[job.build.step]]
+name = "plan"
+run = {{ agent = "planner" }}
+
+[agent.planner]
+run = "claudeless --scenario {}"
+prompt = "Create a plan for the feature."
+on_idle = "done"
+"#,
+        scenario_path.display()
+    )
+}
+
 /// Runbook for plan tests where agent waits at the plan approval dialog.
 fn runbook_plan_wait(scenario_path: &std::path::Path) -> String {
     format!(
@@ -257,6 +282,65 @@ fn resolve_plan_with_cancel_cancels_job() {
     assert!(
         cancelled,
         "job should be cancelled after resolving with Cancel option\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
+    );
+}
+
+/// Tests that resolving a plan decision with Accept (option 1) sends key
+/// presses to the agent session, causing it to proceed and complete the job.
+///
+/// Lifecycle: agent calls ExitPlanMode → decision created with source='plan' →
+/// resolve with Accept (option 1) → daemon sends "Enter" to tmux session →
+/// claudeless receives input, responds → agent idles → on_idle=done → job
+/// completes.
+#[test]
+fn resolve_plan_with_accept_completes_job() {
+    let temp = Project::empty();
+    temp.git_init();
+    temp.file(".oj/scenarios/test.toml", scenario_exit_plan_mode());
+
+    let scenario_path = temp.path().join(".oj/scenarios/test.toml");
+    let runbook = runbook_plan_accept(&scenario_path);
+    temp.file(".oj/runbooks/build.toml", &runbook);
+
+    temp.oj().args(&["daemon", "start"]).passes();
+    temp.oj().args(&["run", "build", "test"]).passes();
+
+    // Wait for plan decision to be created
+    let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["decision", "list"])
+            .passes()
+            .stdout()
+            .contains("plan")
+    });
+    assert!(
+        has_decision,
+        "decision should be created with plan source\njob list:\n{}\ndaemon log:\n{}",
+        temp.oj().args(&["job", "list"]).passes().stdout(),
+        temp.daemon_log()
+    );
+
+    let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
+    let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
+
+    // Option 1 = Accept (clear context) — sends "Enter" to session
+    temp.oj()
+        .args(&["decision", "resolve", &decision_id, "1"])
+        .passes();
+
+    // Agent should proceed after Accept and eventually complete via on_idle=done
+    let completed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
+        temp.oj()
+            .args(&["job", "list"])
+            .passes()
+            .stdout()
+            .contains("completed")
+    });
+    assert!(
+        completed,
+        "job should complete after Accept resolution\njob list:\n{}\ndaemon log:\n{}",
         temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );
