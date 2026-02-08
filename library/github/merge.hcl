@@ -22,26 +22,18 @@ const "check" { default = "true" }
 
 cron "merge" {
   interval = "60s"
-  run      = { job = "merge-check" }
-}
-
-job "merge-check" {
-  name = "merge-check"
-
-  step "scan" {
-    run = <<-SHELL
-      gh pr list --label merge:auto --json number,mergeable,statusCheckRollup --jq '
-        .[] | select(
-          .mergeable == "CONFLICTING" or
-          (.statusCheckRollup | length > 0 and (map(select(.conclusion != "")) | length > 0) and all(.conclusion != "SUCCESS" and .conclusion != "NEUTRAL" and .conclusion != "SKIPPED" and .conclusion != ""))
-        ) | .number
-      ' | while read -r num; do
-        echo "Escalating PR #$num to cicd"
-        gh pr edit "$num" --remove-label merge:auto --add-label merge:cicd
-      done
-      oj worker start cicd 2>/dev/null || true
-    SHELL
-  }
+  run      = <<-SHELL
+    gh pr list --label merge:auto --json number,mergeable,statusCheckRollup --jq '
+      .[] | select(
+        .mergeable == "CONFLICTING" or
+        (.statusCheckRollup | length > 0 and (map(select(.conclusion != "")) | length > 0) and all(.conclusion != "SUCCESS" and .conclusion != "NEUTRAL" and .conclusion != "SKIPPED" and .conclusion != ""))
+      ) | .number
+    ' | while read -r num; do
+      echo "Escalating PR #$num to cicd"
+      gh pr edit "$num" --remove-label merge:auto --add-label merge:cicd
+    done
+    oj worker start cicd 2>/dev/null || true
+  SHELL
 }
 
 # ------------------------------------------------------------------------------
@@ -90,7 +82,7 @@ job "cicd" {
   }
 
   step "resolve" {
-    run     = { agent = "merge-resolver" }
+    run     = { agent = "cicd:fix" }
     on_done = { step = "push" }
   }
 
@@ -115,19 +107,10 @@ job "cicd" {
 # Agent
 # ------------------------------------------------------------------------------
 
-agent "merge-resolver" {
-  run     = "claude --model sonnet --dangerously-skip-permissions"
+agent "cicd:fix" {
+  run     = "claude --model opus --dangerously-skip-permissions"
   on_idle = { action = "gate", command = "test ! -d $(git rev-parse --git-dir)/rebase-merge && test ! -f $(git rev-parse --git-dir)/MERGE_HEAD" }
   on_dead = { action = "escalate" }
-
-  session "tmux" {
-    color = "yellow"
-    title = "Merge: PR #${var.pr.number}"
-    status {
-      left  = "${var.pr.title}"
-      right = "${var.pr.headRefName} -> main"
-    }
-  }
 
   prime = [
     "echo '## Git Status'",

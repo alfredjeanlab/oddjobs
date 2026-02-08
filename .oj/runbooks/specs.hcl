@@ -129,7 +129,7 @@ agent "deflake" {
 }
 
 agent "specs" {
-  run      = "claude --model sonnet --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
+  run      = "claude --model opus --dangerously-skip-permissions --disallowed-tools ExitPlanMode,EnterPlanMode"
   on_idle  = "done"
   on_dead  = { action = "gate", run = "cargo test -p oj-specs" }
 
