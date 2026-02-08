@@ -21,7 +21,7 @@ pub use checkpoint::{
 pub use migration::MigrationError;
 pub use snapshot::{Snapshot, SnapshotError, CURRENT_SNAPSHOT_VERSION};
 pub use state::{
-    CronRecord, MaterializedState, QueueItem, QueueItemStatus, Session, WorkerRecord, Workspace,
-    WorkspaceType,
+    CronRecord, MaterializedState, QueueItem, QueueItemStatus, QueuePollMeta, Session,
+    WorkerRecord, Workspace, WorkspaceType,
 };
 pub use wal::{Wal, WalEntry, WalError};

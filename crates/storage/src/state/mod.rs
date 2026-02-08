@@ -13,8 +13,8 @@ mod types;
 mod workers;
 
 pub use types::{
-    CronRecord, QueueItem, QueueItemStatus, Session, StoredRunbook, WorkerRecord, Workspace,
-    WorkspaceType,
+    CronRecord, QueueItem, QueueItemStatus, QueuePollMeta, Session, StoredRunbook, WorkerRecord,
+    Workspace, WorkspaceType,
 };
 
 use oj_core::{AgentRecord, AgentRun, Decision, Event, Job};
@@ -48,6 +48,10 @@ pub struct MaterializedState {
     /// or standalone.
     #[serde(default)]
     pub agents: HashMap<String, AgentRecord>,
+    /// Runtime-only poll metadata: scoped_queue_key → last poll info.
+    /// Not persisted — repopulates naturally as workers resume polling.
+    #[serde(skip)]
+    pub poll_meta: HashMap<String, QueuePollMeta>,
     /// Durable namespace → project root mapping.
     ///
     /// Populated from WorkerStarted, CronStarted, and CommandRun events.

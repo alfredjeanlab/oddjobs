@@ -10,7 +10,7 @@ use crate::runtime::Runtime;
 use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, UuidIdGen};
 use oj_runbook::QueueType;
-use oj_storage::QueueItemStatus;
+use oj_storage::{QueueItemStatus, QueuePollMeta};
 use std::collections::HashMap;
 
 impl<S, A, N, C> Runtime<S, A, N, C>
@@ -71,6 +71,18 @@ where
                 state.namespace.clone(),
             )
         };
+
+        // Record poll metadata for display in `oj queue list`
+        let scoped_key = scoped_name(&worker_namespace, &queue_name);
+        self.lock_state_mut(|s| {
+            s.poll_meta.insert(
+                scoped_key,
+                QueuePollMeta {
+                    last_item_count: items.len(),
+                    last_polled_at_ms: self.clock().epoch_ms(),
+                },
+            )
+        });
 
         let mut dispatched_count = 0;
         for item in items.iter() {

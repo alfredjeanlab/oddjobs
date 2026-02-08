@@ -5,7 +5,8 @@
 
 use crate::runtime::handlers::worker::WorkerStatus;
 use crate::test_helpers::{load_runbook_hash, setup_with_runbook, TestContext};
-use oj_core::{Clock, Event, TimerId};
+use oj_core::{scoped_name, Clock, Event, TimerId};
+use oj_storage::{QueueItem, QueueItemStatus};
 
 /// External queue with a poll interval
 const POLL_RUNBOOK: &str = r#"
@@ -153,5 +154,99 @@ async fn wake_on_stopped_worker_skips_timer() {
     assert!(
         !sched.has_timers(),
         "wake on stopped worker should not set timer"
+    );
+}
+
+// ============================================================================
+// poll_persisted_queue poll_meta tests
+// ============================================================================
+
+/// Persisted queue runbook for poll_meta tests
+const PERSISTED_RUNBOOK: &str = r#"
+[job.build]
+input  = ["name"]
+
+[[job.build.step]]
+name = "init"
+run = "echo init"
+
+[queue.tasks]
+type = "persisted"
+vars = ["name"]
+
+[worker.builder]
+source = { queue = "tasks" }
+handler = { job = "build" }
+concurrency = 2
+"#;
+
+#[tokio::test]
+async fn poll_persisted_queue_writes_poll_meta() {
+    let ctx = setup_with_runbook(PERSISTED_RUNBOOK).await;
+    let hash = load_runbook_hash(&ctx, PERSISTED_RUNBOOK);
+    let namespace = "testns";
+    let queue_key = scoped_name(namespace, "tasks");
+
+    // Seed queue items into state
+    ctx.runtime.lock_state_mut(|s| {
+        s.queue_items.insert(
+            queue_key.clone(),
+            vec![
+                QueueItem {
+                    id: "item-1".to_string(),
+                    queue_name: "tasks".to_string(),
+                    data: Default::default(),
+                    status: QueueItemStatus::Pending,
+                    worker_name: None,
+                    pushed_at_epoch_ms: 0,
+                    failure_count: 0,
+                },
+                QueueItem {
+                    id: "item-2".to_string(),
+                    queue_name: "tasks".to_string(),
+                    data: Default::default(),
+                    status: QueueItemStatus::Active,
+                    worker_name: None,
+                    pushed_at_epoch_ms: 0,
+                    failure_count: 0,
+                },
+            ],
+        );
+    });
+
+    // Start worker
+    let worker_key = scoped_name(namespace, "builder");
+    ctx.runtime
+        .handle_event(Event::WorkerStarted {
+            worker_name: "builder".to_string(),
+            project_root: ctx.project_root.clone(),
+            runbook_hash: hash,
+            queue_name: "tasks".to_string(),
+            concurrency: 2,
+            namespace: namespace.to_string(),
+        })
+        .await
+        .unwrap();
+
+    // Advance clock so poll_meta gets a non-zero timestamp
+    ctx.clock.advance(std::time::Duration::from_secs(10));
+
+    // Poll the persisted queue
+    ctx.runtime
+        .poll_persisted_queue(&worker_key, "tasks", namespace)
+        .unwrap();
+
+    // Verify poll_meta was written
+    let meta = ctx
+        .runtime
+        .lock_state(|s| s.poll_meta.get(&queue_key).cloned());
+    let meta = meta.expect("poll_meta should be set after polling");
+    assert_eq!(
+        meta.last_item_count, 2,
+        "should count all items, not just pending"
+    );
+    assert!(
+        meta.last_polled_at_ms > 0,
+        "should have a non-zero timestamp"
     );
 }

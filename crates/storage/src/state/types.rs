@@ -130,6 +130,13 @@ pub struct QueueItem {
     pub failure_count: u32,
 }
 
+/// Runtime-only metadata from the most recent queue poll.
+#[derive(Debug, Default, Clone)]
+pub struct QueuePollMeta {
+    pub last_item_count: usize,
+    pub last_polled_at_ms: u64,
+}
+
 /// Record of a running cron for WAL replay / restart recovery
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronRecord {

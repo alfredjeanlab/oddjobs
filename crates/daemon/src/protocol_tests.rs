@@ -328,6 +328,8 @@ fn encode_decode_queues_response() {
             queue_type: "persisted".to_string(),
             item_count: 5,
             workers: vec!["fixer".to_string()],
+            last_poll_count: Some(3),
+            last_polled_at_ms: Some(1700000000000),
         }],
     };
 
