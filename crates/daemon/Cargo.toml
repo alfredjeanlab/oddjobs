@@ -12,11 +12,11 @@ name = "ojd"
 path = "src/main.rs"
 
 [dependencies]
-oj-adapters = { path = "../adapters", version = "0.1.0" }
-oj-core = { path = "../core", version = "0.1.0" }
-oj-engine = { path = "../engine", version = "0.1.0" }
-oj-runbook = { path = "../runbook", version = "0.1.0" }
-oj-storage = { path = "../storage", version = "0.1.0" }
+oj-adapters = { path = "../adapters" }
+oj-core = { path = "../core" }
+oj-engine = { path = "../engine" }
+oj-runbook = { path = "../runbook" }
+oj-storage = { path = "../storage" }
 
 async-trait.workspace = true
 parking_lot.workspace = true
@@ -26,14 +26,16 @@ serde_json.workspace = true
 sha2 = "0.10"
 thiserror.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 uuid.workspace = true
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-oj-adapters = { path = "../adapters", version = "0.1.0", features = ["test-support"] }
-oj-core = { path = "../core", version = "0.1.0", features = ["test-support"] }
+oj-adapters = { path = "../adapters", features = ["test-support"] }
+oj-core = { path = "../core", features = ["test-support"] }
+proptest.workspace = true
 tempfile.workspace = true
 yare.workspace = true
 

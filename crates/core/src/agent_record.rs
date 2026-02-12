@@ -3,14 +3,11 @@
 
 //! First-class agent record for unified tracking in MaterializedState.
 //!
-//! `AgentRecord` provides a unified view of ALL agents regardless of how they
-//! were spawned (job-embedded or standalone). It serves as a lookup index that
-//! is populated from existing events during WAL replay — no new event types
-//! are needed.
+//! `AgentRecord` provides a unified view of ALL agents regardless of how they were spawned.
+//! It serves as a lookup index that is populated from existing events during WAL replay.
 
 use crate::owner::OwnerId;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::path::PathBuf;
 
 /// A first-class agent entity tracked in MaterializedState.
@@ -18,22 +15,19 @@ use std::path::PathBuf;
 /// Provides a unified view of ALL agents regardless of how they were spawned
 /// (job-embedded or standalone). Replaces the dual-tracking approach where job
 /// agents were implicit in Job.step_history and standalone agents were explicit
-/// in AgentRun.
+/// in Crew.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
     /// Agent instance UUID (same as session-id passed to claude)
     pub agent_id: String,
     /// Agent definition name from the runbook
     pub agent_name: String,
-    /// Owner of this agent (job or agent_run)
+    /// Owner of this agent (job or crew)
     pub owner: OwnerId,
-    /// Project namespace
-    pub namespace: String,
-    /// Workspace path where the agent runs
+    /// Project project
+    pub project: String,
+    /// Workspace path where the crew
     pub workspace_path: PathBuf,
-    /// tmux session ID
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub session_id: Option<String>,
     /// Current status
     pub status: AgentRecordStatus,
     /// Epoch milliseconds when created
@@ -58,18 +52,12 @@ pub enum AgentRecordStatus {
     Gone,
 }
 
-impl fmt::Display for AgentRecordStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Starting => write!(f, "starting"),
-            Self::Running => write!(f, "running"),
-            Self::Idle => write!(f, "idle"),
-            Self::Exited => write!(f, "exited"),
-            Self::Gone => write!(f, "gone"),
-        }
+crate::simple_display! {
+    AgentRecordStatus {
+        Starting => "starting",
+        Running => "running",
+        Idle => "idle",
+        Exited => "exited",
+        Gone => "gone",
     }
 }
-
-#[cfg(test)]
-#[path = "agent_record_tests.rs"]
-mod tests;

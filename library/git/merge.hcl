@@ -36,13 +36,13 @@ queue "merge-conflicts" {
 
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { job = "merge" }
+  run = { job = "merge" }
   concurrency = 1
 }
 
 worker "merge-conflict" {
   source      = { queue = "merge-conflicts" }
-  handler     = { job = "merge-conflict" }
+  run = { job = "merge-conflict" }
   concurrency = 1
 }
 
@@ -50,12 +50,12 @@ worker "merge-conflict" {
 job "merge" {
   name      = "${var.mr.title}"
   vars      = ["mr"]
-  workspace = "folder"
+  source    = "folder"
   on_cancel = { step = "cleanup" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "merge-${workspace.nonce}"
+    branch = "merge-${source.nonce}"
   }
 
   notify {
@@ -66,13 +66,13 @@ job "merge" {
 
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
-      rm -rf "${workspace.root}" 2>/dev/null || true
+      rm -rf "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" ls-remote --exit-code origin "refs/heads/${var.mr.branch}" >/dev/null 2>&1 \
         || { echo "error: branch '${var.mr.branch}' not found on remote"; exit 1; }
       git -C "${local.repo}" fetch origin ${var.mr.base} ${var.mr.branch}
-      git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
+      git -C "${local.repo}" worktree add -b ${local.branch} "${source.root}" origin/${var.mr.base}
     SHELL
     on_done = { step = "merge" }
   }
@@ -116,7 +116,7 @@ job "merge" {
 
   step "cleanup" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${var.mr.branch}" 2>/dev/null || true
     SHELL
@@ -127,12 +127,12 @@ job "merge" {
 job "merge-conflict" {
   name      = "Conflicts: ${var.mr.title}"
   vars      = ["mr"]
-  workspace = "folder"
+  source    = "folder"
   on_cancel = { step = "cleanup" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "merge-${workspace.nonce}"
+    branch = "merge-${source.nonce}"
   }
 
   notify {
@@ -143,11 +143,11 @@ job "merge-conflict" {
 
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
-      rm -rf "${workspace.root}" 2>/dev/null || true
+      rm -rf "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" fetch origin ${var.mr.base} ${var.mr.branch}
-      git -C "${local.repo}" worktree add -b ${local.branch} "${workspace.root}" origin/${var.mr.base}
+      git -C "${local.repo}" worktree add -b ${local.branch} "${source.root}" origin/${var.mr.base}
     SHELL
     on_done = { step = "merge" }
   }
@@ -188,7 +188,7 @@ job "merge-conflict" {
 
   step "cleanup" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${var.mr.branch}" 2>/dev/null || true
     SHELL
@@ -199,15 +199,6 @@ agent "conflicts" {
   run      = "claude --model opus --dangerously-skip-permissions"
   on_idle  = { action = "gate", command = "test ! -f $(git rev-parse --git-dir)/MERGE_HEAD" }
   on_dead  = { action = "escalate" }
-
-  session "tmux" {
-    color = "blue"
-    title = "Merge: ${var.mr.branch}"
-    status {
-      left  = "${var.mr.title}"
-      right = "${var.mr.branch} -> ${var.mr.base}"
-    }
-  }
 
   prime = [
     "echo '## Git Status'",

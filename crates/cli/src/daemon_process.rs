@@ -6,6 +6,7 @@
 //! Functions for starting, stopping, and monitoring the oj daemon process.
 
 use crate::client::ClientError;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -28,7 +29,7 @@ pub fn start_daemon_background() -> Result<std::process::Child, ClientError> {
 /// inside a tokio runtime (can't use block_on).
 pub fn stop_daemon_sync() {
     if let Ok(Some(pid)) = read_daemon_pid() {
-        kill_signal("-15", pid);
+        send_signal(nix::sys::signal::Signal::SIGTERM, pid);
 
         let start = Instant::now();
         let timeout = super::client::timeout_exit();
@@ -40,7 +41,7 @@ pub fn stop_daemon_sync() {
         }
 
         if process_exists(pid) {
-            force_kill_daemon(pid);
+            send_signal(nix::sys::signal::Signal::SIGKILL, pid);
             let start = Instant::now();
             while start.elapsed() < timeout {
                 if !process_exists(pid) {
@@ -77,7 +78,7 @@ fn find_ojd_binary() -> Result<PathBuf, ClientError> {
     let current_exe = std::env::current_exe().ok();
 
     // Only use CARGO_MANIFEST_DIR if the CLI itself is a debug build.
-    // This prevents version mismatches when agents run in tmux sessions that
+    // This prevents version mismatches when agents run in coop sessions that
     // inherit CARGO_MANIFEST_DIR from a dev environment but use release builds.
     let is_debug_build = current_exe
         .as_ref()
@@ -122,9 +123,22 @@ pub fn daemon_dir() -> Result<PathBuf, ClientError> {
     crate::env::state_dir()
 }
 
-/// Tmux socket directory used by the daemon for session isolation.
-pub fn daemon_tmux_dir() -> Result<PathBuf, ClientError> {
-    Ok(daemon_dir()?.join("tmux"))
+/// Attach to a coop agent session by agent ID (local socket).
+pub fn coop_attach(agent_id: &str) -> anyhow::Result<()> {
+    let state_dir = daemon_dir()?;
+    let socket_path = oj_core::agent_dir(&state_dir, agent_id).join("coop.sock");
+    coop_attach_socket(&socket_path.to_string_lossy())
+}
+
+/// Attach to a coop agent session via a known socket path.
+pub fn coop_attach_socket(socket_path: &str) -> anyhow::Result<()> {
+    let status =
+        std::process::Command::new("coop").args(["attach", "--socket", socket_path]).status()?;
+
+    if !status.success() {
+        anyhow::bail!("Failed to attach via {}", socket_path);
+    }
+    Ok(())
 }
 
 /// Clean up orphaned PID file during shutdown.
@@ -150,26 +164,14 @@ pub fn read_daemon_pid() -> Result<Option<u32>, ClientError> {
     }
 }
 
-/// Execute kill command with the given signal and PID
-fn kill_signal(signal: &str, pid: u32) -> bool {
-    Command::new("kill")
-        .args([signal, &pid.to_string()])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+/// Send a signal to a process.
+pub(crate) fn send_signal(signal: nix::sys::signal::Signal, pid: u32) -> bool {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), Some(signal)).is_ok()
 }
 
-/// Check if a process with the given PID exists
+/// Check if a process with the given PID exists.
 pub fn process_exists(pid: u32) -> bool {
-    kill_signal("-0", pid)
-}
-
-/// Force kill a daemon process
-pub fn force_kill_daemon(pid: u32) -> bool {
-    kill_signal("-9", pid)
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
 }
 
 /// Startup marker prefix that daemon writes to log before anything else.
@@ -180,8 +182,6 @@ const STARTUP_MARKER_PREFIX: &str = "--- ojd: starting (pid: ";
 /// Only reads the last 100KB of the file — the startup marker is always
 /// within the last few KB of the current log.
 pub fn read_startup_error() -> Option<String> {
-    use std::io::{Read, Seek, SeekFrom};
-
     let dir = daemon_dir().ok()?;
     let log_path = dir.join("daemon.log");
 

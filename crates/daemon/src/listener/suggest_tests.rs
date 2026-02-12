@@ -61,10 +61,7 @@ fn format_suggestion_single() {
 #[test]
 fn format_suggestion_multiple() {
     let similar = vec!["merges".to_string(), "merge-queue".to_string()];
-    assert_eq!(
-        format_suggestion(&similar),
-        "\n\n  did you mean one of: merges, merge-queue?"
-    );
+    assert_eq!(format_suggestion(&similar), "\n\n  did you mean one of: merges, merge-queue?");
 }
 
 #[test]
@@ -76,8 +73,5 @@ fn format_suggestion_empty() {
 #[test]
 fn format_cross_project_suggestion_formats_correctly() {
     let result = format_cross_project_suggestion("oj worker stop", "fix", "oddjobs");
-    assert_eq!(
-        result,
-        "\n\n  did you mean: oj worker stop fix --project oddjobs?"
-    );
+    assert_eq!(result, "\n\n  did you mean: oj worker stop fix --project oddjobs?");
 }

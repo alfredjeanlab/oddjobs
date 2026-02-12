@@ -44,10 +44,7 @@ fn shell_inline_runs_command_successfully() {
     );
 
     assert!(result.is_ok());
-    assert!(
-        marker.exists(),
-        "shell command should have created the marker file"
-    );
+    assert!(marker.exists(), "shell command should have created the marker file");
 }
 
 #[test]
@@ -106,10 +103,8 @@ fn shell_inline_interpolates_workspace() {
     let dir = tempfile::tempdir().unwrap();
     let output_file = dir.path().join("workspace.txt");
 
-    let cmd_def = make_shell_command(
-        "check-ws",
-        &format!("echo ${{workspace}} > {}", output_file.display()),
-    );
+    let cmd_def =
+        make_shell_command("check-ws", &format!("echo ${{workspace}} > {}", output_file.display()));
 
     let result = execute_shell_inline(
         cmd_def.run.shell_command().unwrap(),
@@ -126,16 +121,16 @@ fn shell_inline_interpolates_workspace() {
 }
 
 #[test]
-fn shell_inline_does_not_inject_oj_namespace() {
+fn shell_inline_does_not_inject_oj_project() {
     let dir = tempfile::tempdir().unwrap();
-    let output_file = dir.path().join("namespace.txt");
+    let output_file = dir.path().join("project.txt");
 
     // Use printenv so we get empty output (exit 1) when the var is unset,
-    // rather than an empty line from `echo $OJ_NAMESPACE`.
+    // rather than an empty line from `echo $OJ_PROJECT`.
     let cmd_def = make_shell_command(
         "check-ns",
         &format!(
-            "printenv OJ_NAMESPACE > {} 2>/dev/null || echo __UNSET__ > {}",
+            "printenv OJ_PROJECT > {} 2>/dev/null || echo __UNSET__ > {}",
             output_file.display(),
             output_file.display()
         ),
@@ -153,19 +148,19 @@ fn shell_inline_does_not_inject_oj_namespace() {
     assert!(result.is_ok());
     let content = std::fs::read_to_string(&output_file).unwrap();
 
-    // The child should inherit OJ_NAMESPACE from the parent environment (if set)
+    // The child should inherit OJ_PROJECT from the parent environment (if set)
     // rather than having it explicitly injected. Verify the child sees the same
     // value as the parent process.
-    let expected = std::env::var("OJ_NAMESPACE").unwrap_or("__UNSET__".to_string());
+    let expected = std::env::var("OJ_PROJECT").unwrap_or("__UNSET__".to_string());
     assert_eq!(
         content.trim(),
         expected,
-        "OJ_NAMESPACE should be inherited from parent env, not explicitly injected"
+        "OJ_PROJECT should be inherited from parent env, not explicitly injected"
     );
 }
 
 #[test]
-fn shell_inline_runs_in_project_root() {
+fn shell_inline_runs_in_project_path() {
     let dir = tempfile::tempdir().unwrap();
     let output_file = dir.path().join("cwd.txt");
 
@@ -222,10 +217,7 @@ fn shell_inline_with_named_args() {
     let cmd_def = make_shell_command_with_args(
         "greet",
         "<name> --greeting=hello",
-        &format!(
-            "echo ${{args.greeting}} ${{args.name}} > {}",
-            output_file.display()
-        ),
+        &format!("echo ${{args.greeting}} ${{args.name}} > {}", output_file.display()),
     );
 
     let mut named = HashMap::new();
@@ -255,19 +247,14 @@ fn directive_is_shell_for_shell_commands() {
 
 #[test]
 fn directive_is_job_for_job_commands() {
-    let directive = RunDirective::Job {
-        job: "build".to_string(),
-    };
+    let directive = RunDirective::Job { job: "build".to_string() };
     assert!(!directive.is_shell());
     assert!(directive.is_job());
 }
 
 #[test]
 fn directive_is_agent_for_agent_commands() {
-    let directive = RunDirective::Agent {
-        agent: "planning".to_string(),
-        attach: None,
-    };
+    let directive = RunDirective::Agent { agent: "planning".to_string(), attach: None };
     assert!(!directive.is_shell());
     assert!(directive.is_agent());
 }
@@ -288,11 +275,7 @@ fn format_available_commands_empty_shows_no_commands() {
 #[test]
 fn format_available_commands_shows_commands() {
     let commands = vec![
-        (
-            "build".to_string(),
-            make_shell_command("build", "make build"),
-            None,
-        ),
+        ("build".to_string(), make_shell_command("build", "make build"), None),
         (
             "greet".to_string(),
             make_shell_command_with_args("greet", "<name>", "echo ${args.name}"),
@@ -314,11 +297,7 @@ fn format_available_commands_shows_commands() {
 #[test]
 fn format_available_commands_shows_description() {
     let cmd = make_shell_command("deploy", "deploy.sh");
-    let commands = vec![(
-        "deploy".to_string(),
-        cmd,
-        Some("Deploy to production".to_string()),
-    )];
+    let commands = vec![("deploy".to_string(), cmd, Some("Deploy to production".to_string()))];
 
     let mut help = HelpPrinter::uncolored();
     format_available_commands(&mut help, &commands, &[]);
@@ -330,11 +309,7 @@ fn format_available_commands_shows_description() {
 
 #[test]
 fn format_available_commands_shows_warnings() {
-    let commands = vec![(
-        "build".to_string(),
-        make_shell_command("build", "make build"),
-        None,
-    )];
+    let commands = vec![("build".to_string(), make_shell_command("build", "make build"), None)];
     let warnings = vec!["runbooks/broken.hcl: expected `{`, found `}`".to_string()];
 
     let mut help = HelpPrinter::uncolored();
@@ -349,11 +324,7 @@ fn format_available_commands_shows_warnings() {
 
 #[test]
 fn format_available_commands_no_warnings_when_empty() {
-    let commands = vec![(
-        "build".to_string(),
-        make_shell_command("build", "make build"),
-        None,
-    )];
+    let commands = vec![("build".to_string(), make_shell_command("build", "make build"), None)];
 
     let mut help = HelpPrinter::uncolored();
     format_available_commands(&mut help, &commands, &[]);

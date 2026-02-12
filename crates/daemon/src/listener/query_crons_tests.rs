@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-use crate::listener::query::query_crons::{
-    cron_time_display, format_duration_short, parse_interval_ms,
-};
+use crate::listener::query::query_crons::{cron_time_display, parse_interval_ms};
 use oj_storage::CronRecord;
 
 fn make_cron_record(
@@ -14,12 +12,12 @@ fn make_cron_record(
 ) -> CronRecord {
     CronRecord {
         name: "test".to_string(),
-        namespace: String::new(),
-        project_root: std::path::PathBuf::from("/test"),
+        project: String::new(),
+        project_path: std::path::PathBuf::from("/test"),
         runbook_hash: String::new(),
         status: status.to_string(),
         interval: interval.to_string(),
-        run_target: "job:cleanup".to_string(),
+        target: oj_core::RunTarget::job("cleanup"),
         started_at_ms,
         last_fired_at_ms,
     }
@@ -62,5 +60,5 @@ fn interval_parsing(input: &str, expected: Option<u64>) {
     days = { 172800, "2d" },
 )]
 fn duration_formatting(secs: u64, expected: &str) {
-    assert_eq!(format_duration_short(secs), expected);
+    assert_eq!(oj_core::format_elapsed(secs), expected);
 }

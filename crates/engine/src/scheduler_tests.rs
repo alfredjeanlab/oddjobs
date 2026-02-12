@@ -91,10 +91,7 @@ fn scheduler_overwrite_timer_resets_deadline() {
     // Original deadline (10s) should not fire
     clock.advance(Duration::from_secs(9));
     let events = scheduler.fired_timers(clock.now());
-    assert!(
-        events.is_empty(),
-        "old timer deadline should be overwritten"
-    );
+    assert!(events.is_empty(), "old timer deadline should be overwritten");
 
     // New deadline (20s from overwrite) should fire
     clock.advance(Duration::from_secs(12));
@@ -149,26 +146,10 @@ fn scheduler_cancel_timers_with_prefix() {
     let mut scheduler = Scheduler::new();
 
     // Set up timers with different prefixes
-    scheduler.set_timer(
-        "job:abc123".to_string(),
-        Duration::from_secs(10),
-        clock.now(),
-    );
-    scheduler.set_timer(
-        "job:abc123:step1".to_string(),
-        Duration::from_secs(15),
-        clock.now(),
-    );
-    scheduler.set_timer(
-        "job:def456".to_string(),
-        Duration::from_secs(20),
-        clock.now(),
-    );
-    scheduler.set_timer(
-        "other:xyz".to_string(),
-        Duration::from_secs(25),
-        clock.now(),
-    );
+    scheduler.set_timer("job:abc123".to_string(), Duration::from_secs(10), clock.now());
+    scheduler.set_timer("job:abc123:step1".to_string(), Duration::from_secs(15), clock.now());
+    scheduler.set_timer("job:def456".to_string(), Duration::from_secs(20), clock.now());
+    scheduler.set_timer("other:xyz".to_string(), Duration::from_secs(25), clock.now());
 
     // Cancel all timers starting with "job:abc123"
     scheduler.cancel_timers_with_prefix("job:abc123");

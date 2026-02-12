@@ -12,8 +12,6 @@ use std::io::Write;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use oj_core::ShortId;
-
 use crate::log_paths;
 use crate::time_fmt::format_utc_now;
 
@@ -58,10 +56,7 @@ pub struct ActivityLogger<K: LogKind> {
 impl<K: LogKind> ActivityLogger<K> {
     /// Create a new activity logger.
     pub fn new(log_dir: PathBuf) -> Self {
-        Self {
-            log_dir,
-            _kind: PhantomData,
-        }
+        Self { log_dir, _kind: PhantomData }
     }
 
     /// Write a timestamped line to a log file.
@@ -77,10 +72,6 @@ impl<K: LogKind> ActivityLogger<K> {
         Ok(())
     }
 }
-
-// =============================================================================
-// JobLogger implementation
-// =============================================================================
 
 /// Type alias for job activity logger.
 pub type JobLogger = ActivityLogger<JobLog>;
@@ -100,11 +91,7 @@ impl ActivityLogger<JobLog> {
     pub fn append(&self, job_id: &str, step: &str, message: &str) {
         let path = log_paths::job_log_path(&self.log_dir, job_id);
         if let Err(e) = self.write_line(&path, step, message) {
-            tracing::warn!(
-                job_id,
-                error = %e,
-                "failed to write job log"
-            );
+            tracing::warn!(job_id, error = %e, "failed to write job log");
         }
     }
 
@@ -117,36 +104,25 @@ impl ActivityLogger<JobLog> {
         self.append(job_id, step, &message);
     }
 
-    /// Copy the agent's session.jsonl to the logs directory.
+    /// Write the agent's session transcript to the logs directory.
     ///
-    /// Copies the source file to `{logs_dir}/agent/{agent_id}/session.jsonl`.
+    /// Writes content to `{logs_dir}/agent/{agent_id}/session.jsonl`.
     /// Failures are logged via tracing but do not propagate.
-    pub fn copy_session_log(&self, agent_id: &str, source: &Path) {
+    pub fn write_session_log(&self, agent_id: &str, content: &str) {
         let dest_dir = log_paths::agent_session_log_dir(&self.log_dir, agent_id);
         let dest = dest_dir.join("session.jsonl");
 
         if let Err(e) = fs::create_dir_all(&dest_dir) {
-            tracing::warn!(
-                agent_id,
-                error = %e,
-                "failed to create session log directory"
-            );
+            tracing::warn!(agent_id, error = %e, "failed to create session log directory");
             return;
         }
 
-        if let Err(e) = fs::copy(source, &dest) {
+        if let Err(e) = fs::write(&dest, content) {
             tracing::warn!(
                 agent_id,
-                source = %source.display(),
                 dest = %dest.display(),
                 error = %e,
-                "failed to copy session log"
-            );
-        } else {
-            tracing::debug!(
-                agent_id,
-                dest = %dest.display(),
-                "copied session log"
+                "failed to write session log"
             );
         }
     }
@@ -162,11 +138,7 @@ impl ActivityLogger<JobLog> {
     pub fn append_fenced(&self, job_id: &str, step: &str, label: &str, content: &str) {
         let path = log_paths::job_log_path(&self.log_dir, job_id);
         if let Err(e) = self.write_fenced(&path, step, label, content) {
-            tracing::warn!(
-                job_id,
-                error = %e,
-                "failed to write job log"
-            );
+            tracing::warn!(job_id, error = %e, "failed to write job log");
         }
     }
 
@@ -201,11 +173,7 @@ impl ActivityLogger<JobLog> {
     pub fn append_agent_error(&self, agent_id: &str, message: &str) {
         let path = log_paths::agent_log_path(&self.log_dir, agent_id);
         if let Err(e) = self.write_agent_error(&path, message) {
-            tracing::warn!(
-                agent_id,
-                error = %e,
-                "failed to write agent spawn error log"
-            );
+            tracing::warn!(agent_id, error = %e, "failed to write agent spawn error log");
         }
     }
 
@@ -216,17 +184,7 @@ impl ActivityLogger<JobLog> {
     pub fn write_agent_capture(&self, agent_id: &str, content: &str) {
         let path = log_paths::agent_capture_path(&self.log_dir, agent_id);
         if let Err(e) = self.write_capture_file(&path, content) {
-            tracing::warn!(
-                agent_id,
-                error = %e,
-                "failed to write agent terminal capture"
-            );
-        } else {
-            tracing::debug!(
-                agent_id,
-                path = %path.display(),
-                "wrote agent terminal capture"
-            );
+            tracing::warn!(agent_id, error = %e, "failed to write agent terminal capture");
         }
     }
 
@@ -249,10 +207,6 @@ impl ActivityLogger<JobLog> {
     }
 }
 
-// =============================================================================
-// WorkerLogger implementation
-// =============================================================================
-
 /// Type alias for worker activity logger.
 pub type WorkerLogger = ActivityLogger<WorkerLog>;
 
@@ -263,21 +217,13 @@ impl ActivityLogger<WorkerLog> {
     ///
     /// Failures are logged via tracing but do not propagate — logging
     /// must not break the engine.
-    pub fn append(&self, worker_name: &str, message: &str) {
-        let path = log_paths::worker_log_path(&self.log_dir, worker_name);
+    pub fn append(&self, worker: &str, message: &str) {
+        let path = log_paths::worker_log_path(&self.log_dir, worker);
         if let Err(e) = self.write_line(&path, "worker", message) {
-            tracing::warn!(
-                worker_name,
-                error = %e,
-                "failed to write worker log"
-            );
+            tracing::warn!(worker, error = %e, "failed to write worker log");
         }
     }
 }
-
-// =============================================================================
-// QueueLogger implementation
-// =============================================================================
 
 /// Type alias for queue activity logger.
 pub type QueueLogger = ActivityLogger<QueueLog>;
@@ -289,15 +235,11 @@ impl ActivityLogger<QueueLog> {
     ///
     /// Failures are logged via tracing but do not propagate — logging
     /// must not break the engine.
-    pub fn append(&self, queue_name: &str, item_id: &str, message: &str) {
-        let path = log_paths::queue_log_path(&self.log_dir, queue_name);
-        let prefix = item_id.short(8);
+    pub fn append(&self, queue: &str, item_id: &str, message: &str) {
+        let path = log_paths::queue_log_path(&self.log_dir, queue);
+        let prefix = oj_core::short(item_id, 8);
         if let Err(e) = self.write_line(&path, prefix, message) {
-            tracing::warn!(
-                queue_name,
-                error = %e,
-                "failed to write queue log"
-            );
+            tracing::warn!(queue, error = %e, "failed to write queue log");
         }
     }
 }

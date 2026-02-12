@@ -50,18 +50,9 @@ fn log_connection_error_creates_log_file() {
     let content = fs::read_to_string(&log_path).unwrap();
     assert!(content.contains("pid="), "log should contain pid");
     assert!(content.contains("cwd="), "log should contain cwd");
-    assert!(
-        content.contains("OJ_STATE_DIR="),
-        "log should contain OJ_STATE_DIR"
-    );
-    assert!(
-        content.contains("socket="),
-        "log should contain socket path"
-    );
-    assert!(
-        content.contains("Daemon not running"),
-        "log should contain error message"
-    );
+    assert!(content.contains("OJ_STATE_DIR="), "log should contain OJ_STATE_DIR");
+    assert!(content.contains("socket="), "log should contain socket path");
+    assert!(content.contains("Daemon not running"), "log should contain error message");
 }
 
 /// Verify log_connection_error includes socket path in output.
@@ -133,10 +124,7 @@ fn test_stale_lock_cleanup() {
     fs::write(&socket_path, "").unwrap();
 
     let pid_path = state_dir.path().join("daemon.pid");
-    assert!(
-        !pid_path.exists(),
-        "PID file should not exist for this test"
-    );
+    assert!(!pid_path.exists(), "PID file should not exist for this test");
 
     // Socket file is not a real Unix socket, so probe should fail
     assert!(!probe_socket(&socket_path));

@@ -8,16 +8,16 @@ mod decisions;
 mod helpers;
 mod jobs;
 mod queues;
-mod sessions;
 mod types;
 mod workers;
+mod workspaces;
 
 pub use types::{
-    CronRecord, QueueItem, QueueItemStatus, QueuePollMeta, Session, StoredRunbook, WorkerRecord,
-    Workspace, WorkspaceType,
+    CronRecord, QueueItem, QueueItemStatus, QueuePollMeta, StoredRunbook, WorkerRecord, Workspace,
+    WorkspaceType,
 };
 
-use oj_core::{AgentRecord, AgentRun, Decision, Event, Job};
+use oj_core::{AgentRecord, Crew, Decision, Event, Job};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -26,7 +26,6 @@ use std::path::PathBuf;
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct MaterializedState {
     pub jobs: HashMap<String, Job>,
-    pub sessions: HashMap<String, Session>,
     pub workspaces: HashMap<String, Workspace>,
     #[serde(default)]
     pub runbooks: HashMap<String, StoredRunbook>,
@@ -39,10 +38,10 @@ pub struct MaterializedState {
     #[serde(default)]
     pub decisions: HashMap<String, Decision>,
     #[serde(default)]
-    pub agent_runs: HashMap<String, AgentRun>,
+    pub crew: HashMap<String, Crew>,
     /// Unified agent index: agent_id → AgentRecord.
     ///
-    /// Populated from existing events (StepStarted, AgentRunStarted, agent
+    /// Populated from existing events (StepStarted, CrewStarted, agent
     /// state events) during WAL replay. Provides a single source of truth
     /// for all agent queries regardless of whether the agent is job-embedded
     /// or standalone.
@@ -52,12 +51,12 @@ pub struct MaterializedState {
     /// Not persisted — repopulates naturally as workers resume polling.
     #[serde(skip)]
     pub poll_meta: HashMap<String, QueuePollMeta>,
-    /// Durable namespace → project root mapping.
+    /// Durable project → project path mapping.
     ///
     /// Populated from WorkerStarted, CronStarted, and CommandRun events.
     /// Never cleared by deletion events, so the mapping survives worker/cron pruning.
     #[serde(default)]
-    pub project_roots: HashMap<String, PathBuf>,
+    pub project_paths: HashMap<String, PathBuf>,
 }
 
 impl MaterializedState {
@@ -71,22 +70,22 @@ impl MaterializedState {
         helpers::find_by_prefix(&self.decisions, id)
     }
 
-    /// Look up the known project root for a namespace.
+    /// Look up the known project path for a project.
     ///
-    /// Checks the durable project_roots map first (survives worker/cron pruning),
+    /// Checks the durable project_paths map first (survives worker/cron pruning),
     /// then falls back to scanning active workers and crons.
-    pub fn project_root_for_namespace(&self, namespace: &str) -> Option<std::path::PathBuf> {
-        if let Some(root) = self.project_roots.get(namespace) {
+    pub fn project_path_for_namespace(&self, project: &str) -> Option<std::path::PathBuf> {
+        if let Some(root) = self.project_paths.get(project) {
             return Some(root.clone());
         }
         for w in self.workers.values() {
-            if w.namespace == namespace {
-                return Some(w.project_root.clone());
+            if w.project == project {
+                return Some(w.project_path.clone());
             }
         }
         for c in self.crons.values() {
-            if c.namespace == namespace {
-                return Some(c.project_root.clone());
+            if c.project == project {
+                return Some(c.project_path.clone());
             }
         }
         None
@@ -118,8 +117,7 @@ impl MaterializedState {
             | Event::AgentWaiting { .. }
             | Event::AgentExited { .. }
             | Event::AgentFailed { .. }
-            | Event::AgentGone { .. }
-            | Event::AgentSignal { .. } => agents::apply(self, event),
+            | Event::AgentGone { .. } => agents::apply(self, event),
 
             // Jobs, steps, and shell
             Event::JobCreated { .. }
@@ -129,23 +127,25 @@ impl MaterializedState {
             | Event::StepWaiting { .. }
             | Event::StepCompleted { .. }
             | Event::StepFailed { .. }
+            | Event::JobFailing { .. }
             | Event::JobCancelling { .. }
             | Event::JobSuspending { .. }
             | Event::JobDeleted { .. }
             | Event::ShellExited { .. }
             | Event::JobUpdated { .. } => jobs::apply(self, event),
 
-            // Sessions and workspaces
-            Event::SessionCreated { .. }
-            | Event::SessionDeleted { .. }
-            | Event::WorkspaceCreated { .. }
+            // Workspaces
+            Event::WorkspaceCreated { .. }
             | Event::WorkspaceReady { .. }
             | Event::WorkspaceFailed { .. }
-            | Event::WorkspaceDeleted { .. } => sessions::apply(self, event),
+            | Event::WorkspaceDeleted { .. } => workspaces::apply(self, event),
+
+            // AgentSpawned: no state mutation (runtime handler sets liveness timer)
+            Event::AgentSpawned { .. } => {}
 
             // Workers and crons
             Event::WorkerStarted { .. }
-            | Event::WorkerItemDispatched { .. }
+            | Event::WorkerDispatched { .. }
             | Event::WorkerStopped { .. }
             | Event::WorkerResized { .. }
             | Event::WorkerDeleted { .. }
@@ -160,36 +160,37 @@ impl MaterializedState {
             | Event::QueueCompleted { .. }
             | Event::QueueFailed { .. }
             | Event::QueueDropped { .. }
-            | Event::QueueItemRetry { .. }
-            | Event::QueueItemDead { .. } => queues::apply(self, event),
+            | Event::QueueRetry { .. }
+            | Event::QueueDead { .. } => queues::apply(self, event),
 
-            // Decisions, agent runs, and commands
+            // Decisions, crew, and commands
             Event::DecisionCreated { .. }
             | Event::DecisionResolved { .. }
-            | Event::AgentRunCreated { .. }
-            | Event::AgentRunStarted { .. }
-            | Event::AgentRunStatusChanged { .. }
-            | Event::AgentRunDeleted { .. }
+            | Event::CrewCreated { .. }
+            | Event::CrewStarted { .. }
+            | Event::CrewUpdated { .. }
+            | Event::CrewDeleted { .. }
             | Event::CommandRun { .. } => decisions::apply(self, event),
 
             // Events that don't affect persisted state
             // (These are action/signal events handled by the runtime)
             Event::Custom
             | Event::TimerStart { .. }
-            | Event::SessionInput { .. }
             | Event::AgentInput { .. }
+            | Event::AgentRespond { .. }
             | Event::AgentSpawnFailed { .. }
             | Event::JobResume { .. }
             | Event::JobCancel { .. }
             | Event::JobSuspend { .. }
-            | Event::AgentRunResume { .. }
+            | Event::CrewResume { .. }
             | Event::WorkspaceDrop { .. }
             | Event::WorkerWake { .. }
-            | Event::WorkerPollComplete { .. }
-            | Event::WorkerTakeComplete { .. }
+            | Event::WorkerPolled { .. }
+            | Event::WorkerTook { .. }
             | Event::AgentIdle { .. }
             | Event::AgentPrompt { .. }
-            | Event::AgentStop { .. }
+            | Event::AgentStopBlocked { .. }
+            | Event::AgentStopAllowed { .. }
             | Event::CronOnce { .. }
             | Event::Shutdown => {}
         }

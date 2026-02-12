@@ -33,12 +33,12 @@ job "deploy" {
 ```hcl
 locals {
   repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-  branch = "feature/${var.name}-${workspace.nonce}"
+  branch = "feature/${var.name}-${source.nonce}"
   title  = "feat(${var.name}): ${var.instructions}"
 }
 ```
 
-Use `local.repo` to resolve the main repo root when using `workspace = "folder"` with manual worktree commands.
+Use `local.repo` to resolve the main repo root when using `source = "folder"` with manual worktree commands.
 
 **Job name templates** — human-readable names: `name = "${var.name}"`
 
@@ -155,9 +155,9 @@ Key patterns for crew agents:
 - `run = { agent = "name" }` for standalone agents
 - `run = <<-SHELL ... SHELL` for inline shell (e.g. launching crons, quick operations)
 
-**Workspaces:**
-- `workspace { git = "worktree" }` for engine-managed git worktrees (init/cleanup handled automatically)
-- `workspace = "folder"` for plain directories with manual git worktree setup (needed for custom start points)
+**Source:**
+- `source { git = true }` for engine-managed git worktrees (init/cleanup handled automatically)
+- `source = "folder"` for plain directories with manual git worktree setup (needed for custom start points)
 - Share build cache: `.cargo/config.toml` → main repo's `target/` dir
 
 **Workers and queues:**

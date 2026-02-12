@@ -91,11 +91,7 @@ impl Wal {
             std::fs::create_dir_all(parent)?;
         }
 
-        let mut file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(path)?;
+        let mut file = OpenOptions::new().create(true).read(true).append(true).open(path)?;
 
         // Scan to find max sequence and build offset index
         let (mut write_seq, mut read_offset, corrupt) = Self::scan_wal(&file, processed_seq)?;
@@ -128,11 +124,7 @@ impl Wal {
             }
 
             // Re-open the clean file
-            file = OpenOptions::new()
-                .create(true)
-                .read(true)
-                .append(true)
-                .open(path)?;
+            file = OpenOptions::new().create(true).read(true).append(true).open(path)?;
 
             // Re-scan the clean file for correct offsets
             let scan = Self::scan_wal(&file, processed_seq)?;
@@ -312,11 +304,7 @@ impl Wal {
         let record: WalRecord = match serde_json::from_str(trimmed) {
             Ok(r) => r,
             Err(e) => {
-                warn!(
-                    offset = self.read_offset,
-                    error = %e,
-                    "Corrupt WAL entry, skipping",
-                );
+                warn!(offset = self.read_offset, error = %e, "Corrupt WAL entry, skipping");
                 // Advance past the corrupt line to avoid getting stuck
                 self.read_offset += bytes_read as u64;
                 return Ok(None);
@@ -325,10 +313,7 @@ impl Wal {
 
         self.read_offset += bytes_read as u64;
 
-        Ok(Some(WalEntry {
-            seq: record.seq,
-            event: record.event,
-        }))
+        Ok(Some(WalEntry { seq: record.seq, event: record.event }))
     }
 
     /// Mark an entry as processed.
@@ -411,11 +396,8 @@ impl Wal {
             }
 
             // If no unprocessed entries found, read_offset is at end of file
-            new_read_offset = if found_unprocessed {
-                first_unprocessed_offset
-            } else {
-                current_offset
-            };
+            new_read_offset =
+                if found_unprocessed { first_unprocessed_offset } else { current_offset };
 
             tmp_file.sync_all()?;
         }
@@ -424,11 +406,7 @@ impl Wal {
         std::fs::rename(&tmp_path, &self.path)?;
 
         // Reopen file
-        self.file = OpenOptions::new()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&self.path)?;
+        self.file = OpenOptions::new().create(true).read(true).append(true).open(&self.path)?;
         self.read_file = self.file.try_clone()?;
         self.read_offset = new_read_offset;
 
@@ -476,10 +454,7 @@ impl Wal {
             current_offset += bytes_read as u64;
 
             if record.seq > seq {
-                entries.push(WalEntry {
-                    seq: record.seq,
-                    event: record.event,
-                });
+                entries.push(WalEntry { seq: record.seq, event: record.event });
             }
         }
 

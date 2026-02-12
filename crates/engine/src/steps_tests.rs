@@ -7,122 +7,96 @@ use super::*;
 use oj_core::{Effect, Job};
 
 fn test_job() -> Job {
-    Job::builder().id("pipe-1").cwd("/tmp/workspace").build()
+    Job::builder().id("job-1").cwd("/tmp/workspace").build()
 }
 
 fn has_cancel_timer(effects: &[Effect], timer_id: &str) -> bool {
+    effects.iter().any(|e| matches!(e, Effect::CancelTimer { id } if id == timer_id))
+}
+
+fn has_kill_agent(effects: &[Effect], expected_id: &str) -> bool {
     effects
         .iter()
-        .any(|e| matches!(e, Effect::CancelTimer { id } if id == timer_id))
+        .any(|e| matches!(e, Effect::KillAgent { agent_id } if agent_id.as_str() == expected_id))
 }
 
-fn has_kill_session(effects: &[Effect], expected_id: &str) -> bool {
-    effects.iter().any(
-        |e| matches!(e, Effect::KillSession { session_id } if session_id.as_str() == expected_id),
-    )
+fn completion_effects_for(_job: &Job, _err: &str) -> Vec<Effect> {
+    completion_effects(_job)
 }
 
-fn has_session_deleted_event(effects: &[Effect], expected_id: &str) -> bool {
-    effects.iter().any(|e| {
-        matches!(e, Effect::Emit { event: Event::SessionDeleted { id } } if id.as_str() == expected_id)
-    })
+#[yare::parameterized(
+    completion_cancels_liveness       = { completion_effects_for, "liveness:job:job-1" },
+    completion_cancels_exit_deferred  = { completion_effects_for, "exit-deferred:job:job-1" },
+    failure_cancels_liveness          = { failure_effects,        "liveness:job:job-1" },
+    failure_cancels_exit_deferred     = { failure_effects,        "exit-deferred:job:job-1" },
+)]
+fn cancels_timer(build_effects: fn(&Job, &str) -> Vec<Effect>, timer_id: &str) {
+    let job = test_job();
+    let effects = build_effects(&job, "something went wrong");
+    assert!(has_cancel_timer(&effects, timer_id), "must cancel timer {}", timer_id);
 }
 
 #[test]
-fn completion_effects_cancels_liveness_timer() {
+fn failure_effects_kills_agent_when_set() {
+    let mut job = test_job();
+    job.step_history.push(oj_core::StepRecord {
+        name: job.step.clone(),
+        agent_id: Some("agent-1".to_string()),
+        started_at_ms: 0,
+        finished_at_ms: None,
+        outcome: oj_core::StepOutcome::Running,
+        agent_name: None,
+    });
+    let effects = failure_effects(&job, "something went wrong");
+    assert!(
+        has_kill_agent(&effects, "agent-1"),
+        "failure_effects must kill agent when agent_id is set"
+    );
+}
+
+#[test]
+fn failure_effects_no_kill_agent_when_none() {
     let job = test_job();
+    let effects = failure_effects(&job, "something went wrong");
+    assert!(
+        !effects.iter().any(|e| matches!(e, Effect::KillAgent { .. })),
+        "failure_effects must not include KillAgent when agent_id is None"
+    );
+}
+
+#[test]
+fn completion_effects_kills_agent_when_set() {
+    let mut job = test_job();
+    job.step_history.push(oj_core::StepRecord {
+        name: job.step.clone(),
+        agent_id: Some("agent-2".to_string()),
+        started_at_ms: 0,
+        finished_at_ms: None,
+        outcome: oj_core::StepOutcome::Running,
+        agent_name: None,
+    });
     let effects = completion_effects(&job);
     assert!(
-        has_cancel_timer(&effects, "liveness:pipe-1"),
-        "completion_effects must cancel the liveness timer"
+        has_kill_agent(&effects, "agent-2"),
+        "completion_effects must kill agent when agent_id is set"
     );
 }
 
 #[test]
-fn completion_effects_cancels_exit_deferred_timer() {
-    let job = test_job();
-    let effects = completion_effects(&job);
-    assert!(
-        has_cancel_timer(&effects, "exit-deferred:pipe-1"),
-        "completion_effects must cancel the exit-deferred timer"
-    );
-}
-
-#[test]
-fn failure_effects_cancels_liveness_timer() {
-    let job = test_job();
-    let effects = failure_effects(&job, "something went wrong");
-    assert!(
-        has_cancel_timer(&effects, "liveness:pipe-1"),
-        "failure_effects must cancel the liveness timer"
-    );
-}
-
-#[test]
-fn failure_effects_cancels_exit_deferred_timer() {
-    let job = test_job();
-    let effects = failure_effects(&job, "something went wrong");
-    assert!(
-        has_cancel_timer(&effects, "exit-deferred:pipe-1"),
-        "failure_effects must cancel the exit-deferred timer"
-    );
-}
-
-#[test]
-fn failure_effects_kills_session_when_set() {
+fn cancellation_effects_kills_agent_when_set() {
     let mut job = test_job();
-    job.session_id = Some("sess-agent-1".to_string());
-    let effects = failure_effects(&job, "something went wrong");
-    assert!(
-        has_kill_session(&effects, "sess-agent-1"),
-        "failure_effects must kill session when session_id is set"
-    );
-    assert!(
-        has_session_deleted_event(&effects, "sess-agent-1"),
-        "failure_effects must emit SessionDeleted when session_id is set"
-    );
-}
-
-#[test]
-fn failure_effects_no_kill_session_when_none() {
-    let job = test_job();
-    assert!(job.session_id.is_none());
-    let effects = failure_effects(&job, "something went wrong");
-    assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::KillSession { .. })),
-        "failure_effects must not include KillSession when session_id is None"
-    );
-}
-
-#[test]
-fn completion_effects_kills_session_when_set() {
-    let mut job = test_job();
-    job.session_id = Some("sess-agent-2".to_string());
-    let effects = completion_effects(&job);
-    assert!(
-        has_kill_session(&effects, "sess-agent-2"),
-        "completion_effects must kill session when session_id is set"
-    );
-    assert!(
-        has_session_deleted_event(&effects, "sess-agent-2"),
-        "completion_effects must emit SessionDeleted when session_id is set"
-    );
-}
-
-#[test]
-fn cancellation_effects_kills_session_when_set() {
-    let mut job = test_job();
-    job.session_id = Some("sess-agent-3".to_string());
+    job.step_history.push(oj_core::StepRecord {
+        name: job.step.clone(),
+        agent_id: Some("agent-3".to_string()),
+        started_at_ms: 0,
+        finished_at_ms: None,
+        outcome: oj_core::StepOutcome::Running,
+        agent_name: None,
+    });
     let effects = cancellation_effects(&job);
     assert!(
-        has_kill_session(&effects, "sess-agent-3"),
-        "cancellation_effects must kill session when session_id is set"
-    );
-    assert!(
-        has_session_deleted_event(&effects, "sess-agent-3"),
-        "cancellation_effects must emit SessionDeleted when session_id is set"
+        has_kill_agent(&effects, "agent-3"),
+        "cancellation_effects must kill agent when agent_id is set"
     );
 }
 
@@ -154,31 +128,23 @@ fn cancellation_transition_effects_emits_step_failed_and_advance() {
             } if step == "cleanup"
         )
     });
-    assert!(
-        has_advanced,
-        "cancellation_transition_effects must emit JobAdvanced to cleanup step"
-    );
+    assert!(has_advanced, "cancellation_transition_effects must emit JobAdvanced to cleanup step");
 }
 
 #[test]
 fn cancellation_transition_effects_does_not_cancel_timers_or_kill_sessions() {
-    let mut job = test_job();
-    job.session_id = Some("sess-agent-4".to_string());
+    let job = test_job();
     let effects = cancellation_transition_effects(&job, "cleanup");
 
     // Should NOT cancel timers (runtime handles that separately)
     assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::CancelTimer { .. })),
+        !effects.iter().any(|e| matches!(e, Effect::CancelTimer { .. })),
         "cancellation_transition_effects must not cancel timers"
     );
 
-    // Should NOT kill sessions (runtime handles that separately)
+    // Should NOT kill agents (runtime handles that separately)
     assert!(
-        !effects
-            .iter()
-            .any(|e| matches!(e, Effect::KillSession { .. })),
-        "cancellation_transition_effects must not kill sessions"
+        !effects.iter().any(|e| matches!(e, Effect::KillAgent { .. })),
+        "cancellation_transition_effects must not kill agents"
     );
 }

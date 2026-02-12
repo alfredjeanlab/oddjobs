@@ -7,10 +7,6 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Runbooks
-// =============================================================================
-
 /// Job where init always fails, falling back to reinit.
 /// init (exit 1) → on_fail → reinit (succeeds) → on_done → work → completes.
 const INIT_REINIT_RUNBOOK: &str = r#"
@@ -25,13 +21,13 @@ workspace = "folder"
 [[job.test.step]]
 name = "init"
 run = "exit 1"
-on_fail = "reinit"
-on_done = "work"
+on_fail = { step = "reinit" }
+on_done = { step = "work" }
 
 [[job.test.step]]
 name = "reinit"
 run = "echo reinit-ok"
-on_done = "work"
+on_done = { step = "work" }
 
 [[job.test.step]]
 name = "work"
@@ -52,13 +48,13 @@ workspace = "folder"
 [[job.test.step]]
 name = "init"
 run = "touch collision-marker && exit 1"
-on_fail = "reinit"
-on_done = "work"
+on_fail = { step = "reinit" }
+on_done = { step = "work" }
 
 [[job.test.step]]
 name = "reinit"
 run = "rm -f collision-marker"
-on_done = "work"
+on_done = { step = "work" }
 
 [[job.test.step]]
 name = "work"
@@ -78,7 +74,7 @@ workspace = "folder"
 [[job.test.step]]
 name = "init"
 run = "echo ${var.name} > name.txt"
-on_done = "work"
+on_done = { step = "work" }
 
 [[job.test.step]]
 name = "work"
@@ -99,17 +95,13 @@ workspace = "folder"
 [[job.test.step]]
 name = "init"
 run = "exit 1"
-on_fail = "reinit"
+on_fail = { step = "reinit" }
 
 [[job.test.step]]
 name = "reinit"
 run = "exit 1"
-on_fail = "init"
+on_fail = { step = "init" }
 "#;
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 /// When init fails, on_fail routes to reinit, and the job completes.
 #[test]
@@ -122,11 +114,7 @@ fn init_on_fail_routes_to_reinit_step() {
     temp.oj().args(&["run", "test", "reinit-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !done {
@@ -149,11 +137,7 @@ fn reinit_cleans_stale_state_and_recovers() {
     temp.oj().args(&["run", "test", "stale-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !done {
@@ -186,10 +170,7 @@ fn concurrent_jobs_get_isolated_workspaces() {
         eprintln!("=== JOB LIST ===\n{}\n=== END ===", out);
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        both_done,
-        "both jobs should complete with isolated workspaces"
-    );
+    assert!(both_done, "both jobs should complete with isolated workspaces");
 }
 
 /// init↔reinit cycle triggers circuit breaker and job fails.
@@ -215,10 +196,7 @@ fn init_reinit_cycle_triggers_circuit_breaker() {
     if !failed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        failed,
-        "job should fail after circuit breaker stops init/reinit cycle"
-    );
+    assert!(failed, "job should fail after circuit breaker stops init/reinit cycle");
 }
 
 /// Sequential job runs of the same kind don't collide.
@@ -237,11 +215,7 @@ fn sequential_runs_complete_without_workspace_collision() {
     // First run
     temp.oj().args(&["run", "test", "first"]).passes();
     let first_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(first_done, "first job should complete");
 
@@ -255,8 +229,5 @@ fn sequential_runs_complete_without_workspace_collision() {
     if !second_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        second_done,
-        "second job should complete without collision from first"
-    );
+    assert!(second_done, "second job should complete without collision from first");
 }

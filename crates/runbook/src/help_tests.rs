@@ -20,9 +20,7 @@ fn format_help_full_args() {
         ]
         .into_iter()
         .collect(),
-        run: RunDirective::Job {
-            job: "build".to_string(),
-        },
+        run: RunDirective::Job { job: "build".to_string() },
     };
 
     let comment = FileComment {
@@ -120,9 +118,7 @@ fn format_help_empty_default_not_shown() {
         name: "build".to_string(),
 
         args: parse_arg_spec("[--rebase]").unwrap(),
-        defaults: [("rebase".to_string(), String::new())]
-            .into_iter()
-            .collect(),
+        defaults: [("rebase".to_string(), String::new())].into_iter().collect(),
         run: RunDirective::Shell("echo".to_string()),
     };
 

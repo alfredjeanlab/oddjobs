@@ -21,14 +21,14 @@ pub(super) fn cron_time_display(cron: &CronRecord, now_ms: u64) -> String {
             "now".to_string()
         } else {
             let remaining_secs = (next_fire_ms - now_ms) / 1000;
-            format!("in {}", format_duration_short(remaining_secs))
+            format!("in {}", oj_core::format_elapsed(remaining_secs))
         }
     } else {
         // stopped
         match cron.last_fired_at_ms {
             Some(fired_ms) if fired_ms > 0 && now_ms >= fired_ms => {
                 let ago_secs = (now_ms - fired_ms) / 1000;
-                format!("{} ago", format_duration_short(ago_secs))
+                format!("{} ago", oj_core::format_elapsed(ago_secs))
             }
             _ => "-".to_string(),
         }
@@ -52,11 +52,6 @@ pub(super) fn parse_interval_ms(s: &str) -> Option<u64> {
         _ => return None,
     };
     Some(num * multiplier)
-}
-
-/// Format seconds as a short human-readable duration: "12s", "5m", "2h", "3d".
-pub(super) fn format_duration_short(total_secs: u64) -> String {
-    oj_core::format_elapsed(total_secs)
 }
 
 #[cfg(test)]

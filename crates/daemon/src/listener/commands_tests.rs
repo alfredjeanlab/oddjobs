@@ -32,9 +32,9 @@ run = "echo deploying"
     let ctx = test_ctx(wal_dir.path());
 
     let result = handle_run_command(RunCommandParams {
-        project_root: project.path(),
+        project_path: project.path(),
         invoke_dir: project.path(),
-        namespace: "",
+        project: "",
         command: "deploy",
         args: &[],
         named_args: &HashMap::new(),
@@ -44,10 +44,10 @@ run = "echo deploying"
     .unwrap();
 
     match result {
-        Response::CommandStarted { job_name, .. } => {
+        Response::JobStarted { job_name, .. } => {
             assert_eq!(job_name, "deploy");
         }
-        other => panic!("expected CommandStarted, got {:?}", other),
+        other => panic!("expected JobStarted, got {:?}", other),
     }
 }
 
@@ -71,9 +71,9 @@ run = "make"
     let ctx = test_ctx(wal_dir.path());
 
     let result = handle_run_command(RunCommandParams {
-        project_root: project.path(),
+        project_path: project.path(),
         invoke_dir: project.path(),
-        namespace: "",
+        project: "",
         command: "build",
         args: &[],
         named_args: &HashMap::new(),
@@ -83,10 +83,10 @@ run = "make"
     .unwrap();
 
     match result {
-        Response::CommandStarted { job_name, .. } => {
+        Response::JobStarted { job_name, .. } => {
             assert_eq!(job_name, "build-all");
         }
-        other => panic!("expected CommandStarted, got {:?}", other),
+        other => panic!("expected JobStarted, got {:?}", other),
     }
 }
 
@@ -103,9 +103,9 @@ run = "echo deploying"
     let ctx = test_ctx(wal_dir.path());
 
     let result = handle_run_command(RunCommandParams {
-        project_root: project.path(),
+        project_path: project.path(),
         invoke_dir: project.path(),
-        namespace: "",
+        project: "",
         command: "deploj",
         args: &[],
         named_args: &HashMap::new(),
@@ -127,9 +127,9 @@ async fn unknown_command_returns_error_without_hint_when_no_match() {
     let ctx = test_ctx(wal_dir.path());
 
     let result = handle_run_command(RunCommandParams {
-        project_root: std::path::Path::new("/nonexistent"),
+        project_path: std::path::Path::new("/nonexistent"),
         invoke_dir: std::path::Path::new("/nonexistent"),
-        namespace: "",
+        project: "",
         command: "xyz",
         args: &[],
         named_args: &HashMap::new(),

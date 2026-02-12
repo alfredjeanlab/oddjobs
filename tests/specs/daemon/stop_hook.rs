@@ -9,70 +9,58 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
 /// Agent that simulates the stop hook firing by calling `oj agent hook stop`
-/// directly. This emits an AgentStop event which triggers the on_stop escalation
+/// directly. This emits an AgentStop event which triggers the on_idle escalation
 /// path in the daemon.
 fn scenario_trigger_stop_hook() -> &'static str {
     r#"
-name = "stop-hook-trigger"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "I'm done, trying to stop."
 
-[responses.response]
-text = "I'm done, trying to stop."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "echo '{}' | oj agent hook stop $AGENT_ID" }
 
 [[responses]]
-pattern = { type = "any" }
-response = "Waiting for further instructions."
+on = "*"
+say = "Waiting for further instructions."
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#
 }
 
 /// A slow agent that sleeps, keeping the job on the agent step long enough
 /// to cancel it mid-execution. Uses -p mode so on_dead fires if not cancelled.
 const SLOW_AGENT_SCENARIO: &str = r#"
-name = "slow-agent"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Running a slow task..."
 
-[responses.response]
-text = "Running a slow task..."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "sleep 30" }
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#;
 
-// =============================================================================
-// Runbooks
-// =============================================================================
-
 /// Runbook with an interactive agent that triggers the stop hook.
-/// on_stop = "escalate" causes the stop hook to create an escalation decision.
-fn runbook_on_stop_escalate(scenario_path: &std::path::Path) -> String {
+/// on_idle = "escalate" causes the stop hook to create an escalation decision.
+fn runbook_on_idle_escalate(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.work]
@@ -89,7 +77,7 @@ run = {{ agent = "worker" }}
 [agent.worker]
 run = "claudeless --scenario {}"
 prompt = "Do the task."
-on_stop = "escalate"
+on_idle = "escalate"
 env = {{ AGENT_ID = "${{agent_id}}" }}
 "#,
         scenario_path.display()
@@ -217,7 +205,7 @@ vars = ["name"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ job = "work" }}
+run = {{ job = "work" }}
 concurrency = 1
 
 [job.work]
@@ -250,10 +238,6 @@ fn extract_job_id(temp: &Project, name_filter: &str) -> String {
         .to_string()
 }
 
-// =============================================================================
-// Test 1: Cancel job during agent step transitions to cancelled
-// =============================================================================
-
 /// When a job is cancelled while an agent step is running, the agent
 /// session is killed and the job transitions to "cancelled" status.
 #[test]
@@ -263,10 +247,7 @@ fn cancel_agent_step_transitions_job_to_cancelled() {
 
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/work.toml",
-        &runbook_agent_no_on_cancel(&scenario_path),
-    );
+    temp.file(".oj/runbooks/work.toml", &runbook_agent_no_on_cancel(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "cancel-basic"]).passes();
@@ -276,11 +257,7 @@ fn cancel_agent_step_transitions_job_to_cancelled() {
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
@@ -295,15 +272,8 @@ fn cancel_agent_step_transitions_job_to_cancelled() {
     if !cancelled {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        cancelled,
-        "job should transition to cancelled after cancel during agent step"
-    );
+    assert!(cancelled, "job should transition to cancelled after cancel during agent step");
 }
-
-// =============================================================================
-// Test 2: Job-level on_cancel cleanup step runs after agent is killed
-// =============================================================================
 
 /// When a job with `on_cancel` is cancelled during an agent step, the
 /// agent is killed first, then the cleanup step runs, and the job
@@ -315,10 +285,7 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
 
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/work.toml",
-        &runbook_agent_with_on_cancel(&scenario_path),
-    );
+    temp.file(".oj/runbooks/work.toml", &runbook_agent_with_on_cancel(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "cancel-cleanup"]).passes();
@@ -328,11 +295,7 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
@@ -348,15 +311,8 @@ fn on_cancel_cleanup_step_runs_after_agent_kill() {
     if !terminal {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        terminal,
-        "job should reach terminal state after on_cancel cleanup step runs"
-    );
+    assert!(terminal, "job should reach terminal state after on_cancel cleanup step runs");
 }
-
-// =============================================================================
-// Test 3: Step-level on_cancel routes to cleanup
-// =============================================================================
 
 /// When a step has its own on_cancel, the step-level on_cancel takes priority
 /// over the job-level on_cancel.
@@ -367,10 +323,7 @@ fn step_level_on_cancel_routes_to_cleanup() {
 
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/work.toml",
-        &runbook_agent_step_on_cancel(&scenario_path),
-    );
+    temp.file(".oj/runbooks/work.toml", &runbook_agent_step_on_cancel(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "step-cancel"]).passes();
@@ -380,11 +333,7 @@ fn step_level_on_cancel_routes_to_cleanup() {
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
@@ -399,15 +348,8 @@ fn step_level_on_cancel_routes_to_cleanup() {
     if !terminal {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        terminal,
-        "job should reach terminal state after step-level on_cancel cleanup runs"
-    );
+    assert!(terminal, "job should reach terminal state after step-level on_cancel cleanup runs");
 }
-
-// =============================================================================
-// Test 4: Cancel overrides on_dead recover action
-// =============================================================================
 
 /// When the agent is configured with on_dead = recover (with attempts), but
 /// the job is cancelled, the cancel should take effect immediately.
@@ -419,26 +361,17 @@ fn cancel_overrides_on_dead_recover() {
 
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/work.toml",
-        &runbook_agent_recover_then_cancel(&scenario_path),
-    );
+    temp.file(".oj/runbooks/work.toml", &runbook_agent_recover_then_cancel(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "work", "cancel-vs-recover"])
-        .passes();
+    temp.oj().args(&["run", "work", "cancel-vs-recover"]).passes();
 
     // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // Cancel the job while agent is running
     let job_id = extract_job_id(&temp, "work");
@@ -453,15 +386,8 @@ fn cancel_overrides_on_dead_recover() {
     if !cancelled {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        cancelled,
-        "cancel should override on_dead=recover and transition to cancelled"
-    );
+    assert!(cancelled, "cancel should override on_dead=recover and transition to cancelled");
 }
-
-// =============================================================================
-// Test 5: Re-cancel during cleanup step is a no-op
-// =============================================================================
 
 /// When a job is already running its on_cancel cleanup step, issuing
 /// another cancel should be a no-op (the cleanup runs to completion).
@@ -510,11 +436,7 @@ on_dead = "done"
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // First cancel
     let job_id = extract_job_id(&temp, "work");
@@ -532,15 +454,8 @@ on_dead = "done"
     if !terminal {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        terminal,
-        "job should reach terminal state despite re-cancel during cleanup"
-    );
+    assert!(terminal, "job should reach terminal state despite re-cancel during cleanup");
 }
-
-// =============================================================================
-// Test 6: Cancel agent job frees queue slot
-// =============================================================================
 
 /// When a queue-spawned job with an agent step is cancelled, the queue
 /// item transitions from active and the concurrency slot is freed.
@@ -551,36 +466,23 @@ fn cancel_agent_job_frees_queue_slot() {
 
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/queue.toml",
-        &runbook_queue_agent_cancel(&scenario_path),
-    );
+    temp.file(".oj/runbooks/queue.toml", &runbook_queue_agent_cancel(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a name var
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"name": "test-item"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"name": "test-item"}"#]).passes();
 
     // Wait for job to reach agent step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
     // Verify queue item is active
-    let active = temp
-        .oj()
-        .args(&["queue", "show", "tasks"])
-        .passes()
-        .stdout();
+    let active = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
     assert!(active.contains("active"), "queue item should be active");
 
     // Cancel the job
@@ -589,33 +491,20 @@ fn cancel_agent_job_frees_queue_slot() {
 
     // Queue item should leave active status
     let transitioned = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         !out.contains("active")
     });
 
     if !transitioned {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        transitioned,
-        "queue item must not stay active after agent job cancel"
-    );
+    assert!(transitioned, "queue item must not stay active after agent job cancel");
 
     // Verify the slot is freed by pushing another item and watching it activate
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"name": "second-item"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"name": "second-item"}"#]).passes();
 
     let second_runs = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         // The second item should become active (or complete), proving the slot was freed
         out.matches("active").count() >= 1 || out.matches("completed").count() >= 1
     });
@@ -623,15 +512,8 @@ fn cancel_agent_job_frees_queue_slot() {
     if !second_runs {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        second_runs,
-        "second queue item should activate, proving concurrency slot was freed"
-    );
+    assert!(second_runs, "second queue item should activate, proving concurrency slot was freed");
 }
-
-// =============================================================================
-// Test 7: Cancel already-terminal job is a no-op
-// =============================================================================
 
 /// Cancelling a job that has already completed should be a no-op
 /// (no crash, no state corruption).
@@ -660,11 +542,7 @@ run = "echo done"
 
     // Wait for job to complete
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(completed, "job should complete");
 
@@ -673,15 +551,8 @@ run = "echo done"
     temp.oj().args(&["job", "cancel", &job_id]).passes();
 
     // Job should still show completed (not cancelled)
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_has("completed");
+    temp.oj().args(&["job", "list"]).passes().stdout_has("completed");
 }
-
-// =============================================================================
-// Test 8: Cancel cleans up workspace directory
-// =============================================================================
 
 /// When a job with a workspace is cancelled, the workspace directory
 /// should be cleaned up (same as on successful completion).
@@ -702,7 +573,7 @@ run = {{ job = "work" }}
 
 [job.work]
 vars  = ["name"]
-workspace = "folder"
+source = "folder"
 
 [[job.work.step]]
 name = "agent"
@@ -725,22 +596,15 @@ on_dead = "done"
         let out = temp.oj().args(&["job", "list"]).passes().stdout();
         out.contains("agent") && out.contains("running")
     });
-    assert!(
-        running,
-        "job should reach the agent step\ndaemon log:\n{}",
-        temp.daemon_log()
-    );
+    assert!(running, "job should reach the agent step\ndaemon log:\n{}", temp.daemon_log());
 
-    // Verify workspace directory exists
+    // Verify workspace directory exists (workspace creation is async)
     let workspaces_dir = temp.state_path().join("workspaces");
-    let ws_exists_before = workspaces_dir.exists()
-        && std::fs::read_dir(&workspaces_dir)
-            .map(|mut d| d.next().is_some())
-            .unwrap_or(false);
-    assert!(
-        ws_exists_before,
-        "workspace directory should exist before cancel"
-    );
+    let ws_exists_before = wait_for(SPEC_WAIT_MAX_MS, || {
+        workspaces_dir.exists()
+            && std::fs::read_dir(&workspaces_dir).map(|mut d| d.next().is_some()).unwrap_or(false)
+    });
+    assert!(ws_exists_before, "workspace directory should exist before cancel");
 
     // Cancel the job
     let job_id = extract_job_id(&temp, "work");
@@ -760,9 +624,7 @@ on_dead = "done"
     // Workspace directory should be cleaned up
     let ws_cleaned = wait_for(SPEC_WAIT_MAX_MS, || {
         !workspaces_dir.exists()
-            || std::fs::read_dir(&workspaces_dir)
-                .map(|mut d| d.next().is_none())
-                .unwrap_or(true)
+            || std::fs::read_dir(&workspaces_dir).map(|mut d| d.next().is_none()).unwrap_or(true)
     });
     if !ws_cleaned {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
@@ -774,15 +636,8 @@ on_dead = "done"
             }
         }
     }
-    assert!(
-        ws_cleaned,
-        "workspace directory should be cleaned up after cancel"
-    );
+    assert!(ws_cleaned, "workspace directory should be cleaned up after cancel");
 }
-
-// =============================================================================
-// Test 9: on_stop=escalate creates decision, Done resolves it
-// =============================================================================
 
 /// Extract the first decision ID from `oj decision list` output.
 fn extract_decision_id(output: &str) -> Option<String> {
@@ -800,35 +655,28 @@ fn extract_decision_id(output: &str) -> Option<String> {
     None
 }
 
-/// Tests that on_stop='escalate' creates a decision when the agent tries to
-/// stop without signaling, and resolving with Done (option 2) completes the job.
+/// Tests that on_idle='escalate' creates a decision when the agent tries to
+/// stop, and resolving with Done (option 2) completes the job.
 ///
 /// Lifecycle: agent spawns → Bash tool simulates stop hook via
-/// `oj agent hook stop` → hook reads on_stop=escalate from config.json →
-/// emits AgentStop event → daemon creates decision → job goes to waiting →
+/// `oj agent hook stop` → coop gate mode blocks the turn →
+/// daemon receives stop:blocked → creates decision → job goes to waiting →
 /// resolve with option 2 (Done) → StepCompleted → job completes.
 #[test]
-fn on_stop_escalate_creates_decision_and_done_completes_job() {
+fn on_idle_escalate_creates_decision_and_done_completes_job() {
     let temp = Project::empty();
     temp.git_init();
 
     temp.file(".oj/scenarios/stop.toml", scenario_trigger_stop_hook());
     let scenario_path = temp.path().join(".oj/scenarios/stop.toml");
-    temp.file(
-        ".oj/runbooks/work.toml",
-        &runbook_on_stop_escalate(&scenario_path),
-    );
+    temp.file(".oj/runbooks/work.toml", &runbook_on_idle_escalate(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "work", "stop-test"]).passes();
 
     // Wait for job to escalate to waiting via stop hook
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("waiting")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("waiting")
     });
     assert!(
         waiting,
@@ -848,17 +696,11 @@ fn on_stop_escalate_creates_decision_and_done_completes_job() {
     let decision_id = decision_id.unwrap();
 
     // Resolve with option 2 (Done/Complete)
-    temp.oj()
-        .args(&["decision", "resolve", &decision_id, "2"])
-        .passes();
+    temp.oj().args(&["decision", "resolve", &decision_id, "2"]).passes();
 
     // Job should complete after decision resolution
     let completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         completed,

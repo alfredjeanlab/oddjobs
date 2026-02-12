@@ -14,10 +14,7 @@ use thiserror::Error;
 /// The runbook dir is typically `.oj/runbooks/`, so the parent `.oj/` may
 /// contain a `libraries/` subdirectory for project-level library overrides.
 fn project_library_dirs(runbook_dir: &Path) -> Vec<PathBuf> {
-    runbook_dir
-        .parent()
-        .map(|p| vec![p.join("libraries")])
-        .unwrap_or_default()
+    runbook_dir.parent().map(|p| vec![p.join("libraries")]).unwrap_or_default()
 }
 
 /// Parse a runbook file, resolving imports for HCL files.
@@ -47,8 +44,7 @@ pub struct FileComment {
 
 /// Strip the `# ` or `#` prefix from a comment line.
 fn strip_comment_prefix(line: &str) -> &str {
-    line.strip_prefix("# ")
-        .unwrap_or(line.strip_prefix('#').unwrap_or(""))
+    line.strip_prefix("# ").unwrap_or(line.strip_prefix('#').unwrap_or(""))
 }
 
 /// Split collected comment lines into short/long on the first blank line.
@@ -58,10 +54,7 @@ fn split_comment_lines(lines: &[String]) -> FileComment {
         Some(pos) => (&lines[..pos], &lines[pos + 1..]),
         None => (lines, &[]),
     };
-    FileComment {
-        short: short_lines.join("\n"),
-        long: long_lines.join("\n"),
-    }
+    FileComment { short: short_lines.join("\n"), long: long_lines.join("\n") }
 }
 
 /// Extract the leading comment block from a runbook file's raw content.
@@ -91,6 +84,22 @@ pub fn extract_file_comment(content: &str) -> Option<FileComment> {
     Some(split_comment_lines(&lines))
 }
 
+/// Try to extract a command name from a single line matching `command "name" ...`.
+fn parse_command_name(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix("command ")?;
+    let after_quote = rest.trim().strip_prefix('"')?;
+    let end = after_quote.find('"')?;
+    Some(&after_quote[..end])
+}
+
+/// Extract command names from raw HCL text by scanning for `command "name"` patterns.
+///
+/// This works on unparseable files (e.g., those containing `%{ if }` template
+/// directives) by operating on raw text rather than the HCL AST.
+fn extract_command_names(content: &str) -> Vec<String> {
+    content.lines().filter_map(parse_command_name).map(String::from).collect()
+}
+
 /// Extract comment blocks preceding each `command "name"` block in HCL content.
 ///
 /// Scans the raw text (not the HCL AST) for lines matching `command "name" {`
@@ -102,19 +111,8 @@ pub fn extract_block_comments(content: &str) -> HashMap<String, FileComment> {
     let mut result = HashMap::new();
 
     for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-
-        // Match: command "name" { (with optional trailing content)
-        let Some(rest) = trimmed.strip_prefix("command ") else {
+        let Some(name) = parse_command_name(line) else {
             continue;
-        };
-        let rest = rest.trim();
-        let name = match rest.strip_prefix('"') {
-            Some(after_quote) => match after_quote.find('"') {
-                Some(end) => &after_quote[..end],
-                None => continue,
-            },
-            None => continue,
         };
 
         // Walk backwards from line i-1 collecting # comment lines.
@@ -176,23 +174,16 @@ fn extract_import_command_comments(
         for (_filename, file_content) in &library_files {
             let block_comments = extract_block_comments(file_content);
             let file_comment = extract_file_comment(file_content);
-            let file_rb = match crate::parser::parse_runbook_no_xref(file_content, Format::Hcl) {
-                Ok(rb) => rb,
-                Err(_) => continue,
-            };
-            for cmd_name in file_rb.commands.keys() {
+            for cmd_name in extract_command_names(file_content) {
                 let aliased_name = match alias {
                     Some(a) => format!("{}:{}", a, cmd_name),
                     None => cmd_name.clone(),
                 };
-                let comment = block_comments.get(cmd_name).or(file_comment.as_ref());
+                let comment = block_comments.get(&cmd_name).or(file_comment.as_ref());
                 if let Some(c) = comment {
                     result.insert(
                         aliased_name,
-                        FileComment {
-                            short: c.short.clone(),
-                            long: c.long.clone(),
-                        },
+                        FileComment { short: c.short.clone(), long: c.long.clone() },
                     );
                 }
             }
@@ -248,18 +239,9 @@ pub enum FindError {
     #[error("'{0}' defined in multiple runbooks; use --runbook <file>")]
     Duplicate(String),
     #[error("{entity_type} '{name}' defined in both {} and {}", file_a.display(), file_b.display())]
-    DuplicateAcrossFiles {
-        entity_type: String,
-        name: String,
-        file_a: PathBuf,
-        file_b: PathBuf,
-    },
+    DuplicateAcrossFiles { entity_type: String, name: String, file_a: PathBuf, file_b: PathBuf },
     #[error("{name} not found; {count} runbook(s) skipped due to errors:\n{details}")]
-    NotFoundSkipped {
-        name: String,
-        count: usize,
-        details: String,
-    },
+    NotFoundSkipped { name: String, count: usize, details: String },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -380,12 +362,8 @@ pub fn collect_all_commands(
                         }
                     });
                     let description = comment.and_then(|c| {
-                        let desc_line = c
-                            .short
-                            .lines()
-                            .nth(1)
-                            .or_else(|| c.short.lines().next())
-                            .unwrap_or("");
+                        let desc_line =
+                            c.short.lines().nth(1).or_else(|| c.short.lines().next()).unwrap_or("");
                         if desc_line.is_empty() {
                             None
                         } else {
@@ -396,10 +374,7 @@ pub fn collect_all_commands(
                 })
                 .collect()
         })?;
-    Ok(items
-        .into_iter()
-        .map(|(name, (cmd, desc))| (name, cmd, desc))
-        .collect())
+    Ok(items.into_iter().map(|(name, (cmd, desc))| (name, cmd, desc)).collect())
 }
 
 /// Collect all definitions of a given type from runbooks using a field accessor.
@@ -408,10 +383,7 @@ fn collect_all_by_field<T: Clone>(
     field: impl Fn(&Runbook) -> &HashMap<String, T>,
 ) -> Result<Vec<(String, T)>, FindError> {
     collect_all(runbook_dir, |runbook, _| {
-        field(runbook)
-            .iter()
-            .map(|(name, val)| (name.clone(), val.clone()))
-            .collect()
+        field(runbook).iter().map(|(name, val)| (name.clone(), val.clone())).collect()
     })
 }
 
@@ -477,11 +449,8 @@ pub fn collect_runbook_summaries(runbook_dir: &Path) -> Result<Vec<RunbookSummar
             }
         };
 
-        let file_name = path
-            .strip_prefix(runbook_dir)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
+        let file_name =
+            path.strip_prefix(runbook_dir).unwrap_or(&path).to_string_lossy().to_string();
 
         let description = extract_file_comment(&content).map(|c| c.short);
 
@@ -549,17 +518,11 @@ pub fn validate_runbook_dir(runbook_dir: &Path) -> Result<(), Vec<FindError>> {
         };
 
         for entity_type_names in [
-            (
-                "command",
-                runbook.commands.keys().cloned().collect::<Vec<_>>(),
-            ),
+            ("command", runbook.commands.keys().cloned().collect::<Vec<_>>()),
             ("job", runbook.jobs.keys().cloned().collect::<Vec<_>>()),
             ("agent", runbook.agents.keys().cloned().collect::<Vec<_>>()),
             ("queue", runbook.queues.keys().cloned().collect::<Vec<_>>()),
-            (
-                "worker",
-                runbook.workers.keys().cloned().collect::<Vec<_>>(),
-            ),
+            ("worker", runbook.workers.keys().cloned().collect::<Vec<_>>()),
             ("cron", runbook.crons.keys().cloned().collect::<Vec<_>>()),
         ] {
             let (entity_type, names) = entity_type_names;

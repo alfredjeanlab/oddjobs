@@ -6,8 +6,6 @@
 mod agents;
 mod jobs;
 mod prune_helpers;
-mod resources;
-mod sessions;
 mod workspaces;
 
 pub(super) use self::agents::{
@@ -17,8 +15,6 @@ pub(super) use self::jobs::{
     handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all,
     handle_job_suspend, handle_status,
 };
-pub(super) use self::resources::{handle_cron_prune, handle_worker_prune};
-pub(super) use self::sessions::{handle_session_kill, handle_session_prune, handle_session_send};
 pub(super) use self::workspaces::{handle_workspace_drop, handle_workspace_prune};
 
 use crate::event_bus::EventBus;
@@ -30,18 +26,23 @@ use super::ConnectionError;
 ///
 /// Maps send errors to `ConnectionError::WalError`.
 pub(super) fn emit(event_bus: &EventBus, event: Event) -> Result<(), ConnectionError> {
-    event_bus
-        .send(event)
-        .map(|_| ())
-        .map_err(|_| ConnectionError::WalError)
+    event_bus.send(event).map(|_| ()).map_err(|_| ConnectionError::WalError)
+}
+
+/// Whether a step status is resumable without `--kill`.
+pub(super) fn is_resumable_status(status: &oj_core::StepStatus) -> bool {
+    status.is_waiting()
+        || matches!(
+            status,
+            oj_core::StepStatus::Failed
+                | oj_core::StepStatus::Pending
+                | oj_core::StepStatus::Suspended
+        )
 }
 
 /// Shared flags for prune operations.
 pub(super) struct PruneFlags<'a> {
     pub all: bool,
     pub dry_run: bool,
-    pub namespace: Option<&'a str>,
+    pub project: Option<&'a str>,
 }
-
-#[cfg(test)]
-mod test_helpers;

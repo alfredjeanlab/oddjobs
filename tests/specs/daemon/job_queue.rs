@@ -15,8 +15,8 @@ type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 1
 
 [job.process]
@@ -34,8 +34,8 @@ type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 3
 
 [job.process]
@@ -60,10 +60,6 @@ fn extract_job_id(temp: &Project, name_filter: &str) -> String {
         .to_string()
 }
 
-// =============================================================================
-// Test 1: Cancel transitions queue item from active
-// =============================================================================
-
 #[test]
 fn cancel_job_transitions_queue_item_from_active() {
     let temp = Project::empty();
@@ -74,9 +70,7 @@ fn cancel_job_transitions_queue_item_from_active() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a blocking command so the job stays on "work" step
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "sleep 30"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "sleep 30"}"#]).passes();
 
     // Wait for the job to reach "running" on the "work" step
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -86,11 +80,7 @@ fn cancel_job_transitions_queue_item_from_active() {
     assert!(running, "job should be running the work step");
 
     // Verify queue item is active
-    let active = temp
-        .oj()
-        .args(&["queue", "show", "tasks"])
-        .passes()
-        .stdout();
+    let active = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
     assert!(active.contains("active"), "queue item should be active");
 
     // Get job ID and cancel it
@@ -99,29 +89,18 @@ fn cancel_job_transitions_queue_item_from_active() {
 
     // Wait for queue item to reach a terminal status (dead or failed)
     let transitioned = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("dead") || out.contains("failed")
     });
 
     if !transitioned {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        transitioned,
-        "cancelled job should mark queue item as dead or failed"
-    );
+    assert!(transitioned, "cancelled job should mark queue item as dead or failed");
 }
 
-// =============================================================================
-// Test 2: Failed job marks queue item dead
-// =============================================================================
-
 #[test]
-fn failed_job_marks_queue_item_dead() {
+fn failed_job_marks_queue_dead() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/queue.toml", QUEUE_JOB_RUNBOOK);
@@ -130,17 +109,11 @@ fn failed_job_marks_queue_item_dead() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a command that will fail (exit 1)
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "exit 1"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "exit 1"}"#]).passes();
 
     // Wait for queue item to reach dead status (no retry config → immediate dead)
     let dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("dead")
     });
 
@@ -149,10 +122,6 @@ fn failed_job_marks_queue_item_dead() {
     }
     assert!(dead, "failed job should mark queue item as dead");
 }
-
-// =============================================================================
-// Test 3: Completed job marks queue item completed + frees concurrency
-// =============================================================================
 
 #[test]
 fn completed_job_marks_queue_item_completed() {
@@ -164,40 +133,25 @@ fn completed_job_marks_queue_item_completed() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a command that succeeds
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo hello"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo hello"}"#]).passes();
 
     // Wait for queue item to reach completed status
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("completed")
     });
 
     if !completed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        completed,
-        "successful job should mark queue item as completed"
-    );
+    assert!(completed, "successful job should mark queue item as completed");
 
     // Verify concurrency slot is freed by pushing another item
     // (worker concurrency = 1, so a second item can only run if the slot was freed)
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#]).passes();
 
     let second_completed = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         // Both items should be completed
         out.matches("completed").count() >= 2
     });
@@ -205,15 +159,8 @@ fn completed_job_marks_queue_item_completed() {
     if !second_completed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        second_completed,
-        "second item should complete, proving concurrency slot was freed"
-    );
+    assert!(second_completed, "second item should complete, proving concurrency slot was freed");
 }
-
-// =============================================================================
-// Test 4: Multi-item isolation — one failure doesn't affect others
-// =============================================================================
 
 #[test]
 fn one_job_failure_does_not_affect_others() {
@@ -226,15 +173,9 @@ fn one_job_failure_does_not_affect_others() {
 
     // Push 3 items: one fast-fail, two that succeed.
     // Each item needs unique data to avoid deduplication.
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "exit 1"}"#])
-        .passes();
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo ok-1"}"#])
-        .passes();
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo ok-2"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "exit 1"}"#]).passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo ok-1"}"#]).passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo ok-2"}"#]).passes();
 
     // Wait for all 3 items to reach expected terminal status:
     // 2 completed (the successful ones) + 1 dead/failed (the `exit 1`).
@@ -242,11 +183,7 @@ fn one_job_failure_does_not_affect_others() {
     // from a separate query seeing a different snapshot.
     let mut items_output = String::new();
     let all_terminal = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        items_output = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        items_output = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         let completed = items_output.matches("completed").count();
         let dead_or_failed =
             items_output.matches("dead").count() + items_output.matches("failed").count();
@@ -256,20 +193,8 @@ fn one_job_failure_does_not_affect_others() {
     if !all_terminal {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        all_terminal,
-        "should have 2 completed and 1 dead/failed, got: {}",
-        items_output
-    );
+    assert!(all_terminal, "should have 2 completed and 1 dead/failed, got: {}", items_output);
 }
-
-// =============================================================================
-// Test 5: Circuit breaker — escalation after max action attempts
-// =============================================================================
-
-// =============================================================================
-// Test 6: Queue item released after daemon crash with terminal job
-// =============================================================================
 
 /// When the daemon crashes after a job reaches terminal state but before
 /// the QueueCompleted event is persisted to the WAL, restarting the daemon
@@ -287,9 +212,7 @@ fn queue_item_released_after_crash_with_terminal_job() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a fast command so the job completes quickly
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo hello"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo hello"}"#]).passes();
 
     // Wait for the job to reach a terminal state
     let job_done = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -304,12 +227,8 @@ fn queue_item_released_after_crash_with_terminal_job() {
 
     // Wait for daemon to actually die
     let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .expect("command should run");
+        let output =
+            temp.oj().args(&["daemon", "status"]).command().output().expect("command should run");
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -320,11 +239,7 @@ fn queue_item_released_after_crash_with_terminal_job() {
 
     // Queue item should be completed (either from original WAL or reconciliation)
     let item_completed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("completed")
     });
 
@@ -332,10 +247,7 @@ fn queue_item_released_after_crash_with_terminal_job() {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
         eprintln!(
             "=== JOBS ===\n{}\n=== END JOBS ===",
@@ -350,16 +262,14 @@ fn queue_item_released_after_crash_with_terminal_job() {
 
 /// Scenario that makes the agent exit immediately (print mode) with a response.
 const FAILING_AGENT_SCENARIO: &str = r#"
-name = "failing-agent"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "I cannot complete this task."
 
-[responses.response]
-text = "I cannot complete this task."
-
-[tool_execution]
+[tools]
 mode = "live"
 "#;
 
@@ -375,7 +285,7 @@ vars = ["cmd"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ job = "process" }}
+run = {{ job = "process" }}
 concurrency = 1
 
 [job.process]
@@ -401,18 +311,13 @@ fn circuit_breaker_escalates_after_max_attempts() {
 
     temp.file(".oj/scenarios/fail.toml", FAILING_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/fail.toml");
-    temp.file(
-        ".oj/runbooks/queue.toml",
-        &circuit_breaker_runbook(&scenario_path),
-    );
+    temp.file(".oj/runbooks/queue.toml", &circuit_breaker_runbook(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push an item — the agent will exit, recover, exit, recover, then escalate
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "noop"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "noop"}"#]).passes();
 
     // Wait for job to reach "waiting" (escalated) status
     let escalated = wait_for(SPEC_WAIT_MAX_MS * 5, || {
@@ -423,17 +328,10 @@ fn circuit_breaker_escalates_after_max_attempts() {
     if !escalated {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        escalated,
-        "job should escalate to waiting after exhausting recover attempts"
-    );
+    assert!(escalated, "job should escalate to waiting after exhausting recover attempts");
 
     // Queue item should still be active (job hasn't terminated, it's waiting)
-    let items = temp
-        .oj()
-        .args(&["queue", "show", "tasks"])
-        .passes()
-        .stdout();
+    let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
     assert!(
         items.contains("active"),
         "queue item should remain active while job is waiting for intervention, got: {}",

@@ -9,105 +9,68 @@
 use crate::lexer::Lexer;
 use crate::token::TokenKind;
 
-// =============================================================================
-// Process Substitution Tests
-// =============================================================================
 //
 // Process substitution `<(cmd)` and `>(cmd)` is NOT directly supported.
 // The lexer parses these as redirection followed by subshell tokens.
 // This documents the current behavior.
 
-#[test]
-fn test_process_substitution_input_style() {
-    // <(cmd) is parsed as: RedirectIn, LParen, Word, RParen
-    let tokens = Lexer::tokenize("<(cmd)").unwrap();
-    assert_eq!(tokens.len(), 4);
-    assert!(matches!(tokens[0].kind, TokenKind::RedirectIn { fd: None }));
-    assert_eq!(tokens[1].kind, TokenKind::LParen);
-    assert_eq!(tokens[2].kind, TokenKind::Word("cmd".into()));
-    assert_eq!(tokens[3].kind, TokenKind::RParen);
+lex_tests! {
+    process_substitution_input_style: "<(cmd)" => [
+        TokenKind::RedirectIn { fd: None },
+        TokenKind::LParen,
+        TokenKind::Word("cmd".into()),
+        TokenKind::RParen,
+    ],
+    process_substitution_output_style: ">(cmd)" => [
+        TokenKind::RedirectOut { fd: None },
+        TokenKind::LParen,
+        TokenKind::Word("cmd".into()),
+        TokenKind::RParen,
+    ],
+    process_substitution_in_command: "diff <(cmd1) <(cmd2)" => [
+        TokenKind::Word("diff".into()),
+        TokenKind::RedirectIn { fd: None },
+        TokenKind::LParen,
+        TokenKind::Word("cmd1".into()),
+        TokenKind::RParen,
+        TokenKind::RedirectIn { fd: None },
+        TokenKind::LParen,
+        TokenKind::Word("cmd2".into()),
+        TokenKind::RParen,
+    ],
 }
 
-#[test]
-fn test_process_substitution_output_style() {
-    // >(cmd) is parsed as: RedirectOut, LParen, Word, RParen
-    let tokens = Lexer::tokenize(">(cmd)").unwrap();
-    assert_eq!(tokens.len(), 4);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::RedirectOut { fd: None }
-    ));
-    assert_eq!(tokens[1].kind, TokenKind::LParen);
-    assert_eq!(tokens[2].kind, TokenKind::Word("cmd".into()));
-    assert_eq!(tokens[3].kind, TokenKind::RParen);
-}
-
-#[test]
-fn test_process_substitution_in_command() {
-    // diff <(cmd1) <(cmd2) - parsed as command with redirections + subshells
-    let tokens = Lexer::tokenize("diff <(cmd1) <(cmd2)").unwrap();
-    assert_eq!(tokens.len(), 9);
-    assert_eq!(tokens[0].kind, TokenKind::Word("diff".into()));
-    assert!(matches!(tokens[1].kind, TokenKind::RedirectIn { .. }));
-    assert_eq!(tokens[2].kind, TokenKind::LParen);
-    assert_eq!(tokens[3].kind, TokenKind::Word("cmd1".into()));
-    assert_eq!(tokens[4].kind, TokenKind::RParen);
-}
-
-// =============================================================================
-// Arithmetic Expansion Tests
-// =============================================================================
 //
 // $((expr)) is treated as command substitution containing "(expr)".
 // The lexer does NOT have special handling for arithmetic expansion.
 // This is a design decision: inner parsing can distinguish $((...)) later.
 
-#[test]
-fn test_arithmetic_basic() {
-    // $((1+2)) -> CommandSubstitution with content "(1+2)"
-    let tokens = Lexer::tokenize("$((1+2))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+lex_tests! {
+    arithmetic_basic: "$((1+2))" => [
         TokenKind::CommandSubstitution {
             content: "(1+2)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_arithmetic_with_variables() {
-    // $(($a + $b)) -> CommandSubstitution with content "($a + $b)"
-    let tokens = Lexer::tokenize("$(($a + $b))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    let TokenKind::CommandSubstitution { content, .. } = &tokens[0].kind else {
-        panic!("expected command substitution");
-    };
-    assert_eq!(content, "($a + $b)");
-}
-
-#[test]
-fn test_arithmetic_complex() {
-    // $((x * (y + z))) -> nested parens preserved
-    let tokens = Lexer::tokenize("$((x * (y + z)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    let TokenKind::CommandSubstitution { content, .. } = &tokens[0].kind else {
-        panic!("expected command substitution");
-    };
-    assert_eq!(content, "(x * (y + z))");
-}
-
-#[test]
-fn test_arithmetic_in_expression() {
-    // echo $((2+3)) -> Word, CommandSubstitution
-    let tokens = Lexer::tokenize("echo $((2+3))").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].kind, TokenKind::Word("echo".into()));
-    let TokenKind::CommandSubstitution { content, .. } = &tokens[1].kind else {
-        panic!("expected command substitution");
-    };
-    assert_eq!(content, "(2+3)");
+        },
+    ],
+    arithmetic_with_variables: "$(($a + $b))" => [
+        TokenKind::CommandSubstitution {
+            content: "($a + $b)".into(),
+            backtick: false,
+        },
+    ],
+    arithmetic_complex: "$((x * (y + z)))" => [
+        TokenKind::CommandSubstitution {
+            content: "(x * (y + z))".into(),
+            backtick: false,
+        },
+    ],
+    arithmetic_in_expression: "echo $((2+3))" => [
+        TokenKind::Word("echo".into()),
+        TokenKind::CommandSubstitution {
+            content: "(2+3)".into(),
+            backtick: false,
+        },
+    ],
 }
 
 #[test]
@@ -118,18 +81,10 @@ fn test_arithmetic_vs_command_substitution() {
     let cmd_tokens = Lexer::tokenize("$(echo)").unwrap();
     let math_tokens = Lexer::tokenize("$((1+1))").unwrap();
 
-    let TokenKind::CommandSubstitution {
-        content: cmd_content,
-        ..
-    } = &cmd_tokens[0].kind
-    else {
+    let TokenKind::CommandSubstitution { content: cmd_content, .. } = &cmd_tokens[0].kind else {
         panic!("expected command substitution");
     };
-    let TokenKind::CommandSubstitution {
-        content: math_content,
-        ..
-    } = &math_tokens[0].kind
-    else {
+    let TokenKind::CommandSubstitution { content: math_content, .. } = &math_tokens[0].kind else {
         panic!("expected command substitution");
     };
 

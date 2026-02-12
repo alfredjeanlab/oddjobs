@@ -10,19 +10,16 @@ pub use parking_lot::Mutex;
 pub use tempfile::tempdir;
 
 pub use oj_core::{
-    AgentRun, AgentRunId, AgentRunStatus, Event, Job, JobConfig, JobId, SessionId, StepStatus,
-    SystemClock,
+    Crew, CrewId, CrewStatus, Event, Job, JobConfig, JobId, StepStatus, SystemClock,
 };
-pub use oj_storage::{load_snapshot, MaterializedState, Session, Wal, WorkerRecord};
+pub use oj_storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
 
 pub use super::{Config, DaemonRuntime, DaemonState, LifecycleError, ReconcileCtx};
 pub(crate) use crate::event_bus::{EventBus, EventReader};
 
 use std::path::Path;
 
-use oj_adapters::{
-    ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
-};
+use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
 use oj_core::{StepOutcome, StepRecord};
 use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
@@ -41,7 +38,8 @@ pub fn test_runbook() -> Runbook {
             defaults: HashMap::new(),
             locals: HashMap::new(),
             cwd: None,
-            workspace: None,
+            source: None,
+            container: None,
             on_done: None,
             on_fail: None,
             on_cancel: None,
@@ -100,41 +98,32 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
 
     // Pre-populate state with job + stored runbook
     let mut state = MaterializedState::default();
-    let config = JobConfig::builder("pipe-1", "test", "only-step")
+    let config = JobConfig::builder("job-1", "test", "only-step")
         .name("test-job")
         .runbook_hash(hash.clone())
         .cwd(dir_path.clone())
         .build();
     let job = oj_core::Job::new(config, &SystemClock);
-    state.jobs.insert("pipe-1".to_string(), job);
-    state.apply_event(&Event::RunbookLoaded {
-        hash,
-        version: 1,
-        runbook: runbook_json,
-    });
+    state.jobs.insert("job-1".to_string(), job);
+    state.apply_event(&Event::RunbookLoaded { hash, version: 1, runbook: runbook_json });
 
     // Mark job step as running (as it would be during normal execution)
-    state.jobs.get_mut("pipe-1").unwrap().step_status = StepStatus::Running;
+    state.jobs.get_mut("job-1").unwrap().step_status = StepStatus::Running;
 
     let state = Arc::new(Mutex::new(state));
 
     // Create real adapters (won't be called for ShellExited -> completion path)
-    let session_adapter = TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
-    let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
+    let agent_adapter = RuntimeRouter::new(dir_path.to_path_buf());
 
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
     let runtime = Arc::new(Runtime::new(
         RuntimeDeps {
-            sessions: session_adapter,
             agents: agent_adapter,
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
         },
         SystemClock,
-        RuntimeConfig {
-            state_dir: dir_path.clone(),
-            log_dir: dir_path.join("logs"),
-        },
+        RuntimeConfig { state_dir: dir_path.clone(), log_dir: dir_path.join("logs") },
         internal_tx,
     ));
 
@@ -181,65 +170,45 @@ pub fn test_config(dir: &Path) -> Config {
 }
 
 /// Helper to create a runtime for reconciliation tests.
-pub fn setup_reconcile_runtime(
-    dir_path: &Path,
-) -> (Arc<DaemonRuntime>, TracedSession<TmuxAdapter>) {
-    let session_adapter = TracedSession::new(TmuxAdapter::with_socket_dir(dir_path.join("tmux")));
-    let agent_adapter = TracedAgent::new(ClaudeAgentAdapter::new(session_adapter.clone()));
+pub fn setup_reconcile_runtime(dir_path: &Path) -> Arc<DaemonRuntime> {
+    let agent_adapter = RuntimeRouter::new(dir_path.to_path_buf());
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
 
     let state = Arc::new(Mutex::new(MaterializedState::default()));
-    let runtime = Arc::new(Runtime::new(
+
+    Arc::new(Runtime::new(
         RuntimeDeps {
-            sessions: session_adapter.clone(),
             agents: agent_adapter,
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
         },
         SystemClock,
-        RuntimeConfig {
-            state_dir: dir_path.to_path_buf(),
-            log_dir: dir_path.join("logs"),
-        },
+        RuntimeConfig { state_dir: dir_path.to_path_buf(), log_dir: dir_path.join("logs") },
         internal_tx,
-    ));
-
-    (runtime, session_adapter)
+    ))
 }
 
 /// Run reconciliation on a state snapshot and collect all emitted events.
 pub async fn run_reconcile(
     runtime: &Arc<DaemonRuntime>,
-    session_adapter: &TracedSession<TmuxAdapter>,
     state: MaterializedState,
+    state_dir: PathBuf,
 ) -> Vec<Event> {
     let job_count = state.jobs.values().filter(|j| !j.is_terminal()).count();
-    let worker_count = state
-        .workers
-        .values()
-        .filter(|w| w.status == "running")
-        .count();
-    let cron_count = state
-        .crons
-        .values()
-        .filter(|c| c.status == "running")
-        .count();
-    let agent_run_count = state
-        .agent_runs
-        .values()
-        .filter(|ar| !ar.is_terminal())
-        .count();
+    let worker_count = state.workers.values().filter(|w| w.status == "running").count();
+    let cron_count = state.crons.values().filter(|c| c.status == "running").count();
+    let crew_count = state.crew.values().filter(|run| !run.status.is_terminal()).count();
 
     let (event_tx, mut event_rx) = mpsc::channel::<Event>(100);
     let ctx = ReconcileCtx {
         runtime: Arc::clone(runtime),
         state_snapshot: state,
-        session_adapter: session_adapter.clone(),
         event_tx,
+        state_dir,
         job_count,
         worker_count,
         cron_count,
-        agent_run_count,
+        crew_count,
     };
     crate::lifecycle::reconcile_state(&ctx).await;
     drop(ctx);
@@ -251,16 +220,15 @@ pub async fn run_reconcile(
     events
 }
 
-/// Helper to create a job with an agent_id in step_history and a session_id.
-pub fn make_job_with_agent(id: &str, step: &str, agent_uuid: &str, session_id: &str) -> Job {
+/// Helper to create a job with an agent_id in step_history.
+pub fn make_job_with_agent(id: &str, step: &str, agent_uuid: &str) -> Job {
     Job::builder()
         .id(id)
         .kind("test")
-        .namespace("proj")
+        .project("proj")
         .step(step)
         .runbook_hash("abc123")
         .cwd("/tmp/project")
-        .session_id(session_id)
         .step_history(vec![StepRecord {
             name: step.to_string(),
             started_at_ms: 1000,

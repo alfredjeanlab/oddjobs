@@ -6,17 +6,18 @@ use crate::prelude::*;
 
 fn scenario_simple() -> String {
     r#"
-name = "simple"
+[claude]
+trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Done."
 
-[responses.response]
-text = "Done."
-
-[tool_execution]
+[tools]
 mode = "live"
-tools.Bash.auto_approve = true
+
+[tools.Bash]
+approve = true
 "#
     .to_string()
 }
@@ -88,11 +89,7 @@ fn runbook_with_agent_config_loads() {
 
     // claudeless -p exits immediately. Detection requires liveness poll + deferred timer.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete");
 }
@@ -150,12 +147,11 @@ action = "escalate"
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+    let done = wait_for(SPEC_AGENT_WAIT_MS, || {
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
+    if !done {
+        eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
+    }
     assert!(done, "job should complete via on_idle = done");
 }

@@ -7,7 +7,7 @@ Runbook layer:    command → job → step → agent
                                          │
 Execution layer:               workspace + session
                                          │
-Adapter layer:              AgentAdapter + SessionAdapter
+Adapter layer:              AgentAdapter
 ```
 
 ## Workspace
@@ -18,14 +18,14 @@ A workspace provides:
 - **Identity**: Unique name for this work context
 - **Isolation**: Separate from other concurrent work
 - **Lifecycle**: Created before work, cleaned up on success or cancellation, kept on failure for debugging
-- **Context**: Values tasks can reference (`${workspace.root}`, `${workspace.id}`, `${workspace.branch}`)
+- **Context**: Values tasks can reference (`${source.root}`, `${source.id}`, `${source.branch}`)
 
 ### Workspace Types
 
 | Type | Syntax | Behavior |
 |------|--------|----------|
-| `folder` | `workspace = "folder"` | Plain directory. Engine creates the directory; the init step populates it. |
-| `worktree` | `workspace { git = "worktree" }` | Engine-managed git worktree. The engine handles `git worktree add`, `git worktree remove`, and branch cleanup automatically. |
+| `folder` | `source = "folder"` | Plain directory. Engine creates the directory; the init step populates it. |
+| `worktree` | `source { git = true }` | Engine-managed git worktree. The engine handles `git worktree add`, `git worktree remove`, and branch cleanup automatically. |
 
 **Storage location**: `~/.local/state/oj/workspaces/ws-<job-name>-<nonce>/`
 
@@ -33,28 +33,28 @@ Using XDG state directory keeps the project directory clean and survives `git cl
 
 ### Workspace Setup
 
-For `workspace { git = "worktree" }`, the engine creates a git worktree automatically. The branch name comes from `workspace.branch` if set, otherwise `ws-<nonce>`. The start point comes from `workspace.ref` if set, otherwise `HEAD`. Both fields support `${var.*}` and `${workspace.*}` interpolation; `ref` also supports `$(...)` shell expressions. The `${workspace.branch}` template variable is available in step templates.
+For `source { git = true }`, the engine creates a git worktree automatically. The branch name comes from `source.branch` if set, otherwise `ws-<nonce>`. The start point comes from `source.ref` if set, otherwise `HEAD`. Both fields support `${var.*}` and `${source.*}` interpolation; `ref` also supports `$(...)` shell expressions. The `${source.branch}` template variable is available in step templates.
 
 ```hcl
-workspace {
-  git    = "worktree"
-  branch = "feature/${var.name}-${workspace.nonce}"
+source {
+  git    = true
+  branch = "feature/${var.name}-${source.nonce}"
   ref    = "origin/main"
 }
 ```
 
-For `workspace = "folder"`, the engine creates an empty directory. The job's init step populates it -- useful when fully custom worktree management is needed:
+For `source = "folder"`, the engine creates an empty directory. The job's init step populates it -- useful when fully custom worktree management is needed:
 
 ```hcl
 step "init" {
   run = <<-SHELL
-    git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" origin/${var.base}
+    git -C "${local.repo}" worktree add -b "${local.branch}" "${source.root}" origin/${var.base}
   SHELL
   on_done = { step = "work" }
 }
 ```
 
-**Settings sync**: Agent-specific settings (including the Stop hook for `oj agent hook stop`) are stored in `~/.local/state/oj/agents/<agent-id>/claude-settings.json` and passed to the agent via `--settings`. Project settings from `<workspace>/.claude/settings.json` are loaded (if they exist) and merged into these agent-specific settings.
+**Agent config**: Agent configuration (including settings, stop gate config, and SessionStart hooks for prime scripts) is stored in `~/.local/state/oj/agents/<agent-id>/agent-config.json` and passed to the agent via `--agent-config`. Project settings from `<workspace>/.claude/settings.json` are loaded (if they exist) and merged into the agent-specific settings.
 
 ## Session
 
@@ -64,8 +64,7 @@ Sessions are managed through two adapter layers:
 
 | Layer | Adapter | Responsibility |
 |-------|---------|----------------|
-| High-level | `AgentAdapter` | Agent lifecycle, prompts, state detection |
-| Low-level | `SessionAdapter` | tmux operations (spawn, send, kill) |
+| High-level | `AgentAdapter` | Agent lifecycle, prompts, state detection, process management |
 
 A session provides:
 - **Isolation**: Separate process/environment
@@ -76,13 +75,13 @@ A session provides:
 
 | Property | Description |
 |----------|-------------|
-| `id` | Session identifier (tmux session name, prefixed with `oj-`) |
+| `id` | Session identifier (agent session name, prefixed with `oj-`) |
 | `cwd` | Working directory (typically the workspace path, or agent `cwd` override) |
 | `env` | Environment variables passed to the agent |
 
 ### Agent State Detection
 
-The `AgentAdapter` monitors agent state via Claude's JSONL session log:
+The `AgentAdapter` monitors agent state via coop's WebSocket event bridge:
 
 ```hcl
 agent "fix" {
@@ -92,24 +91,20 @@ agent "fix" {
 }
 ```
 
-**State detection from session log:**
+**State detection via coop WebSocket:**
 
-| State | Log Indicator | Trigger |
-|-------|--------------|---------|
-| Working | `type: "assistant"` with `tool_use` or `thinking` content blocks, or `type: "user"` (processing tool results) | Keep monitoring |
-| Waiting for input | `type: "assistant"` with no `tool_use` content blocks | `on_idle` (after 60s grace period) |
-| API error | Error field in log entry (unauthorized, quota, network, rate limit) | `on_error` |
+| Coop State | Engine Event | Trigger |
+|------------|-------------|---------|
+| `working` | `AgentWorking` | Agent is processing (tool use or thinking) |
+| `idle` | `AgentIdle` | Agent finished current turn, waiting for input |
+| `prompt` | `AgentPrompt` | Permission, plan approval, or question prompt |
+| `error` | `AgentFailed` | API error (unauthorized, quota, network, rate limit) |
+| `exited` / WS close | `AgentGone` | Agent process exited |
+| `stop:outcome` (blocked) | `AgentStopBlocked` | Agent tried to exit but stop gate blocked it |
 
-When idle is detected, the engine applies a 60-second grace period before firing `on_idle`. During this grace period, the engine checks for any session log activity and re-verifies the agent state, preventing false idle triggers from brief pauses between tool calls. See [Claude Code adapter](../arch/06-adapter-claude.md) for detailed idle detection mechanics.
+When idle is detected, the engine applies a 60-second grace period before firing `on_idle`. During this grace period, the engine re-verifies the agent state, preventing false idle triggers from brief pauses between tool calls. See [Agents](../arch/05-agents.md) for detailed idle detection mechanics.
 
-**Process exit detection:**
-
-| Check | Method | Trigger |
-|-------|--------|---------|
-| tmux alive | `tmux has-session` | `SessionGone` |
-| Agent alive | `ps -p <pane_pid>` + `pgrep -P <pane_pid> -f <process>` | `Exited { exit_code }` → `on_dead` |
-
-**Why log-based detection works**: Claude Code writes structured JSONL logs. When an assistant message has no `tool_use` content blocks, Claude has finished its current turn and is waiting for input -- the exact moment to nudge.
+**Process exit detection:** Coop monitors the agent process directly and emits exit events with the exit code via the WebSocket connection, triggering `Exited { exit_code }` and the `on_dead` action.
 
 Agents can run indefinitely. There's no timeout.
 
@@ -164,23 +159,23 @@ the risk of accidental misconfiguration.
 │  Execution                                                  │
 │  ┌─────────────┐         ┌─────────────┐                    │
 │  │  Workspace  │◄────────│   Session   │                    │
-│  │ (directory) │         │   (tmux)    │                    │
+│  │ (directory) │         │   (coop)    │                    │
 │  └─────────────┘         └─────────────┘                    │
 └─────────────────────────────────────────────────────────────┘
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Adapters                                                   │
-│  ┌─────────────┐         ┌──────────────┐                   │
-│  │ AgentAdapter│────────►│SessionAdapter│                   │
-│  │  (Claude)   │         │   (tmux)     │                   │
-│  └─────────────┘         └──────────────┘                   │
+│  ┌──────────────────┐                                       │
+│  │  AgentAdapter    │                                       │
+│  │  (LocalAdapter)   │                                       │
+│  └──────────────────┘                                       │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 - **Job** creates and owns a **Workspace**
 - **Agent** runs in a **Session** within that workspace
-- **AgentAdapter** manages the agent lifecycle using **SessionAdapter** for tmux operations
+- **AgentAdapter** manages the agent lifecycle and process operations
 - Session's `cwd` points to the workspace path (or an agent-specific `cwd` override)
 - Multiple agents in a job share the same workspace
 - **Worker** polls a **Queue** and dispatches items to jobs
@@ -190,8 +185,7 @@ the risk of accidental misconfiguration.
 | Concept | Purpose | Implementation |
 |---------|---------|----------------|
 | **Workspace** | Isolated work directory | Empty directory, populated by init step |
-| **Session** | Where agent runs | Tmux session |
-| **AgentAdapter** | Agent lifecycle management | ClaudeAgentAdapter |
-| **SessionAdapter** | Low-level session ops | TmuxAdapter |
+| **Session** | Where crew | Coop agent process |
+| **AgentAdapter** | Agent lifecycle management | LocalAdapter |
 
 These abstractions enable the same runbook to work across different environments. The runbook defines *what* to do; the execution layer handles *where* and *how*.

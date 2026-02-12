@@ -11,10 +11,7 @@ fn job_list_empty() {
     temp.file(".oj/runbooks/build.toml", MINIMAL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_eq("No jobs\n");
+    temp.oj().args(&["job", "list"]).passes().stdout_eq("No jobs\n");
 }
 
 #[test]
@@ -24,25 +21,15 @@ fn job_list_shows_running() {
     temp.file(".oj/runbooks/build.toml", MINIMAL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["run", "build", "test-feat", "do something"])
-        .passes();
+    temp.oj().args(&["run", "build", "test-feat", "do something"]).passes();
 
     // Wait for job to appear (event processing is async)
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("test-feat")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("test-feat")
     });
     assert!(found, "job should appear in list");
 
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_has("test-feat")
-        .stdout_has("build");
+    temp.oj().args(&["job", "list"]).passes().stdout_has("test-feat").stdout_has("build");
 }
 
 #[test]
@@ -65,17 +52,11 @@ fn job_show_by_prefix() {
     temp.file(".oj/runbooks/build.toml", MINIMAL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["run", "build", "prefix-test", "testing prefix"])
-        .passes();
+    temp.oj().args(&["run", "build", "prefix-test", "testing prefix"]).passes();
 
     // Wait for job to appear (event processing is async)
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("prefix-test")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("prefix-test")
     });
     assert!(found, "job should appear in list");
 
@@ -120,17 +101,11 @@ run = "echo '${var.task}'"
     );
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["run", "varstest", "myname", "do something"])
-        .passes();
+    temp.oj().args(&["run", "varstest", "myname", "do something"]).passes();
 
     // Wait for job to appear
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("varstest")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("varstest")
     });
     assert!(found, "job should appear in list");
 

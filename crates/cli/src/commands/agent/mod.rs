@@ -4,8 +4,6 @@
 //! Agent management commands
 
 pub(crate) mod display;
-mod hooks;
-mod utils;
 mod wait;
 
 use anyhow::Result;
@@ -74,12 +72,12 @@ pub enum AgentCommand {
         #[arg(long)]
         timeout: Option<String>,
     },
-    /// Peek at an agent's tmux session output
+    /// Peek at an agent's session output
     Peek {
         /// Agent ID (or prefix)
         id: String,
     },
-    /// Attach to an agent's tmux session
+    /// Attach to an agent's session
     Attach {
         /// Agent ID (or prefix)
         id: String,
@@ -107,17 +105,12 @@ pub enum AgentCommand {
     Resume {
         /// Agent ID (or prefix). Required unless --all is used.
         id: Option<String>,
-        /// Force kill the current tmux session before resuming
+        /// Force kill the current agent session before resuming
         #[arg(long)]
         kill: bool,
         /// Resume all agents that have dead sessions
         #[arg(long)]
         all: bool,
-    },
-    /// Hook subcommands for Claude Code integration
-    Hook {
-        #[command(subcommand)]
-        hook: HookCommand,
     },
 }
 
@@ -129,30 +122,9 @@ impl AgentCommand {
             | Self::Suspend { .. }
             | Self::Resume { .. }
             | Self::Prune { .. } => ClientKind::Action,
-            Self::Hook { .. } => ClientKind::Signal,
             _ => ClientKind::Query,
         }
     }
-}
-
-#[derive(Subcommand)]
-pub enum HookCommand {
-    /// Stop hook handler - gates agent completion
-    Stop {
-        /// Agent ID to check
-        agent_id: String,
-    },
-    /// PreToolUse hook handler - detects plan/question tools and transitions to Prompting
-    Pretooluse {
-        /// Agent ID to emit prompt event for
-        agent_id: String,
-    },
-    /// Notification hook handler - detects idle_prompt and permission_prompt
-    Notify {
-        /// Agent ID to emit state events for
-        #[arg(long)]
-        agent_id: String,
-    },
 }
 
 pub async fn handle(
@@ -163,12 +135,7 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        AgentCommand::List {
-            job,
-            status,
-            limit,
-            no_limit,
-        } => {
+        AgentCommand::List { job, status, limit, no_limit } => {
             display::handle_list(client, project_filter, format, job, status, limit, no_limit)
                 .await?;
         }
@@ -190,12 +157,7 @@ pub async fn handle(
         AgentCommand::Send { agent_id, message } => {
             display::handle_send(client, &agent_id, &message).await?;
         }
-        AgentCommand::Logs {
-            id,
-            step,
-            follow,
-            limit,
-        } => {
+        AgentCommand::Logs { id, step, follow, limit } => {
             display::handle_logs(client, format, &id, step.as_deref(), follow, limit).await?;
         }
         AgentCommand::Wait { agent_id, timeout } => {
@@ -207,17 +169,6 @@ pub async fn handle(
         AgentCommand::Resume { id, kill, all } => {
             display::handle_resume(client, format, id, kill, all).await?;
         }
-        AgentCommand::Hook { hook } => match hook {
-            HookCommand::Stop { agent_id } => {
-                hooks::handle_stop(&agent_id, client).await?;
-            }
-            HookCommand::Pretooluse { agent_id } => {
-                hooks::handle_pretooluse(&agent_id, client).await?;
-            }
-            HookCommand::Notify { agent_id } => {
-                hooks::handle_notify(&agent_id, client).await?;
-            }
-        },
     }
 
     Ok(())

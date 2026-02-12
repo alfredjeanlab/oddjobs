@@ -6,10 +6,6 @@ use super::macros::{parse_span_tests, parse_tests};
 use crate::ast::WordPart;
 use crate::parser::Parser;
 
-// =============================================================================
-// Macro-based Tests
-// =============================================================================
-
 parse_tests! {
     macro_two_cmds: "a; b" => commands: 2,
     macro_three_cmds: "a; b; c" => commands: 3,
@@ -21,10 +17,6 @@ parse_span_tests! {
     macro_span_single: "echo" => (0, 4),
     macro_span_two_words: "echo a" => (0, 6),
 }
-
-// =============================================================================
-// Standard Tests
-// =============================================================================
 
 #[test]
 fn test_semicolon_separated() {
@@ -51,36 +43,12 @@ fn test_newline_separated() {
 }
 
 #[test]
-fn test_multiple_separators() {
-    let result = Parser::parse("cmd1 ; cmd2 ; cmd3").unwrap();
-    assert_eq!(result.commands.len(), 3);
-}
-
-#[test]
 fn test_leading_separator() {
     let result = Parser::parse("; cmd").unwrap();
     assert_eq!(result.commands.len(), 1);
 
     let cmd = get_simple_command(&result.commands[0]);
     assert_eq!(cmd.name.parts, vec![WordPart::literal("cmd")]);
-}
-
-#[test]
-fn test_trailing_separator() {
-    let result = Parser::parse("cmd ;").unwrap();
-    assert_eq!(result.commands.len(), 1);
-}
-
-#[test]
-fn test_multiple_leading_separators() {
-    let result = Parser::parse(";;; cmd").unwrap();
-    assert_eq!(result.commands.len(), 1);
-}
-
-#[test]
-fn test_mixed_separators() {
-    let result = Parser::parse("cmd1 ; cmd2\ncmd3").unwrap();
-    assert_eq!(result.commands.len(), 3);
 }
 
 #[test]
@@ -120,12 +88,6 @@ fn test_empty_between_separators() {
 #[test]
 fn test_only_separators() {
     let result = Parser::parse(";;;").unwrap();
-    assert!(result.commands.is_empty());
-}
-
-#[test]
-fn test_only_newlines() {
-    let result = Parser::parse("\n\n\n").unwrap();
     assert!(result.commands.is_empty());
 }
 

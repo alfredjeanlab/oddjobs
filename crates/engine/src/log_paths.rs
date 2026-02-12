@@ -57,7 +57,7 @@ pub fn cron_log_path(logs_dir: &Path, cron_name: &str) -> PathBuf {
 ///
 /// # Arguments
 /// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
-/// * `worker_name` - Worker name (may include namespace prefix, e.g., `ns/worker`)
+/// * `worker_name` - Worker name (may include project prefix, e.g., `ns/worker`)
 pub fn worker_log_path(logs_dir: &Path, worker_name: &str) -> PathBuf {
     logs_dir.join("worker").join(format!("{}.log", worker_name))
 }
@@ -66,12 +66,12 @@ pub fn worker_log_path(logs_dir: &Path, worker_name: &str) -> PathBuf {
 ///
 /// Structure: `{logs_dir}/queue/{queue_name}.log`
 ///
-/// The `queue_name` may contain `/` (e.g. `namespace/queue_name`),
+/// The `queue_name` may contain `/` (e.g. `project/queue_name`),
 /// in which case `Path::join` creates nested directories automatically.
 ///
 /// # Arguments
 /// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
-/// * `queue_name` - Queue name (possibly namespace-scoped like `ns/queue`)
+/// * `queue_name` - Queue name (possibly project-scoped like `ns/queue`)
 pub fn queue_log_path(logs_dir: &Path, queue_name: &str) -> PathBuf {
     logs_dir.join("queue").join(format!("{}.log", queue_name))
 }
@@ -84,10 +84,7 @@ pub fn queue_log_path(logs_dir: &Path, queue_name: &str) -> PathBuf {
 /// * `logs_dir` - Base logs directory (e.g., `~/.local/state/oj/logs`)
 /// * `agent_id` - Agent UUID
 pub fn agent_capture_path(logs_dir: &Path, agent_id: &str) -> PathBuf {
-    logs_dir
-        .join("agent")
-        .join(agent_id)
-        .join("capture.latest.txt")
+    logs_dir.join("agent").join(agent_id).join("capture.latest.txt")
 }
 
 /// Build the path to a job breadcrumb file.

@@ -20,8 +20,8 @@ use output::OutputFormat;
 use anyhow::Result;
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use commands::{
-    agent, cron, daemon, decision, emit, env as env_cmd, job, project, queue, resolve, run,
-    runbook, session, status, worker, workspace,
+    agent, cron, daemon, decision, job, project, queue, resolve, run, runbook, status, worker,
+    workspace,
 };
 use std::path::{Path, PathBuf};
 
@@ -39,18 +39,12 @@ struct Cli {
     #[arg(short = 'C', global = true, value_name = "DIR")]
     directory: Option<PathBuf>,
 
-    /// Project namespace override
+    /// Project project override
     #[arg(long = "project", global = true)]
     project: Option<String>,
 
     /// Output format
-    #[arg(
-        short = 'o',
-        long = "output",
-        value_enum,
-        default_value_t,
-        global = true
-    )]
+    #[arg(short = 'o', long = "output", value_enum, default_value_t, global = true)]
     output: OutputFormat,
 
     #[command(subcommand)]
@@ -65,14 +59,10 @@ enum Commands {
     Job(job::JobArgs),
     /// Agent management
     Agent(agent::AgentArgs),
-    /// Session management
-    Session(session::SessionArgs),
     /// Workspace management
     Workspace(workspace::WorkspaceArgs),
     /// Daemon management
     Daemon(daemon::DaemonArgs),
-    /// Environment variable management
-    Env(env_cmd::EnvArgs),
     /// Queue management
     Queue(queue::QueueArgs),
     /// Worker management
@@ -81,22 +71,20 @@ enum Commands {
     Cron(cron::CronArgs),
     /// Decision management
     Decision(decision::DecisionArgs),
-    /// Emit events to the daemon (for agents)
-    Emit(emit::EmitArgs),
     /// Project management
     Project(project::ProjectArgs),
     /// Runbook management
     Runbook(runbook::RunbookArgs),
     /// Show overview of active work across all projects
     Status(status::StatusArgs),
-    /// Peek at the active tmux session (auto-detects entity type)
+    /// Peek at the active agent session (auto-detects entity type)
     Peek {
-        /// Entity ID (job, agent, or session — prefix match supported)
+        /// Entity ID (job or agent — prefix match supported)
         id: String,
     },
-    /// Attach to a tmux session (auto-detects entity type)
+    /// Attach to an agent session (auto-detects entity type)
     Attach {
-        /// Entity ID (job, agent, or session — prefix match supported)
+        /// Entity ID (job or agent — prefix match supported)
         id: String,
     },
     /// View logs for a job or agent (auto-detects entity type)
@@ -113,9 +101,9 @@ enum Commands {
         #[arg(long, short = 's')]
         step: Option<String>,
     },
-    /// Show details of a job, agent, session, or queue (auto-detects type)
+    /// Show details of a job, agent, or queue (auto-detects type)
     Show {
-        /// Entity ID or queue name (job, agent, session, or queue)
+        /// Entity ID or queue name (job, agent, or queue)
         id: String,
         /// Show full variable values without truncation
         #[arg(long, short = 'v')]
@@ -155,9 +143,7 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
-        let code = e
-            .downcast_ref::<exit_error::ExitError>()
-            .map_or(1, |c| c.code);
+        let code = e.downcast_ref::<exit_error::ExitError>().map_or(1, |c| c.code);
         let msg = format_error(&e);
         if !msg.is_empty() {
             eprintln!("Error: {}", msg);
@@ -177,10 +163,7 @@ fn format_error(err: &anyhow::Error) -> String {
 
     // Walk the source chain; if every source message already appears
     // in the top-level string, the chain is redundant.
-    let chain_redundant = err
-        .chain()
-        .skip(1)
-        .all(|cause| top.contains(&cause.to_string()));
+    let chain_redundant = err.chain().skip(1).all(|cause| top.contains(&cause.to_string()));
 
     if chain_redundant {
         return top;
@@ -196,8 +179,8 @@ fn format_error(err: &anyhow::Error) -> String {
 
 pub(crate) fn cli_command() -> clap::Command {
     // Check for -C in raw args to discover correct project root for help text
-    let project_root = find_project_root_from_args();
-    let run_help = commands::run::available_commands_help(&project_root);
+    let project_path = find_project_path_from_args();
+    let run_help = commands::run::available_commands_help(&project_path);
 
     Cli::command()
         .help_template(help::template())
@@ -212,9 +195,7 @@ pub(crate) fn cli_command() -> clap::Command {
                 .action(clap::ArgAction::Version)
                 .help("Print version"),
         )
-        .mut_subcommand("daemon", |sub| {
-            sub.mut_arg("version", |arg| arg.short_alias('V'))
-        })
+        .mut_subcommand("daemon", |sub| sub.mut_arg("version", |arg| arg.short_alias('V')))
         .mut_subcommand("run", |sub| sub.override_help(run_help))
 }
 
@@ -253,11 +234,7 @@ async fn run() -> Result<()> {
             anyhow::anyhow!("cannot change to directory '{}': {}", dir.display(), e)
         })?;
         std::env::set_current_dir(&canonical).map_err(|e| {
-            anyhow::anyhow!(
-                "cannot change to directory '{}': {}",
-                canonical.display(),
-                e
-            )
+            anyhow::anyhow!("cannot change to directory '{}': {}", canonical.display(), e)
         })?;
     }
 
@@ -275,33 +252,28 @@ async fn run() -> Result<()> {
         return daemon::daemon(args, format).await;
     }
 
-    // Handle env command separately (doesn't need client connection)
-    if let Commands::Env(args) = command {
-        return env_cmd::handle(args.command, format);
-    }
-
     // Handle runbook command separately (doesn't need client connection)
     if let Commands::Runbook(args) = command {
-        let project_root = find_project_root();
-        return runbook::handle(args.command, &project_root, format);
+        let project_path = find_project_path();
+        return runbook::handle(args.command, &project_path, format);
     }
 
     // Find project root for runbook loading (now from potentially-changed cwd)
-    let project_root = find_project_root();
-    let invoke_dir = std::env::current_dir().unwrap_or_else(|_| project_root.clone());
+    let project_path = find_project_path();
+    let invoke_dir = std::env::current_dir().unwrap_or_else(|_| project_path.clone());
 
-    // Centralized namespace resolution:
-    //   --project flag > OJ_NAMESPACE env > auto-resolved from project root
-    let namespace = resolve_effective_namespace(cli.project.as_deref(), &project_root);
+    // Centralized project resolution:
+    //   --project flag > OJ_PROJECT env > auto-resolved from project root
+    let project = resolve_effective_namespace(cli.project.as_deref(), &project_path);
 
     // Explicit --project flag for filtering list/show queries.
-    // OJ_NAMESPACE is NOT used for filtering — only the explicit CLI flag.
+    // OJ_PROJECT is NOT used for filtering — only the explicit CLI flag.
     let project_filter = cli.project.as_deref();
 
     // Dispatch commands with appropriate client semantics.
     // Each command enum provides client_kind() to determine action/query/signal.
     match command {
-        Commands::Run(args) => run::handle(args, &project_root, &invoke_dir, &namespace).await?,
+        Commands::Run(args) => run::handle(args, &project_path, &invoke_dir, &project).await?,
 
         Commands::Job(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
@@ -309,53 +281,30 @@ async fn run() -> Result<()> {
         }
         Commands::Workspace(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            workspace::handle(args.command, &client, &namespace, project_filter, format).await?
+            workspace::handle(args.command, &client, &project, project_filter, format).await?
         }
         Commands::Agent(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            agent::handle(args.command, &client, &namespace, project_filter, format).await?
-        }
-        Commands::Session(args) => {
-            let client = DaemonClient::for_kind(args.command.client_kind())?;
-            session::handle(args.command, &client, &namespace, project_filter, format).await?
+            agent::handle(args.command, &client, &project, project_filter, format).await?
         }
         Commands::Queue(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            queue::handle(args.command, &client, &project_root, &namespace, format).await?
+            queue::handle(args.command, &client, &project_path, &project, format).await?
         }
         Commands::Worker(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            worker::handle(
-                args.command,
-                &client,
-                &project_root,
-                &namespace,
-                project_filter,
-                format,
-            )
-            .await?
+            worker::handle(args.command, &client, &project_path, &project, project_filter, format)
+                .await?
         }
         Commands::Cron(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            cron::handle(
-                args.command,
-                &client,
-                &project_root,
-                &namespace,
-                project_filter,
-                format,
-            )
-            .await?
+            cron::handle(args.command, &client, &project_path, &project, project_filter, format)
+                .await?
         }
         Commands::Decision(args) => {
             let client = DaemonClient::for_kind(args.command.client_kind())?;
-            decision::handle(args.command, &client, &namespace, project_filter, format).await?
+            decision::handle(args.command, &client, &project, project_filter, format).await?
         }
-        Commands::Emit(args) => {
-            let client = DaemonClient::for_signal()?;
-            emit::handle(args.command, &client, format).await?
-        }
-
         // Project - global cross-project listing (query, graceful when daemon down)
         Commands::Project(args) => {
             project::handle_not_running_or(args.command, format).await?;
@@ -375,12 +324,7 @@ async fn run() -> Result<()> {
             let client = DaemonClient::for_query()?;
             resolve::handle_attach(&client, &id).await?
         }
-        Commands::Logs {
-            id,
-            follow,
-            limit,
-            step,
-        } => {
+        Commands::Logs { id, follow, limit, step } => {
             let client = DaemonClient::for_query()?;
             resolve::handle_logs(&client, &id, follow, limit, step.as_deref(), format).await?
         }
@@ -392,8 +336,8 @@ async fn run() -> Result<()> {
                 queue::handle(
                     queue::QueueCommand::Show { queue: id },
                     &client,
-                    &project_root,
-                    &namespace,
+                    &project_path,
+                    &project,
                     format,
                 )
                 .await?
@@ -405,40 +349,18 @@ async fn run() -> Result<()> {
         // Convenience action commands - cancel/resume jobs
         Commands::Cancel { ids } => {
             let client = DaemonClient::for_action()?;
-            job::handle(
-                job::JobCommand::Cancel { ids },
-                &client,
-                cli.project.as_deref(),
-                format,
-            )
-            .await?
+            job::handle(job::JobCommand::Cancel { ids }, &client, cli.project.as_deref(), format)
+                .await?
         }
         Commands::Suspend { ids } => {
             let client = DaemonClient::for_action()?;
-            job::handle(
-                job::JobCommand::Suspend { ids },
-                &client,
-                cli.project.as_deref(),
-                format,
-            )
-            .await?
+            job::handle(job::JobCommand::Suspend { ids }, &client, cli.project.as_deref(), format)
+                .await?
         }
-        Commands::Resume {
-            id,
-            message,
-            var,
-            kill,
-            all,
-        } => {
+        Commands::Resume { id, message, var, kill, all } => {
             let client = DaemonClient::for_action()?;
             job::handle(
-                job::JobCommand::Resume {
-                    id,
-                    message,
-                    var,
-                    kill,
-                    all,
-                },
+                job::JobCommand::Resume { id, message, var, kill, all },
                 &client,
                 cli.project.as_deref(),
                 format,
@@ -446,18 +368,18 @@ async fn run() -> Result<()> {
             .await?
         }
 
-        Commands::Daemon(_) | Commands::Env(_) | Commands::Runbook(_) => unreachable!(),
+        Commands::Daemon(_) | Commands::Runbook(_) => unreachable!(),
     }
 
     Ok(())
 }
 
 pub fn load_runbook(
-    project_root: &std::path::Path,
+    project_path: &std::path::Path,
     name: &str,
     runbook_file: Option<&str>,
 ) -> Result<oj_runbook::Runbook> {
-    let runbook_dir = project_root.join(".oj/runbooks");
+    let runbook_dir = project_path.join(".oj/runbooks");
 
     // If --runbook flag provided, load only that file
     if let Some(file) = runbook_file {
@@ -476,47 +398,47 @@ pub fn load_runbook(
     runbook.ok_or_else(|| anyhow::anyhow!("unknown command: {}", name))
 }
 
-/// Find project root, honoring a -C flag if present in raw argv.
+/// Find project path, honoring a -C flag if present in raw argv.
 /// Used by `cli_command()` for help text generation before full argument parsing.
-fn find_project_root_from_args() -> PathBuf {
+fn find_project_path_from_args() -> PathBuf {
     let args: Vec<String> = std::env::args().collect();
     for i in 0..args.len() {
         if args[i] == "-C" {
             if let Some(dir) = args.get(i + 1) {
                 if let Ok(canonical) = std::fs::canonicalize(dir) {
-                    return find_project_root_from(canonical);
+                    return find_project_path_from(canonical);
                 }
             }
         }
     }
-    find_project_root()
+    find_project_path()
 }
 
-/// Resolve the effective namespace using the standard priority chain:
-///   --project flag > OJ_NAMESPACE env > project root resolution
-fn resolve_effective_namespace(project: Option<&str>, project_root: &Path) -> String {
+/// Resolve the effective project using the standard priority chain:
+///   --project flag > OJ_PROJECT env > project path resolution
+fn resolve_effective_namespace(project: Option<&str>, project_path: &Path) -> String {
     if let Some(p) = project {
         return p.to_string();
     }
-    if let Some(ns) = crate::env::namespace() {
+    if let Some(ns) = crate::env::project() {
         return ns;
     }
-    oj_core::namespace::resolve_namespace(project_root)
+    oj_core::project::resolve_namespace(project_path)
 }
 
-/// Find the project root by walking up from current directory.
-/// Looks for .oj directory to identify project root.
+/// Find the project path by walking up from current directory.
+/// Looks for .oj directory to identify project path.
 ///
 /// When running inside a git worktree (e.g. a workspace),
-/// resolves to the main worktree's project root so that daemon requests
+/// resolves to the main worktree's project path so that daemon requests
 /// (queue push, worker start, etc.) reference the canonical project.
-fn find_project_root() -> PathBuf {
+fn find_project_path() -> PathBuf {
     let start = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    find_project_root_from(start)
+    find_project_path_from(start)
 }
 
-/// Find the project root by walking up from a given starting directory.
-fn find_project_root_from(start: PathBuf) -> PathBuf {
+/// Find the project path by walking up from a given starting directory.
+fn find_project_path_from(start: PathBuf) -> PathBuf {
     let mut current = start;
     loop {
         if current.join(".oj").is_dir() {
@@ -543,11 +465,8 @@ fn resolve_main_worktree(path: &Path) -> Option<PathBuf> {
     let content = std::fs::read_to_string(&git_path).ok()?;
     let gitdir = content.strip_prefix("gitdir: ")?.trim();
 
-    let gitdir_path = if Path::new(gitdir).is_absolute() {
-        PathBuf::from(gitdir)
-    } else {
-        path.join(gitdir)
-    };
+    let gitdir_path =
+        if Path::new(gitdir).is_absolute() { PathBuf::from(gitdir) } else { path.join(gitdir) };
 
     // gitdir points to <main>/.git/worktrees/<name>
     // Walk up: worktrees/ -> .git/ -> main project root
@@ -571,11 +490,7 @@ fn print_formatted_help(args: &[String]) {
 
     // Extract subcommand names from args (skip binary name and flags).
     // Handle both "oj run --help" and "oj help run" patterns.
-    let non_flags: Vec<&String> = args
-        .iter()
-        .skip(1)
-        .filter(|arg| !arg.starts_with('-'))
-        .collect();
+    let non_flags: Vec<&String> = args.iter().skip(1).filter(|arg| !arg.starts_with('-')).collect();
 
     let subcommand_names: Vec<&str> = if non_flags.first().map(|s| s.as_str()) == Some("help") {
         non_flags.iter().skip(1).map(|s| s.as_str()).collect()
@@ -586,8 +501,8 @@ fn print_formatted_help(args: &[String]) {
     // Route "run <command>" to per-command help
     if subcommand_names.first() == Some(&"run") && subcommand_names.len() > 1 {
         let command_name = subcommand_names[1];
-        let project_root = find_project_root_from_args();
-        let runbook_dir = project_root.join(".oj/runbooks");
+        let project_path = find_project_path_from_args();
+        let runbook_dir = project_path.join(".oj/runbooks");
 
         if let Ok(Some(runbook)) = oj_runbook::find_runbook_by_command(&runbook_dir, command_name) {
             if let Some(cmd_def) = runbook.get_command(command_name) {

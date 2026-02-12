@@ -6,72 +6,29 @@
 use super::*;
 use oj_core::{AgentState, JobId, StepStatus};
 
-/// Runbook for testing resume functionality with a shell step and an agent step
-const RESUME_RUNBOOK: &str = r#"
-[command.test]
-args = "<name>"
-run = { job = "test" }
-
-[job.test]
-input  = ["name", "prompt"]
-
-[[job.test.step]]
-name = "setup"
-run = "echo setup"
-on_done = "work"
-
-[[job.test.step]]
-name = "work"
-run = { agent = "worker" }
-on_done = "done"
-
-[[job.test.step]]
-name = "done"
-run = "echo done"
-
-[agent.worker]
-run = "claude --print"
-"#;
-
 async fn setup_resume() -> TestContext {
-    setup_with_runbook(RESUME_RUNBOOK).await
-}
-
-async fn create_test_job(ctx: &TestContext, job_id: &str) -> String {
-    let args: HashMap<String, String> = [
-        ("name".to_string(), "test".to_string()),
-        ("prompt".to_string(), "Do the work".to_string()),
-    ]
-    .into_iter()
-    .collect();
-
-    handle_event_chain(
-        &ctx,
-        command_event(job_id, "test", "test", args, &ctx.project_root),
-    )
-    .await;
-
-    job_id.to_string()
+    let mut runbook = test_runbook_steps(
+        "test",
+        "input = [\"name\", \"prompt\"]",
+        &[
+            ("setup", "echo setup", "on_done = { step = \"work\" }"),
+            ("work", "{ agent = \"worker\" }", "on_done = { step = \"done\" }"),
+            ("done", "echo done", ""),
+        ],
+    );
+    runbook.push_str("\n[agent.worker]\nrun = \"claude --print\"\n");
+    setup_with_runbook(&runbook).await
 }
 
 /// Helper to advance job to the agent step (work) by completing the setup step
 async fn advance_to_agent_step(ctx: &TestContext, job_id: &str) {
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id),
-            step: "setup".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(job_id, "setup")).await.unwrap();
 }
 
 #[tokio::test]
 async fn resume_agent_without_message_uses_default() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-1").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step
     advance_to_agent_step(&ctx, &job_id).await;
@@ -96,10 +53,8 @@ async fn resume_agent_without_message_uses_default() {
 
 #[tokio::test]
 async fn resume_agent_alive_sends_nudge() {
-    use oj_adapters::SessionAdapter;
-
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-2").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step (this spawns the agent with a UUID)
     advance_to_agent_step(&ctx, &job_id).await;
@@ -109,20 +64,6 @@ async fn resume_agent_alive_sends_nudge() {
 
     // Set agent state to Working (alive)
     ctx.agents.set_agent_state(&agent_id, AgentState::Working);
-
-    // Spawn a session for the job (simulating agent startup)
-    let session_id = ctx
-        .sessions
-        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[], &[])
-        .await
-        .unwrap();
-
-    // Update the job's session_id in state
-    ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.session_id = Some(session_id.clone());
-        }
-    });
 
     // Resume with message
     let result = ctx
@@ -145,7 +86,7 @@ async fn resume_agent_alive_sends_nudge() {
 #[tokio::test]
 async fn resume_agent_dead_attempts_recovery() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-3").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step
     advance_to_agent_step(&ctx, &job_id).await;
@@ -187,7 +128,7 @@ async fn resume_agent_dead_attempts_recovery() {
 #[tokio::test]
 async fn resume_shell_reruns_command() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-4").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Job starts at "setup" step which is a shell step
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -214,7 +155,7 @@ async fn resume_shell_reruns_command() {
 #[tokio::test]
 async fn resume_shell_with_message_succeeds_with_warning() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-5").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Job starts at "setup" step which is a shell step
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -238,7 +179,7 @@ async fn resume_shell_with_message_succeeds_with_warning() {
 #[tokio::test]
 async fn resume_persists_input_updates() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-6").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Job starts at "setup" step
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -250,12 +191,7 @@ async fn resume_persists_input_updates() {
         .handle_event(Event::JobResume {
             id: JobId::new(job_id.clone()),
             message: None,
-            vars: [
-                ("new_key".to_string(), "new_value".to_string()),
-                ("another_key".to_string(), "another_value".to_string()),
-            ]
-            .into_iter()
-            .collect(),
+            vars: vars!("new_key" => "new_value", "another_key" => "another_value"),
             kill: false,
         })
         .await;
@@ -269,7 +205,7 @@ async fn resume_persists_input_updates() {
 #[tokio::test]
 async fn resume_agent_session_gone_recovers() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-7").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step (spawns agent with UUID)
     advance_to_agent_step(&ctx, &job_id).await;
@@ -278,8 +214,7 @@ async fn resume_agent_session_gone_recovers() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent as SessionGone (dead)
-    ctx.agents
-        .set_agent_state(&agent_id, AgentState::SessionGone);
+    ctx.agents.set_agent_state(&agent_id, AgentState::SessionGone);
 
     // Resume with message
     let result = ctx
@@ -299,10 +234,8 @@ async fn resume_agent_session_gone_recovers() {
 
 #[tokio::test]
 async fn resume_agent_waiting_nudges() {
-    use oj_adapters::SessionAdapter;
-
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-8").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step (spawns agent with UUID)
     advance_to_agent_step(&ctx, &job_id).await;
@@ -311,24 +244,9 @@ async fn resume_agent_waiting_nudges() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent to WaitingForInput (alive, but idle)
-    ctx.agents
-        .set_agent_state(&agent_id, AgentState::WaitingForInput);
+    ctx.agents.set_agent_state(&agent_id, AgentState::WaitingForInput);
 
-    // Spawn a session for the job
-    let session_id = ctx
-        .sessions
-        .spawn("test", std::path::Path::new("/tmp"), "echo test", &[], &[])
-        .await
-        .unwrap();
-
-    // Update the job's session_id in state
-    ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.session_id = Some(session_id.clone());
-        }
-    });
-
-    // Resume with message - should nudge (send to session)
+    // Resume with message - should nudge (send to agent)
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
@@ -349,23 +267,14 @@ async fn resume_agent_waiting_nudges() {
 #[tokio::test]
 async fn resume_from_terminal_failure_shell_step() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-tf-1").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Job starts at "setup" (shell step)
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "setup");
 
     // Fail the shell step (non-zero exit, no on_fail → terminal "failed")
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "setup".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "setup")).await.unwrap();
 
     // Verify job is in terminal "failed" state
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -395,7 +304,7 @@ async fn resume_from_terminal_failure_shell_step() {
 #[tokio::test]
 async fn resume_from_terminal_failure_agent_step() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-tf-2").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step
     advance_to_agent_step(&ctx, &job_id).await;
@@ -445,55 +354,9 @@ async fn resume_from_terminal_failure_agent_step() {
 }
 
 #[tokio::test]
-async fn resume_from_terminal_failure_clears_stale_session() {
-    let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-tf-3").await;
-
-    // Advance to agent step
-    advance_to_agent_step(&ctx, &job_id).await;
-
-    // Set a stale session_id on the job
-    ctx.runtime.lock_state_mut(|state| {
-        if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.session_id = Some("stale-session-123".to_string());
-        }
-    });
-
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "work");
-    assert!(job.session_id.is_some());
-
-    // Fail the job
-    ctx.runtime.fail_job(&job, "agent died").await.unwrap();
-
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "failed");
-
-    // Resume from terminal failure
-    let _result = ctx
-        .runtime
-        .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
-            message: Some("Retry".to_string()),
-            vars: HashMap::new(),
-            kill: false,
-        })
-        .await;
-
-    // After reset, session_id should be cleared (stale session cleaned up)
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "work");
-    assert!(
-        job.session_id.is_none() || job.session_id.as_deref() != Some("stale-session-123"),
-        "stale session_id should be cleared on resume, got: {:?}",
-        job.session_id
-    );
-}
-
-#[tokio::test]
 async fn resume_collects_all_agent_ids_from_step_history() {
     let ctx = setup_resume().await;
-    let job_id = create_test_job(&ctx, "pipe-resume-history-1").await;
+    let job_id = create_job_for_runbook(&ctx, "test", &[("prompt", "Do the work")]).await;
 
     // Advance to agent step (spawns first agent)
     advance_to_agent_step(&ctx, &job_id).await;
@@ -521,30 +384,16 @@ async fn resume_collects_all_agent_ids_from_step_history() {
 
     // Verify step_history now has two entries for "work"
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    let work_entries: Vec<_> = job
-        .step_history
-        .iter()
-        .filter(|r| r.name == "work")
-        .collect();
-    assert_eq!(
-        work_entries.len(),
-        2,
-        "should have two step history entries for 'work'"
-    );
+    let work_entries: Vec<_> = job.step_history.iter().filter(|r| r.name == "work").collect();
+    assert_eq!(work_entries.len(), 2, "should have two step history entries for 'work'");
 
     // Verify we have both agent IDs
-    let agent_ids: Vec<_> = work_entries
-        .iter()
-        .filter_map(|r| r.agent_id.as_ref())
-        .collect();
+    let agent_ids: Vec<_> = work_entries.iter().filter_map(|r| r.agent_id.as_ref()).collect();
     assert!(
         agent_ids.contains(&&first_agent_id.as_str().to_string()),
         "should contain first agent_id"
     );
-    assert!(
-        agent_ids.contains(&&second_agent_id.to_string()),
-        "should contain second agent_id"
-    );
+    assert!(agent_ids.contains(&&second_agent_id.to_string()), "should contain second agent_id");
 
     // The handle_agent_resume should collect all agent_ids and try each
     // (most recent first) to find one with a valid session file.

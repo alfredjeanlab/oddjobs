@@ -9,7 +9,7 @@
 #   1. Create issue bead in beads (or use existing bead ID)
 #   2. Instantiate polecat-work molecule (creates step beads)
 #   3. Hook the molecule to a polecat (set assignee + hook label)
-#   4. Spawn polecat job in folder workspace
+#   4. Spawn polecat job in folder source
 #   5. Optionally create a convoy for tracking
 #
 # Examples:
@@ -29,15 +29,15 @@ command "gt-sling" {
 job "sling" {
   name      = "${var.issue}"
   vars      = ["issue", "instructions", "base", "rig"]
-  workspace = "folder"
+  source    = "folder"
   on_cancel = { step = "cleanup" }
   on_fail   = { step = "reopen" }
 
   locals {
     repo    = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    polecat = "${var.issue}-${workspace.nonce}"
-    branch  = "polecat/${var.issue}-${workspace.nonce}"
-    actor   = "${var.rig}/polecats/${var.issue}-${workspace.nonce}"
+    polecat = "${var.issue}-${source.nonce}"
+    branch  = "polecat/${var.issue}-${source.nonce}"
+    actor   = "${var.rig}/polecats/${var.issue}-${source.nonce}"
     title   = "feat(${var.issue}): ${var.instructions}"
   }
 
@@ -47,7 +47,7 @@ job "sling" {
     on_fail  = "Polecat failed: ${var.issue}"
   }
 
-  # Create work bead, molecule steps, and spawn polecat workspace
+  # Create work bead, molecule steps, and spawn polecat source
   step "provision" {
     run = <<-SHELL
       # If issue looks like an existing bead ID (has a dash), use it;
@@ -81,8 +81,8 @@ job "sling" {
       echo "$BEAD_ID" > .bead-id
       echo "Slung $BEAD_ID to ${local.actor}"
 
-      # Spawn polecat workspace
-      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}/work" origin/${var.base}
+      # Spawn polecat source
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${source.root}/work" origin/${var.base}
     SHELL
     on_done = { step = "execute" }
   }
@@ -96,8 +96,8 @@ job "sling" {
   # Completion: push, create MR, clean up
   step "submit" {
     run = <<-SHELL
-      cd "${workspace.root}/work"
-      BEAD_ID="$(cat ${workspace.root}/.bead-id)"
+      cd "${source.root}/work"
+      BEAD_ID="$(cat ${source.root}/.bead-id)"
 
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
@@ -123,21 +123,21 @@ job "sling" {
 
   step "reopen" {
     run = <<-SHELL
-      BEAD_ID="$(cat ${workspace.root}/.bead-id 2>/dev/null || echo '')"
+      BEAD_ID="$(cat ${source.root}/.bead-id 2>/dev/null || echo '')"
       test -n "$BEAD_ID" && bd reopen "$BEAD_ID" --reason "Sling job failed" 2>/dev/null || true
     SHELL
     on_done = { step = "cleanup" }
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}/work\" 2>/dev/null || true"
+    run = "git -C \"${local.repo}\" worktree remove --force \"${source.root}/work\" 2>/dev/null || true"
   }
 }
 
 # The polecat worker agent — discovers and executes molecule steps
 agent "polecat-worker" {
   run      = "claude --dangerously-skip-permissions --disallowed-tools ExitPlanMode,AskUserQuestion,EnterPlanMode"
-  cwd      = "${workspace.root}/work"
+  cwd      = "${source.root}/work"
   on_idle  = { action = "nudge", message = "You have work. Check `bd ready` for your next step. Execute it. Say 'I'm done' when all steps are complete." }
   on_dead  = { action = "gate", run = "make check" }
 
@@ -154,9 +154,9 @@ agent "polecat-worker" {
     "echo '## Identity'",
     "echo \"BD_ACTOR=$BD_ACTOR\"",
     "echo '## Hook'",
-    "cat ${workspace.root}/.bead-id 2>/dev/null && bd show $(cat ${workspace.root}/.bead-id) 2>/dev/null || echo 'No hook found'",
+    "cat ${source.root}/.bead-id 2>/dev/null && bd show $(cat ${source.root}/.bead-id) 2>/dev/null || echo 'No hook found'",
     "echo '## Ready Steps'",
-    "bd ready --parent=$(cat ${workspace.root}/.bead-id 2>/dev/null) --json 2>/dev/null || echo '[]'",
+    "bd ready --parent=$(cat ${source.root}/.bead-id 2>/dev/null) --json 2>/dev/null || echo '[]'",
     "echo '## Advice'",
     "bd advice list --for=$BD_ACTOR 2>/dev/null || echo 'No advice.'",
     "echo '## Git'",

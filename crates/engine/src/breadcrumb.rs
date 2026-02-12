@@ -11,11 +11,11 @@
 //! recovered WAL/snapshot state to detect orphaned jobs.
 
 use crate::log_paths;
+use crate::time_fmt::format_utc_now;
 use oj_core::Job;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 /// Breadcrumb snapshot written to disk on job creation and step transitions.
 ///
@@ -74,11 +74,7 @@ impl BreadcrumbWriter {
             std::fs::write(&tmp_path, json.as_bytes())?;
             std::fs::rename(&tmp_path, &path)
         }) {
-            tracing::warn!(
-                job_id = %breadcrumb.job_id,
-                error = %e,
-                "failed to write breadcrumb"
-            );
+            tracing::warn!(job_id = %breadcrumb.job_id, error = %e, "failed to write breadcrumb");
         }
     }
 
@@ -87,11 +83,7 @@ impl BreadcrumbWriter {
         let path = log_paths::breadcrumb_path(&self.logs_dir, job_id);
         if path.exists() {
             if let Err(e) = std::fs::remove_file(&path) {
-                tracing::warn!(
-                    job_id,
-                    error = %e,
-                    "failed to delete breadcrumb"
-                );
+                tracing::warn!(job_id, error = %e, "failed to delete breadcrumb");
             }
         }
     }
@@ -102,14 +94,9 @@ impl BreadcrumbWriter {
         // Collect agents from step history
         for record in &job.step_history {
             if let Some(ref agent_id) = record.agent_id {
-                let is_current_step = record.name == job.step;
                 agents.push(BreadcrumbAgent {
                     agent_id: agent_id.clone(),
-                    session_name: if is_current_step {
-                        job.session_id.clone()
-                    } else {
-                        None
-                    },
+                    session_name: None,
                     log_path: log_paths::agent_log_path(&self.logs_dir, agent_id),
                 });
             }
@@ -117,7 +104,7 @@ impl BreadcrumbWriter {
 
         Breadcrumb {
             job_id: job.id.clone(),
-            project: job.namespace.clone(),
+            project: job.project.clone(),
             kind: job.kind.clone(),
             name: job.name.clone(),
             vars: job.vars.clone(),
@@ -167,54 +154,12 @@ pub fn scan_breadcrumbs(logs_dir: &Path) -> Vec<Breadcrumb> {
                 }
             },
             Err(e) => {
-                tracing::warn!(
-                    path = %path.display(),
-                    error = %e,
-                    "failed to read breadcrumb file"
-                );
+                tracing::warn!(path = %path.display(), error = %e, "failed to read breadcrumb file");
             }
         }
     }
 
     breadcrumbs
-}
-
-/// Format the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
-fn format_utc_now() -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-
-    let (year, month, day) = days_to_civil(days);
-
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        year, month, day, hours, minutes, seconds
-    )
-}
-
-/// Convert days since Unix epoch to (year, month, day).
-///
-/// Algorithm from Howard Hinnant's `civil_from_days`.
-fn days_to_civil(days: u64) -> (i64, u32, u32) {
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    (y, m as u32, d as u32)
 }
 
 #[cfg(test)]

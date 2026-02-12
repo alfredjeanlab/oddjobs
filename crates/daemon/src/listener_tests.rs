@@ -3,6 +3,7 @@
 
 use std::io::Write;
 use tempfile::tempdir;
+use tokio_util::sync::CancellationToken;
 
 /// Test that agent log lookup supports prefix matching on filenames.
 ///
@@ -118,4 +119,49 @@ fn agent_log_ambiguous_prefix_returns_empty() {
     // With multiple matches, should fall back to exact path (which doesn't exist)
     assert_eq!(log_path, exact_path);
     assert!(!log_path.exists());
+}
+
+/// Test that detect_client_disconnect completes when the writer is dropped (EOF).
+#[tokio::test]
+async fn detect_client_disconnect_completes_on_eof() {
+    let (mut reader, writer) = tokio::io::duplex(64);
+    drop(writer); // Simulate client disconnect
+    super::detect_client_disconnect(&mut reader).await;
+    // Reaching here means disconnect was detected
+}
+
+/// Test that a cancelled token is visible to handlers via is_cancelled().
+#[tokio::test]
+async fn cancellation_token_is_visible_after_cancel() {
+    let token = CancellationToken::new();
+    assert!(!token.is_cancelled());
+    token.cancel();
+    assert!(token.is_cancelled());
+}
+
+/// Test that early disconnect drops slow handler and cancels via token.
+#[tokio::test]
+async fn early_disconnect_cancels_via_token() {
+    let token = CancellationToken::new();
+
+    let (mut reader, writer) = tokio::io::duplex(64);
+    // Drop writer immediately to simulate client disconnect
+    drop(writer);
+
+    let handler = async {
+        // Simulate a slow handler
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+        "slow handler done"
+    };
+
+    let result = tokio::select! {
+        msg = handler => msg.to_string(),
+        _ = super::detect_client_disconnect(&mut reader) => {
+            token.cancel();
+            "disconnected".to_string()
+        }
+    };
+
+    assert_eq!(result, "disconnected");
+    assert!(token.is_cancelled());
 }

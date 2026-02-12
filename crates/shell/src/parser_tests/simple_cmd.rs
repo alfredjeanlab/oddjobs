@@ -6,20 +6,12 @@ use super::macros::simple_cmd_tests;
 use crate::ast::{SubstitutionBody, WordPart};
 use crate::parser::Parser;
 
-// =============================================================================
-// Macro-based Tests
-// =============================================================================
-
 simple_cmd_tests! {
     macro_echo: "echo" => ("echo", 0),
     macro_echo_arg: "echo hello" => ("echo", 1),
     macro_ls: "ls -la /tmp" => ("ls", 2),
     macro_cat: "cat file1 file2 file3" => ("cat", 3),
 }
-
-// =============================================================================
-// Standard Tests
-// =============================================================================
 
 #[test]
 fn test_single_word_command() {
@@ -62,13 +54,7 @@ fn test_command_with_variable() {
     let cmd = get_simple_command(&result.commands[0]);
     assert_eq!(cmd.name.parts, vec![WordPart::literal("echo")]);
     assert_eq!(cmd.args.len(), 1);
-    assert_eq!(
-        cmd.args[0].parts,
-        vec![WordPart::Variable {
-            name: "HOME".into(),
-            modifier: None
-        }]
-    );
+    assert_eq!(cmd.args[0].parts, vec![WordPart::Variable { name: "HOME".into(), modifier: None }]);
 }
 
 #[test]
@@ -80,10 +66,7 @@ fn test_command_with_variable_modifier() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(
         cmd.args[0].parts,
-        vec![WordPart::Variable {
-            name: "PATH".into(),
-            modifier: Some(":-/bin".into())
-        }]
+        vec![WordPart::Variable { name: "PATH".into(), modifier: Some(":-/bin".into()) }]
     );
 }
 
@@ -96,10 +79,8 @@ fn test_command_with_command_substitution() {
     assert_eq!(cmd.args.len(), 1);
 
     // Verify the command substitution was parsed
-    let WordPart::CommandSubstitution {
-        body: SubstitutionBody::Parsed(body),
-        backtick,
-    } = &cmd.args[0].parts[0]
+    let WordPart::CommandSubstitution { body: SubstitutionBody::Parsed(body), backtick } =
+        &cmd.args[0].parts[0]
     else {
         panic!("expected command substitution");
     };
@@ -120,10 +101,8 @@ fn test_command_with_backtick_substitution() {
     assert_eq!(cmd.args.len(), 1);
 
     // Verify the backtick command substitution was parsed
-    let WordPart::CommandSubstitution {
-        body: SubstitutionBody::Parsed(body),
-        backtick,
-    } = &cmd.args[0].parts[0]
+    let WordPart::CommandSubstitution { body: SubstitutionBody::Parsed(body), backtick } =
+        &cmd.args[0].parts[0]
     else {
         panic!("expected command substitution");
     };
@@ -163,13 +142,7 @@ fn test_variable_as_command() {
     assert_eq!(result.commands.len(), 1);
 
     let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(
-        cmd.name.parts,
-        vec![WordPart::Variable {
-            name: "CMD".into(),
-            modifier: None
-        }]
-    );
+    assert_eq!(cmd.name.parts, vec![WordPart::Variable { name: "CMD".into(), modifier: None }]);
     assert_eq!(cmd.args.len(), 1);
 }
 
@@ -181,10 +154,8 @@ fn test_command_substitution_as_command() {
     let cmd = get_simple_command(&result.commands[0]);
 
     // Verify the command substitution was parsed as the command name
-    let WordPart::CommandSubstitution {
-        body: SubstitutionBody::Parsed(body),
-        backtick,
-    } = &cmd.name.parts[0]
+    let WordPart::CommandSubstitution { body: SubstitutionBody::Parsed(body), backtick } =
+        &cmd.name.parts[0]
     else {
         panic!("expected command substitution");
     };
@@ -199,10 +170,6 @@ fn test_command_substitution_as_command() {
 
     assert_eq!(cmd.args.len(), 1);
 }
-
-// =============================================================================
-// Backslash Escape Tests
-// =============================================================================
 
 #[test]
 fn test_escaped_parens_in_find_command() {

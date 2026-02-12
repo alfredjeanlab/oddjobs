@@ -6,36 +6,53 @@
 //! This module provides an abstraction layer for managing AI agents (like Claude).
 //! The `AgentAdapter` trait encapsulates all agent-specific logic including:
 //! - Workspace preparation
-//! - Session log parsing
-//! - Background monitoring via file watchers
+//! - Background state monitoring via coop sidecar
+//! - Session transcript retrieval
 //!
 //! # ID Hierarchy
 //!
 //! ```text
 //! workspace_id  - Git worktree path (may outlive job)
 //!      │
-//!      └── agent_id  - Agent instance (UUID, used as --session-id for claude)
-//!               │
-//!               └── session_id  - Internal to AgentAdapter (hidden)
+//!      └── agent_id  - Agent instance (UUID)
 //!
 //! job_id  - Job execution (references workspace)
 //! ```
 
-mod claude;
+pub mod attach_proxy;
+pub(crate) mod coop;
+pub(crate) mod docker;
+pub(crate) mod k8s;
 pub mod log_entry;
-mod watcher;
+pub(crate) mod remote;
+mod router;
 
-pub use claude::{extract_process_name, ClaudeAgentAdapter};
-pub use watcher::{extract_last_assistant_text, find_session_log};
+pub use coop::LocalAdapter;
+pub use docker::DockerAdapter;
+pub use k8s::KubernetesAdapter;
+pub use router::{CoopInfo, RuntimeRouter};
+
+/// Extract the binary basename from a command string.
+///
+/// Handles absolute paths (`/usr/bin/claude` → `claude`), relative paths
+/// (`./claude` → `claude`), and plain names (`claudeless` → `claudeless`).
+/// Falls back to `"claude"` for empty strings.
+pub fn extract_process_name(command: &str) -> String {
+    command
+        .split_whitespace()
+        .next()
+        .and_then(|first| first.rsplit('/').next())
+        .unwrap_or("claude")
+        .to_string()
+}
 
 /// Configuration for reconnecting to an existing agent session
 #[derive(Debug, Clone)]
 pub struct AgentReconnectConfig {
     pub agent_id: AgentId,
-    pub session_id: String,
     pub workspace_path: PathBuf,
     pub process_name: String,
-    /// Owner of this agent (job or agent_run)
+    /// Owner of this agent (job or crew)
     pub owner: OwnerId,
 }
 
@@ -70,7 +87,7 @@ pub enum AgentAdapterError {
 
 /// Configuration for spawning a new agent
 #[derive(Debug, Clone)]
-pub struct AgentSpawnConfig {
+pub struct AgentConfig {
     /// Unique identifier for this agent instance
     pub agent_id: AgentId,
     /// Name of the agent (e.g., "claude")
@@ -92,14 +109,16 @@ pub struct AgentSpawnConfig {
     /// Job ID
     pub job_id: String,
     /// Root of the project
-    pub project_root: PathBuf,
-    /// Adapter-specific session configuration (provider -> config as JSON)
-    pub session_config: std::collections::HashMap<String, serde_json::Value>,
-    /// Owner of this agent (job or agent_run)
+    pub project_path: PathBuf,
+    /// Owner of this agent (job or crew)
     pub owner: OwnerId,
+    /// Whether to resume a previous session (coop handles session discovery)
+    pub resume: bool,
+    /// Container config — when present, route to the container adapter.
+    pub container: Option<oj_core::ContainerConfig>,
 }
 
-impl AgentSpawnConfig {
+impl AgentConfig {
     pub fn new(
         agent_id: AgentId,
         command: impl Into<String>,
@@ -118,49 +137,27 @@ impl AgentSpawnConfig {
             prompt: String::new(),
             job_name: String::new(),
             job_id: String::new(),
-            project_root: workspace_path,
-            session_config: std::collections::HashMap::new(),
+            project_path: workspace_path,
+            resume: false,
+            container: None,
         }
     }
 
-    pub fn agent_name(mut self, v: impl Into<String>) -> Self {
-        self.agent_name = v.into();
-        self
-    }
-    pub fn prompt(mut self, v: impl Into<String>) -> Self {
-        self.prompt = v.into();
-        self
-    }
-    pub fn job_name(mut self, v: impl Into<String>) -> Self {
-        self.job_name = v.into();
-        self
-    }
-    pub fn job_id(mut self, v: impl Into<String>) -> Self {
-        self.job_id = v.into();
-        self
-    }
-    pub fn env(mut self, v: Vec<(String, String)>) -> Self {
-        self.env = v;
-        self
-    }
-    pub fn unset_env(mut self, v: Vec<String>) -> Self {
-        self.unset_env = v;
-        self
-    }
-    pub fn cwd(mut self, v: PathBuf) -> Self {
-        self.cwd = Some(v);
-        self
-    }
-    pub fn project_root(mut self, v: PathBuf) -> Self {
-        self.project_root = v;
-        self
-    }
-    pub fn session_config(
-        mut self,
-        v: std::collections::HashMap<String, serde_json::Value>,
-    ) -> Self {
-        self.session_config = v;
-        self
+    oj_core::setters! {
+        into {
+            agent_name: String,
+            prompt: String,
+            job_name: String,
+            job_id: String,
+        }
+        set {
+            env: Vec<(String, String)>,
+            unset_env: Vec<String>,
+            project_path: PathBuf,
+        }
+        option {
+            cwd: PathBuf,
+        }
     }
 }
 
@@ -169,20 +166,14 @@ impl AgentSpawnConfig {
 pub struct AgentHandle {
     /// Public agent identifier
     pub agent_id: AgentId,
-    /// Session identifier (assigned by the adapter)
-    pub session_id: String,
     /// Path to the agent's workspace
     pub workspace_path: PathBuf,
 }
 
 impl AgentHandle {
     /// Create a new agent handle
-    pub fn new(agent_id: AgentId, session_id: String, workspace_path: PathBuf) -> Self {
-        Self {
-            agent_id,
-            session_id,
-            workspace_path,
-        }
+    pub fn new(agent_id: AgentId, workspace_path: PathBuf) -> Self {
+        Self { agent_id, workspace_path }
     }
 }
 
@@ -200,12 +191,23 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
     /// state changes (detected via file watching).
     async fn spawn(
         &self,
-        config: AgentSpawnConfig,
+        config: AgentConfig,
         event_tx: mpsc::Sender<Event>,
     ) -> Result<AgentHandle, AgentAdapterError>;
 
     /// Send input to an agent
     async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError>;
+
+    /// Send a structured response to an agent prompt (plan, permission).
+    ///
+    /// Default implementation falls back to `send` with the text field.
+    async fn respond(
+        &self,
+        agent_id: &AgentId,
+        response: &oj_core::PromptResponse,
+    ) -> Result<(), AgentAdapterError> {
+        self.send(agent_id, response.text.as_deref().unwrap_or("")).await
+    }
 
     /// Kill an agent
     ///
@@ -214,8 +216,8 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
 
     /// Reconnect to an existing agent session (after daemon restart).
     ///
-    /// Sets up background monitoring without spawning a new session.
-    /// The session must already be alive in tmux.
+    /// Sets up background monitoring without spawning a new process.
+    /// The agent must already be alive.
     async fn reconnect(
         &self,
         config: AgentReconnectConfig,
@@ -228,16 +230,193 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
     /// event channel from `spawn()`.
     async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError>;
 
-    /// Get the current size of the agent's session log file in bytes.
-    ///
-    /// Returns `None` if the log file doesn't exist or can't be read.
-    /// Used by the idle grace timer to detect activity during the grace period.
-    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64>;
-
     /// Extract the last assistant text message from the agent's session log.
     ///
     /// Used to provide context on decisions (idle, dead, prompt, question).
-    async fn last_assistant_message(&self, agent_id: &AgentId) -> Option<String>;
+    async fn last_message(&self, agent_id: &AgentId) -> Option<String>;
+
+    /// Resolve a pending stop gate, allowing the agent to exit on its next attempt.
+    async fn resolve_stop(&self, agent_id: &AgentId);
+
+    /// Check if an agent is alive (session exists and agent process is running).
+    ///
+    /// Returns `false` if the agent is not found or the check fails.
+    async fn is_alive(&self, agent_id: &AgentId) -> bool;
+
+    /// Capture recent output from the agent's terminal.
+    ///
+    /// Returns the last `lines` lines of visible terminal output.
+    async fn capture_output(
+        &self,
+        agent_id: &AgentId,
+        lines: u32,
+    ) -> Result<String, AgentAdapterError>;
+
+    /// Fetch the full session transcript from the agent's coop sidecar.
+    ///
+    /// Returns the complete JSONL transcript content for archival.
+    /// Returns an empty string if the transcript is unavailable.
+    async fn fetch_transcript(&self, agent_id: &AgentId) -> Result<String, AgentAdapterError>;
+
+    /// Fetch cumulative usage metrics from the agent's sidecar.
+    ///
+    /// Returns `None` if the agent is unreachable or has no usage data.
+    async fn fetch_usage(&self, agent_id: &AgentId) -> Option<UsageData>;
+}
+
+/// Cumulative token/cost usage data from an agent session.
+#[derive(Debug, Clone, Default)]
+pub struct UsageData {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub total_cost_usd: f64,
+    pub total_api_ms: u64,
+}
+
+impl UsageData {
+    /// Parse usage data from a coop `/api/v1/session/usage` JSON response.
+    pub(crate) fn from_json(json: &serde_json::Value) -> Self {
+        Self {
+            input_tokens: json.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            output_tokens: json.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            cache_read_tokens: json.get("cache_read_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            cache_write_tokens: json
+                .get("cache_write_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            total_cost_usd: json.get("total_cost_usd").and_then(|v| v.as_f64()).unwrap_or(0.0),
+            total_api_ms: json.get("total_api_ms").and_then(|v| v.as_u64()).unwrap_or(0),
+        }
+    }
+}
+
+/// Map a coop agent state JSON response to an `AgentState`.
+///
+/// Shared by all three adapters (coop, docker, k8s) since they all talk to
+/// the same coop HTTP API.
+pub(crate) fn parse_coop_agent_state(json: &serde_json::Value) -> AgentState {
+    let state_str = json.get("state").and_then(|v| v.as_str()).unwrap_or("unknown");
+    match state_str {
+        "starting" | "working" => AgentState::Working,
+        "idle" | "prompt" => AgentState::WaitingForInput,
+        "error" => {
+            let detail =
+                json.get("error_detail").and_then(|v| v.as_str()).unwrap_or("unknown error");
+            let category = json.get("error_category").and_then(|v| v.as_str());
+            let error = match category {
+                Some("Unauthorized") => oj_core::AgentError::Unauthorized,
+                Some("OutOfCredits") => oj_core::AgentError::OutOfCredits,
+                _ => oj_core::AgentError::Other(detail.to_string()),
+            };
+            AgentState::Failed(error)
+        }
+        "exited" => AgentState::SessionGone,
+        _ => AgentState::Working,
+    }
+}
+
+/// Add `--allow-dangerously-skip-permissions` if skip-permissions is present.
+pub(crate) fn augment_command_for_skip_permissions(command: &str) -> String {
+    if command.contains("--dangerously-skip-permissions")
+        && !command.contains("--allow-dangerously-skip-permissions")
+    {
+        format!("{} --allow-dangerously-skip-permissions", command)
+    } else {
+        command.to_string()
+    }
+}
+
+/// Generate a random bearer token for per-agent auth.
+pub(crate) fn generate_auth_token() -> String {
+    uuid::Uuid::new_v4().simple().to_string()
+}
+
+/// Detect the git remote URL from a project directory.
+pub(crate) async fn detect_git_remote(project_path: &std::path::Path) -> Option<String> {
+    let output = tokio::process::Command::new("git")
+        .args(["remote", "get-url", "origin"])
+        .current_dir(project_path)
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() {
+        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+    None
+}
+
+/// Detect the current git branch of a workspace directory.
+pub(crate) async fn detect_git_branch(workspace_path: &std::path::Path) -> Option<String> {
+    if !workspace_path.exists() {
+        return None;
+    }
+    let output = tokio::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(workspace_path)
+        .output()
+        .await
+        .ok()?;
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() && branch != "HEAD" {
+            return Some(branch);
+        }
+    }
+    None
+}
+
+/// Detect the current git branch of a workspace directory (blocking variant).
+///
+/// Uses `std::process::Command` — suitable for contexts where the workspace
+/// path may not exist yet and blocking is acceptable (e.g., K8s pod spec build).
+pub(crate) fn detect_git_branch_blocking(workspace_path: &std::path::Path) -> Option<String> {
+    if !workspace_path.exists() {
+        return None;
+    }
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(workspace_path)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() && branch != "HEAD" {
+            return Some(branch);
+        }
+    }
+    None
+}
+
+/// Poll a remote coop health endpoint until it responds successfully.
+pub(crate) async fn poll_until_ready(
+    addr: &str,
+    auth_token: &str,
+    poll_ms: u64,
+    max_attempts: usize,
+    label: &str,
+) -> Result<(), AgentAdapterError> {
+    for i in 0..max_attempts {
+        if i > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(poll_ms)).await;
+        }
+        match docker::http::get_authed(addr, "/api/v1/health", auth_token).await {
+            Ok(_) => {
+                tracing::info!(%addr, attempt = i, "{} coop health check succeeded", label);
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+    Err(AgentAdapterError::SpawnFailed(format!(
+        "coop failed to become ready within {}s ({})",
+        (max_attempts as u64 * poll_ms) / 1000,
+        label,
+    )))
 }
 
 #[cfg(test)]

@@ -3,16 +3,13 @@
 
 //! Job identifier and state machine.
 
-use crate::action_tracker::ActionTracker;
+use crate::actions::ActionTracker;
 use crate::clock::Clock;
 use crate::workspace::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fmt;
 use std::path::PathBuf;
 use std::time::Instant;
-
-pub use crate::action_tracker::AgentSignal;
 
 crate::define_id! {
     /// Unique identifier for a job instance.
@@ -52,16 +49,14 @@ impl StepStatus {
     }
 }
 
-impl fmt::Display for StepStatus {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StepStatus::Pending => write!(f, "pending"),
-            StepStatus::Running => write!(f, "running"),
-            StepStatus::Waiting(_) => write!(f, "waiting"),
-            StepStatus::Completed => write!(f, "completed"),
-            StepStatus::Failed => write!(f, "failed"),
-            StepStatus::Suspended => write!(f, "suspended"),
-        }
+crate::simple_display! {
+    StepStatus {
+        Pending => "pending",
+        Running => "running",
+        Waiting(..) => "waiting",
+        Completed => "completed",
+        Failed => "failed",
+        Suspended => "suspended",
     }
 }
 
@@ -101,17 +96,15 @@ impl From<&StepStatus> for StepStatusKind {
     }
 }
 
-impl fmt::Display for StepStatusKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StepStatusKind::Pending => write!(f, "pending"),
-            StepStatusKind::Running => write!(f, "running"),
-            StepStatusKind::Waiting => write!(f, "waiting"),
-            StepStatusKind::Completed => write!(f, "completed"),
-            StepStatusKind::Failed => write!(f, "failed"),
-            StepStatusKind::Suspended => write!(f, "suspended"),
-            StepStatusKind::Orphaned => write!(f, "orphaned"),
-        }
+crate::simple_display! {
+    StepStatusKind {
+        Pending => "pending",
+        Running => "running",
+        Waiting => "waiting",
+        Completed => "completed",
+        Failed => "failed",
+        Suspended => "suspended",
+        Orphaned => "orphaned",
     }
 }
 
@@ -136,14 +129,12 @@ impl From<&StepOutcome> for StepOutcomeKind {
     }
 }
 
-impl fmt::Display for StepOutcomeKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            StepOutcomeKind::Running => write!(f, "running"),
-            StepOutcomeKind::Completed => write!(f, "completed"),
-            StepOutcomeKind::Failed => write!(f, "failed"),
-            StepOutcomeKind::Waiting => write!(f, "waiting"),
-        }
+crate::simple_display! {
+    StepOutcomeKind {
+        Running => "running",
+        Completed => "completed",
+        Failed => "failed",
+        Waiting => "waiting",
     }
 }
 
@@ -172,8 +163,7 @@ pub struct JobConfig {
     pub runbook_hash: String,
     pub cwd: PathBuf,
     pub initial_step: String,
-    pub namespace: String,
-    /// Name of the cron that spawned this job, if any.
+    pub project: String,
     pub cron_name: Option<String>,
 }
 
@@ -192,7 +182,7 @@ impl JobConfig {
             runbook_hash: String::new(),
             cwd: PathBuf::new(),
             initial_step: initial_step.into(),
-            namespace: String::new(),
+            project: String::new(),
             cron_name: None,
         }
     }
@@ -206,35 +196,26 @@ pub struct JobConfigBuilder {
     runbook_hash: String,
     cwd: PathBuf,
     initial_step: String,
-    namespace: String,
+    project: String,
     cron_name: Option<String>,
 }
 
 impl JobConfigBuilder {
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = name.into();
-        self
+    crate::setters! {
+        into {
+            name: String,
+            runbook_hash: String,
+            cwd: PathBuf,
+            project: String,
+        }
+        set {
+            vars: HashMap<String, String>,
+        }
+        option {
+            cron_name: String,
+        }
     }
-    pub fn vars(mut self, vars: HashMap<String, String>) -> Self {
-        self.vars = vars;
-        self
-    }
-    pub fn runbook_hash(mut self, hash: impl Into<String>) -> Self {
-        self.runbook_hash = hash.into();
-        self
-    }
-    pub fn cwd(mut self, cwd: impl Into<PathBuf>) -> Self {
-        self.cwd = cwd.into();
-        self
-    }
-    pub fn namespace(mut self, ns: impl Into<String>) -> Self {
-        self.namespace = ns.into();
-        self
-    }
-    pub fn cron_name(mut self, name: impl Into<String>) -> Self {
-        self.cron_name = Some(name.into());
-        self
-    }
+
     pub fn build(self) -> JobConfig {
         JobConfig {
             id: self.id,
@@ -244,7 +225,7 @@ impl JobConfigBuilder {
             runbook_hash: self.runbook_hash,
             cwd: self.cwd,
             initial_step: self.initial_step,
-            namespace: self.namespace,
+            project: self.project,
             cron_name: self.cron_name,
         }
     }
@@ -261,9 +242,8 @@ pub struct Job {
     pub id: String,
     pub name: String,
     pub kind: String,
-    /// Project namespace this job belongs to
-    #[serde(default)]
-    pub namespace: String,
+    /// Project project this job belongs to
+    pub project: String,
     /// Current step name (from runbook definition)
     pub step: String,
     pub step_status: StepStatus,
@@ -280,16 +260,18 @@ pub struct Job {
     pub workspace_id: Option<WorkspaceId>,
     /// Path to the workspace (derived from workspace_id lookup)
     pub workspace_path: Option<PathBuf>,
-    pub session_id: Option<String>,
     #[serde(skip, default = "Instant::now")]
     pub created_at: Instant,
     pub error: Option<String>,
     /// Action attempt tracking and agent signal state.
     #[serde(flatten)]
-    pub action_tracker: ActionTracker,
+    pub actions: ActionTracker,
     /// True when running an on_cancel cleanup step. Prevents re-cancellation.
     #[serde(default)]
     pub cancelling: bool,
+    /// True when running an on_fail cleanup step. Routes to "failed" on completion.
+    #[serde(default)]
+    pub failing: bool,
     /// True when suspension is in progress. Prevents re-suspension.
     #[serde(default)]
     pub suspending: bool,
@@ -304,10 +286,6 @@ pub struct Job {
     /// Name of the cron that spawned this job, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cron_name: Option<String>,
-    /// Session log file size when idle grace timer was set.
-    /// Used to detect activity during the grace period.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idle_grace_log_size: Option<u64>,
     /// Epoch milliseconds when the last nudge was sent.
     /// Used to suppress auto-resume from our own nudge text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,7 +304,7 @@ impl Job {
             id: config.id,
             name: config.name,
             kind: config.kind,
-            namespace: config.namespace,
+            project: config.project,
             step: config.initial_step.clone(),
             step_status: StepStatus::Pending,
             vars: config.vars,
@@ -334,7 +312,6 @@ impl Job {
             cwd: config.cwd,
             workspace_id: None,
             workspace_path: None,
-            session_id: None,
             created_at: Instant::now(),
             step_started_at: Instant::now(),
             error: None,
@@ -346,15 +323,23 @@ impl Job {
                 agent_id: None,
                 agent_name: None,
             }],
-            action_tracker: ActionTracker::default(),
+            actions: ActionTracker::default(),
             cancelling: false,
+            failing: false,
             suspending: false,
             total_retries: 0,
             step_visits: HashMap::new(),
             cron_name: config.cron_name,
-            idle_grace_log_size: None,
             last_nudge_at: None,
         }
+    }
+
+    /// Directory where the job's agent executes.
+    ///
+    /// Uses the workspace path if the job has a managed worktree,
+    /// otherwise falls back to the original working directory.
+    pub fn execution_dir(&self) -> &std::path::Path {
+        self.workspace_path.as_deref().unwrap_or(&self.cwd)
     }
 
     /// Finalize the most recent step record
@@ -426,38 +411,14 @@ impl Job {
         self
     }
 
-    /// Set the session ID
-    pub fn with_session(mut self, id: String) -> Self {
-        self.session_id = Some(id);
-        self.step_status = StepStatus::Running;
-        self
-    }
-
     /// Increment and return the new attempt count for a given action.
     /// Also tracks cumulative retries (when attempt count > 1).
-    pub fn increment_action_attempt(&mut self, trigger: &str, chain_pos: usize) -> u32 {
-        let count = self
-            .action_tracker
-            .increment_action_attempt(trigger, chain_pos);
+    pub fn increment_attempt(&mut self, trigger: &str, chain_pos: usize) -> u32 {
+        let count = self.actions.increment_attempt(trigger, chain_pos);
         if count > 1 {
             self.total_retries += 1;
         }
         count
-    }
-
-    /// Get current attempt count for a given action
-    pub fn get_action_attempt(&self, trigger: &str, chain_pos: usize) -> u32 {
-        self.action_tracker.get_action_attempt(trigger, chain_pos)
-    }
-
-    /// Reset action attempts (called on success step transitions, not on_fail)
-    pub fn reset_action_attempts(&mut self) {
-        self.action_tracker.reset_action_attempts();
-    }
-
-    /// Clear agent signal (called on step transition)
-    pub fn clear_agent_signal(&mut self) {
-        self.action_tracker.clear_agent_signal();
     }
 
     /// Record a visit to a step. Returns the new visit count.
@@ -473,173 +434,39 @@ impl Job {
     }
 }
 
-/// Builder for `Job` with test defaults. Useful for tests and any context
-/// where you want a `Job` without going through the `JobConfig` + `Clock` path.
-#[cfg(any(test, feature = "test-support"))]
-pub struct JobBuilder {
-    id: String,
-    name: String,
-    kind: String,
-    namespace: String,
-    step: String,
-    step_status: StepStatus,
-    step_history: Vec<StepRecord>,
-    vars: HashMap<String, String>,
-    runbook_hash: String,
-    cwd: PathBuf,
-    workspace_id: Option<WorkspaceId>,
-    workspace_path: Option<PathBuf>,
-    session_id: Option<String>,
-    error: Option<String>,
-    action_tracker: ActionTracker,
-    cancelling: bool,
-    suspending: bool,
-    total_retries: u32,
-    step_visits: HashMap<String, u32>,
-    cron_name: Option<String>,
-    idle_grace_log_size: Option<u64>,
-    last_nudge_at: Option<u64>,
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl Default for JobBuilder {
-    fn default() -> Self {
-        Self {
-            id: "test-1".to_string(),
-            name: "test-job".to_string(),
-            kind: "build".to_string(),
-            namespace: String::new(),
-            step: "execute".to_string(),
-            step_status: StepStatus::Running,
-            step_history: Vec::new(),
-            vars: HashMap::new(),
-            runbook_hash: "testhash".to_string(),
-            cwd: PathBuf::from("/tmp/test"),
-            workspace_id: None,
-            workspace_path: None,
-            session_id: None,
-            error: None,
-            action_tracker: ActionTracker::default(),
-            cancelling: false,
-            suspending: false,
-            total_retries: 0,
-            step_visits: HashMap::new(),
-            cron_name: None,
-            idle_grace_log_size: None,
-            last_nudge_at: None,
+crate::builder! {
+    pub struct JobBuilder => Job {
+        into {
+            id: String = "test-1",
+            name: String = "test-job",
+            kind: String = "build",
+            project: String = "",
+            step: String = "execute",
+            runbook_hash: String = "testhash",
+            cwd: PathBuf = "/tmp/test",
         }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl JobBuilder {
-    pub fn id(mut self, v: impl Into<String>) -> Self {
-        self.id = v.into();
-        self
-    }
-    pub fn name(mut self, v: impl Into<String>) -> Self {
-        self.name = v.into();
-        self
-    }
-    pub fn kind(mut self, v: impl Into<String>) -> Self {
-        self.kind = v.into();
-        self
-    }
-    pub fn namespace(mut self, v: impl Into<String>) -> Self {
-        self.namespace = v.into();
-        self
-    }
-    pub fn step(mut self, v: impl Into<String>) -> Self {
-        self.step = v.into();
-        self
-    }
-    pub fn step_status(mut self, v: StepStatus) -> Self {
-        self.step_status = v;
-        self
-    }
-    pub fn vars(mut self, v: HashMap<String, String>) -> Self {
-        self.vars = v;
-        self
-    }
-    pub fn runbook_hash(mut self, v: impl Into<String>) -> Self {
-        self.runbook_hash = v.into();
-        self
-    }
-    pub fn cwd(mut self, v: impl Into<PathBuf>) -> Self {
-        self.cwd = v.into();
-        self
-    }
-    pub fn workspace_id(mut self, v: WorkspaceId) -> Self {
-        self.workspace_id = Some(v);
-        self
-    }
-    pub fn workspace_path(mut self, v: impl Into<PathBuf>) -> Self {
-        self.workspace_path = Some(v.into());
-        self
-    }
-    pub fn session_id(mut self, v: impl Into<String>) -> Self {
-        self.session_id = Some(v.into());
-        self
-    }
-    pub fn error(mut self, v: impl Into<String>) -> Self {
-        self.error = Some(v.into());
-        self
-    }
-    pub fn cancelling(mut self, v: bool) -> Self {
-        self.cancelling = v;
-        self
-    }
-    pub fn suspending(mut self, v: bool) -> Self {
-        self.suspending = v;
-        self
-    }
-    pub fn total_retries(mut self, v: u32) -> Self {
-        self.total_retries = v;
-        self
-    }
-    pub fn cron_name(mut self, v: impl Into<String>) -> Self {
-        self.cron_name = Some(v.into());
-        self
-    }
-    pub fn step_history(mut self, v: Vec<StepRecord>) -> Self {
-        self.step_history = v;
-        self
-    }
-    pub fn build(self) -> Job {
-        Job {
-            id: self.id,
-            name: self.name,
-            kind: self.kind,
-            namespace: self.namespace,
-            step: self.step,
-            step_status: self.step_status,
-            step_started_at: Instant::now(),
-            step_history: self.step_history,
-            vars: self.vars,
-            runbook_hash: self.runbook_hash,
-            cwd: self.cwd,
-            workspace_id: self.workspace_id,
-            workspace_path: self.workspace_path,
-            session_id: self.session_id,
-            created_at: Instant::now(),
-            error: self.error,
-            action_tracker: self.action_tracker,
-            cancelling: self.cancelling,
-            suspending: self.suspending,
-            total_retries: self.total_retries,
-            step_visits: self.step_visits,
-            cron_name: self.cron_name,
-            idle_grace_log_size: self.idle_grace_log_size,
-            last_nudge_at: self.last_nudge_at,
+        set {
+            step_status: StepStatus = StepStatus::Running,
+            step_history: Vec<StepRecord> = Vec::new(),
+            vars: HashMap<String, String> = HashMap::new(),
+            actions: ActionTracker = ActionTracker::default(),
+            cancelling: bool = false,
+            failing: bool = false,
+            suspending: bool = false,
+            total_retries: u32 = 0,
+            step_visits: HashMap<String, u32> = HashMap::new(),
+            last_nudge_at: Option<u64> = None,
         }
-    }
-}
-
-#[cfg(any(test, feature = "test-support"))]
-impl Job {
-    /// Create a builder with test defaults.
-    pub fn builder() -> JobBuilder {
-        JobBuilder::default()
+        option {
+            workspace_id: WorkspaceId = None,
+            workspace_path: PathBuf = None,
+            error: String = None,
+            cron_name: String = None,
+        }
+        computed {
+            step_started_at: Instant = Instant::now(),
+            created_at: Instant = Instant::now(),
+        }
     }
 }
 

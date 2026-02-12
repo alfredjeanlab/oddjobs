@@ -26,11 +26,6 @@ agent "planner" {
   on_idle = "done"
   on_dead = "done"
 
-  session "tmux" {
-    color = "green"
-    title = "Claude"
-  }
-
   prime = {
     startup = <<-SHELL
       echo '## Reminders'

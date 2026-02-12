@@ -20,73 +20,61 @@ use super::{
 /// Helper: push an item and mark it as Completed.
 fn push_and_mark_completed(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     item_id: &str,
     data: &[(&str, &str)],
-    pushed_at_epoch_ms: u64,
+    pushed_at_ms: u64,
 ) {
-    let data_map = data
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let data_map = data.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     state.lock().apply_event(&Event::QueuePushed {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
         data: data_map,
-        pushed_at_epoch_ms,
-        namespace: namespace.to_string(),
+        pushed_at_ms,
+        project: project.to_string(),
     });
     state.lock().apply_event(&Event::QueueCompleted {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
-        namespace: namespace.to_string(),
+        project: project.to_string(),
     });
 }
 
 /// Helper: push an item and mark it as Dead, with a specific pushed_at timestamp.
 fn push_and_mark_dead_at(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     item_id: &str,
     data: &[(&str, &str)],
-    pushed_at_epoch_ms: u64,
+    pushed_at_ms: u64,
 ) {
-    let data_map = data
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let data_map = data.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     state.lock().apply_event(&Event::QueuePushed {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
         data: data_map,
-        pushed_at_epoch_ms,
-        namespace: namespace.to_string(),
+        pushed_at_ms,
+        project: project.to_string(),
     });
-    state.lock().apply_event(&Event::QueueItemDead {
-        queue_name: queue_name.to_string(),
+    state.lock().apply_event(&Event::QueueDead {
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
-        namespace: namespace.to_string(),
+        project: project.to_string(),
     });
 }
 
 /// Old timestamp: 24 hours ago (well past the 12h threshold).
 fn old_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
         - 24 * 60 * 60 * 1000
 }
 
 /// Recent timestamp: 1 hour ago (within the 12h threshold).
 fn recent_epoch_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64
-        - 1 * 60 * 60 * 1000
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
+        - 60 * 60 * 1000
 }
 
 #[test]
@@ -109,10 +97,7 @@ fn prune_completed_items_older_than_12h() {
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", false, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert_eq!(pruned.len(), 1);
             assert_eq!(pruned[0].item_id, "old-item-1");
             assert_eq!(pruned[0].status, "completed");
@@ -149,10 +134,7 @@ fn prune_skips_recent_completed_items() {
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", false, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert!(pruned.is_empty(), "recent items should not be pruned");
             assert_eq!(skipped, 1);
         }
@@ -183,10 +165,7 @@ fn prune_all_flag_prunes_recent_items() {
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", true, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert_eq!(pruned.len(), 1);
             assert_eq!(pruned[0].item_id, "recent-item-1");
             assert_eq!(skipped, 0);
@@ -206,22 +185,12 @@ fn prune_dead_items() {
     let state = Arc::new(Mutex::new(MaterializedState::default()));
     let ctx = make_ctx(event_bus, Arc::clone(&state));
 
-    push_and_mark_dead_at(
-        &ctx.state,
-        "",
-        "tasks",
-        "dead-item-1",
-        &[("task", "d")],
-        old_epoch_ms(),
-    );
+    push_and_mark_dead_at(&ctx.state, "", "tasks", "dead-item-1", &[("task", "d")], old_epoch_ms());
 
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", false, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert_eq!(pruned.len(), 1);
             assert_eq!(pruned[0].item_id, "dead-item-1");
             assert_eq!(pruned[0].status, "dead");
@@ -248,49 +217,35 @@ fn prune_skips_active_pending_failed_items() {
 
     // Pending item
     ctx.state.lock().apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "pending-1".to_string(),
-        data: [("task".to_string(), "p".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: old_epoch_ms(),
-        namespace: String::new(),
+        data: [("task".to_string(), "p".to_string())].into_iter().collect(),
+        pushed_at_ms: old_epoch_ms(),
+        project: String::new(),
     });
 
     // Active item
     ctx.state.lock().apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-1".to_string(),
-        data: [("task".to_string(), "a".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: old_epoch_ms(),
-        namespace: String::new(),
+        data: [("task".to_string(), "a".to_string())].into_iter().collect(),
+        pushed_at_ms: old_epoch_ms(),
+        project: String::new(),
     });
     ctx.state.lock().apply_event(&Event::QueueTaken {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-1".to_string(),
-        worker_name: "w1".to_string(),
-        namespace: String::new(),
+        worker: "w1".to_string(),
+        project: String::new(),
     });
 
     // Failed item
-    push_and_mark_failed(
-        &ctx.state,
-        "",
-        "tasks",
-        "failed-1",
-        &[("task", "f")],
-        old_epoch_ms(),
-    );
+    push_and_mark_failed(&ctx.state, "", "tasks", "failed-1", &[("task", "f")], old_epoch_ms());
 
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", true, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert!(pruned.is_empty(), "no terminal items to prune");
             assert_eq!(skipped, 3, "pending, active, and failed should be skipped");
         }
@@ -321,10 +276,7 @@ fn prune_dry_run_does_not_emit_events() {
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", false, true).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert_eq!(pruned.len(), 1, "should report items that would be pruned");
             assert_eq!(pruned[0].item_id, "old-item-1");
             assert_eq!(skipped, 0);
@@ -333,11 +285,7 @@ fn prune_dry_run_does_not_emit_events() {
     }
 
     let events = drain_events(&wal);
-    assert!(
-        events.is_empty(),
-        "dry-run should not emit any events, got {:?}",
-        events
-    );
+    assert!(events.is_empty(), "dry-run should not emit any events, got {:?}", events);
 }
 
 #[test]
@@ -351,10 +299,7 @@ fn prune_empty_queue_returns_empty() {
     let result = handle_queue_prune(&ctx, project.path(), "", "tasks", true, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert!(pruned.is_empty());
             assert_eq!(skipped, 0);
         }
@@ -376,38 +321,30 @@ fn prune_works_without_runbook_definition() {
     let ctx = make_ctx(event_bus, Arc::clone(&state));
 
     // Push and complete an item (with old timestamp so it passes the 12h threshold)
-    let data_map = [("task".to_string(), "a".to_string())]
-        .into_iter()
-        .collect();
+    let data_map = [("task".to_string(), "a".to_string())].into_iter().collect();
     ctx.state.lock().apply_event(&Event::QueuePushed {
-        queue_name: "removed-queue".to_string(),
+        queue: "removed-queue".to_string(),
         item_id: "old-item-1".to_string(),
         data: data_map,
-        pushed_at_epoch_ms: old_epoch_ms(),
-        namespace: String::new(),
+        pushed_at_ms: old_epoch_ms(),
+        project: String::new(),
     });
     ctx.state.lock().apply_event(&Event::QueueCompleted {
-        queue_name: "removed-queue".to_string(),
+        queue: "removed-queue".to_string(),
         item_id: "old-item-1".to_string(),
-        namespace: String::new(),
+        project: String::new(),
     });
 
     let result =
         handle_queue_prune(&ctx, project.path(), "", "removed-queue", false, false).unwrap();
 
     match result {
-        Response::QueuesPruned {
-            ref pruned,
-            skipped,
-        } => {
+        Response::QueuesPruned { ref pruned, skipped } => {
             assert_eq!(pruned.len(), 1);
             assert_eq!(pruned[0].item_id, "old-item-1");
             assert_eq!(skipped, 0);
         }
-        other => panic!(
-            "expected QueuesPruned for queue without runbook, got {:?}",
-            other
-        ),
+        other => panic!("expected QueuesPruned for queue without runbook, got {:?}", other),
     }
 
     let events = drain_events(&wal);

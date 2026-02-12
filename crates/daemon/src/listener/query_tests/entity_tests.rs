@@ -41,8 +41,8 @@ fn list_queues_shows_all_namespaces() {
 
     let response = handle_query(
         Query::ListQueues {
-            project_root: temp.path().to_path_buf(),
-            namespace: "project-a".to_string(),
+            project_path: temp.path().to_path_buf(),
+            project: "project-a".to_string(),
         },
         &state,
         &empty_orphans(),
@@ -55,13 +55,13 @@ fn list_queues_shows_all_namespaces() {
             assert_eq!(queues.len(), 2, "should show queues from all namespaces");
 
             let qa = queues.iter().find(|q| q.name == "tasks").unwrap();
-            assert_eq!(qa.namespace, "project-a");
+            assert_eq!(qa.project, "project-a");
             assert_eq!(qa.item_count, 1);
             assert_eq!(qa.last_poll_count, None);
             assert_eq!(qa.last_polled_at_ms, None);
 
             let qb = queues.iter().find(|q| q.name == "builds").unwrap();
-            assert_eq!(qb.namespace, "project-b");
+            assert_eq!(qb.project, "project-b");
             assert_eq!(qb.item_count, 2);
             assert_eq!(qb.workers, vec!["worker1".to_string()]);
             assert_eq!(qb.last_poll_count, None);
@@ -88,17 +88,14 @@ fn list_queues_includes_poll_meta() {
         );
         s.poll_meta.insert(
             "myproj/tasks".to_string(),
-            oj_storage::QueuePollMeta {
-                last_item_count: 5,
-                last_polled_at_ms: 1700000000000,
-            },
+            oj_storage::QueuePollMeta { last_item_count: 5, last_polled_at_ms: 1700000000000 },
         );
     }
 
     let response = handle_query(
         Query::ListQueues {
-            project_root: temp.path().to_path_buf(),
-            namespace: "myproj".to_string(),
+            project_path: temp.path().to_path_buf(),
+            project: "myproj".to_string(),
         },
         &state,
         &empty_orphans(),
@@ -119,34 +116,58 @@ fn list_queues_includes_poll_meta() {
     }
 }
 
-#[test]
-fn get_agent_returns_detail_by_exact_id() {
+#[yare::parameterized(
+    by_exact_id = {
+        "pipe123", "my-job", "myproject", "build",
+        StepStatus::Running, StepOutcome::Running,
+        "pipe123-build", "pipe123-build", "running", None
+    },
+    by_prefix = {
+        "pipe999", "test-pipe", "", "deploy",
+        StepStatus::Completed, StepOutcome::Completed,
+        "pipe999-deploy", "pipe999-dep", "completed", None
+    },
+    failed = {
+        "pipefail", "fail-pipe", "proj", "check",
+        StepStatus::Completed, StepOutcome::Failed("compilation error".to_string()),
+        "pipefail-check", "pipefail-check", "failed", Some("compilation error")
+    },
+)]
+fn get_agent_found(
+    job_id: &str,
+    job_name: &str,
+    project: &str,
+    step: &str,
+    step_status: StepStatus,
+    step_outcome: StepOutcome,
+    agent_id: &str,
+    query: &str,
+    expected_status: &str,
+    expected_error: Option<&str>,
+) {
     let state = empty_state();
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
-    let agent_id = "pipe123-build";
     {
         let mut s = state.lock();
-        let mut p = make_job(
-            "pipe123",
-            "my-job",
-            "myproject",
-            "build",
-            StepStatus::Running,
-            StepOutcome::Running,
-            Some(agent_id),
-            1000,
+        s.jobs.insert(
+            job_id.to_string(),
+            make_job(
+                job_id,
+                job_name,
+                project,
+                step,
+                step_status,
+                step_outcome,
+                Some(agent_id),
+                1000,
+            ),
         );
-        p.workspace_path = Some(std::path::PathBuf::from("/tmp/ws"));
-        p.session_id = Some("sess-1".to_string());
-        s.jobs.insert("pipe123".to_string(), p);
     }
 
     let response = handle_query(
-        Query::GetAgent {
-            agent_id: agent_id.to_string(),
-        },
+        Query::GetAgent { agent_id: query.to_string() },
         &state,
         &empty_orphans(),
         temp.path(),
@@ -157,60 +178,15 @@ fn get_agent_returns_detail_by_exact_id() {
         Response::Agent { agent } => {
             let a = agent.expect("agent should be found");
             assert_eq!(a.agent_id, agent_id);
-            assert_eq!(a.job_id, "pipe123");
-            assert_eq!(a.job_name, "my-job");
-            assert_eq!(a.step_name, "build");
-            assert_eq!(a.namespace, Some("myproject".to_string()));
-            assert_eq!(a.status, "running");
-            assert_eq!(a.workspace_path, Some(std::path::PathBuf::from("/tmp/ws")));
-            assert_eq!(a.session_id, Some("sess-1".to_string()));
+            assert_eq!(a.job_id, job_id);
+            assert_eq!(a.job_name, job_name);
+            assert_eq!(a.step_name, step);
+            assert_eq!(a.status, expected_status);
             assert_eq!(a.started_at_ms, 1000);
-            assert!(a.error.is_none());
-        }
-        other => panic!("unexpected response: {:?}", other),
-    }
-}
-
-#[test]
-fn get_agent_returns_detail_by_prefix() {
-    let state = empty_state();
-    let temp = tempdir().unwrap();
-    let start = Instant::now();
-
-    {
-        let mut s = state.lock();
-        s.jobs.insert(
-            "pipe999".to_string(),
-            make_job(
-                "pipe999",
-                "test-pipe",
-                "",
-                "deploy",
-                StepStatus::Completed,
-                StepOutcome::Completed,
-                Some("pipe999-deploy"),
-                2000,
-            ),
-        );
-    }
-
-    let response = handle_query(
-        Query::GetAgent {
-            agent_id: "pipe999-dep".to_string(),
-        },
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
-
-    match response {
-        Response::Agent { agent } => {
-            let a = agent.expect("agent should be found by prefix");
-            assert_eq!(a.agent_id, "pipe999-deploy");
-            assert_eq!(a.job_name, "test-pipe");
-            assert_eq!(a.step_name, "deploy");
-            assert_eq!(a.status, "completed");
+            assert_eq!(a.error.as_deref(), expected_error);
+            if !project.is_empty() {
+                assert_eq!(a.project, project.to_string());
+            }
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -223,9 +199,7 @@ fn get_agent_returns_none_when_not_found() {
     let start = Instant::now();
 
     let response = handle_query(
-        Query::GetAgent {
-            agent_id: "nonexistent".to_string(),
-        },
+        Query::GetAgent { agent_id: "nonexistent".to_string() },
         &state,
         &empty_orphans(),
         temp.path(),
@@ -235,50 +209,6 @@ fn get_agent_returns_none_when_not_found() {
     match response {
         Response::Agent { agent } => {
             assert!(agent.is_none(), "should return None for unknown agent");
-        }
-        other => panic!("unexpected response: {:?}", other),
-    }
-}
-
-#[test]
-fn get_agent_includes_error_for_failed_agent() {
-    let state = empty_state();
-    let temp = tempdir().unwrap();
-    let start = Instant::now();
-
-    {
-        let mut s = state.lock();
-        s.jobs.insert(
-            "pipefail".to_string(),
-            make_job(
-                "pipefail",
-                "fail-pipe",
-                "proj",
-                "check",
-                StepStatus::Completed,
-                StepOutcome::Failed("compilation error".to_string()),
-                Some("pipefail-check"),
-                3000,
-            ),
-        );
-    }
-
-    let response = handle_query(
-        Query::GetAgent {
-            agent_id: "pipefail-check".to_string(),
-        },
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
-
-    match response {
-        Response::Agent { agent } => {
-            let a = agent.expect("failed agent should be found");
-            assert_eq!(a.status, "failed");
-            assert_eq!(a.error, Some("compilation error".to_string()));
-            assert!(a.exit_reason.as_ref().unwrap().starts_with("failed"));
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -307,18 +237,13 @@ fn list_decisions_returns_most_recent_first() {
             ),
         );
         // Insert decisions with different timestamps
-        s.decisions
-            .insert("d-old".to_string(), make_decision("d-old", "p1", 1000));
-        s.decisions
-            .insert("d-mid".to_string(), make_decision("d-mid", "p1", 2000));
-        s.decisions
-            .insert("d-new".to_string(), make_decision("d-new", "p1", 3000));
+        s.decisions.insert("d-old".to_string(), make_decision("d-old", "p1", 1000));
+        s.decisions.insert("d-mid".to_string(), make_decision("d-mid", "p1", 2000));
+        s.decisions.insert("d-new".to_string(), make_decision("d-new", "p1", 3000));
     }
 
     let response = handle_query(
-        Query::ListDecisions {
-            namespace: "oddjobs".to_string(),
-        },
+        Query::ListDecisions { project: "oddjobs".to_string() },
         &state,
         &empty_orphans(),
         temp.path(),

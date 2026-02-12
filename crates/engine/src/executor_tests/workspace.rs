@@ -16,7 +16,7 @@ async fn create_folder_workspace() {
         .execute(Effect::CreateWorkspace {
             workspace_id: WorkspaceId::new("ws-folder-1"),
             path: tmp.clone(),
-            owner: Some(oj_core::OwnerId::Job(oj_core::JobId::new("job-1"))),
+            owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-1")),
             workspace_type: Some("folder".to_string()),
             repo_root: None,
             branch: None,
@@ -68,7 +68,7 @@ async fn create_folder_workspace_none_type() {
         .execute(Effect::CreateWorkspace {
             workspace_id: WorkspaceId::new("ws-none-type"),
             path: tmp.clone(),
-            owner: None,
+            owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-none-type")),
             workspace_type: None,
             repo_root: None,
             branch: None,
@@ -108,7 +108,7 @@ async fn create_workspace_failure_sends_failed_event() {
         .execute(Effect::CreateWorkspace {
             workspace_id: WorkspaceId::new("ws-fail-1"),
             path: tmp.join("workspace"),
-            owner: Some(oj_core::OwnerId::Job(oj_core::JobId::new("job-fail"))),
+            owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-fail")),
             workspace_type: Some("worktree".to_string()),
             repo_root: Some(tmp.join("nonexistent-repo")),
             branch: Some("test-branch".to_string()),
@@ -155,7 +155,7 @@ async fn delete_workspace_removes_plain_directory() {
                 id: "ws-plain".to_string(),
                 path: tmp.clone(),
                 branch: None,
-                owner: None,
+                owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-plain")),
                 status: oj_core::WorkspaceStatus::Ready,
                 workspace_type: oj_storage::WorkspaceType::Folder,
                 created_at_ms: 0,
@@ -165,9 +165,7 @@ async fn delete_workspace_removes_plain_directory() {
 
     let result = harness
         .executor
-        .execute(Effect::DeleteWorkspace {
-            workspace_id: WorkspaceId::new("ws-plain"),
-        })
+        .execute(Effect::DeleteWorkspace { workspace_id: WorkspaceId::new("ws-plain") })
         .await;
 
     // Deferred: returns Ok(None) immediately
@@ -242,7 +240,7 @@ async fn delete_workspace_removes_git_worktree() {
                 id: "ws-wt".to_string(),
                 path: wt_dir.clone(),
                 branch: None,
-                owner: None,
+                owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-wt")),
                 status: oj_core::WorkspaceStatus::Ready,
                 workspace_type: oj_storage::WorkspaceType::Folder,
                 created_at_ms: 0,
@@ -252,9 +250,7 @@ async fn delete_workspace_removes_git_worktree() {
 
     let result = harness
         .executor
-        .execute(Effect::DeleteWorkspace {
-            workspace_id: WorkspaceId::new("ws-wt"),
-        })
+        .execute(Effect::DeleteWorkspace { workspace_id: WorkspaceId::new("ws-wt") })
         .await;
 
     // Deferred: returns Ok(None) immediately
@@ -284,11 +280,7 @@ async fn delete_workspace_removes_git_worktree() {
     let output = String::from_utf8_lossy(&list.stdout);
     // Should only have the main repo worktree, not the deleted one
     let lines: Vec<&str> = output.lines().collect();
-    assert_eq!(
-        lines.len(),
-        1,
-        "should only have main worktree listed, got: {output}"
-    );
+    assert_eq!(lines.len(), 1, "should only have main worktree listed, got: {output}");
 
     // Cleanup
     let _ = std::fs::remove_dir_all(&base);
@@ -302,9 +294,7 @@ async fn delete_workspace_not_found_returns_error() {
 
     let result = harness
         .executor
-        .execute(Effect::DeleteWorkspace {
-            workspace_id: WorkspaceId::new("nonexistent-ws"),
-        })
+        .execute(Effect::DeleteWorkspace { workspace_id: WorkspaceId::new("nonexistent-ws") })
         .await;
 
     assert!(result.is_err());
@@ -333,7 +323,7 @@ async fn delete_workspace_already_removed_directory() {
                 id: "ws-gone".to_string(),
                 path: nonexistent_path,
                 branch: None,
-                owner: None,
+                owner: oj_core::OwnerId::Job(oj_core::JobId::new("job-gone")),
                 status: oj_core::WorkspaceStatus::Ready,
                 workspace_type: oj_storage::WorkspaceType::Folder,
                 created_at_ms: 0,
@@ -344,9 +334,7 @@ async fn delete_workspace_already_removed_directory() {
     // Should succeed even if the directory doesn't exist
     let result = harness
         .executor
-        .execute(Effect::DeleteWorkspace {
-            workspace_id: WorkspaceId::new("ws-gone"),
-        })
+        .execute(Effect::DeleteWorkspace { workspace_id: WorkspaceId::new("ws-gone") })
         .await;
 
     // Deferred: returns Ok(None) immediately

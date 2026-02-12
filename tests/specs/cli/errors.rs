@@ -26,10 +26,7 @@ fn run_missing_args_shows_error() {
 
     // Runbook defines: args = "<name> <prompt>"
     // Running without args should error
-    temp.oj()
-        .args(&["run", "build"])
-        .fails()
-        .stderr_has("missing required argument: <name>");
+    temp.oj().args(&["run", "build"]).fails().stderr_has("missing required argument: <name>");
 }
 
 #[test]

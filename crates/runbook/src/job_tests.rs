@@ -12,7 +12,8 @@ fn sample_job() -> JobDef {
         defaults: HashMap::new(),
         locals: HashMap::new(),
         cwd: None,
-        workspace: None,
+        source: None,
+        container: None,
         on_done: None,
         on_fail: None,
         on_cancel: None,
@@ -27,26 +28,16 @@ fn sample_job() -> JobDef {
             },
             StepDef {
                 name: "plan".to_string(),
-                run: RunDirective::Agent {
-                    agent: "planner".to_string(),
-                    attach: None,
-                },
+                run: RunDirective::Agent { agent: "planner".to_string(), attach: None },
                 on_done: None,
                 on_fail: None,
                 on_cancel: None,
             },
             StepDef {
                 name: "execute".to_string(),
-                run: RunDirective::Agent {
-                    agent: "executor".to_string(),
-                    attach: None,
-                },
-                on_done: Some(StepTransition {
-                    step: "done".to_string(),
-                }),
-                on_fail: Some(StepTransition {
-                    step: "failed".to_string(),
-                }),
+                run: RunDirective::Agent { agent: "executor".to_string(), attach: None },
+                on_done: Some(StepTransition { step: "done".to_string() }),
+                on_fail: Some(StepTransition { step: "failed".to_string() }),
                 on_cancel: None,
             },
             StepDef {
@@ -89,13 +80,11 @@ fn step_is_agent() {
     assert_eq!(p.get_step("plan").unwrap().agent_name(), Some("planner"));
 }
 
-#[test]
-fn parse_toml_job_on_done_on_fail() {
-    let toml = r#"
+const ON_DONE_FAIL_TOML: &str = r#"
 [job.deploy]
 vars  = ["name"]
-on_done = "teardown"
-on_fail = "cleanup"
+on_done = { step = "teardown" }
+on_fail = { step = "cleanup" }
 
 [[job.deploy.step]]
 name = "init"
@@ -109,22 +98,12 @@ run = "echo teardown"
 name = "cleanup"
 run = "echo cleanup"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
-    let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.on_done.as_ref().map(|t| t.step_name()),
-        Some("teardown")
-    );
-    assert_eq!(job.on_fail.as_ref().map(|t| t.step_name()), Some("cleanup"));
-}
 
-#[test]
-fn parse_hcl_job_on_done_on_fail() {
-    let hcl = r#"
+const ON_DONE_FAIL_HCL: &str = r#"
 job "deploy" {
     vars  = ["name"]
-    on_done = "teardown"
-    on_fail = "cleanup"
+    on_done = { step = "teardown" }
+    on_fail = { step = "cleanup" }
 
     step "init" {
         run = "echo init"
@@ -139,18 +118,19 @@ job "deploy" {
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+
+#[yare::parameterized(
+    toml = { ON_DONE_FAIL_TOML, Format::Toml },
+    hcl  = { ON_DONE_FAIL_HCL,  Format::Hcl },
+)]
+fn parse_job_on_done_on_fail(input: &str, fmt: Format) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
     let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.on_done.as_ref().map(|t| t.step_name()),
-        Some("teardown")
-    );
+    assert_eq!(job.on_done.as_ref().map(|t| t.step_name()), Some("teardown"));
     assert_eq!(job.on_fail.as_ref().map(|t| t.step_name()), Some("cleanup"));
 }
 
-#[test]
-fn parse_toml_structured_step_transition() {
-    let toml = r#"
+const STEP_TRANSITION_TOML: &str = r#"
 [job.deploy]
 vars = ["name"]
 
@@ -165,15 +145,8 @@ step = "next"
 name = "next"
 run = "echo next"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
-    let job = runbook.get_job("deploy").unwrap();
-    let init = job.get_step("init").unwrap();
-    assert_eq!(init.on_done.as_ref().map(|t| t.step_name()), Some("next"));
-}
 
-#[test]
-fn parse_hcl_structured_step_transition() {
-    let hcl = r#"
+const STEP_TRANSITION_HCL: &str = r#"
 job "deploy" {
     vars = ["name"]
 
@@ -187,7 +160,13 @@ job "deploy" {
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+
+#[yare::parameterized(
+    toml = { STEP_TRANSITION_TOML, Format::Toml },
+    hcl  = { STEP_TRANSITION_HCL,  Format::Hcl },
+)]
+fn parse_structured_step_transition(input: &str, fmt: Format) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
     let job = runbook.get_job("deploy").unwrap();
     let init = job.get_step("init").unwrap();
     assert_eq!(init.on_done.as_ref().map(|t| t.step_name()), Some("next"));
@@ -209,9 +188,7 @@ run = "echo init"
     assert!(job.on_fail.is_none());
 }
 
-#[test]
-fn parse_toml_job_notify() {
-    let toml = r#"
+const NOTIFY_TOML: &str = r#"
 [job.deploy]
 vars  = ["env"]
 
@@ -224,25 +201,8 @@ on_fail  = "Deploy failed: ${var.env}"
 name = "init"
 run = "echo init"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
-    let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.notify.on_start.as_deref(),
-        Some("Deploy started: ${var.env}")
-    );
-    assert_eq!(
-        job.notify.on_done.as_deref(),
-        Some("Deploy complete: ${var.env}")
-    );
-    assert_eq!(
-        job.notify.on_fail.as_deref(),
-        Some("Deploy failed: ${var.env}")
-    );
-}
 
-#[test]
-fn parse_hcl_job_notify() {
-    let hcl = r#"
+const NOTIFY_HCL: &str = r#"
 job "deploy" {
     vars = ["env"]
 
@@ -257,20 +217,17 @@ job "deploy" {
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+
+#[yare::parameterized(
+    toml = { NOTIFY_TOML, Format::Toml },
+    hcl  = { NOTIFY_HCL,  Format::Hcl },
+)]
+fn parse_job_notify(input: &str, fmt: Format) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
     let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.notify.on_start.as_deref(),
-        Some("Deploy started: ${var.env}")
-    );
-    assert_eq!(
-        job.notify.on_done.as_deref(),
-        Some("Deploy complete: ${var.env}")
-    );
-    assert_eq!(
-        job.notify.on_fail.as_deref(),
-        Some("Deploy failed: ${var.env}")
-    );
+    assert_eq!(job.notify.on_start.as_deref(), Some("Deploy started: ${var.env}"));
+    assert_eq!(job.notify.on_done.as_deref(), Some("Deploy complete: ${var.env}"));
+    assert_eq!(job.notify.on_fail.as_deref(), Some("Deploy failed: ${var.env}"));
 }
 
 #[test]
@@ -330,7 +287,7 @@ job "build" {
 
     locals {
         repo   = "$(git rev-parse --show-toplevel)"
-        branch = "feature/${var.name}-${workspace.nonce}"
+        branch = "feature/${var.name}-${source.nonce}"
         title  = "feat: ${var.name}"
     }
 
@@ -342,20 +299,15 @@ job "build" {
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     let job = runbook.get_job("build").unwrap();
     assert_eq!(job.locals.len(), 3);
-    assert_eq!(
-        job.locals.get("repo").unwrap(),
-        "$(git rev-parse --show-toplevel)"
-    );
-    assert_eq!(
-        job.locals.get("branch").unwrap(),
-        "feature/${var.name}-${workspace.nonce}"
-    );
+    assert_eq!(job.locals.get("repo").unwrap(), "$(git rev-parse --show-toplevel)");
+    assert_eq!(job.locals.get("branch").unwrap(), "feature/${var.name}-${source.nonce}");
     assert_eq!(job.locals.get("title").unwrap(), "feat: ${var.name}");
 }
 
 #[test]
 fn parse_toml_job_locals() {
-    let toml = r#"
+    let runbook = parse_runbook(
+        r#"
 [job.build]
 vars = ["name"]
 
@@ -366,14 +318,12 @@ branch = "feature/${var.name}"
 [[job.build.step]]
 name = "init"
 run  = "echo init"
-"#;
-    let runbook = parse_runbook(toml).unwrap();
+"#,
+    )
+    .unwrap();
     let job = runbook.get_job("build").unwrap();
     assert_eq!(job.locals.len(), 2);
-    assert_eq!(
-        job.locals.get("repo").unwrap(),
-        "$(git rev-parse --show-toplevel)"
-    );
+    assert_eq!(job.locals.get("repo").unwrap(), "$(git rev-parse --show-toplevel)");
     assert_eq!(job.locals.get("branch").unwrap(), "feature/${var.name}");
 }
 
@@ -392,17 +342,15 @@ run = "echo init"
     assert!(job.locals.is_empty());
 }
 
-#[test]
-fn parse_toml_job_on_cancel() {
-    let toml = r#"
+const ON_CANCEL_TOML: &str = r#"
 [job.deploy]
 vars  = ["name"]
-on_cancel = "cleanup"
+on_cancel = { step = "cleanup" }
 
 [[job.deploy.step]]
 name = "init"
 run = "echo init"
-on_cancel = "teardown"
+on_cancel = { step = "teardown" }
 
 [[job.deploy.step]]
 name = "teardown"
@@ -412,29 +360,15 @@ run = "echo teardown"
 name = "cleanup"
 run = "echo cleanup"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
-    let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.on_cancel.as_ref().map(|t| t.step_name()),
-        Some("cleanup")
-    );
-    let init = job.get_step("init").unwrap();
-    assert_eq!(
-        init.on_cancel.as_ref().map(|t| t.step_name()),
-        Some("teardown")
-    );
-}
 
-#[test]
-fn parse_hcl_job_on_cancel() {
-    let hcl = r#"
+const ON_CANCEL_HCL: &str = r#"
 job "deploy" {
     vars  = ["name"]
-    on_cancel = "cleanup"
+    on_cancel = { step = "cleanup" }
 
     step "init" {
         run       = "echo init"
-        on_cancel = "teardown"
+        on_cancel = { step = "teardown" }
     }
 
     step "teardown" {
@@ -446,17 +380,17 @@ job "deploy" {
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
+
+#[yare::parameterized(
+    toml = { ON_CANCEL_TOML, Format::Toml },
+    hcl  = { ON_CANCEL_HCL,  Format::Hcl },
+)]
+fn parse_job_on_cancel(input: &str, fmt: Format) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
     let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(
-        job.on_cancel.as_ref().map(|t| t.step_name()),
-        Some("cleanup")
-    );
+    assert_eq!(job.on_cancel.as_ref().map(|t| t.step_name()), Some("cleanup"));
     let init = job.get_step("init").unwrap();
-    assert_eq!(
-        init.on_cancel.as_ref().map(|t| t.step_name()),
-        Some("teardown")
-    );
+    assert_eq!(init.on_cancel.as_ref().map(|t| t.step_name()), Some("teardown"));
 }
 
 #[test]
@@ -476,9 +410,7 @@ run = "echo init"
     assert!(init.on_cancel.is_none());
 }
 
-#[test]
-fn parse_hcl_job_name_template() {
-    let hcl = r#"
+const NAME_TEMPLATE_HCL: &str = r#"
 job "fix" {
     name = "${var.bug.title}"
     vars = ["bug"]
@@ -488,32 +420,8 @@ job "fix" {
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let job = runbook.get_job("fix").unwrap();
-    assert_eq!(job.kind, "fix");
-    assert_eq!(job.name.as_deref(), Some("${var.bug.title}"));
-}
 
-#[test]
-fn parse_job_without_name_template() {
-    let hcl = r#"
-job "build" {
-    vars = ["name"]
-
-    step "init" {
-        run = "echo init"
-    }
-}
-"#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let job = runbook.get_job("build").unwrap();
-    assert_eq!(job.kind, "build");
-    assert!(job.name.is_none());
-}
-
-#[test]
-fn parse_toml_job_name_template() {
-    let toml = r#"
+const NAME_TEMPLATE_TOML: &str = r#"
 [job.deploy]
 name = "${var.env}"
 vars = ["env"]
@@ -522,77 +430,98 @@ vars = ["env"]
 name = "init"
 run = "echo init"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
-    let job = runbook.get_job("deploy").unwrap();
-    assert_eq!(job.kind, "deploy");
-    assert_eq!(job.name.as_deref(), Some("${var.env}"));
+
+#[yare::parameterized(
+    hcl  = { NAME_TEMPLATE_HCL,  Format::Hcl,  "fix",    "${var.bug.title}" },
+    toml = { NAME_TEMPLATE_TOML, Format::Toml,  "deploy", "${var.env}" },
+)]
+fn parse_job_name_template(input: &str, fmt: Format, kind: &str, name_tmpl: &str) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
+    let job = runbook.get_job(kind).unwrap();
+    assert_eq!(job.kind, kind);
+    assert_eq!(job.name.as_deref(), Some(name_tmpl));
 }
 
 #[test]
-fn parse_hcl_workspace_folder() {
-    let hcl = r#"
+fn parse_job_without_name_template() {
+    let runbook = parse_runbook_with_format(
+        r#"
+job "build" {
+    vars = ["name"]
+
+    step "init" {
+        run = "echo init"
+    }
+}
+"#,
+        Format::Hcl,
+    )
+    .unwrap();
+    let job = runbook.get_job("build").unwrap();
+    assert_eq!(job.kind, "build");
+    assert!(job.name.is_none());
+}
+
+const SOURCE_FOLDER_HCL: &str = r#"
 job "test" {
     vars = ["name"]
-    workspace = "folder"
+    source = "folder"
 
     step "init" {
         run = "echo init"
     }
 }
 "#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let job = runbook.get_job("test").unwrap();
-    assert_eq!(
-        job.workspace,
-        Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
-    );
-    assert!(!job.workspace.as_ref().unwrap().is_git_worktree());
-}
 
-#[test]
-fn parse_hcl_workspace_git_worktree() {
-    let hcl = r#"
-job "test" {
-    vars = ["name"]
-
-    workspace {
-        git = "worktree"
-    }
-
-    step "init" {
-        run = "echo init"
-    }
-}
-"#;
-    let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
-    let job = runbook.get_job("test").unwrap();
-    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
-    assert_eq!(
-        job.workspace,
-        Some(WorkspaceConfig::Block(WorkspaceBlock {
-            git: GitWorkspaceMode::Worktree,
-            branch: None,
-            from_ref: None,
-        }))
-    );
-}
-
-#[test]
-fn parse_toml_workspace_folder() {
-    let toml = r#"
+const SOURCE_FOLDER_TOML: &str = r#"
 [job.test]
 vars = ["name"]
-workspace = "folder"
+source = "folder"
 
 [[job.test.step]]
 name = "init"
 run = "echo init"
 "#;
-    let runbook = parse_runbook(toml).unwrap();
+
+#[yare::parameterized(
+    hcl  = { SOURCE_FOLDER_HCL,  Format::Hcl },
+    toml = { SOURCE_FOLDER_TOML, Format::Toml },
+)]
+fn parse_source_folder(input: &str, fmt: Format) {
+    let runbook = parse_runbook_with_format(input, fmt).unwrap();
     let job = runbook.get_job("test").unwrap();
+    assert_eq!(job.source, Some(WorkspaceConfig::Simple(WorkspaceType::Folder)));
+    assert!(!job.source.as_ref().unwrap().is_git_worktree());
+}
+
+#[test]
+fn parse_hcl_source_git_true() {
+    let runbook = parse_runbook_with_format(
+        r#"
+job "test" {
+    vars = ["name"]
+
+    source {
+        git = true
+    }
+
+    step "init" {
+        run = "echo init"
+    }
+}
+"#,
+        Format::Hcl,
+    )
+    .unwrap();
+    let job = runbook.get_job("test").unwrap();
+    assert!(job.source.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        job.workspace,
-        Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
+        job.source,
+        Some(WorkspaceConfig::Block(WorkspaceBlock {
+            git: GitWorkspaceMode::Worktree,
+            branch: None,
+            from_ref: None,
+        }))
     );
 }
 
@@ -610,13 +539,13 @@ fn workspace_config_is_git_worktree() {
 }
 
 #[test]
-fn parse_hcl_workspace_git_worktree_with_branch() {
+fn parse_hcl_source_git_with_branch() {
     let hcl = r#"
 job "test" {
     vars = ["name"]
 
-    workspace {
-        git    = "worktree"
+    source {
+        git    = true
         branch = "feat/${var.name}"
     }
 
@@ -627,9 +556,9 @@ job "test" {
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     let job = runbook.get_job("test").unwrap();
-    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
+    assert!(job.source.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        job.workspace,
+        job.source,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: Some("feat/${var.name}".to_string()),
@@ -639,13 +568,13 @@ job "test" {
 }
 
 #[test]
-fn parse_hcl_workspace_git_worktree_with_ref() {
+fn parse_hcl_source_git_with_ref() {
     let hcl = r#"
 job "test" {
     vars = ["name"]
 
-    workspace {
-        git = "worktree"
+    source {
+        git = true
         ref = "origin/main"
     }
 
@@ -656,9 +585,9 @@ job "test" {
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     let job = runbook.get_job("test").unwrap();
-    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
+    assert!(job.source.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        job.workspace,
+        job.source,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
             branch: None,
@@ -668,14 +597,14 @@ job "test" {
 }
 
 #[test]
-fn parse_hcl_workspace_git_worktree_with_branch_and_ref() {
+fn parse_hcl_source_git_with_branch_and_ref() {
     let hcl = r#"
 job "test" {
     vars = ["name"]
 
-    workspace {
-        git    = "worktree"
-        branch = "feat/${var.name}-${workspace.nonce}"
+    source {
+        git    = true
+        branch = "feat/${var.name}-${source.nonce}"
         ref    = "origin/main"
     }
 
@@ -686,12 +615,12 @@ job "test" {
 "#;
     let runbook = parse_runbook_with_format(hcl, Format::Hcl).unwrap();
     let job = runbook.get_job("test").unwrap();
-    assert!(job.workspace.as_ref().unwrap().is_git_worktree());
+    assert!(job.source.as_ref().unwrap().is_git_worktree());
     assert_eq!(
-        job.workspace,
+        job.source,
         Some(WorkspaceConfig::Block(WorkspaceBlock {
             git: GitWorkspaceMode::Worktree,
-            branch: Some("feat/${var.name}-${workspace.nonce}".to_string()),
+            branch: Some("feat/${var.name}-${source.nonce}".to_string()),
             from_ref: Some("origin/main".to_string()),
         }))
     );

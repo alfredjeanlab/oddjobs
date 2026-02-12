@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 /// Known variable scope prefixes.
-const SCOPE_PREFIXES: &[&str] = &["var.", "invoke.", "workspace.", "local.", "args."];
+const SCOPE_PREFIXES: &[&str] = &["var.", "invoke.", "source.", "local.", "args."];
 
 /// Returns true if `key` already has a recognized scope prefix.
 fn has_scope_prefix(key: &str) -> bool {
@@ -15,8 +15,8 @@ fn has_scope_prefix(key: &str) -> bool {
 
 /// Namespace bare keys under the `var.` prefix.
 ///
-/// Keys that already carry a scope prefix (`var.`, `invoke.`, `workspace.`,
-/// `local.`, `args.`, `item.`) are kept as-is to avoid double-prefixing.
+/// Keys that already carry a scope prefix (`var.`, `invoke.`, `source.`,
+/// `local.`, `args.`) are kept as-is to avoid double-prefixing.
 pub fn namespace_vars(input: &HashMap<String, String>) -> HashMap<String, String> {
     input
         .iter()

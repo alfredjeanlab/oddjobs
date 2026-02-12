@@ -23,14 +23,8 @@ fn ansi_constant(constant: &str, expected: &str, expected_len: usize) {
 fn tty_wraps_with_cursor_home_and_clear() {
     let content = "oj daemon: running 2m\n";
     let frame = render_frame(content, true);
-    assert!(
-        frame.starts_with(CURSOR_HOME),
-        "TTY frame must start with cursor-home sequence"
-    );
-    assert!(
-        frame.ends_with(CLEAR_TO_END),
-        "TTY frame must end with clear-to-end sequence"
-    );
+    assert!(frame.starts_with(CURSOR_HOME), "TTY frame must start with cursor-home sequence");
+    assert!(frame.ends_with(CLEAR_TO_END), "TTY frame must end with clear-to-end sequence");
     let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
     let expected = content.replace('\n', &format!("{CLEAR_TO_EOL}\n"));
     assert_eq!(inner, expected);
@@ -41,10 +35,7 @@ fn non_tty_no_escape_codes() {
     let content = "oj daemon: running 2m\n";
     let frame = render_frame(content, false);
     assert_eq!(frame, content, "non-TTY frame should be the raw content");
-    assert!(
-        !frame.contains('\x1B'),
-        "non-TTY frame must not contain any ANSI escape codes"
-    );
+    assert!(!frame.contains('\x1B'), "non-TTY frame must not contain any ANSI escape codes");
 }
 
 // ── per-line clearing ───────────────────────────────────────────────
@@ -63,10 +54,7 @@ fn tty_clears_each_line() {
 
     for line in content.lines() {
         let pattern = format!("{line}{CLEAR_TO_EOL}\n");
-        assert!(
-            frame.contains(&pattern),
-            "TTY frame should contain '{line}\\x1B[K\\n'"
-        );
+        assert!(frame.contains(&pattern), "TTY frame should contain '{line}\\x1B[K\\n'");
     }
 }
 
@@ -90,10 +78,7 @@ fn shorter_frame_clears_previous_line_remnants() {
 
     for line in short_content.lines() {
         let pattern = format!("{line}{CLEAR_TO_EOL}\n");
-        assert!(
-            short_frame.contains(&pattern),
-            "short TTY frame must clear-to-EOL after: {line}"
-        );
+        assert!(short_frame.contains(&pattern), "short TTY frame must clear-to-EOL after: {line}");
     }
 
     assert!(short_frame.starts_with(CURSOR_HOME));
@@ -145,16 +130,10 @@ fn consecutive_frames_tty_each_have_escape_codes() {
     let combined = format!("{frame1}{frame2}");
 
     let home_count = combined.matches(CURSOR_HOME).count();
-    assert_eq!(
-        home_count, 2,
-        "each TTY frame must have its own cursor-home"
-    );
+    assert_eq!(home_count, 2, "each TTY frame must have its own cursor-home");
 
     let clear_count = combined.matches(CLEAR_TO_END).count();
-    assert_eq!(
-        clear_count, 2,
-        "each TTY frame must have its own clear-to-end"
-    );
+    assert_eq!(clear_count, 2, "each TTY frame must have its own clear-to-end");
 }
 
 #[test]
@@ -170,10 +149,7 @@ fn consecutive_frames_non_tty_no_escape_codes() {
 
     let combined = format!("{frame1}{frame2}");
 
-    assert!(
-        !combined.contains('\x1B'),
-        "non-TTY output must never contain escape sequences"
-    );
+    assert!(!combined.contains('\x1B'), "non-TTY output must never contain escape sequences");
     assert!(combined.contains("1m")); // 60s
     assert!(combined.contains("2m")); // 120s
 }
@@ -186,16 +162,10 @@ fn format_text_never_contains_escape_sequences() {
     setup_no_color();
 
     let with_watch = format_text(300, &[], Some("3s"), None);
-    assert!(
-        !with_watch.contains('\x1B'),
-        "format_text must not inject escape codes"
-    );
+    assert!(!with_watch.contains('\x1B'), "format_text must not inject escape codes");
 
     let without_watch = format_text(300, &[], None, None);
-    assert!(
-        !without_watch.contains('\x1B'),
-        "format_text must not inject escape codes"
-    );
+    assert!(!without_watch.contains('\x1B'), "format_text must not inject escape codes");
 }
 
 #[test]
@@ -219,7 +189,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
     });
     ns.workers.push(oj_daemon::WorkerSummary {
         name: "builder".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         queue: "default".to_string(),
         status: "running".to_string(),
         active: 1,
@@ -242,10 +212,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
     let text = format_text(600, &[ns], Some("5s"), None);
     let frame = render_frame(&text, false);
 
-    assert!(
-        !frame.contains('\x1B'),
-        "no ANSI escapes in non-TTY + NO_COLOR frame"
-    );
+    assert!(!frame.contains('\x1B'), "no ANSI escapes in non-TTY + NO_COLOR frame");
     assert!(frame.contains("myproject"));
     assert!(frame.contains("job"));
     assert!(frame.contains("builder"));
@@ -267,8 +234,5 @@ fn tty_frame_preserves_color_codes_in_content() {
 
     let inner = &frame[CURSOR_HOME.len()..frame.len() - CLEAR_TO_END.len()];
     let stripped = inner.replace(CLEAR_TO_EOL, "");
-    assert!(
-        stripped.contains("\x1b[38;5;"),
-        "TTY frame should preserve color codes from content"
-    );
+    assert!(stripped.contains("\x1b[38;5;"), "TTY frame should preserve color codes from content");
 }

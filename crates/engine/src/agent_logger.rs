@@ -40,11 +40,7 @@ impl AgentLogger {
         };
 
         if let Err(e) = self.write_entries(agent_dir, &path, entries) {
-            tracing::warn!(
-                agent_id,
-                error = %e,
-                "failed to write agent log"
-            );
+            tracing::warn!(agent_id, error = %e, "failed to write agent log");
         }
     }
 
@@ -79,7 +75,6 @@ impl AgentLogger {
             while let Some((agent_id, entries)) = rx.recv().await {
                 logger.append_entries(agent_id.as_str(), &entries);
             }
-            tracing::debug!("agent log writer task ended");
         })
     }
 }

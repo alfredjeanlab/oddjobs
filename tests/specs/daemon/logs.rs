@@ -11,10 +11,7 @@ fn daemon_logs_shows_output() {
     temp.file(".oj/runbooks/build.toml", MINIMAL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["daemon", "logs", "-n", "10"])
-        .passes()
-        .stdout_has("ojd: starting");
+    temp.oj().args(&["daemon", "logs", "-n", "10"]).passes().stdout_has("ojd: starting");
 }
 
 #[test]
@@ -28,11 +25,7 @@ fn daemon_logs_shows_startup_info() {
     // not be flushed to disk by the time `daemon start` returns (which only
     // waits for the socket). Poll until the log line appears.
     let ready = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["daemon", "logs"])
-            .passes()
-            .stdout()
-            .contains("Daemon ready")
+        temp.oj().args(&["daemon", "logs"]).passes().stdout().contains("Daemon ready")
     });
     assert!(ready, "daemon log should contain 'Daemon ready'");
 }

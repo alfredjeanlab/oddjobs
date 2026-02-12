@@ -114,12 +114,8 @@ pub fn parse_with_imports(
         crate::parser::validate_cross_refs(&lib_runbook)?;
 
         // Merge into the main runbook
-        let merge_warnings = merge_runbook(
-            &mut runbook,
-            lib_runbook,
-            import_def.alias.as_deref(),
-            source,
-        )?;
+        let merge_warnings =
+            merge_runbook(&mut runbook, lib_runbook, import_def.alias.as_deref(), source)?;
         all_warnings.extend(merge_warnings);
     }
 

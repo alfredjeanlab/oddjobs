@@ -12,7 +12,7 @@ fn test_job() -> Job {
         .vars(HashMap::from([("branch".to_string(), "main".to_string())]))
         .runbook_hash("abc123")
         .cwd("/tmp/test")
-        .namespace("myproject")
+        .project("myproject")
         .build();
     Job::new(config, &SystemClock)
 }
@@ -126,7 +126,7 @@ fn round_trip_write_scan() {
 
     let mut job = test_job();
     job.id = "rt-001".to_string();
-    job.namespace = "proj".to_string();
+    job.project = "proj".to_string();
     job.kind = "ci".to_string();
     job.name = "my-build".to_string();
     // Push a new step record matching the current step
@@ -137,8 +137,6 @@ fn round_trip_write_scan() {
     if let Some(record) = job.step_history.last_mut() {
         record.agent_id = Some("rt-001-test".to_string());
     }
-    job.session_id = Some("oj-rt-001-test".to_string());
-
     writer.write(&job);
 
     let breadcrumbs = scan_breadcrumbs(dir.path());
@@ -152,7 +150,7 @@ fn round_trip_write_scan() {
     assert_eq!(b.current_step, "test");
     assert_eq!(b.agents.len(), 1);
     assert_eq!(b.agents[0].agent_id, "rt-001-test");
-    assert_eq!(b.agents[0].session_name.as_deref(), Some("oj-rt-001-test"));
+    assert!(b.agents[0].session_name.is_none());
 }
 
 #[test]
@@ -181,7 +179,6 @@ fn write_captures_agents_from_history() {
         },
     ];
     job.step = "test".to_string();
-    job.session_id = Some("oj-p-001-test".to_string());
 
     writer.write(&job);
 
@@ -189,10 +186,8 @@ fn write_captures_agents_from_history() {
     let b = &breadcrumbs[0];
 
     assert_eq!(b.agents.len(), 2);
-    // First agent (past step) should not have session_name
     assert_eq!(b.agents[0].agent_id, "p-001-build");
     assert!(b.agents[0].session_name.is_none());
-    // Second agent (current step) should have session_name
     assert_eq!(b.agents[1].agent_id, "p-001-test");
-    assert_eq!(b.agents[1].session_name.as_deref(), Some("oj-p-001-test"));
+    assert!(b.agents[1].session_name.is_none());
 }

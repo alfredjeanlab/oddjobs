@@ -6,14 +6,10 @@
 //! Shell commands like `foo$VAR/bin` should produce a single Word with multiple
 //! parts (`[Literal("foo"), Variable("VAR"), Literal("/bin")]`), not separate words.
 
-use super::helpers::get_simple_command;
-use crate::ast::{SubstitutionBody, WordPart};
+use super::helpers::{assert_quoted_literal, get_simple_command};
+use crate::ast::{QuoteStyle, SubstitutionBody, WordPart};
 use crate::parser::Parser;
 use crate::token::Span;
-
-// =============================================================================
-// Step 2: Adjacent Token Merging Patterns
-// =============================================================================
 
 #[test]
 fn literal_followed_by_variable() {
@@ -24,13 +20,7 @@ fn literal_followed_by_variable() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(
         cmd.args[0].parts,
-        vec![
-            WordPart::literal("foo"),
-            WordPart::Variable {
-                name: "VAR".into(),
-                modifier: None
-            }
-        ]
+        vec![WordPart::literal("foo"), WordPart::Variable { name: "VAR".into(), modifier: None }]
     );
 }
 
@@ -43,13 +33,7 @@ fn variable_followed_by_literal() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(
         cmd.args[0].parts,
-        vec![
-            WordPart::Variable {
-                name: "VAR".into(),
-                modifier: None
-            },
-            WordPart::literal(".txt")
-        ]
+        vec![WordPart::Variable { name: "VAR".into(), modifier: None }, WordPart::literal(".txt")]
     );
 }
 
@@ -64,10 +48,8 @@ fn literal_substitution_literal() {
 
     assert_eq!(cmd.args[0].parts[0], WordPart::literal("pre"));
 
-    let WordPart::CommandSubstitution {
-        body: SubstitutionBody::Parsed(body),
-        backtick,
-    } = &cmd.args[0].parts[1]
+    let WordPart::CommandSubstitution { body: SubstitutionBody::Parsed(body), backtick } =
+        &cmd.args[0].parts[1]
     else {
         panic!("expected command substitution");
     };
@@ -88,10 +70,7 @@ fn variable_in_middle() {
         cmd.args[0].parts,
         vec![
             WordPart::literal("pre"),
-            WordPart::Variable {
-                name: "VAR".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "VAR".into(), modifier: None },
             WordPart::literal("suf")
         ]
     );
@@ -107,18 +86,9 @@ fn multiple_variables_concatenated() {
     assert_eq!(
         cmd.args[0].parts,
         vec![
-            WordPart::Variable {
-                name: "A".into(),
-                modifier: None
-            },
-            WordPart::Variable {
-                name: "B".into(),
-                modifier: None
-            },
-            WordPart::Variable {
-                name: "C".into(),
-                modifier: None
-            }
+            WordPart::Variable { name: "A".into(), modifier: None },
+            WordPart::Variable { name: "B".into(), modifier: None },
+            WordPart::Variable { name: "C".into(), modifier: None }
         ]
     );
 }
@@ -132,13 +102,7 @@ fn path_with_variable_prefix() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(
         cmd.args[0].parts,
-        vec![
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None
-            },
-            WordPart::literal("/bin")
-        ]
+        vec![WordPart::Variable { name: "HOME".into(), modifier: None }, WordPart::literal("/bin")]
     );
 }
 
@@ -153,10 +117,7 @@ fn path_with_variable_middle() {
         cmd.args[0].parts,
         vec![
             WordPart::literal("/usr/"),
-            WordPart::Variable {
-                name: "LOCAL".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "LOCAL".into(), modifier: None },
             WordPart::literal("/bin")
         ]
     );
@@ -173,10 +134,7 @@ fn file_extension_pattern() {
         cmd.args[0].parts,
         vec![
             WordPart::literal("file"),
-            WordPart::Variable {
-                name: "NUM".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "NUM".into(), modifier: None },
             WordPart::literal(".log")
         ]
     );
@@ -192,10 +150,7 @@ fn braced_variable_in_word() {
     assert_eq!(
         cmd.args[0].parts,
         vec![
-            WordPart::Variable {
-                name: "NAME".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "NAME".into(), modifier: None },
             WordPart::literal("_suffix")
         ]
     );
@@ -212,32 +167,16 @@ fn multiple_separate_concatenated_words() {
     assert_eq!(
         cmd.args[0].parts,
         vec![
-            WordPart::Variable {
-                name: "A".into(),
-                modifier: None
-            },
-            WordPart::Variable {
-                name: "B".into(),
-                modifier: None
-            }
+            WordPart::Variable { name: "A".into(), modifier: None },
+            WordPart::Variable { name: "B".into(), modifier: None }
         ]
     );
     // Second arg: foo$C
     assert_eq!(
         cmd.args[1].parts,
-        vec![
-            WordPart::literal("foo"),
-            WordPart::Variable {
-                name: "C".into(),
-                modifier: None
-            }
-        ]
+        vec![WordPart::literal("foo"), WordPart::Variable { name: "C".into(), modifier: None }]
     );
 }
-
-// =============================================================================
-// Step 3: Whitespace Separation
-// =============================================================================
 
 #[test]
 fn whitespace_separates_words() {
@@ -246,13 +185,7 @@ fn whitespace_separates_words() {
     let cmd = get_simple_command(&result.commands[0]);
 
     assert_eq!(cmd.args.len(), 2);
-    assert_eq!(
-        cmd.args[0].parts,
-        vec![WordPart::Variable {
-            name: "VAR".into(),
-            modifier: None
-        }]
-    );
+    assert_eq!(cmd.args[0].parts, vec![WordPart::Variable { name: "VAR".into(), modifier: None }]);
     assert_eq!(cmd.args[1].parts, vec![WordPart::literal(".txt")]);
 }
 
@@ -264,13 +197,7 @@ fn tab_separates_words() {
 
     assert_eq!(cmd.args.len(), 2);
     assert_eq!(cmd.args[0].parts, vec![WordPart::literal("foo")]);
-    assert_eq!(
-        cmd.args[1].parts,
-        vec![WordPart::Variable {
-            name: "VAR".into(),
-            modifier: None
-        }]
-    );
+    assert_eq!(cmd.args[1].parts, vec![WordPart::Variable { name: "VAR".into(), modifier: None }]);
 }
 
 #[test]
@@ -299,13 +226,7 @@ fn concatenation_stops_at_pipe() {
     assert_eq!(job.commands.len(), 2);
     assert_eq!(
         job.commands[0].name.parts,
-        vec![
-            WordPart::literal("foo"),
-            WordPart::Variable {
-                name: "VAR".into(),
-                modifier: None
-            }
-        ]
+        vec![WordPart::literal("foo"), WordPart::Variable { name: "VAR".into(), modifier: None }]
     );
     assert_eq!(job.commands[1].name.parts, vec![WordPart::literal("bar")]);
 }
@@ -325,52 +246,17 @@ fn concatenation_stops_at_and() {
     assert_eq!(result.commands[0].rest.len(), 1);
 }
 
-// =============================================================================
-// Step 4: Span Calculation
-// =============================================================================
-
-#[test]
-fn span_covers_concatenated_word() {
-    // Input: "echo foo$VAR" (12 chars: echo=0-4, space=4, foo=5-8, $VAR=8-12)
-    // Expected span for "foo$VAR": Span::new(5, 12)
-    let result = Parser::parse("echo foo$VAR").unwrap();
+#[yare::parameterized(
+    foo_var    = { "echo foo$VAR",      5, 12 },
+    home_bin   = { "echo $HOME/bin",    5, 14 },
+    braced_suf = { "echo ${VAR}suffix", 5, 17 },
+    three_part = { "echo pre${VAR}suf", 5, 17 },
+)]
+fn span_covers_concatenated_arg(input: &str, start: usize, end: usize) {
+    let result = Parser::parse(input).unwrap();
     let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args[0].span.start, 5);
-    assert_eq!(cmd.args[0].span.end, 12);
-}
-
-#[test]
-fn span_covers_path_pattern() {
-    // Input: "echo $HOME/bin" (14 chars: echo=0-4, space=4, $HOME=5-10, /bin=10-14)
-    // Expected span for "$HOME/bin": Span::new(5, 14)
-    let result = Parser::parse("echo $HOME/bin").unwrap();
-    let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args[0].span.start, 5);
-    assert_eq!(cmd.args[0].span.end, 14);
-}
-
-#[test]
-fn span_accuracy_with_braced_variable() {
-    // Input: "echo ${VAR}suffix" (17 chars: echo=0-4, space=4, ${VAR}=5-11, suffix=11-17)
-    // Expected span: Span::new(5, 17)
-    let result = Parser::parse("echo ${VAR}suffix").unwrap();
-    let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args[0].span.start, 5);
-    assert_eq!(cmd.args[0].span.end, 17);
-}
-
-#[test]
-fn span_covers_three_part_word() {
-    // Input: "echo pre${VAR}suf" (17 chars: echo=0-4, space=4, pre=5-8, ${VAR}=8-14, suf=14-17)
-    // Expected span: Span::new(5, 17)
-    let result = Parser::parse("echo pre${VAR}suf").unwrap();
-    let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args[0].span.start, 5);
-    assert_eq!(cmd.args[0].span.end, 17);
+    assert_eq!(cmd.args[0].span.start, start);
+    assert_eq!(cmd.args[0].span.end, end);
 }
 
 #[test]
@@ -380,10 +266,6 @@ fn span_covers_entire_concatenated_command_name() {
     let cmd = get_simple_command(&result.commands[0]);
     assert_eq!(cmd.name.span, Span::new(0, 7));
 }
-
-// =============================================================================
-// Step 5: Edge Cases and Integration
-// =============================================================================
 
 #[test]
 fn single_literal_word() {
@@ -402,13 +284,7 @@ fn single_variable_word() {
     let cmd = get_simple_command(&result.commands[0]);
 
     assert_eq!(cmd.args.len(), 1);
-    assert_eq!(
-        cmd.args[0].parts,
-        vec![WordPart::Variable {
-            name: "HOME".into(),
-            modifier: None
-        }]
-    );
+    assert_eq!(cmd.args[0].parts, vec![WordPart::Variable { name: "HOME".into(), modifier: None }]);
 }
 
 #[test]
@@ -425,13 +301,7 @@ fn job_with_concatenation() {
     // First command has concatenated arg
     assert_eq!(
         job.commands[0].args[0].parts,
-        vec![
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None
-            },
-            WordPart::literal("/bin")
-        ]
+        vec![WordPart::Variable { name: "HOME".into(), modifier: None }, WordPart::literal("/bin")]
     );
 }
 
@@ -451,13 +321,7 @@ fn and_or_with_concatenation() {
     let first_cmd = get_simple_command(&first_and_or);
     assert_eq!(
         first_cmd.name.parts,
-        vec![
-            WordPart::literal("test"),
-            WordPart::Variable {
-                name: "A".into(),
-                modifier: None
-            }
-        ]
+        vec![WordPart::literal("test"), WordPart::Variable { name: "A".into(), modifier: None }]
     );
 }
 
@@ -516,93 +380,37 @@ fn command_name_with_concatenation() {
     assert_eq!(
         cmd.name.parts,
         vec![
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: None },
             WordPart::literal("/bin/cmd")
         ]
     );
     assert_eq!(cmd.args.len(), 1);
 }
 
-// =============================================================================
-// Step 6: Quote Style Preservation
-// =============================================================================
-
-#[test]
-fn unquoted_literal_has_unquoted_style() {
-    use crate::ast::QuoteStyle;
-
-    let result = Parser::parse("echo hello").unwrap();
+#[yare::parameterized(
+    unquoted = { "echo hello",   "hello", QuoteStyle::Unquoted },
+    single   = { "echo 'hello'", "hello", QuoteStyle::Single },
+    double   = { r#"echo "hello""#, "hello", QuoteStyle::Double },
+)]
+fn literal_quote_style(input: &str, expected: &str, style: QuoteStyle) {
+    let result = Parser::parse(input).unwrap();
     let cmd = get_simple_command(&result.commands[0]);
-
     assert_eq!(cmd.args.len(), 1);
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "hello");
-            assert_eq!(*quoted, QuoteStyle::Unquoted);
-        }
-        _ => panic!("expected literal"),
-    }
-}
-
-#[test]
-fn single_quoted_literal_has_single_style() {
-    use crate::ast::QuoteStyle;
-
-    let result = Parser::parse("echo 'hello'").unwrap();
-    let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args.len(), 1);
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "hello");
-            assert_eq!(*quoted, QuoteStyle::Single);
-        }
-        _ => panic!("expected literal"),
-    }
-}
-
-#[test]
-fn double_quoted_literal_has_double_style() {
-    use crate::ast::QuoteStyle;
-
-    let result = Parser::parse(r#"echo "hello""#).unwrap();
-    let cmd = get_simple_command(&result.commands[0]);
-
-    assert_eq!(cmd.args.len(), 1);
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "hello");
-            assert_eq!(*quoted, QuoteStyle::Double);
-        }
-        _ => panic!("expected literal"),
-    }
+    assert_quoted_literal(&cmd.args[0].parts[0], expected, style);
 }
 
 #[test]
 fn single_quoted_preserves_dollar_sign() {
-    use crate::ast::QuoteStyle;
-
     // '$VAR' should be a literal, not a variable reference
     let result = Parser::parse("echo '$VAR'").unwrap();
     let cmd = get_simple_command(&result.commands[0]);
 
     assert_eq!(cmd.args.len(), 1);
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "$VAR");
-            assert_eq!(*quoted, QuoteStyle::Single);
-        }
-        _ => panic!("expected literal, got {:?}", cmd.args[0].parts[0]),
-    }
+    assert_quoted_literal(&cmd.args[0].parts[0], "$VAR", QuoteStyle::Single);
 }
 
 #[test]
 fn double_quoted_string_with_variable() {
-    use crate::ast::QuoteStyle;
-
     // "$HOME/bin" should have Double-quoted literal parts
     // Note: boundary literals are emitted for word splitting support
     let result = Parser::parse(r#"echo "$HOME/bin""#).unwrap();
@@ -612,13 +420,7 @@ fn double_quoted_string_with_variable() {
     assert_eq!(cmd.args[0].parts.len(), 3);
 
     // First part is an empty boundary literal
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "");
-            assert_eq!(*quoted, QuoteStyle::Double);
-        }
-        _ => panic!("expected boundary literal"),
-    }
+    assert_quoted_literal(&cmd.args[0].parts[0], "", QuoteStyle::Double);
 
     // Second part is the variable
     assert!(matches!(
@@ -627,19 +429,11 @@ fn double_quoted_string_with_variable() {
     ));
 
     // Third part is a double-quoted literal
-    match &cmd.args[0].parts[2] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "/bin");
-            assert_eq!(*quoted, QuoteStyle::Double);
-        }
-        _ => panic!("expected literal"),
-    }
+    assert_quoted_literal(&cmd.args[0].parts[2], "/bin", QuoteStyle::Double);
 }
 
 #[test]
 fn mixed_quoting_styles_preserved() {
-    use crate::ast::QuoteStyle;
-
     // hello'world'"test" → three parts with different quote styles
     let result = Parser::parse(r#"echo hello'world'"test""#).unwrap();
     let cmd = get_simple_command(&result.commands[0]);
@@ -647,30 +441,7 @@ fn mixed_quoting_styles_preserved() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].parts.len(), 3);
 
-    // First: unquoted "hello"
-    match &cmd.args[0].parts[0] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "hello");
-            assert_eq!(*quoted, QuoteStyle::Unquoted);
-        }
-        _ => panic!("expected literal"),
-    }
-
-    // Second: single-quoted "world"
-    match &cmd.args[0].parts[1] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "world");
-            assert_eq!(*quoted, QuoteStyle::Single);
-        }
-        _ => panic!("expected literal"),
-    }
-
-    // Third: double-quoted "test"
-    match &cmd.args[0].parts[2] {
-        WordPart::Literal { value, quoted } => {
-            assert_eq!(value, "test");
-            assert_eq!(*quoted, QuoteStyle::Double);
-        }
-        _ => panic!("expected literal"),
-    }
+    assert_quoted_literal(&cmd.args[0].parts[0], "hello", QuoteStyle::Unquoted);
+    assert_quoted_literal(&cmd.args[0].parts[1], "world", QuoteStyle::Single);
+    assert_quoted_literal(&cmd.args[0].parts[2], "test", QuoteStyle::Double);
 }

@@ -14,9 +14,8 @@ pub mod protocol;
 
 pub use protocol::{
     AgentDetail, AgentEntry, AgentStatusEntry, AgentSummary, CronEntry, CronSummary, JobDetail,
-    JobEntry, JobStatusEntry, JobSummary, MetricsHealthSummary, NamespaceStatus, OrphanAgent,
-    OrphanSummary, ProjectSummary, Query, QueueItemEntry, QueueItemSummary, QueueStatus,
-    QueueSummary, Request, Response, SessionEntry, SessionSummary, StepRecordDetail, WorkerEntry,
-    WorkerSummary, WorkspaceDetail, WorkspaceEntry, WorkspaceSummary, DEFAULT_TIMEOUT,
-    MAX_MESSAGE_SIZE, PROTOCOL_VERSION,
+    JobEntry, JobStatusEntry, JobSummary, MetricsHealthSummary, OrphanSummary, ProjectStatus,
+    ProjectSummary, Query, QueueItemEntry, QueueItemSummary, QueueStatus, QueueSummary, Request,
+    Response, StepRecordDetail, WorkerEntry, WorkerSummary, WorkspaceDetail, WorkspaceEntry,
+    WorkspaceSummary,
 };

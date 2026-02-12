@@ -135,16 +135,9 @@ pub fn interpolate_consts(
 ) -> Result<String, String> {
     let content = process_const_directives(content, values)?;
 
-    // Replace ${raw(const.name)} with raw values
-    let result = RAW_CONST_PATTERN
-        .replace_all(&content, |caps: &regex::Captures| {
-            let name = &caps[1];
-            values
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| caps[0].to_string())
-        })
-        .to_string();
+    // Replace ${raw(const.name)} with raw values, preserving indentation
+    // for multi-line values so they stay aligned inside heredocs.
+    let result = replace_raw_consts(&content, values);
 
     // Replace ${const.name} with shell-escaped values
     Ok(CONST_PATTERN
@@ -156,6 +149,57 @@ pub fn interpolate_consts(
             }
         })
         .to_string())
+}
+
+/// Replace `${raw(const.name)}` patterns, indenting multi-line values to match
+/// the column where the pattern appears. Without this, lines after the first
+/// would lose their alignment inside `<<-` heredocs and get truncated.
+fn replace_raw_consts(content: &str, values: &HashMap<String, String>) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut last_end = 0;
+
+    for caps in RAW_CONST_PATTERN.captures_iter(content) {
+        let Some(full_match) = caps.get(0) else {
+            continue;
+        };
+        let name = &caps[1];
+
+        // Append everything before this match
+        result.push_str(&content[last_end..full_match.start()]);
+
+        let value = match values.get(name) {
+            Some(v) => v.as_str(),
+            None => {
+                result.push_str(full_match.as_str());
+                last_end = full_match.end();
+                continue;
+            }
+        };
+
+        // Find the leading whitespace on the line containing this match
+        let line_start = content[..full_match.start()].rfind('\n').map(|p| p + 1).unwrap_or(0);
+        let prefix: &str = &content[line_start..full_match.start()];
+        let indent: String = prefix.chars().take_while(|c| c.is_whitespace()).collect();
+
+        // For multi-line values, indent continuation lines to match
+        if let Some(first_newline) = value.find('\n') {
+            result.push_str(&value[..first_newline]);
+            for line in value[first_newline..].split('\n').skip(1) {
+                result.push('\n');
+                if !line.is_empty() {
+                    result.push_str(&indent);
+                }
+                result.push_str(line);
+            }
+        } else {
+            result.push_str(value);
+        }
+
+        last_end = full_match.end();
+    }
+
+    result.push_str(&content[last_end..]);
+    result
 }
 
 /// Validate const values against const definitions.

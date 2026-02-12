@@ -1,6 +1,6 @@
 //! Agent spawn and execution tests using claudeless simulator.
 //!
-//! Tests the Effect::Spawn -> TmuxAdapter::spawn() path triggered by
+//! Tests the Effect::SpawnAgent -> LocalAdapter::spawn() path triggered by
 //! `run = { agent = "..." }` directives.
 
 use crate::prelude::*;
@@ -9,20 +9,18 @@ use crate::prelude::*;
 fn scenario(trusted: bool) -> String {
     format!(
         r#"
-name = "spawn-test"
+[claude]
 trusted = {trusted}
 
 [[responses]]
-pattern = {{ type = "any" }}
+on = "*"
+say = "Task complete."
 
-[responses.response]
-text = "Task complete."
-
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#,
     )
 }
@@ -79,7 +77,7 @@ env = {{ OJ_STEP = "work" }}
 
 /// Verifies the agent spawn flow with -p (print) mode:
 /// - Job starts and reaches agent step
-/// - Effect::Spawn creates tmux session via TmuxAdapter
+/// - Effect::SpawnAgent creates coop process via LocalAdapter
 /// - Workspace is prepared with CLAUDE.md
 /// - Agent (claudeless -p) runs and exits after one response
 /// - on_dead = "done" advances the job
@@ -98,18 +96,11 @@ fn agent_spawn_creates_session_and_completes() {
 
     // claudeless -p exits immediately. Detection requires liveness poll + deferred timer.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete via agent spawn path");
 
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_has("completed");
+    temp.oj().args(&["job", "list"]).passes().stdout_has("completed");
 }
 
 /// Verifies the agent spawn flow with interactive mode (no -p):
@@ -128,12 +119,8 @@ fn agent_spawn_interactive_idle_completes() {
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "spawn-test"]).passes();
 
-    let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+    let done = wait_for(SPEC_AGENT_WAIT_MS, || {
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete via on_idle = done");
 }
@@ -149,46 +136,42 @@ fn multi_step_job_with_gates_completes() {
 
     // Plan agent: creates output/plan.txt via tool call
     let plan_scenario = r#"
-name = "plan-step"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Creating the plan document."
 
-[responses.response]
-text = "Creating the plan document."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "mkdir -p output && echo '# Test Plan' > output/plan.txt" }
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#;
 
     // Implement agent: creates output/impl.txt via tool call
     let impl_scenario = r#"
-name = "impl-step"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Implementation complete."
 
-[responses.response]
-text = "Implementation complete."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "echo '# Implementation' > output/impl.txt" }
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#;
 
     temp.file(".oj/scenarios/plan.toml", plan_scenario);
@@ -209,12 +192,12 @@ vars  = ["name"]
 [[job.build.step]]
 name = "init"
 run = "mkdir -p output"
-on_done = "plan"
+on_done = {{ step = "plan" }}
 
 [[job.build.step]]
 name = "plan"
 run = {{ agent = "planner" }}
-on_done = "implement"
+on_done = {{ step = "implement" }}
 
 [[job.build.step]]
 name = "implement"
@@ -240,11 +223,7 @@ on_dead = {{ action = "gate", run = "test -f output/impl.txt" }}
     temp.oj().args(&["run", "build", "e2e-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "multi-step job should complete via gates");
 }
@@ -267,16 +246,9 @@ fn agent_spawn_graceful_when_no_trust_prompt() {
     temp.oj().args(&["run", "build", "trust-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
-    assert!(
-        done,
-        "job should complete - no trust prompt shown for trusted scenario"
-    );
+    assert!(done, "job should complete - no trust prompt shown for trusted scenario");
 }
 
 /// Tests that the bypass permissions prompt is auto-accepted.
@@ -322,17 +294,10 @@ on_idle = "done"
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "bypass-test"]).passes();
 
-    let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+    let done = wait_for(SPEC_AGENT_WAIT_MS, || {
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
-    assert!(
-        done,
-        "job should complete - bypass permissions prompt was auto-accepted"
-    );
+    assert!(done, "job should complete - bypass permissions prompt was auto-accepted");
 }
 
 /// Tests that untrusted scenario completes via auto-accept of the trust prompt.
@@ -354,14 +319,7 @@ fn agent_spawn_auto_accepts_trust_prompt() {
     temp.oj().args(&["run", "build", "trust-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
-    assert!(
-        done,
-        "job should complete - trust prompt was auto-acknowledged"
-    );
+    assert!(done, "job should complete - trust prompt was auto-acknowledged");
 }

@@ -7,56 +7,29 @@ use super::{Lexer, LexerError, QuoteState};
 use crate::token::{Span, Token, TokenKind};
 
 impl Lexer<'_> {
-    /// Lex a command substitution (`$(cmd)`).
-    ///
-    /// Called when we've seen `$` and peeked `(`.
-    /// Handles quotes inside substitutions so `$(echo ")")` works correctly.
-    ///
-    /// ## Depth Tracking
-    ///
-    /// Tracks ALL parentheses for balance, not just `$()` markers:
-    /// - Input: `$(echo (a) (b))`
-    /// - Depth: 1→2→1→2→1→0
-    ///
-    /// This is correct because shell command substitution must balance all parentheses.
-    /// Content is stored as a raw string (lazy parsing) rather than recursively parsed.
-    ///
-    /// ## Error Span Strategy
-    ///
-    /// On unterminated substitution, the span points to the start of the outermost
-    /// unclosed `$(`, helping users locate where the construct began.
+    /// Tracks ALL parentheses for balance, not just `$()` markers, because shell
+    /// command substitution must balance all parentheses. Content is stored as a raw
+    /// string (lazy parsing) rather than recursively parsed.
     pub(super) fn lex_dollar_substitution(&mut self, start: usize) -> Result<Token, LexerError> {
-        self.chars.next(); // consume (
+        self.chars.next();
 
         let content = self.read_balanced_content('(', ')', start)?;
         Ok(Token::new(
-            TokenKind::CommandSubstitution {
-                content,
-                backtick: false,
-            },
+            TokenKind::CommandSubstitution { content, backtick: false },
             Span::new(start, self.current_position()),
         ))
     }
 
-    /// Lex a backtick command substitution (`` `cmd` ``).
-    ///
-    /// Called when peek() has confirmed the next char is '`'.
     pub(super) fn lex_backtick_substitution(&mut self, start: usize) -> Result<Token, LexerError> {
-        self.chars.next(); // consume opening `
+        self.chars.next();
 
         let content = self.read_backtick_content(start)?;
         Ok(Token::new(
-            TokenKind::CommandSubstitution {
-                content,
-                backtick: true,
-            },
+            TokenKind::CommandSubstitution { content, backtick: true },
             Span::new(start, self.current_position()),
         ))
     }
 
-    /// Read content until closing backtick.
-    ///
-    /// Handles escape sequences within backtick content.
     pub(super) fn read_backtick_content(&mut self, start: usize) -> Result<String, LexerError> {
         let content_start = self.current_position();
         let mut content_end = content_start;
@@ -78,7 +51,7 @@ impl Lexer<'_> {
                 }
                 '`' => {
                     let content = self.input[content_start..content_end].to_string();
-                    self.chars.next(); // consume closing `
+                    self.chars.next();
                     return Ok(content);
                 }
                 _ => {
@@ -88,14 +61,11 @@ impl Lexer<'_> {
             }
         }
 
-        Err(LexerError::UnterminatedSubstitution {
-            span: Span::new(start, content_end),
-        })
+        Err(LexerError::UnterminatedSubstitution { span: Span::new(start, content_end) })
     }
 
-    /// Read balanced content until closing delimiter.
-    ///
-    /// Tracks nested parens/braces and respects quotes.
+    /// Read balanced content until closing delimiter, tracking nested parens/braces
+    /// and respecting quotes.
     pub(super) fn read_balanced_content(
         &mut self,
         open: char,
@@ -117,7 +87,7 @@ impl Lexer<'_> {
                     depth -= 1;
                     if depth == 0 {
                         let content = self.input[content_start..content_end].to_string();
-                        self.chars.next(); // consume closing delimiter
+                        self.chars.next();
                         return Ok(content);
                     }
                 }
@@ -126,8 +96,6 @@ impl Lexer<'_> {
             self.chars.next();
         }
 
-        Err(LexerError::UnterminatedSubstitution {
-            span: Span::new(start, content_end),
-        })
+        Err(LexerError::UnterminatedSubstitution { span: Span::new(start, content_end) })
     }
 }

@@ -2,9 +2,8 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
-use crate::agent_run::AgentRunId;
+use crate::crew::CrewId;
 use crate::job::JobId;
-use crate::owner::OwnerId;
 
 #[test]
 fn timer_id_display() {
@@ -39,272 +38,103 @@ fn timer_id_serde() {
 }
 
 #[test]
-fn liveness_timer_id() {
-    let job_id = JobId::new("pipe-123");
-    let id = TimerId::liveness(&job_id);
-    assert_eq!(id.as_str(), "liveness:pipe-123");
+fn factory_methods_format() {
+    assert_eq!(TimerId::liveness(&JobId::new("job-123")).as_str(), "liveness:job:job-123");
+    assert_eq!(
+        TimerId::exit_deferred(&JobId::new("job-123")).as_str(),
+        "exit-deferred:job:job-123"
+    );
+    assert_eq!(
+        TimerId::cooldown(&JobId::new("job-123"), "idle", 0).as_str(),
+        "cooldown:job:job-123:idle:0"
+    );
+    assert_eq!(
+        TimerId::cooldown(&JobId::new("job-456"), "exit", 2).as_str(),
+        "cooldown:job:job-456:exit:2"
+    );
+    assert_eq!(TimerId::liveness(&CrewId::new("run-123")).as_str(), "liveness:agent:run-123");
+    assert_eq!(
+        TimerId::exit_deferred(&CrewId::new("run-123")).as_str(),
+        "exit-deferred:agent:run-123"
+    );
+    assert_eq!(
+        TimerId::cooldown(&CrewId::new("run-123"), "idle", 0).as_str(),
+        "cooldown:agent:run-123:idle:0"
+    );
+    assert_eq!(TimerId::queue_retry("bugs", "item-123").as_str(), "queue-retry:bugs:item-123");
+    assert_eq!(
+        TimerId::queue_retry("myns/bugs", "item-456").as_str(),
+        "queue-retry:myns/bugs:item-456"
+    );
+    assert_eq!(TimerId::cron("janitor", "").as_str(), "cron:janitor");
+    assert_eq!(TimerId::cron("janitor", "myproject").as_str(), "cron:myproject/janitor");
+    assert_eq!(TimerId::queue_poll("my-worker", "").as_str(), "queue-poll:my-worker");
+    assert_eq!(
+        TimerId::queue_poll("my-worker", "myproject").as_str(),
+        "queue-poll:myproject/my-worker"
+    );
 }
 
 #[test]
-fn exit_deferred_timer_id() {
-    let job_id = JobId::new("pipe-123");
-    let id = TimerId::exit_deferred(&job_id);
-    assert_eq!(id.as_str(), "exit-deferred:pipe-123");
+fn owner_id_constructors() {
+    let job: OwnerId = JobId::new("job-123").into();
+    let run: OwnerId = CrewId::new("run-456").into();
+    assert_eq!(TimerId::liveness(&job).as_str(), "liveness:job:job-123");
+    assert_eq!(TimerId::liveness(&run).as_str(), "liveness:agent:run-456");
+    assert_eq!(TimerId::exit_deferred(&job).as_str(), "exit-deferred:job:job-123");
+    assert_eq!(TimerId::exit_deferred(&run).as_str(), "exit-deferred:agent:run-456");
+    assert_eq!(TimerId::cooldown(&job, "idle", 1).as_str(), "cooldown:job:job-123:idle:1");
+    assert_eq!(TimerId::cooldown(&run, "exit", 2).as_str(), "cooldown:agent:run-456:exit:2");
 }
 
 #[test]
-fn cooldown_timer_id_format() {
-    let job_id = JobId::new("pipe-123");
-    let id = TimerId::cooldown(&job_id, "idle", 0);
-    assert_eq!(id.as_str(), "cooldown:pipe-123:idle:0");
-
-    let job_id2 = JobId::new("pipe-456");
-    let id2 = TimerId::cooldown(&job_id2, "exit", 2);
-    assert_eq!(id2.as_str(), "cooldown:pipe-456:exit:2");
+fn owner_id_extraction() {
+    assert_eq!(
+        TimerId::liveness(&JobId::new("job-123")).owner_id(),
+        Some(OwnerId::Job(JobId::new("job-123")))
+    );
+    assert_eq!(
+        TimerId::liveness(&CrewId::new("run-456")).owner_id(),
+        Some(OwnerId::Crew(CrewId::new("run-456")))
+    );
+    assert_eq!(TimerId::cron("janitor", "").owner_id(), None);
 }
 
 #[test]
-fn is_liveness() {
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(id.is_liveness());
-
-    let id = TimerId::new("exit-deferred:pipe-123");
-    assert!(!id.is_liveness());
-
-    let id = TimerId::new("cooldown:pipe-123:idle:0");
-    assert!(!id.is_liveness());
+fn kind_unknown_returns_none() {
+    assert!(TimerId::new("other-timer").kind().is_none());
 }
 
 #[test]
-fn is_exit_deferred() {
-    let id = TimerId::new("exit-deferred:pipe-123");
-    assert!(id.is_exit_deferred());
-
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(!id.is_exit_deferred());
-
-    let id = TimerId::new("cooldown:pipe-123:idle:0");
-    assert!(!id.is_exit_deferred());
+fn timer_kind_parse_unknown_returns_none() {
+    assert!(TimerKind::parse("other-timer").is_none());
+    assert!(TimerKind::parse("").is_none());
+    assert!(TimerKind::parse("unknown:foo").is_none());
 }
 
 #[test]
-fn is_cooldown() {
-    let id = TimerId::new("cooldown:pipe-123:idle:0");
-    assert!(id.is_cooldown());
+fn timer_kind_round_trip_all_factory_methods() {
+    let cases = vec![
+        TimerId::liveness(&JobId::new("j1")),
+        TimerId::exit_deferred(&JobId::new("j1")),
+        TimerId::cooldown(&JobId::new("j1"), "idle", 0),
+        TimerId::cooldown(&JobId::new("j1"), "exit", 3),
+        TimerId::liveness(&CrewId::new("ar1")),
+        TimerId::exit_deferred(&CrewId::new("ar1")),
+        TimerId::cooldown(&CrewId::new("ar1"), "idle", 0),
+        TimerId::cooldown(&CrewId::new("ar1"), "exit", 5),
+        TimerId::queue_retry("bugs", "item-1"),
+        TimerId::queue_retry("ns/bugs", "item-2"),
+        TimerId::cron("janitor", ""),
+        TimerId::cron("janitor", "myns"),
+        TimerId::queue_poll("worker", ""),
+        TimerId::queue_poll("worker", "myns"),
+    ];
 
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(!id.is_cooldown());
-
-    let id = TimerId::new("exit-deferred:pipe-123");
-    assert!(!id.is_cooldown());
-}
-
-#[test]
-fn job_id_str_liveness() {
-    let id = TimerId::new("liveness:pipe-123");
-    assert_eq!(id.job_id_str(), Some("pipe-123"));
-}
-
-#[test]
-fn job_id_str_exit_deferred() {
-    let id = TimerId::new("exit-deferred:pipe-456");
-    assert_eq!(id.job_id_str(), Some("pipe-456"));
-}
-
-#[test]
-fn job_id_str_cooldown() {
-    let id = TimerId::new("cooldown:pipe-789:idle:0");
-    assert_eq!(id.job_id_str(), Some("pipe-789"));
-}
-
-#[test]
-fn job_id_str_unknown_timer() {
-    let id = TimerId::new("other-timer");
-    assert_eq!(id.job_id_str(), None);
-}
-
-#[test]
-fn queue_retry_timer_id_format() {
-    let id = TimerId::queue_retry("bugs", "item-123");
-    assert_eq!(id.as_str(), "queue-retry:bugs:item-123");
-}
-
-#[test]
-fn queue_retry_timer_id_with_namespace() {
-    let id = TimerId::queue_retry("myns/bugs", "item-456");
-    assert_eq!(id.as_str(), "queue-retry:myns/bugs:item-456");
-}
-
-#[test]
-fn is_queue_retry() {
-    let id = TimerId::queue_retry("bugs", "item-1");
-    assert!(id.is_queue_retry());
-
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(!id.is_queue_retry());
-
-    let id = TimerId::new("cooldown:pipe-123:idle:0");
-    assert!(!id.is_queue_retry());
-}
-
-#[test]
-fn cron_timer_id_format() {
-    let id = TimerId::cron("janitor", "");
-    assert_eq!(id.as_str(), "cron:janitor");
-}
-
-#[test]
-fn cron_timer_id_with_namespace() {
-    let id = TimerId::cron("janitor", "myproject");
-    assert_eq!(id.as_str(), "cron:myproject/janitor");
-}
-
-#[test]
-fn is_cron() {
-    let id = TimerId::cron("janitor", "");
-    assert!(id.is_cron());
-
-    let id = TimerId::cron("janitor", "myproject");
-    assert!(id.is_cron());
-
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(!id.is_cron());
-}
-
-#[test]
-fn queue_poll_timer_id_format() {
-    let id = TimerId::queue_poll("my-worker", "");
-    assert_eq!(id.as_str(), "queue-poll:my-worker");
-}
-
-#[test]
-fn queue_poll_timer_id_with_namespace() {
-    let id = TimerId::queue_poll("my-worker", "myproject");
-    assert_eq!(id.as_str(), "queue-poll:myproject/my-worker");
-}
-
-#[test]
-fn is_queue_poll() {
-    let id = TimerId::queue_poll("my-worker", "");
-    assert!(id.is_queue_poll());
-
-    let id = TimerId::queue_poll("my-worker", "ns");
-    assert!(id.is_queue_poll());
-
-    let id = TimerId::new("liveness:pipe-123");
-    assert!(!id.is_queue_poll());
-
-    let id = TimerId::new("cron:janitor");
-    assert!(!id.is_queue_poll());
-}
-
-// =============================================================================
-// OwnerId-based constructor tests
-// =============================================================================
-
-#[test]
-fn owner_liveness_job() {
-    let job_id = JobId::new("job-123");
-    let owner = OwnerId::job(job_id.clone());
-    let id = TimerId::owner_liveness(&owner);
-    assert_eq!(id.as_str(), "liveness:job-123");
-}
-
-#[test]
-fn owner_liveness_agent_run() {
-    let ar_id = AgentRunId::new("ar-456");
-    let owner = OwnerId::agent_run(ar_id.clone());
-    let id = TimerId::owner_liveness(&owner);
-    assert_eq!(id.as_str(), "liveness:ar:ar-456");
-}
-
-#[test]
-fn owner_exit_deferred_job() {
-    let job_id = JobId::new("job-123");
-    let owner = OwnerId::job(job_id.clone());
-    let id = TimerId::owner_exit_deferred(&owner);
-    assert_eq!(id.as_str(), "exit-deferred:job-123");
-}
-
-#[test]
-fn owner_exit_deferred_agent_run() {
-    let ar_id = AgentRunId::new("ar-456");
-    let owner = OwnerId::agent_run(ar_id.clone());
-    let id = TimerId::owner_exit_deferred(&owner);
-    assert_eq!(id.as_str(), "exit-deferred:ar:ar-456");
-}
-
-#[test]
-fn owner_cooldown_job() {
-    let job_id = JobId::new("job-123");
-    let owner = OwnerId::job(job_id.clone());
-    let id = TimerId::owner_cooldown(&owner, "idle", 1);
-    assert_eq!(id.as_str(), "cooldown:job-123:idle:1");
-}
-
-#[test]
-fn owner_cooldown_agent_run() {
-    let ar_id = AgentRunId::new("ar-456");
-    let owner = OwnerId::agent_run(ar_id.clone());
-    let id = TimerId::owner_cooldown(&owner, "exit", 2);
-    assert_eq!(id.as_str(), "cooldown:ar:ar-456:exit:2");
-}
-
-#[test]
-fn owner_idle_grace_job() {
-    let job_id = JobId::new("job-123");
-    let owner = OwnerId::job(job_id.clone());
-    let id = TimerId::owner_idle_grace(&owner);
-    assert_eq!(id.as_str(), "idle-grace:job-123");
-}
-
-#[test]
-fn owner_idle_grace_agent_run() {
-    let ar_id = AgentRunId::new("ar-456");
-    let owner = OwnerId::agent_run(ar_id.clone());
-    let id = TimerId::owner_idle_grace(&owner);
-    assert_eq!(id.as_str(), "idle-grace:ar:ar-456");
-}
-
-#[test]
-fn owner_id_extracts_job() {
-    let id = TimerId::liveness(&JobId::new("job-123"));
-    let owner = id.owner_id();
-    assert_eq!(owner, Some(OwnerId::job(JobId::new("job-123"))));
-}
-
-#[test]
-fn owner_id_extracts_agent_run() {
-    let id = TimerId::liveness_agent_run(&AgentRunId::new("ar-456"));
-    let owner = id.owner_id();
-    assert_eq!(owner, Some(OwnerId::agent_run(AgentRunId::new("ar-456"))));
-}
-
-#[test]
-fn owner_id_returns_none_for_unrelated() {
-    let id = TimerId::cron("janitor", "");
-    assert_eq!(id.owner_id(), None);
-}
-
-// =============================================================================
-// job_id_str exclusion tests
-// =============================================================================
-
-#[test]
-fn job_id_str_excludes_agent_run_liveness() {
-    // Agent run timer: should NOT return a job_id
-    let id = TimerId::liveness_agent_run(&AgentRunId::new("ar-123"));
-    assert_eq!(id.job_id_str(), None);
-}
-
-#[test]
-fn job_id_str_excludes_agent_run_cooldown() {
-    let id = TimerId::cooldown_agent_run(&AgentRunId::new("ar-123"), "idle", 0);
-    assert_eq!(id.job_id_str(), None);
-}
-
-#[test]
-fn job_id_str_excludes_agent_run_idle_grace() {
-    let id = TimerId::idle_grace_agent_run(&AgentRunId::new("ar-123"));
-    assert_eq!(id.job_id_str(), None);
+    for timer_id in &cases {
+        let kind = TimerKind::parse(timer_id.as_str())
+            .unwrap_or_else(|| panic!("failed to parse: {}", timer_id));
+        let round_tripped = kind.to_timer_id();
+        assert_eq!(timer_id, &round_tripped, "round-trip failed for: {}", timer_id);
+    }
 }

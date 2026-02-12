@@ -10,15 +10,16 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use oj_core::{ShortId, StepOutcomeKind};
+use oj_core::StepOutcomeKind;
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
 use crate::output::{
-    display_log, format_time_ago, print_capture_frame, print_peek_frame, print_prune_results,
-    should_use_color, OutputFormat,
+    apply_limit, display_log, filter_by_project, format_or_json, format_time_ago,
+    handle_list_with_limit, poll_log_follow, print_batch_action_results, print_capture_frame,
+    print_prune_results, OutputFormat,
 };
-use crate::table::{project_cell, should_show_project, Column, Table};
+use crate::table::{Column, Table};
 
 pub(crate) use super::job_display::print_job_commands;
 use super::job_display::{
@@ -108,7 +109,7 @@ pub enum JobCommand {
         #[arg(short = 'n', long, default_value = "50")]
         limit: usize,
     },
-    /// Peek at the active tmux session for a job
+    /// Peek at the active agent session for a job
     Peek {
         /// Job ID (supports prefix matching)
         id: String,
@@ -160,9 +161,8 @@ impl JobCommand {
 
 /// Parse a key=value string for input arguments.
 pub(crate) fn parse_key_value(s: &str) -> Result<(String, String), String> {
-    let pos = s
-        .find('=')
-        .ok_or_else(|| format!("invalid input format '{}': must be key=value", s))?;
+    let pos =
+        s.find('=').ok_or_else(|| format!("invalid input format '{}': must be key=value", s))?;
     Ok((s[..pos].to_string(), s[pos + 1..].to_string()))
 }
 
@@ -175,9 +175,8 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
         if c.is_ascii_digit() {
             current_num.push(c);
         } else {
-            let n: u64 = current_num
-                .parse()
-                .map_err(|_| anyhow::anyhow!("invalid duration: {}", s))?;
+            let n: u64 =
+                current_num.parse().map_err(|_| anyhow::anyhow!("invalid duration: {}", s))?;
             current_num.clear();
             match c {
                 'h' => total_secs += n * 3600,
@@ -189,9 +188,7 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     }
     // Bare number → seconds
     if !current_num.is_empty() {
-        let n: u64 = current_num
-            .parse()
-            .map_err(|_| anyhow::anyhow!("invalid duration: {}", s))?;
+        let n: u64 = current_num.parse().map_err(|_| anyhow::anyhow!("invalid duration: {}", s))?;
         total_secs += n;
     }
     if total_secs == 0 {
@@ -200,29 +197,25 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs(total_secs))
 }
 
-pub(crate) fn format_job_list(out: &mut impl Write, jobs: &[oj_daemon::JobSummary]) {
+pub(crate) fn format_job_list(out: &mut (impl Write + ?Sized), jobs: &[oj_daemon::JobSummary]) {
     if jobs.is_empty() {
         let _ = writeln!(out, "No jobs");
         return;
     }
 
-    // Show PROJECT column only when multiple namespaces present
-    let show_project = should_show_project(jobs.iter().map(|p| p.namespace.as_str()));
-
     // Show RETRIES column only when any job has retries
-    let show_retries = jobs.iter().any(|p| p.retry_count > 0);
+    let show_retries = jobs.iter().any(|p| p.retries > 0);
 
-    // Build columns
-    let mut cols = vec![Column::muted("ID")];
-    if show_project {
-        cols.push(Column::left("PROJECT"));
-    }
-    cols.extend([
+    // Build columns — RETRIES is conditionally inserted
+    let mut cols = vec![
+        Column::muted("ID"),
+        Column::left("PROJECT"),
         Column::left("NAME"),
         Column::left("KIND"),
         Column::left("STEP"),
         Column::left("UPDATED"),
-    ]);
+    ];
+    // Insert RETRIES before STATUS (which will be last)
     if show_retries {
         cols.push(Column::left("RETRIES"));
     }
@@ -231,16 +224,14 @@ pub(crate) fn format_job_list(out: &mut impl Write, jobs: &[oj_daemon::JobSummar
     let mut table = Table::new(cols);
 
     for p in jobs {
-        let id = p.id.short(8).to_string();
+        let id = oj_core::short(&p.id, 8).to_string();
+        let ns = if p.project.is_empty() { "-" } else { &p.project };
         let updated = format_time_ago(p.updated_at_ms);
 
-        let mut cells = vec![id];
-        if show_project {
-            cells.push(project_cell(&p.namespace));
-        }
-        cells.extend([p.name.clone(), p.kind.clone(), p.step.clone(), updated]);
+        let mut cells =
+            vec![id, ns.to_string(), p.name.clone(), p.kind.clone(), p.step.clone(), updated];
         if show_retries {
-            cells.push(p.retry_count.to_string());
+            cells.push(p.retries.to_string());
         }
         cells.push(p.step_status.to_string());
         table.row(cells);
@@ -256,18 +247,9 @@ pub async fn handle(
     format: OutputFormat,
 ) -> Result<()> {
     match command {
-        JobCommand::List {
-            name,
-            status,
-            limit,
-            no_limit,
-        } => {
+        JobCommand::List { name, status, limit, no_limit } => {
             let mut jobs = client.list_jobs().await?;
-
-            // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-            if let Some(proj) = project {
-                jobs.retain(|p| p.namespace == proj);
-            }
+            filter_by_project(&mut jobs, project, |p| &p.project);
 
             // Filter by name substring
             if let Some(ref pat) = name {
@@ -283,211 +265,150 @@ pub async fn handle(
                 });
             }
 
-            // Sort by most recently updated first
             jobs.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms));
+            let truncation = apply_limit(&mut jobs, limit, no_limit);
 
-            // Limit
-            let total = jobs.len();
-            let effective_limit = if no_limit { total } else { limit };
-            let truncated = total > effective_limit;
-            if truncated {
-                jobs.truncate(effective_limit);
-            }
-
-            match format {
-                OutputFormat::Text => {
-                    let mut out = std::io::stdout();
-                    format_job_list(&mut out, &jobs);
-
-                    if truncated {
-                        let remaining = total - effective_limit;
-                        println!(
-                            "\n... {} more not shown. Use --no-limit or --limit N to see more.",
-                            remaining
-                        );
-                    }
-                }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&jobs)?);
-                }
-            }
+            handle_list_with_limit(format, &jobs, "No jobs", truncation, |items, out| {
+                format_job_list(out, items);
+            })?;
         }
         JobCommand::Show { id, verbose } => {
             let job = client.get_job(&id).await?;
-
-            match format {
-                OutputFormat::Text => {
-                    if let Some(p) = job {
-                        println!("{} {}", color::header("Job:"), p.id);
-                        println!("  {} {}", color::context("Name:"), p.name);
-                        if !p.namespace.is_empty() {
-                            println!("  {} {}", color::context("Project:"), p.namespace);
-                        }
-                        println!("  {} {}", color::context("Kind:"), p.kind);
-                        println!(
-                            "  {} {}",
-                            color::context("Status:"),
-                            color::status(&p.step_status.to_string())
-                        );
-                        if let Some(session) = &p.session_id {
-                            println!("  {} {}", color::context("Session:"), session);
-                        }
-                        if let Some(ws) = &p.workspace_path {
-                            println!("  {} {}", color::context("Workspace:"), ws.display());
-                        }
-                        if let Some(error) = &p.error {
-                            println!();
-                            println!("  {} {}", color::context("Error:"), error);
-                        }
-
-                        if !p.steps.is_empty() {
-                            println!();
-                            println!("  {}", color::header("Steps:"));
-                            for step in &p.steps {
-                                let duration = super::job_wait::format_duration(
-                                    step.started_at_ms,
-                                    step.finished_at_ms,
-                                );
-                                let status = match step.outcome {
-                                    StepOutcomeKind::Completed => "completed".to_string(),
-                                    StepOutcomeKind::Running => "running".to_string(),
-                                    StepOutcomeKind::Failed => match &step.detail {
-                                        Some(d) => {
-                                            format!("failed ({})", truncate(d, 40))
-                                        }
-                                        None => "failed".to_string(),
-                                    },
-                                    StepOutcomeKind::Waiting => match &step.detail {
-                                        Some(d) => {
-                                            format!("waiting ({})", truncate(d, 40))
-                                        }
-                                        None => "waiting".to_string(),
-                                    },
-                                };
-                                println!(
-                                    "    {:<12} {:<8} {}",
-                                    step.name,
-                                    duration,
-                                    color::status(&status)
-                                );
-                            }
-                        }
-
-                        if !p.agents.is_empty() {
-                            println!();
-                            println!("  {}", color::header("Agents:"));
-                            for agent in &p.agents {
-                                let summary = format_agent_summary(agent);
-                                let session_id = truncate(&agent.agent_id, 8);
-                                if summary.is_empty() {
-                                    println!(
-                                        "    {:<12} {} {}",
-                                        agent.step_name,
-                                        color::status(&format!("{:<12}", &agent.status)),
-                                        color::muted(session_id),
-                                    );
-                                } else {
-                                    println!(
-                                        "    {:<12} {} {} ({})",
-                                        agent.step_name,
-                                        color::status(&format!("{:<12}", &agent.status)),
-                                        summary,
-                                        color::muted(session_id),
-                                    );
-                                }
-                            }
-                        }
-
-                        if !p.vars.is_empty() {
-                            println!();
-                            println!("  {}", color::header("Variables:"));
-                            let sorted_vars = group_vars_by_scope(&p.vars);
-                            if verbose {
-                                for (k, v) in &sorted_vars {
-                                    if v.contains('\n') {
-                                        println!("    {}", color::context(&format!("{}:", k)));
-                                        for line in v.lines() {
-                                            println!("      {}", line);
-                                        }
-                                    } else {
-                                        println!(
-                                            "    {} {}",
-                                            color::context(&format!("{}:", k)),
-                                            v
-                                        );
-                                    }
-                                }
-                            } else {
-                                for (k, v) in &sorted_vars {
-                                    println!(
-                                        "    {} {}",
-                                        color::context(&format!("{}:", k)),
-                                        format_var_value(v, 80)
-                                    );
-                                }
-                                let any_truncated =
-                                    p.vars.values().any(|v| is_var_truncated(v, 80));
-                                if any_truncated {
-                                    println!();
-                                    println!(
-                                        "  {}",
-                                        color::context(
-                                            "hint: use --verbose to show full variables"
-                                        )
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        println!("Job not found: {}", id);
+            format_or_json(format, &job, || {
+                if let Some(p) = &job {
+                    println!("{} {}", color::header("Job:"), p.id);
+                    println!("  {} {}", color::context("Name:"), p.name);
+                    if !p.project.is_empty() {
+                        println!("  {} {}", color::context("Project:"), p.project);
                     }
+                    println!("  {} {}", color::context("Kind:"), p.kind);
+                    println!(
+                        "  {} {}",
+                        color::context("Status:"),
+                        color::status(&p.step_status.to_string())
+                    );
+                    if let Some(ws) = &p.workspace_path {
+                        println!("  {} {}", color::context("Workspace:"), ws.display());
+                    }
+                    if let Some(error) = &p.error {
+                        println!();
+                        println!("  {} {}", color::context("Error:"), error);
+                    }
+
+                    if !p.steps.is_empty() {
+                        println!();
+                        println!("  {}", color::header("Steps:"));
+                        for step in &p.steps {
+                            let duration = super::job_wait::format_duration(
+                                step.started_at_ms,
+                                step.finished_at_ms,
+                            );
+                            let status = match (&step.outcome, &step.detail) {
+                                (StepOutcomeKind::Failed | StepOutcomeKind::Waiting, Some(d)) => {
+                                    format!("{} ({})", step.outcome, truncate(d, 40))
+                                }
+                                _ => step.outcome.to_string(),
+                            };
+                            println!(
+                                "    {:<12} {:<8} {}",
+                                step.name,
+                                duration,
+                                color::status(&status)
+                            );
+                        }
+                    }
+
+                    if !p.agents.is_empty() {
+                        println!();
+                        println!("  {}", color::header("Crew:"));
+                        for agent in &p.agents {
+                            let summary = format_agent_summary(agent);
+                            let short_id = truncate(&agent.agent_id, 8);
+                            if summary.is_empty() {
+                                println!(
+                                    "    {:<12} {} {}",
+                                    agent.step_name,
+                                    color::status(&format!("{:<12}", &agent.status)),
+                                    color::muted(short_id),
+                                );
+                            } else {
+                                println!(
+                                    "    {:<12} {} {} ({})",
+                                    agent.step_name,
+                                    color::status(&format!("{:<12}", &agent.status)),
+                                    summary,
+                                    color::muted(short_id),
+                                );
+                            }
+                        }
+                    }
+
+                    if !p.vars.is_empty() {
+                        println!();
+                        println!("  {}", color::header("Variables:"));
+                        let sorted_vars = group_vars_by_scope(&p.vars);
+                        if verbose {
+                            for (k, v) in &sorted_vars {
+                                if v.contains('\n') {
+                                    println!("    {}", color::context(&format!("{}:", k)));
+                                    for line in v.lines() {
+                                        println!("      {}", line);
+                                    }
+                                } else {
+                                    println!("    {} {}", color::context(&format!("{}:", k)), v);
+                                }
+                            }
+                        } else {
+                            for (k, v) in &sorted_vars {
+                                println!(
+                                    "    {} {}",
+                                    color::context(&format!("{}:", k)),
+                                    format_var_value(v, 80)
+                                );
+                            }
+                            let any_truncated = p.vars.values().any(|v| is_var_truncated(v, 80));
+                            if any_truncated {
+                                println!();
+                                println!(
+                                    "  {}",
+                                    color::context("hint: use --verbose to show full variables")
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    println!("Job not found: {}", id);
                 }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&job)?);
-                }
-            }
+            })?;
         }
-        JobCommand::Resume {
-            id,
-            message,
-            var,
-            kill,
-            all,
-        } => {
+        JobCommand::Resume { id, message, var, kill, all } => {
             if all {
                 if id.is_some() || message.is_some() || !var.is_empty() {
                     anyhow::bail!("--all cannot be combined with a job ID, --message, or --var");
                 }
                 let (resumed, skipped) = client.job_resume_all(kill).await?;
 
-                match format {
-                    OutputFormat::Text => {
-                        if resumed.is_empty() && skipped.is_empty() {
-                            println!("No resumable jobs found");
-                        } else {
-                            for id in &resumed {
-                                println!("Resumed job {}", id);
-                            }
-                            for (id, reason) in &skipped {
-                                println!("Skipped job {} ({})", id, reason);
-                            }
+                let obj = serde_json::json!({
+                    "resumed": resumed,
+                    "skipped": skipped,
+                });
+                format_or_json(format, &obj, || {
+                    if resumed.is_empty() && skipped.is_empty() {
+                        println!("No resumable jobs found");
+                    } else {
+                        for id in &resumed {
+                            println!("Resumed job {}", id);
+                        }
+                        for (id, reason) in &skipped {
+                            println!("Skipped job {} ({})", id, reason);
                         }
                     }
-                    OutputFormat::Json => {
-                        let obj = serde_json::json!({
-                            "resumed": resumed,
-                            "skipped": skipped,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&obj)?);
-                    }
-                }
+                })?;
             } else {
                 let id =
                     id.ok_or_else(|| anyhow::anyhow!("Either provide a job ID or use --all"))?;
                 let var_map: HashMap<String, String> = var.into_iter().collect();
-                client
-                    .job_resume(&id, message.as_deref(), &var_map, kill)
-                    .await?;
+                client.job_resume(&id, message.as_deref(), &var_map, kill).await?;
                 if !var_map.is_empty() {
                     println!("Updated vars and resumed job {}", id);
                 } else {
@@ -496,50 +417,36 @@ pub async fn handle(
             }
         }
         JobCommand::Cancel { ids } => {
-            let result = client.job_cancel(&ids).await?;
-
-            for id in &result.cancelled {
-                println!("Cancelled job {}", id);
-            }
-            for id in &result.already_terminal {
-                println!("Job {} was already terminal", id);
-            }
-            for id in &result.not_found {
-                eprintln!("Job not found: {}", id);
-            }
-
-            // Exit with error if any jobs were not found
-            if !result.not_found.is_empty() {
-                std::process::exit(1);
-            }
+            let r = client.job_cancel(&ids).await?;
+            print_batch_action_results(
+                &r.cancelled,
+                "Cancelled",
+                &r.already_terminal,
+                &r.not_found,
+            );
         }
         JobCommand::Suspend { ids } => {
-            let result = client.job_suspend(&ids).await?;
-
-            for id in &result.suspended {
-                println!("Suspended job {}", id);
-            }
-            for id in &result.already_terminal {
-                println!("Job {} was already terminal", id);
-            }
-            for id in &result.not_found {
-                eprintln!("Job not found: {}", id);
-            }
-
-            // Exit with error if any jobs were not found
-            if !result.not_found.is_empty() {
-                std::process::exit(1);
-            }
+            let r = client.job_suspend(&ids).await?;
+            print_batch_action_results(
+                &r.suspended,
+                "Suspended",
+                &r.already_terminal,
+                &r.not_found,
+            );
         }
         JobCommand::Attach { id } => {
             let job = client
                 .get_job(&id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("job not found: {}", id))?;
-            let session_id = job
-                .session_id
-                .ok_or_else(|| anyhow::anyhow!("job has no active session"))?;
-            super::session::attach(&session_id)?;
+            // Find running agent to attach to
+            let agent_id = job
+                .agents
+                .iter()
+                .find(|a| a.status == "running")
+                .map(|a| a.agent_id.clone())
+                .ok_or_else(|| anyhow::anyhow!("job has no active agent session"))?;
+            crate::daemon_process::coop_attach(&agent_id)?;
         }
         JobCommand::Peek { id } => {
             let job = client
@@ -547,108 +454,81 @@ pub async fn handle(
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Job not found: {}", id))?;
 
-            // Try main job session first, then fall back to running agent session
-            let session_id = job.session_id.clone().or_else(|| {
-                job.agents
-                    .iter()
-                    .find(|a| a.status == "running")
-                    .map(|a| a.agent_id.clone())
-            });
+            let short_id = oj_core::short(&job.id, 8);
 
-            // Try to capture the tmux pane output if a session exists
-            let peek_output = if let Some(ref session_id) = session_id {
-                let with_color = should_use_color();
-                match client.peek_session(session_id, with_color).await {
-                    Ok(output) => Some((session_id.clone(), output)),
-                    Err(crate::client::ClientError::Rejected(msg))
-                        if msg.starts_with("Session not found") =>
-                    {
-                        None
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-            } else {
-                None
-            };
-
-            match peek_output {
-                Some((session_id, output)) => {
-                    print_peek_frame(&session_id, &output);
-                }
-                None => {
-                    let short_id = job.id.short(8);
-
-                    // Try saved capture: find agent_id from current step, then
-                    // fall back to the most recent agent in the job.
-                    let agent_id = job
-                        .steps
+            // Try saved capture: find agent_id from current step, then
+            // fall back to the most recent agent in the job.
+            let agent_id = job
+                .agents
+                .iter()
+                .find(|a| a.status == "running")
+                .map(|a| a.agent_id.as_str())
+                .or_else(|| {
+                    job.steps
                         .iter()
                         .rfind(|s| s.name == job.step)
                         .and_then(|s| s.agent_id.as_deref())
-                        .or_else(|| job.agents.last().map(|a| a.agent_id.as_str()));
-                    if let Some(aid) = agent_id {
-                        if let Some(content) = super::agent::display::try_read_agent_capture(aid) {
-                            let label = aid.short(8);
-                            print_capture_frame(label, &content);
-                            return Ok(());
-                        }
-                    }
-
-                    let is_terminal = job.step == "done"
-                        || job.step == "failed"
-                        || job.step == "cancelled"
-                        || job.step == "suspended";
-
-                    if job.step == "suspended" {
-                        println!(
-                            "Job {} is suspended. Use `oj resume {}` to continue.",
-                            short_id, short_id
-                        );
-                    } else if is_terminal {
-                        println!("Job {} is {}. No active session.", short_id, job.step);
-                    } else {
-                        println!(
-                            "No active session for job {} (step: {}, status: {})",
-                            short_id, job.step, job.step_status
-                        );
-                    }
-                    println!();
-                    println!("Try:");
-                    println!("    oj job logs {}", short_id);
-                    println!("    oj job show {}", short_id);
+                })
+                .or_else(|| job.agents.last().map(|a| a.agent_id.as_str()));
+            if let Some(aid) = agent_id {
+                if let Some(content) = super::agent::display::try_read_agent_capture(aid) {
+                    let label = oj_core::short(aid, 8);
+                    print_capture_frame(label, &content);
+                    return Ok(());
                 }
             }
+
+            let is_terminal = job.step == "done"
+                || job.step == "failed"
+                || job.step == "cancelled"
+                || job.step == "suspended";
+
+            if job.step == "suspended" {
+                println!(
+                    "Job {} is suspended. Use `oj resume {}` to continue.",
+                    short_id, short_id
+                );
+            } else if is_terminal {
+                println!("Job {} is {}. No active agent.", short_id, job.step);
+            } else {
+                println!(
+                    "No active agent for job {} (step: {}, status: {})",
+                    short_id, job.step, job.step_status
+                );
+            }
+            println!();
+            println!("Try:");
+            println!("    oj job logs {}", short_id);
+            println!("    oj job show {}", short_id);
         }
         JobCommand::Logs { id, follow, limit } => {
-            let (log_path, content) = client.get_job_logs(&id, limit).await?;
-            display_log(&log_path, &content, follow, format, "job", &id).await?;
-        }
-        JobCommand::Prune {
-            all,
-            failed,
-            orphans,
-            dry_run,
-        } => {
-            // Only scope by namespace when explicitly requested via --project.
-            // Without this, prune matches `job list` behavior and operates
-            // across all namespaces — fixing the bug where auto-resolved namespace
-            // silently skipped jobs from other projects.
-            let (pruned, skipped) = client
-                .job_prune(all, failed, orphans, dry_run, project)
+            let (log_path, content, offset) = client.get_job_logs(&id, limit, 0).await?;
+            if let Some(off) =
+                display_log(&log_path, &content, follow, offset, format, "job", &id).await?
+            {
+                let id = id.clone();
+                poll_log_follow(off, |o| {
+                    let id = id.clone();
+                    async move {
+                        let (_, c, new_off) = client.get_job_logs(&id, 0, o).await?;
+                        Ok((c, new_off))
+                    }
+                })
                 .await?;
+            }
+        }
+        JobCommand::Prune { all, failed, orphans, dry_run } => {
+            // Only scope by project when explicitly requested via --project.
+            // Without this, prune matches `job list` behavior and operates
+            // across all namespaces — fixing the bug where auto-resolved project
+            // silently skipped jobs from other projects.
+            let (pruned, skipped) =
+                client.job_prune(all, failed, orphans, dry_run, project).await?;
 
-            print_prune_results(
-                &pruned,
-                skipped,
-                dry_run,
-                format,
-                "job",
-                "skipped",
-                |entry| {
-                    let short_id = entry.id.short(8);
-                    format!("{} ({}, {})", entry.name, short_id, entry.step)
-                },
-            )?;
+            print_prune_results(&pruned, skipped, dry_run, format, "job", "skipped", |entry| {
+                let short_id = oj_core::short(&entry.id, 8);
+                format!("{} ({}, {})", entry.name, short_id, entry.step)
+            })?;
         }
         JobCommand::Wait { ids, all, timeout } => {
             super::job_wait::handle(ids, all, timeout, client).await?;

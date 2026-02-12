@@ -11,9 +11,9 @@ mod job_tests {
         let log_dir = dir.path().join("logs");
         let logger = JobLogger::new(log_dir.clone());
 
-        logger.append("pipe-1", "init", "job created");
+        logger.append("job-1", "init", "job created");
 
-        let content = std::fs::read_to_string(log_dir.join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(log_dir.join("job/job-1.log")).unwrap();
         assert!(content.contains("[init] job created"));
     }
 
@@ -22,11 +22,11 @@ mod job_tests {
         let dir = tempdir().unwrap();
         let logger = JobLogger::new(dir.path().to_path_buf());
 
-        logger.append("pipe-1", "init", "step started");
-        logger.append("pipe-1", "init", "shell: echo hello");
-        logger.append("pipe-1", "init", "shell completed (exit 0)");
+        logger.append("job-1", "init", "step started");
+        logger.append("job-1", "init", "shell: echo hello");
+        logger.append("job-1", "init", "shell completed (exit 0)");
 
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("job/job-1.log")).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 3);
         assert!(lines[0].contains("[init] step started"));
@@ -39,25 +39,17 @@ mod job_tests {
         let dir = tempdir().unwrap();
         let logger = JobLogger::new(dir.path().to_path_buf());
 
-        logger.append("pipe-1", "plan", "agent spawned: planner");
+        logger.append("job-1", "plan", "agent spawned: planner");
 
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("job/job-1.log")).unwrap();
         let line = content.trim();
 
         // Format: YYYY-MM-DDTHH:MM:SSZ [step] message
-        assert!(
-            line.chars().nth(4) == Some('-'),
-            "expected date format, got: {}",
-            line
-        );
+        assert!(line.chars().nth(4) == Some('-'), "expected date format, got: {}", line);
         assert!(line.contains("[plan] agent spawned: planner"));
         assert_eq!(line.chars().nth(10), Some('T'));
         assert!(line.ends_with("Z [plan] agent spawned: planner"));
-        assert!(
-            line.len() > 20,
-            "line too short for expected format: {}",
-            line
-        );
+        assert!(line.len() > 20, "line too short for expected format: {}", line);
     }
 
     #[test]
@@ -65,11 +57,11 @@ mod job_tests {
         let dir = tempdir().unwrap();
         let logger = JobLogger::new(dir.path().to_path_buf());
 
-        logger.append("pipe-1", "init", "first job");
-        logger.append("pipe-2", "init", "second job");
+        logger.append("job-1", "init", "first job");
+        logger.append("job-2", "init", "second job");
 
-        let content1 = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
-        let content2 = std::fs::read_to_string(dir.path().join("job/pipe-2.log")).unwrap();
+        let content1 = std::fs::read_to_string(dir.path().join("job/job-1.log")).unwrap();
+        let content2 = std::fs::read_to_string(dir.path().join("job/job-2.log")).unwrap();
         assert!(content1.contains("first job"));
         assert!(content2.contains("second job"));
         assert!(!content1.contains("second job"));
@@ -84,7 +76,7 @@ mod job_tests {
         let logger = JobLogger::new(file_path.join("nested"));
 
         // Should not panic, just log a warning
-        logger.append("pipe-1", "init", "should not panic");
+        logger.append("job-1", "init", "should not panic");
     }
 
     #[test]
@@ -94,9 +86,9 @@ mod job_tests {
         let logger = JobLogger::new(log_dir.clone());
 
         let agent_id = "8cf5e1df-a434-4029-a369-c95af9c374c9";
-        logger.append_agent_pointer("pipe-1", "plan", agent_id);
+        logger.append_agent_pointer("job-1", "plan", agent_id);
 
-        let content = std::fs::read_to_string(log_dir.join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(log_dir.join("job/job-1.log")).unwrap();
         let expected_path = log_dir.join("agent").join(format!("{}.log", agent_id));
         assert!(
             content.contains(&expected_path.display().to_string()),
@@ -106,18 +98,13 @@ mod job_tests {
     }
 
     #[test]
-    fn copy_session_log_creates_directory_and_copies_file() {
+    fn write_session_log_creates_directory_and_writes_content() {
         let dir = tempdir().unwrap();
         let log_dir = dir.path().join("logs");
         let logger = JobLogger::new(log_dir.clone());
 
-        let source_dir = dir.path().join("source");
-        std::fs::create_dir_all(&source_dir).unwrap();
-        let source = source_dir.join("session.jsonl");
-        std::fs::write(&source, r#"{"type":"user","message":"hello"}"#).unwrap();
-
         let agent_id = "8cf5e1df-a434-4029-a369-c95af9c374c9";
-        logger.copy_session_log(agent_id, &source);
+        logger.write_session_log(agent_id, r#"{"type":"user","message":"hello"}"#);
 
         let dest = log_dir.join("agent").join(agent_id).join("session.jsonl");
         assert!(dest.exists(), "session.jsonl should exist at {:?}", dest);
@@ -166,71 +153,55 @@ mod job_tests {
     }
 
     #[test]
-    fn copy_session_log_handles_missing_source() {
+    fn write_session_log_handles_empty_content() {
         let dir = tempdir().unwrap();
         let log_dir = dir.path().join("logs");
         let logger = JobLogger::new(log_dir.clone());
 
-        let source = dir.path().join("nonexistent.jsonl");
-
         let agent_id = "abc-123";
-        // Should not panic, just log a warning
-        logger.copy_session_log(agent_id, &source);
+        logger.write_session_log(agent_id, "");
 
-        let dest_dir = log_dir.join("agent").join(agent_id);
-        assert!(dest_dir.exists());
+        let dest = log_dir.join("agent").join(agent_id).join("session.jsonl");
+        assert!(dest.exists());
+        assert!(std::fs::read_to_string(&dest).unwrap().is_empty());
     }
 
-    #[test]
-    fn append_fenced_writes_correctly_formatted_block() {
+    #[yare::parameterized(
+        single_line = {
+            "init", "stdout", "hello world\n",
+            &["hello world"]
+        },
+        trailing_newline_missing = {
+            "build", "stderr", "warning: unused variable",
+            &["warning: unused variable"]
+        },
+        multiline = {
+            "build", "stdout", "Compiling oj v0.1.0\n    Finished dev target(s) in 12.34s\n",
+            &["Compiling oj v0.1.0", "    Finished dev target(s) in 12.34s"]
+        },
+    )]
+    fn append_fenced_formats_correctly(
+        step: &str,
+        label: &str,
+        body: &str,
+        expected_body_lines: &[&str],
+    ) {
         let dir = tempdir().unwrap();
         let logger = JobLogger::new(dir.path().to_path_buf());
 
-        logger.append_fenced("pipe-1", "init", "stdout", "hello world\n");
+        logger.append_fenced("job-1", step, label, body);
 
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("job/job-1.log")).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("[init] ```stdout"));
-        assert_eq!(lines[1], "hello world");
-        assert!(lines[2].contains("[init] ```"));
-        assert!(!lines[2].contains("```stdout"));
-    }
-
-    #[test]
-    fn append_fenced_adds_trailing_newline_when_missing() {
-        let dir = tempdir().unwrap();
-        let logger = JobLogger::new(dir.path().to_path_buf());
-
-        logger.append_fenced("pipe-1", "build", "stderr", "warning: unused variable");
-
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("[build] ```stderr"));
-        assert_eq!(lines[1], "warning: unused variable");
-        assert!(lines[2].contains("[build] ```"));
-    }
-
-    #[test]
-    fn append_fenced_multiline_content() {
-        let dir = tempdir().unwrap();
-        let logger = JobLogger::new(dir.path().to_path_buf());
-
-        logger.append_fenced(
-            "pipe-1",
-            "build",
-            "stdout",
-            "Compiling oj v0.1.0\n    Finished dev target(s) in 12.34s\n",
-        );
-
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
-        let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 4);
-        assert!(lines[0].contains("[build] ```stdout"));
-        assert_eq!(lines[1], "Compiling oj v0.1.0");
-        assert_eq!(lines[2], "    Finished dev target(s) in 12.34s");
-        assert!(lines[3].contains("[build] ```"));
+        // open fence + body lines + close fence
+        assert_eq!(lines.len(), expected_body_lines.len() + 2);
+        assert!(lines[0].contains(&format!("[{}] ```{}", step, label)));
+        for (i, expected) in expected_body_lines.iter().enumerate() {
+            assert_eq!(lines[i + 1], *expected);
+        }
+        let last = lines.last().unwrap();
+        assert!(last.contains(&format!("[{}] ```", step)));
+        assert!(!last.contains(&format!("```{}", label)));
     }
 
     #[test]
@@ -238,10 +209,10 @@ mod job_tests {
         let dir = tempdir().unwrap();
         let logger = JobLogger::new(dir.path().to_path_buf());
 
-        logger.append_fenced("pipe-1", "init", "stdout", "hello world\n");
-        logger.append("pipe-1", "init", "shell completed (exit 0)");
+        logger.append_fenced("job-1", "init", "stdout", "hello world\n");
+        logger.append("job-1", "init", "shell completed (exit 0)");
 
-        let content = std::fs::read_to_string(dir.path().join("job/pipe-1.log")).unwrap();
+        let content = std::fs::read_to_string(dir.path().join("job/job-1.log")).unwrap();
         let lines: Vec<&str> = content.lines().collect();
         assert_eq!(lines.len(), 4);
         assert!(lines[0].contains("[init] ```stdout"));
@@ -354,34 +325,23 @@ mod queue_tests {
     #[test]
     fn handles_namespaced_queue_name() {
         let (dir, logger) = setup();
-        logger.append(
-            "myproject/build-queue",
-            "abcdef01-2345-6789-abcd-ef0123456789",
-            "pushed",
-        );
+        logger.append("myproject/build-queue", "abcdef01-2345-6789-abcd-ef0123456789", "pushed");
 
         let path = dir.path().join("queue/myproject/build-queue.log");
         assert!(path.exists(), "namespaced log file should be created");
     }
 
-    #[test]
-    fn truncates_item_id_prefix() {
+    #[yare::parameterized(
+        long_id  = { "abcdef0123456789", "[abcdef01]" },
+        short_id = { "abc",              "[abc]" },
+    )]
+    fn item_id_truncation(item_id: &str, expected_prefix: &str) {
         let (dir, logger) = setup();
-        logger.append("q", "abcdef0123456789", "pushed");
+        logger.append("q", item_id, "pushed");
 
         let path = dir.path().join("queue/q.log");
         let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("[abcdef01]"));
-    }
-
-    #[test]
-    fn handles_short_item_id() {
-        let (dir, logger) = setup();
-        logger.append("q", "abc", "pushed");
-
-        let path = dir.path().join("queue/q.log");
-        let content = std::fs::read_to_string(&path).unwrap();
-        assert!(content.contains("[abc]"));
+        assert!(content.contains(expected_prefix), "expected {} in: {}", expected_prefix, content);
     }
 
     #[test]
@@ -395,11 +355,7 @@ mod queue_tests {
 
         // Format: YYYY-MM-DDTHH:MM:SSZ [prefix] message
         assert!(line.ends_with("[a1b2c3d4] failed error=\"timeout exceeded\""));
-        assert!(
-            line.starts_with("20"),
-            "line should start with timestamp: {}",
-            line
-        );
+        assert!(line.starts_with("20"), "line should start with timestamp: {}", line);
         assert!(line.contains('T'));
         assert!(line.contains('Z'));
     }

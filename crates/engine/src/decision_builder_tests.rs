@@ -3,772 +3,433 @@
 
 use super::*;
 use oj_core::{
-    AgentRunId, DecisionSource, Event, JobId, OwnerId, QuestionData, QuestionEntry, QuestionOption,
+    AgentId, CrewId, DecisionId, DecisionOption, DecisionSource, Event, JobId, OwnerId,
+    QuestionData, QuestionEntry, QuestionOption,
 };
+use proptest::prelude::*;
 
-#[test]
-fn test_idle_trigger_builds_correct_options() {
-    let (id, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Idle {
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    assert!(!id.is_empty());
-
-    match event {
-        Event::DecisionCreated {
-            options, source, ..
-        } => {
-            assert_eq!(source, DecisionSource::Idle);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Nudge");
-            assert!(options[0].recommended);
-            assert_eq!(options[1].label, "Done");
-            assert!(!options[1].recommended);
-            assert_eq!(options[2].label, "Cancel");
-            assert!(!options[2].recommended);
-            assert_eq!(options[3].label, "Dismiss");
-            assert!(!options[3].recommended);
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
+/// Unwrap a `DecisionCreated` event, panicking if the variant doesn't match.
+struct Decision {
+    id: DecisionId,
+    agent_id: AgentId,
+    owner: OwnerId,
+    source: DecisionSource,
+    context: String,
+    options: Vec<DecisionOption>,
+    questions: Option<QuestionData>,
+    project: String,
 }
 
-#[test]
-fn test_dead_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Dead {
-            exit_code: Some(137),
-            assistant_context: None,
-        },
-    )
-    .build();
-
+fn unwrap_decision((id, event): (DecisionId, Event)) -> Decision {
     match event {
         Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Dead);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Retry");
-            assert!(options[0].recommended);
-            assert_eq!(options[1].label, "Skip");
-            assert_eq!(options[2].label, "Cancel");
-            assert_eq!(options[3].label, "Dismiss");
-            assert!(context.contains("exit code 137"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_error_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Error {
-            error_type: "OutOfCredits".to_string(),
-            message: "API quota exceeded".to_string(),
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Error);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Retry");
-            assert_eq!(options[3].label, "Dismiss");
-            assert!(context.contains("OutOfCredits"));
-            assert!(context.contains("API quota exceeded"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_gate_failure_includes_command_and_stderr() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::GateFailed {
-            command: "./check.sh".to_string(),
-            exit_code: 1,
-            stderr: "validation failed".to_string(),
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            context, source, ..
-        } => {
-            assert_eq!(source, DecisionSource::Gate);
-            assert!(context.contains("./check.sh"));
-            assert!(context.contains("validation failed"));
-            assert!(context.contains("Exit code: 1"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_prompt_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Prompt {
-            prompt_type: "permission".to_string(),
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Approval);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Approve");
-            assert_eq!(options[1].label, "Deny");
-            assert_eq!(options[2].label, "Cancel");
-            assert_eq!(options[3].label, "Dismiss");
-            assert!(context.contains("permission prompt"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_builder_with_agent_id_and_namespace() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Idle {
-            assistant_context: None,
-        },
-    )
-    .agent_id("agent-123")
-    .namespace("my-project")
-    .build();
-
-    match event {
-        Event::DecisionCreated {
+            id: did,
             agent_id,
-            namespace,
+            owner,
+            source,
+            context,
+            options,
+            questions,
+            project,
             ..
         } => {
-            assert_eq!(agent_id, Some("agent-123".to_string()));
-            assert_eq!(namespace, "my-project");
+            assert_eq!(id, did);
+            Decision { id, agent_id, owner, source, context, options, questions, project }
         }
         _ => panic!("expected DecisionCreated"),
     }
+}
+
+fn build_job_decision(trigger: EscalationTrigger) -> Decision {
+    unwrap_decision(
+        EscalationDecisionBuilder::new(
+            JobId::new("job-1").into(),
+            "test-job".to_string(),
+            "agent-1".to_string(),
+            trigger,
+        )
+        .build(),
+    )
+}
+
+#[yare::parameterized(
+    idle   = {
+        EscalationTrigger::Idle { last_message: None },
+        DecisionSource::Idle,
+        &["Nudge", "Done", "Cancel", "Dismiss"],
+        true
+    },
+    dead   = {
+        EscalationTrigger::Dead { exit_code: Some(137), last_message: None },
+        DecisionSource::Dead,
+        &["Retry", "Skip", "Cancel", "Dismiss"],
+        true
+    },
+    error  = {
+        EscalationTrigger::Error { error_type: "OutOfCredits".into(), message: "API quota exceeded".into(), last_message: None },
+        DecisionSource::Error,
+        &["Retry", "Skip", "Cancel", "Dismiss"],
+        true
+    },
+    prompt = {
+        EscalationTrigger::Prompt { prompt_type: "permission".into(), last_message: None },
+        DecisionSource::Approval,
+        &["Approve", "Deny", "Cancel", "Dismiss"],
+        false
+    },
+    plan   = {
+        EscalationTrigger::Plan { last_message: Some("plan".into()) },
+        DecisionSource::Plan,
+        &["Accept (clear context)", "Accept (auto edits)", "Accept (manual edits)", "Revise", "Cancel"],
+        true
+    },
+)]
+fn trigger_builds_correct_options(
+    trigger: EscalationTrigger,
+    expected_source: DecisionSource,
+    expected_labels: &[&str],
+    first_recommended: bool,
+) {
+    let d = build_job_decision(trigger);
+    assert!(!d.id.as_str().is_empty());
+    assert_eq!(d.source, expected_source);
+    assert_eq!(d.options.len(), expected_labels.len());
+    for (opt, label) in d.options.iter().zip(expected_labels) {
+        assert_eq!(opt.label, *label);
+    }
+    assert_eq!(
+        d.options[0].recommended, first_recommended,
+        "first option recommended mismatch for {:?}",
+        d.options[0].label,
+    );
+}
+
+#[yare::parameterized(
+    gate_with_stderr = {
+        EscalationTrigger::GateFailed { command: "./check.sh".into(), exit_code: 1, stderr: "validation failed".into() },
+        &["./check.sh", "validation failed", "Exit code: 1"],
+        &[]
+    },
+    gate_empty_stderr = {
+        EscalationTrigger::GateFailed { command: "./check.sh".into(), exit_code: 1, stderr: String::new() },
+        &["./check.sh", "Exit code: 1"],
+        &["stderr:"]
+    },
+    prompt_type = {
+        EscalationTrigger::Prompt { prompt_type: "permission".into(), last_message: None },
+        &["permission prompt"],
+        &[]
+    },
+    dead_no_exit_code = {
+        EscalationTrigger::Dead { exit_code: None, last_message: None },
+        &["exited unexpectedly"],
+        &["exit code"]
+    },
+    plan_with_context = {
+        EscalationTrigger::Plan { last_message: Some("# My Plan\n\n## Steps\n1. Do thing".into()) },
+        &["requesting plan approval", "--- Plan ---", "# My Plan"],
+        &[]
+    },
+    plan_without_context = {
+        EscalationTrigger::Plan { last_message: None },
+        &["requesting plan approval"],
+        &["--- Plan ---"]
+    },
+)]
+fn trigger_context_fragments(
+    trigger: EscalationTrigger,
+    must_contain: &[&str],
+    must_not_contain: &[&str],
+) {
+    let d = build_job_decision(trigger);
+    for s in must_contain {
+        assert!(d.context.contains(s), "context should contain '{}': {}", s, d.context);
+    }
+    for s in must_not_contain {
+        assert!(!d.context.contains(s), "context should not contain '{}': {}", s, d.context);
+    }
+}
+
+#[test]
+fn test_builder_with_agent_id_and_project() {
+    let d = unwrap_decision(
+        EscalationDecisionBuilder::new(
+            JobId::new("job-1").into(),
+            "test-job".to_string(),
+            "agent-123".to_string(),
+            EscalationTrigger::Idle { last_message: None },
+        )
+        .project("my-project")
+        .build(),
+    );
+    assert_eq!(d.agent_id, AgentId::new("agent-123"));
+    assert_eq!(d.project, "my-project");
 }
 
 #[test]
 fn test_builder_with_agent_log_tail() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Idle {
-            assistant_context: None,
-        },
-    )
-    .agent_log_tail("last few lines of output")
-    .build();
-
-    match event {
-        Event::DecisionCreated { context, .. } => {
-            assert!(context.contains("Recent agent output:"));
-            assert!(context.contains("last few lines of output"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
+    let d = unwrap_decision(
+        EscalationDecisionBuilder::new(
+            JobId::new("job-1").into(),
+            "test-job".to_string(),
+            "agent-1".to_string(),
+            EscalationTrigger::Idle { last_message: None },
+        )
+        .agent_log_tail("last few lines of output")
+        .build(),
+    );
+    assert!(d.context.contains("Recent agent output:"));
+    assert!(d.context.contains("last few lines of output"));
 }
 
-#[test]
-fn test_dead_trigger_without_exit_code() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Dead {
-            exit_code: None,
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated { context, .. } => {
-            assert!(context.contains("exited unexpectedly"));
-            assert!(!context.contains("exit code"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_gate_failure_empty_stderr() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::GateFailed {
-            command: "./check.sh".to_string(),
-            exit_code: 1,
-            stderr: String::new(),
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated { context, .. } => {
-            assert!(context.contains("./check.sh"));
-            assert!(context.contains("Exit code: 1"));
-            assert!(!context.contains("stderr:"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_question_trigger_with_data() {
-    let question_data = QuestionData {
-        questions: vec![QuestionEntry {
-            question: "Which library should we use?".to_string(),
-            header: Some("Library".to_string()),
-            options: vec![
-                QuestionOption {
-                    label: "React".to_string(),
-                    description: Some("Popular UI library".to_string()),
+#[yare::parameterized(
+    with_data = {
+        Some(QuestionData {
+            questions: vec![QuestionEntry {
+                question: "Which library should we use?".to_string(),
+                header: Some("Library".to_string()),
+                options: vec![
+                    QuestionOption { label: "React".to_string(), description: Some("Popular UI library".to_string()) },
+                    QuestionOption { label: "Vue".to_string(), description: Some("Progressive framework".to_string()) },
+                ],
+                multi_select: false,
+            }],
+        }),
+        &["React", "Vue", "Other", "Cancel", "Dismiss"],
+        &["Which library should we use?", "[Library]"],
+        Some(1)
+    },
+    without_data = {
+        None,
+        &["Other", "Cancel", "Dismiss"],
+        &["no details available"],
+        None
+    },
+    multi_question_context = {
+        Some(QuestionData {
+            questions: vec![
+                QuestionEntry {
+                    question: "First question?".to_string(),
+                    header: Some("Q1".to_string()),
+                    options: vec![QuestionOption { label: "Yes".to_string(), description: None }],
+                    multi_select: false,
                 },
-                QuestionOption {
-                    label: "Vue".to_string(),
-                    description: Some("Progressive framework".to_string()),
+                QuestionEntry {
+                    question: "Second question?".to_string(),
+                    header: Some("Q2".to_string()),
+                    options: vec![],
+                    multi_select: false,
                 },
             ],
-            multi_select: false,
-        }],
-    };
-
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Question {
-            question_data: Some(question_data),
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Question);
-            // 2 user options + Other + Cancel + Dismiss
-            assert_eq!(options.len(), 5);
-            assert_eq!(options[0].label, "React");
-            assert_eq!(
-                options[0].description,
-                Some("Popular UI library".to_string())
-            );
-            assert_eq!(options[1].label, "Vue");
-            assert_eq!(options[2].label, "Other");
-            assert_eq!(options[3].label, "Cancel");
-            assert_eq!(options[4].label, "Dismiss");
-            // Context includes question text
-            assert!(context.contains("Which library should we use?"));
-            assert!(context.contains("[Library]"));
+        }),
+        &["Yes", "Other", "Cancel", "Dismiss"],
+        &["[Q1] First question?", "[Q2] Second question?"],
+        Some(2)
+    },
+    multi_question_all_options = {
+        Some(QuestionData {
+            questions: vec![
+                QuestionEntry {
+                    question: "Which framework?".to_string(),
+                    header: Some("Framework".to_string()),
+                    options: vec![
+                        QuestionOption { label: "React".to_string(), description: Some("Component-based".to_string()) },
+                        QuestionOption { label: "Vue".to_string(), description: None },
+                    ],
+                    multi_select: false,
+                },
+                QuestionEntry {
+                    question: "Which database?".to_string(),
+                    header: Some("Database".to_string()),
+                    options: vec![
+                        QuestionOption { label: "PostgreSQL".to_string(), description: None },
+                        QuestionOption { label: "MySQL".to_string(), description: None },
+                    ],
+                    multi_select: false,
+                },
+            ],
+        }),
+        &["React", "Vue", "PostgreSQL", "MySQL", "Other", "Cancel", "Dismiss"],
+        &["Which framework?", "Which database?"],
+        Some(2)
+    },
+)]
+fn question_trigger_builds_options_and_context(
+    questions: Option<QuestionData>,
+    expected_labels: &[&str],
+    expected_context: &[&str],
+    expected_question_count: Option<usize>,
+) {
+    let d = build_job_decision(EscalationTrigger::Question { questions, last_message: None });
+    assert_eq!(d.source, DecisionSource::Question);
+    assert_eq!(d.options.len(), expected_labels.len());
+    for (opt, label) in d.options.iter().zip(expected_labels) {
+        assert_eq!(opt.label, *label);
+    }
+    for frag in expected_context {
+        assert!(d.context.contains(frag), "context should contain '{}'", frag);
+    }
+    match expected_question_count {
+        Some(n) => {
+            let qd = d.questions.expect("questions should be present");
+            assert_eq!(qd.questions.len(), n);
         }
-        _ => panic!("expected DecisionCreated"),
+        None => assert!(d.questions.is_none()),
     }
 }
 
-#[test]
-fn test_question_trigger_without_data() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Question {
-            question_data: None,
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Question);
-            // Other + Cancel + Dismiss when no question data
-            assert_eq!(options.len(), 3);
-            assert_eq!(options[0].label, "Other");
-            assert_eq!(options[1].label, "Cancel");
-            assert_eq!(options[2].label, "Dismiss");
-            assert!(context.contains("no details available"));
-        }
-        _ => panic!("expected DecisionCreated"),
+#[yare::parameterized(
+    idle = {
+        "run-123", "my-command",
+        EscalationTrigger::Idle { last_message: None },
+        DecisionSource::Idle, 4, "Nudge",
+        None, None, &[]
+    },
+    error = {
+        "run-456", "build-project",
+        EscalationTrigger::Error { error_type: "OutOfCredits".into(), message: "API quota exceeded".into(), last_message: None },
+        DecisionSource::Error, 4, "Retry",
+        Some("test-ns"), None, &["OutOfCredits"]
+    },
+    dead_with_agent_id = {
+        "run-001", "deploy",
+        EscalationTrigger::Dead { exit_code: Some(1), last_message: None },
+        DecisionSource::Dead, 4, "Retry",
+        None, Some("agent-uuid-123"), &[]
+    },
+    plan = {
+        "run-plan", "my-planner",
+        EscalationTrigger::Plan { last_message: Some("Plan content here".into()) },
+        DecisionSource::Plan, 5, "Accept (clear context)",
+        Some("test-ns"), None, &["Plan content here"]
+    },
+)]
+fn for_crew_properties(
+    run_id_str: &str,
+    agent_name: &str,
+    trigger: EscalationTrigger,
+    expected_source: DecisionSource,
+    expected_option_count: usize,
+    expected_first_label: &str,
+    project: Option<&str>,
+    agent_id: Option<&str>,
+    context_fragments: &[&str],
+) {
+    let aid = agent_id.unwrap_or("agent-1");
+    let mut builder = EscalationDecisionBuilder::new(
+        CrewId::new(run_id_str).into(),
+        agent_name.to_string(),
+        aid.to_string(),
+        trigger,
+    );
+    if let Some(ns) = project {
+        builder = builder.project(ns);
     }
-}
-
-#[test]
-fn test_question_trigger_maps_to_question_source() {
-    let trigger = EscalationTrigger::Question {
-        question_data: None,
-        assistant_context: None,
-    };
-    assert_eq!(trigger.to_source(), DecisionSource::Question);
-}
-
-#[test]
-fn test_question_trigger_multi_question_context() {
-    let question_data = QuestionData {
-        questions: vec![
-            QuestionEntry {
-                question: "First question?".to_string(),
-                header: Some("Q1".to_string()),
-                options: vec![QuestionOption {
-                    label: "Yes".to_string(),
-                    description: None,
-                }],
-                multi_select: false,
-            },
-            QuestionEntry {
-                question: "Second question?".to_string(),
-                header: Some("Q2".to_string()),
-                options: vec![],
-                multi_select: false,
-            },
-        ],
-    };
-
-    #[allow(deprecated)]
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Question {
-            question_data: Some(question_data),
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            context,
-            options,
-            question_data,
-            ..
-        } => {
-            assert!(context.contains("[Q1] First question?"));
-            assert!(context.contains("[Q2] Second question?"));
-            // Options come from ALL questions
-            assert_eq!(options.len(), 4); // "Yes" (from Q1) + "Other" + "Cancel" + "Dismiss"
-            assert_eq!(options[0].label, "Yes");
-            assert_eq!(options[1].label, "Other");
-            assert_eq!(options[2].label, "Cancel");
-            assert_eq!(options[3].label, "Dismiss");
-            // question_data is passed through
-            assert!(question_data.is_some());
-            assert_eq!(question_data.unwrap().questions.len(), 2);
-        }
-        _ => panic!("expected DecisionCreated"),
+    let d = unwrap_decision(builder.build());
+    assert_eq!(d.owner, OwnerId::Crew(CrewId::new(run_id_str)));
+    assert_eq!(d.source, expected_source);
+    assert_eq!(d.options.len(), expected_option_count);
+    assert_eq!(d.options[0].label, expected_first_label);
+    if let Some(ns) = project {
+        assert_eq!(d.project, ns);
     }
-}
-
-#[test]
-fn test_multi_question_options_from_all_questions() {
-    let question_data = QuestionData {
-        questions: vec![
-            QuestionEntry {
-                question: "Which framework?".to_string(),
-                header: Some("Framework".to_string()),
-                options: vec![
-                    QuestionOption {
-                        label: "React".to_string(),
-                        description: Some("Component-based".to_string()),
-                    },
-                    QuestionOption {
-                        label: "Vue".to_string(),
-                        description: None,
-                    },
-                ],
-                multi_select: false,
-            },
-            QuestionEntry {
-                question: "Which database?".to_string(),
-                header: Some("Database".to_string()),
-                options: vec![
-                    QuestionOption {
-                        label: "PostgreSQL".to_string(),
-                        description: None,
-                    },
-                    QuestionOption {
-                        label: "MySQL".to_string(),
-                        description: None,
-                    },
-                ],
-                multi_select: false,
-            },
-        ],
-    };
-
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Question {
-            question_data: Some(question_data),
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            question_data,
-            ..
-        } => {
-            // Options from ALL questions: React, Vue, PostgreSQL, MySQL + Other + Cancel + Dismiss
-            assert_eq!(options.len(), 7);
-            assert_eq!(options[0].label, "React");
-            assert_eq!(options[0].description, Some("Component-based".to_string()));
-            assert_eq!(options[1].label, "Vue");
-            assert_eq!(options[2].label, "PostgreSQL");
-            assert_eq!(options[3].label, "MySQL");
-            assert_eq!(options[4].label, "Other");
-            assert_eq!(options[5].label, "Cancel");
-            assert_eq!(options[6].label, "Dismiss");
-
-            // question_data preserved
-            let qd = question_data.unwrap();
-            assert_eq!(qd.questions.len(), 2);
-            assert_eq!(qd.questions[0].question, "Which framework?");
-            assert_eq!(qd.questions[1].question, "Which database?");
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-// ===================== Tests for Signal trigger =====================
-
-#[test]
-fn test_signal_trigger_builds_correct_options() {
-    let (id, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Signal {
-            message: "Need human help with merge conflicts".to_string(),
-        },
-    )
-    .build();
-
-    assert!(!id.is_empty());
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Signal);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Nudge");
-            assert!(options[0].recommended);
-            assert_eq!(options[1].label, "Done");
-            assert_eq!(options[2].label, "Cancel");
-            assert_eq!(options[3].label, "Dismiss");
-            assert!(context.contains("requested escalation"));
-            assert!(context.contains("Need human help with merge conflicts"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_signal_trigger_maps_to_signal_source() {
-    let trigger = EscalationTrigger::Signal {
-        message: "help".to_string(),
-    };
-    assert_eq!(trigger.to_source(), DecisionSource::Signal);
-}
-
-#[test]
-fn test_signal_trigger_for_agent_run() {
-    let (_, event) = EscalationDecisionBuilder::for_agent_run(
-        AgentRunId::new("ar-sig"),
-        "my-worker".to_string(),
-        EscalationTrigger::Signal {
-            message: "Stuck on tests".to_string(),
-        },
-    )
-    .namespace("test-ns")
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            owner,
-            source,
-            context,
-            namespace,
-            ..
-        } => {
-            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-sig")));
-            assert_eq!(source, DecisionSource::Signal);
-            assert_eq!(namespace, "test-ns");
-            assert!(context.contains("my-worker"));
-            assert!(context.contains("Stuck on tests"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-// ===================== Tests for for_agent_run() =====================
-
-#[test]
-fn test_for_agent_run_idle_trigger() {
-    let (id, event) = EscalationDecisionBuilder::for_agent_run(
-        AgentRunId::new("ar-123"),
-        "my-command".to_string(),
-        EscalationTrigger::Idle {
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    assert!(!id.is_empty());
-
-    match event {
-        Event::DecisionCreated {
-            job_id,
-            owner,
-            source,
-            options,
-            context,
-            ..
-        } => {
-            // job_id should be empty for agent runs
-            assert!(job_id.as_str().is_empty());
-            // owner should be AgentRun
-            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-123")));
-            assert_eq!(source, DecisionSource::Idle);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Nudge");
-            // Context should use the command name
-            assert!(context.contains("my-command"));
-        }
-        _ => panic!("expected DecisionCreated"),
-    }
-}
-
-#[test]
-fn test_for_agent_run_error_trigger() {
-    let (_, event) = EscalationDecisionBuilder::for_agent_run(
-        AgentRunId::new("ar-456"),
-        "build-project".to_string(),
-        EscalationTrigger::Error {
-            error_type: "OutOfCredits".to_string(),
-            message: "API quota exceeded".to_string(),
-            assistant_context: None,
-        },
-    )
-    .namespace("test-ns")
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            owner,
-            source,
-            options,
-            namespace,
-            context,
-            ..
-        } => {
-            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-456")));
-            assert_eq!(source, DecisionSource::Error);
-            assert_eq!(options.len(), 4);
-            assert_eq!(options[0].label, "Retry");
-            assert_eq!(options[3].label, "Dismiss");
-            assert_eq!(namespace, "test-ns");
-            assert!(context.contains("OutOfCredits"));
-        }
-        _ => panic!("expected DecisionCreated"),
+    assert_eq!(d.agent_id, AgentId::new(aid));
+    assert!(d.context.contains(agent_name));
+    for frag in context_fragments {
+        assert!(d.context.contains(frag), "context should contain '{}': {}", frag, d.context);
     }
 }
 
 #[test]
 fn test_for_job_creates_job_owner() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("job-789"),
-        "test-job".to_string(),
-        EscalationTrigger::Idle {
-            assistant_context: None,
-        },
-    )
-    .build();
+    let d = unwrap_decision(
+        EscalationDecisionBuilder::new(
+            JobId::new("job-789").into(),
+            "test-job".to_string(),
+            "agent-1".to_string(),
+            EscalationTrigger::Idle { last_message: None },
+        )
+        .build(),
+    );
+    assert_eq!(d.owner, OwnerId::Job(JobId::new("job-789")));
+}
 
-    match event {
-        Event::DecisionCreated { job_id, owner, .. } => {
-            assert_eq!(job_id.as_str(), "job-789");
-            assert_eq!(owner, OwnerId::Job(JobId::new("job-789")));
+fn arb_escalation_trigger() -> impl Strategy<Value = EscalationTrigger> {
+    prop_oneof![
+        any::<Option<String>>().prop_map(|ac| EscalationTrigger::Idle { last_message: ac }),
+        (any::<Option<i32>>(), any::<Option<String>>())
+            .prop_map(|(ec, ac)| { EscalationTrigger::Dead { exit_code: ec, last_message: ac } }),
+        ("[a-zA-Z]{1,10}", "[a-zA-Z ]{0,20}", any::<Option<String>>()).prop_map(|(et, msg, ac)| {
+            EscalationTrigger::Error { error_type: et, message: msg, last_message: ac }
+        }),
+        ("[a-zA-Z./]{1,20}", 1..255i32, "[a-zA-Z ]{0,30}").prop_map(|(cmd, ec, stderr)| {
+            EscalationTrigger::GateFailed { command: cmd, exit_code: ec, stderr }
+        }),
+        ("[a-zA-Z]{1,10}", any::<Option<String>>()).prop_map(|(pt, ac)| {
+            EscalationTrigger::Prompt { prompt_type: pt, last_message: ac }
+        }),
+        any::<Option<String>>()
+            .prop_map(|ac| EscalationTrigger::Question { questions: None, last_message: ac }),
+        any::<Option<String>>().prop_map(|ac| EscalationTrigger::Plan { last_message: ac }),
+    ]
+}
+
+proptest! {
+    /// Every trigger type maps to its expected DecisionSource variant.
+    #[test]
+    fn trigger_source_is_consistent(trigger in arb_escalation_trigger()) {
+        let source = trigger.to_source();
+        match &trigger {
+            EscalationTrigger::Idle { .. } => prop_assert_eq!(source, DecisionSource::Idle),
+            EscalationTrigger::Dead { .. } => prop_assert_eq!(source, DecisionSource::Dead),
+            EscalationTrigger::Error { .. } => prop_assert_eq!(source, DecisionSource::Error),
+            EscalationTrigger::GateFailed { .. } => prop_assert_eq!(source, DecisionSource::Gate),
+            EscalationTrigger::Prompt { .. } => prop_assert_eq!(source, DecisionSource::Approval),
+            EscalationTrigger::Question { .. } => prop_assert_eq!(source, DecisionSource::Question),
+            EscalationTrigger::Plan { .. } => prop_assert_eq!(source, DecisionSource::Plan),
         }
-        _ => panic!("expected DecisionCreated"),
     }
-}
 
-#[test]
-fn test_for_agent_run_with_agent_id() {
-    let (_, event) = EscalationDecisionBuilder::for_agent_run(
-        AgentRunId::new("ar-001"),
-        "deploy".to_string(),
-        EscalationTrigger::Dead {
-            exit_code: Some(1),
-            assistant_context: None,
-        },
-    )
-    .agent_id("agent-uuid-123")
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            agent_id, owner, ..
-        } => {
-            assert_eq!(agent_id, Some("agent-uuid-123".to_string()));
-            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-001")));
-        }
-        _ => panic!("expected DecisionCreated"),
+    /// Every trigger produces at least 3 options (all have Cancel/Dismiss or equivalent).
+    #[test]
+    fn trigger_always_produces_options(trigger in arb_escalation_trigger()) {
+        let d = build_job_decision(trigger);
+        prop_assert!(d.options.len() >= 3, "expected >=3 options, got {}", d.options.len());
     }
-}
 
-// ===================== Tests for Plan trigger =====================
-
-#[test]
-fn test_plan_trigger_builds_correct_options() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Plan {
-            assistant_context: Some("# My Plan\n\n## Steps\n1. Do thing".to_string()),
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Plan);
-            assert_eq!(options.len(), 5);
-            assert_eq!(options[0].label, "Accept (clear context)");
-            assert!(options[0].recommended);
-            assert_eq!(options[1].label, "Accept (auto edits)");
-            assert!(!options[1].recommended);
-            assert_eq!(options[2].label, "Accept (manual edits)");
-            assert_eq!(options[3].label, "Revise");
-            assert_eq!(options[4].label, "Cancel");
-            // Context should include plan content under "Plan" label
-            assert!(context.contains("requesting plan approval"));
-            assert!(context.contains("--- Plan ---"));
-            assert!(context.contains("# My Plan"));
-        }
-        _ => panic!("expected DecisionCreated"),
+    /// Every trigger produces non-empty context.
+    #[test]
+    fn trigger_always_produces_context(trigger in arb_escalation_trigger()) {
+        let d = build_job_decision(trigger);
+        prop_assert!(!d.context.is_empty(), "context should not be empty");
     }
-}
 
-#[test]
-fn test_plan_trigger_maps_to_plan_source() {
-    let trigger = EscalationTrigger::Plan {
-        assistant_context: None,
-    };
-    assert_eq!(trigger.to_source(), DecisionSource::Plan);
-}
-
-#[test]
-fn test_plan_trigger_without_context() {
-    let (_, event) = EscalationDecisionBuilder::for_job(
-        JobId::new("pipe-1"),
-        "test-job".to_string(),
-        EscalationTrigger::Plan {
-            assistant_context: None,
-        },
-    )
-    .build();
-
-    match event {
-        Event::DecisionCreated {
-            options,
-            source,
-            context,
-            ..
-        } => {
-            assert_eq!(source, DecisionSource::Plan);
-            assert_eq!(options.len(), 5);
-            assert!(context.contains("requesting plan approval"));
-            // No plan content section when assistant_context is None
-            assert!(!context.contains("--- Plan ---"));
-        }
-        _ => panic!("expected DecisionCreated"),
+    /// Decision ID is always non-empty (UUID).
+    #[test]
+    fn trigger_always_produces_id(trigger in arb_escalation_trigger()) {
+        let d = build_job_decision(trigger);
+        prop_assert!(!d.id.as_str().is_empty());
     }
-}
 
-#[test]
-fn test_plan_trigger_for_agent_run() {
-    let (_, event) = EscalationDecisionBuilder::for_agent_run(
-        AgentRunId::new("ar-plan"),
-        "my-planner".to_string(),
-        EscalationTrigger::Plan {
-            assistant_context: Some("Plan content here".to_string()),
-        },
-    )
-    .namespace("test-ns")
-    .build();
+    /// for_job always sets owner to Job variant.
+    #[test]
+    fn for_job_owner_is_job(trigger in arb_escalation_trigger()) {
+        let d = build_job_decision(trigger);
+        prop_assert!(matches!(d.owner, OwnerId::Job(_)));
+    }
 
-    match event {
-        Event::DecisionCreated {
-            owner,
-            source,
-            options,
-            context,
-            namespace,
-            ..
-        } => {
-            assert_eq!(owner, OwnerId::AgentRun(AgentRunId::new("ar-plan")));
-            assert_eq!(source, DecisionSource::Plan);
-            assert_eq!(options.len(), 5);
-            assert_eq!(namespace, "test-ns");
-            assert!(context.contains("my-planner"));
-            assert!(context.contains("Plan content here"));
-        }
-        _ => panic!("expected DecisionCreated"),
+    /// for_crew always sets owner to Crew variant with correct id.
+    #[test]
+    fn for_crew_owner_is_crew(trigger in arb_escalation_trigger()) {
+        let d = unwrap_decision(
+            EscalationDecisionBuilder::new(
+                CrewId::new("run-prop").into(),
+                "test-cmd".to_string(),
+                "agent-1".to_string(),
+                trigger,
+            )
+            .build(),
+        );
+        prop_assert_eq!(d.owner, OwnerId::Crew(CrewId::new("run-prop")));
     }
 }

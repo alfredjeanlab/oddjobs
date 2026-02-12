@@ -5,14 +5,13 @@
 
 use std::fmt::Write;
 use std::io::IsTerminal;
+use std::io::Write as _;
 
 use anyhow::Result;
 
-use oj_core::ShortId;
-
 use crate::client::DaemonClient;
 use crate::color;
-use crate::output::OutputFormat;
+use crate::output::{format_or_json, OutputFormat};
 
 /// ANSI sequence: move cursor to top-left (home position).
 /// Used instead of \x1B[2J (clear screen) to avoid pushing old content
@@ -56,10 +55,7 @@ pub async fn handle(
 
     loop {
         handle_watch_frame(format, &args.interval, is_tty, project_filter).await?;
-        {
-            use std::io::Write as _;
-            std::io::stdout().flush()?;
-        }
+        std::io::stdout().flush()?;
         tokio::time::sleep(interval).await;
     }
 }
@@ -70,43 +66,21 @@ async fn handle_watch_frame(
     is_tty: bool,
     project_filter: Option<&str>,
 ) -> Result<()> {
-    let client = match DaemonClient::connect() {
-        Ok(c) => c,
-        Err(_) => {
-            let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty));
+    let (uptime_secs, mut namespaces, metrics_health) = match fetch_overview().await? {
+        Some(data) => data,
+        None => {
+            print!("{}", render_frame(&format_not_running(format), is_tty));
             return Ok(());
         }
     };
 
-    let (uptime_secs, namespaces, metrics_health) = match client.status_overview().await {
-        Ok(data) => data,
-        Err(crate::client::ClientError::DaemonNotRunning) => {
-            let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty));
-            return Ok(());
-        }
-        Err(crate::client::ClientError::Io(ref e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            let content = format_not_running(format);
-            print!("{}", render_frame(&content, is_tty));
-            return Ok(());
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    let namespaces = filter_namespaces(namespaces, project_filter);
+    if let Some(proj) = project_filter {
+        namespaces.retain(|ns| ns.project == proj);
+    }
     let content = match format {
-        OutputFormat::Text => format_text(
-            uptime_secs,
-            &namespaces,
-            Some(interval),
-            metrics_health.as_ref(),
-        ),
+        OutputFormat::Text => {
+            format_text(uptime_secs, &namespaces, Some(interval), metrics_health.as_ref())
+        }
         OutputFormat::Json => {
             let obj = serde_json::json!({
                 "uptime_secs": uptime_secs,
@@ -138,10 +112,25 @@ fn render_frame(content: &str, is_tty: bool) -> String {
     }
 }
 
+/// Connect to the daemon and fetch the status overview.
+/// Returns `Ok(None)` when the daemon is not reachable.
+async fn fetch_overview(
+) -> Result<Option<(u64, Vec<oj_daemon::ProjectStatus>, Option<oj_daemon::MetricsHealthSummary>)>> {
+    let client = match DaemonClient::connect() {
+        Ok(c) => c,
+        Err(_) => return Ok(None),
+    };
+    match client.status_overview().await {
+        Ok(data) => Ok(Some(data)),
+        Err(e) if e.is_not_running() => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
 fn format_not_running(format: OutputFormat) -> String {
     match format {
         OutputFormat::Text => format!("{} not running\n", color::header("oj daemon:")),
-        OutputFormat::Json => r#"{ "status": "not_running" }"#.to_string() + "\n",
+        OutputFormat::Json => "{ \"status\": \"not_running\" }\n".to_string(),
     }
 }
 
@@ -150,97 +139,41 @@ async fn handle_once(
     watch_interval: Option<&str>,
     project_filter: Option<&str>,
 ) -> Result<()> {
-    let client = match DaemonClient::connect() {
-        Ok(c) => c,
-        Err(_) => {
-            return handle_not_running(format);
+    let (uptime_secs, mut namespaces, metrics_health) = match fetch_overview().await? {
+        Some(data) => data,
+        None => {
+            print!("{}", format_not_running(format));
+            return Ok(());
         }
     };
 
-    let (uptime_secs, namespaces, metrics_health) = match client.status_overview().await {
-        Ok(data) => data,
-        Err(crate::client::ClientError::DaemonNotRunning) => {
-            return handle_not_running(format);
-        }
-        Err(crate::client::ClientError::Io(ref e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            return handle_not_running(format);
-        }
-        Err(e) => return Err(e.into()),
-    };
-
-    let namespaces = filter_namespaces(namespaces, project_filter);
-    match format {
-        OutputFormat::Text => print!(
-            "{}",
-            format_text(
-                uptime_secs,
-                &namespaces,
-                watch_interval,
-                metrics_health.as_ref()
-            )
-        ),
-        OutputFormat::Json => {
-            let obj = serde_json::json!({
-                "uptime_secs": uptime_secs,
-                "namespaces": namespaces,
-                "metrics_health": metrics_health,
-            });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
-        }
+    if let Some(proj) = project_filter {
+        namespaces.retain(|ns| ns.project == proj);
     }
-
-    Ok(())
-}
-
-fn handle_not_running(format: OutputFormat) -> Result<()> {
-    match format {
-        OutputFormat::Text => {
-            println!("{} not running", color::header("oj daemon:"));
-        }
-        OutputFormat::Json => println!(r#"{{ "status": "not_running" }}"#),
-    }
-    Ok(())
-}
-
-/// Filter namespaces to only the specified project when `--project` is given.
-fn filter_namespaces(
-    namespaces: Vec<oj_daemon::NamespaceStatus>,
-    project_filter: Option<&str>,
-) -> Vec<oj_daemon::NamespaceStatus> {
-    match project_filter {
-        Some(project) => namespaces
-            .into_iter()
-            .filter(|ns| ns.namespace == project)
-            .collect(),
-        None => namespaces,
-    }
+    let obj = serde_json::json!({
+        "uptime_secs": uptime_secs,
+        "namespaces": &namespaces,
+        "metrics_health": &metrics_health,
+    });
+    format_or_json(format, &obj, || {
+        print!("{}", format_text(uptime_secs, &namespaces, watch_interval, metrics_health.as_ref()))
+    })
 }
 
 fn format_text(
     uptime_secs: u64,
-    namespaces: &[oj_daemon::NamespaceStatus],
+    namespaces: &[oj_daemon::ProjectStatus],
     watch_interval: Option<&str>,
     metrics_health: Option<&oj_daemon::MetricsHealthSummary>,
 ) -> String {
     let mut out = String::new();
 
     // Header line with uptime and global counts
-    let uptime = format_duration(uptime_secs);
+    let uptime = oj_core::format_elapsed(uptime_secs);
     let total_active: usize = namespaces.iter().map(|ns| ns.active_jobs.len()).sum();
     let total_escalated: usize = namespaces.iter().map(|ns| ns.escalated_jobs.len()).sum();
 
-    let _ = write!(
-        out,
-        "{} {} {}",
-        color::header("oj daemon:"),
-        color::status("running"),
-        uptime
-    );
+    let _ = write!(out, "{} {} {}", color::header("oj daemon:"), color::status("running"), uptime);
     if let Some(interval) = watch_interval {
         let _ = write!(out, " | every {}", interval);
     }
@@ -269,32 +202,14 @@ fn format_text(
             out,
             " | {} decision{} pending",
             total_pending_decisions,
-            if total_pending_decisions == 1 {
-                ""
-            } else {
-                "s"
-            }
+            if total_pending_decisions == 1 { "" } else { "s" }
         );
     }
     // Metrics health summary
     if let Some(mh) = metrics_health {
         if let Some(ref err) = mh.last_error {
-            let short = if err.len() > 30 {
-                format!("{}...", &err[..27])
-            } else {
-                err.clone()
-            };
+            let short = if err.len() > 30 { format!("{}...", &err[..27]) } else { err.clone() };
             let _ = write!(out, " | metrics: {} ({})", color::status("error"), short);
-        } else if mh.sessions_tracked > 0 || !mh.ghost_sessions.is_empty() {
-            let _ = write!(out, " | metrics: {} sessions", mh.sessions_tracked);
-            if !mh.ghost_sessions.is_empty() {
-                let _ = write!(
-                    out,
-                    ", {} {}",
-                    mh.ghost_sessions.len(),
-                    color::yellow("ghost")
-                );
-            }
         }
     }
     out.push('\n');
@@ -304,18 +219,12 @@ fn format_text(
     }
 
     for ns in namespaces {
-        let label = if ns.namespace.is_empty() {
-            "(no project)"
-        } else {
-            &ns.namespace
-        };
+        let label = if ns.project.is_empty() { "(no project)" } else { &ns.project };
 
-        // Check if this namespace has any content to show
+        // Check if this project has any content to show
         // Note: queues need at least one non-zero count to be displayed
-        let has_non_empty_queues = ns
-            .queues
-            .iter()
-            .any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
+        let has_non_empty_queues =
+            ns.queues.iter().any(|q| q.pending > 0 || q.active > 0 || q.dead > 0);
         let has_content = !ns.active_jobs.is_empty()
             || !ns.escalated_jobs.is_empty()
             || !ns.suspended_jobs.is_empty()
@@ -339,20 +248,10 @@ fn format_text(
         out.push('\n');
 
         // Sort jobs by most recent activity (descending) and workers alphabetically
-        let mut active_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.active_jobs.iter().collect();
-        active_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
-
-        let mut escalated_jobs: Vec<&oj_daemon::JobStatusEntry> =
-            ns.escalated_jobs.iter().collect();
-        escalated_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
-
-        let mut suspended_jobs: Vec<&oj_daemon::JobStatusEntry> =
-            ns.suspended_jobs.iter().collect();
-        suspended_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
-
-        let mut orphaned_jobs: Vec<&oj_daemon::JobStatusEntry> = ns.orphaned_jobs.iter().collect();
-        orphaned_jobs.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
-
+        let active_jobs = sorted_by_activity(&ns.active_jobs);
+        let escalated_jobs = sorted_by_activity(&ns.escalated_jobs);
+        let suspended_jobs = sorted_by_activity(&ns.suspended_jobs);
+        let orphaned_jobs = sorted_by_activity(&ns.orphaned_jobs);
         let mut workers: Vec<&oj_daemon::WorkerSummary> = ns.workers.iter().collect();
         workers.sort_by(|a, b| a.name.cmp(&b.name));
 
@@ -367,11 +266,11 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: "    ".to_string(),
-                    id: p.id.short(8).to_string(),
+                    id: oj_core::short(&p.id, 8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: p.step_status.to_string(),
-                    suffix: format_duration_ms(p.elapsed_ms),
+                    suffix: oj_core::format_elapsed_ms(p.elapsed_ms),
                     reason: None,
                 })
                 .collect();
@@ -394,10 +293,10 @@ fn format_text(
                         .as_deref()
                         .map(|s| format!("[{}]  ", s))
                         .unwrap_or_default();
-                    let elapsed = format_duration_ms(p.elapsed_ms);
+                    let elapsed = oj_core::format_elapsed_ms(p.elapsed_ms);
                     JobRow {
                         prefix: format!("    {} ", color::yellow("⚠")),
-                        id: p.id.short(8).to_string(),
+                        id: oj_core::short(&p.id, 8).to_string(),
                         name: friendly_name_label(&p.name, &p.kind, &p.id),
                         kind_step: format!("{}/{}", p.kind, p.step),
                         status: p.step_status.to_string(),
@@ -421,11 +320,11 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: format!("    {} ", color::yellow("⚠")),
-                    id: p.id.short(8).to_string(),
+                    id: oj_core::short(&p.id, 8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: "orphaned".to_string(),
-                    suffix: format_duration_ms(p.elapsed_ms),
+                    suffix: oj_core::format_elapsed_ms(p.elapsed_ms),
                     reason: None,
                 })
                 .collect();
@@ -445,11 +344,11 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: "    ".to_string(),
-                    id: p.id.short(8).to_string(),
+                    id: oj_core::short(&p.id, 8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: "suspended".to_string(),
-                    suffix: format_duration_ms(p.elapsed_ms),
+                    suffix: oj_core::format_elapsed_ms(p.elapsed_ms),
                     reason: None,
                 })
                 .collect();
@@ -497,10 +396,8 @@ fn format_text(
             let _ = writeln!(out, "  {}", color::header("Crons:"));
             let c_name = crons.iter().map(|c| c.name.len()).max().unwrap_or(0);
             let c_int = crons.iter().map(|c| c.interval.len()).max().unwrap_or(0);
-            let labels: Vec<&str> = crons
-                .iter()
-                .map(|c| if c.status == "running" { "on" } else { "off" })
-                .collect();
+            let labels: Vec<&str> =
+                crons.iter().map(|c| if c.status == "running" { "on" } else { "off" }).collect();
             let c_st = labels.iter().map(|l: &&str| l.len()).max().unwrap_or(0);
             for (c, label) in crons.iter().zip(labels.iter()) {
                 let _ = writeln!(
@@ -516,18 +413,11 @@ fn format_text(
         }
 
         // Queues
-        let non_empty_queues: Vec<_> = ns
-            .queues
-            .iter()
-            .filter(|q| q.pending > 0 || q.active > 0 || q.dead > 0)
-            .collect();
+        let non_empty_queues: Vec<_> =
+            ns.queues.iter().filter(|q| q.pending > 0 || q.active > 0 || q.dead > 0).collect();
         if !non_empty_queues.is_empty() {
             let _ = writeln!(out, "  {}", color::header("Queues:"));
-            let w_name = non_empty_queues
-                .iter()
-                .map(|q| q.name.len())
-                .max()
-                .unwrap_or(0);
+            let w_name = non_empty_queues.iter().map(|q| q.name.len()).max().unwrap_or(0);
             for q in &non_empty_queues {
                 let _ = write!(
                     out,
@@ -549,23 +439,13 @@ fn format_text(
                 "  {}",
                 color::header(&format!("Agents ({} running):", ns.active_agents.len()))
             );
-            let w_name = ns
-                .active_agents
-                .iter()
-                .map(|a| a.agent_name.len())
-                .max()
-                .unwrap_or(0);
-            let w_st = ns
-                .active_agents
-                .iter()
-                .map(|a| a.status.len())
-                .max()
-                .unwrap_or(0);
+            let w_name = ns.active_agents.iter().map(|a| a.agent_name.len()).max().unwrap_or(0);
+            let w_st = ns.active_agents.iter().map(|a| a.status.len()).max().unwrap_or(0);
             for a in &ns.active_agents {
                 let _ = writeln!(
                     out,
                     "    {}  {:<w_name$}  {}",
-                    color::muted(a.agent_id.short(8)),
+                    color::muted(oj_core::short(&a.agent_id, 8)),
                     a.agent_name,
                     color::status(&format!("{:<w_st$}", a.status)),
                 );
@@ -577,14 +457,6 @@ fn format_text(
     out
 }
 
-fn format_duration(secs: u64) -> String {
-    oj_core::format_elapsed(secs)
-}
-
-fn format_duration_ms(ms: u64) -> String {
-    oj_core::format_elapsed_ms(ms)
-}
-
 /// Returns the job name when it is a meaningful friendly name,
 /// or an empty string when it would be redundant (same as kind) or opaque (same as id).
 fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
@@ -592,7 +464,7 @@ fn friendly_name_label(name: &str, kind: &str, id: &str) -> String {
     // When the name template produces an empty slug, job_display_name() returns
     // just the nonce (first 8 chars of the ID), which would be redundant with the
     // truncated ID shown in the status output.
-    let truncated_id = id.short(8);
+    let truncated_id = oj_core::short(id, 8);
     if name.is_empty() || name == kind || name == id || name == truncated_id {
         String::new()
     } else {
@@ -629,11 +501,7 @@ fn write_aligned_job_rows(out: &mut String, rows: &[JobRow]) {
         if w_name > 0 {
             let _ = write!(out, "  {:<w_name$}", r.name);
         }
-        let _ = write!(
-            out,
-            "  {}",
-            color::context(&format!("{:<w_ks$}", r.kind_step))
-        );
+        let _ = write!(out, "  {}", color::context(&format!("{:<w_ks$}", r.kind_step)));
         let _ = write!(out, "  {}", color::status(&format!("{:<w_st$}", r.status)));
         let _ = writeln!(out, "  {}", r.suffix);
         if let Some(ref reason) = r.reason {
@@ -650,13 +518,15 @@ fn truncate_reason(reason: &str, max_len: usize) -> String {
         first_line.to_string()
     } else {
         let limit = max_len.saturating_sub(3);
-        let truncated = if first_line.len() > limit {
-            &first_line[..limit]
-        } else {
-            first_line
-        };
+        let truncated = if first_line.len() > limit { &first_line[..limit] } else { first_line };
         format!("{}...", truncated)
     }
+}
+
+fn sorted_by_activity(jobs: &[oj_daemon::JobStatusEntry]) -> Vec<&oj_daemon::JobStatusEntry> {
+    let mut sorted: Vec<_> = jobs.iter().collect();
+    sorted.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
+    sorted
 }
 
 #[cfg(test)]

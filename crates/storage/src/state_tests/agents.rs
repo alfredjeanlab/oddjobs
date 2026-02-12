@@ -21,164 +21,128 @@ fn state_with_job_agent(job_id: &str, agent_id: &str) -> MaterializedState {
 
 #[test]
 fn populated_from_step_started_with_agent() {
-    let state = state_with_job_agent("pipe-1", "agent-abc");
+    let state = state_with_job_agent("job-1", "agent-abc");
 
     assert!(state.agents.contains_key("agent-abc"));
     let record = &state.agents["agent-abc"];
     assert_eq!(record.agent_id, "agent-abc");
     assert_eq!(record.agent_name, "worker");
-    assert_eq!(record.owner, OwnerId::Job(JobId::new("pipe-1")));
+    assert_eq!(record.owner, OwnerId::Job(JobId::new("job-1")));
     assert_eq!(record.status, oj_core::AgentRecordStatus::Starting);
 }
 
 #[test]
 fn not_populated_from_step_started_without_agent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&step_started_event("pipe-1")); // no agent_id
+    state.apply_event(&job_create_event("job-1", "build", "test", "init"));
+    state.apply_event(&step_started_event("job-1")); // no agent_id
 
     assert!(state.agents.is_empty());
 }
 
 #[test]
-fn populated_from_agent_run_started() {
+fn populated_from_crew_started() {
     let mut state = MaterializedState::default();
-    let ar_id = AgentRunId::new("ar-1");
+    let run_id = CrewId::new("run-1");
 
-    state.apply_event(&Event::AgentRunCreated {
-        id: ar_id.clone(),
-        agent_name: "fixer".to_string(),
-        command_name: "fix".to_string(),
-        namespace: "myproj".to_string(),
+    state.apply_event(&Event::CrewCreated {
+        id: run_id.clone(),
+        agent: "fixer".to_string(),
+        command: "fix".to_string(),
+        project: "myproj".to_string(),
         cwd: PathBuf::from("/work/dir"),
         runbook_hash: "abc".to_string(),
         vars: HashMap::new(),
-        created_at_epoch_ms: 1_000,
+        created_at_ms: 1_000,
     });
 
-    state.apply_event(&Event::AgentRunStarted {
-        id: ar_id.clone(),
+    state.apply_event(&Event::CrewStarted {
+        id: run_id.clone(),
         agent_id: oj_core::AgentId::new("agent-xyz"),
     });
 
     assert!(state.agents.contains_key("agent-xyz"));
     let record = &state.agents["agent-xyz"];
     assert_eq!(record.agent_name, "fixer");
-    assert_eq!(record.owner, OwnerId::AgentRun(ar_id));
-    assert_eq!(record.namespace, "myproj");
+    assert_eq!(record.owner, OwnerId::Crew(run_id));
+    assert_eq!(record.project, "myproj");
     assert_eq!(record.workspace_path, PathBuf::from("/work/dir"));
     assert_eq!(record.status, oj_core::AgentRecordStatus::Running);
 }
 
 #[test]
 fn status_updates_from_lifecycle_events() {
-    let state = state_with_job_agent("pipe-1", "agent-1");
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Starting
-    );
+    let state = state_with_job_agent("job-1", "agent-1");
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Starting);
 
     // Working → Idle → Exited
     let mut state = state;
     state.apply_event(&Event::AgentWorking {
-        agent_id: oj_core::AgentId::new("agent-1"),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
     });
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Running
-    );
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Running);
 
     state.apply_event(&Event::AgentWaiting {
-        agent_id: oj_core::AgentId::new("agent-1"),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
     });
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Idle
-    );
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Idle);
 
     state.apply_event(&Event::AgentExited {
-        agent_id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::new("agent-1"),
         exit_code: Some(0),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        owner: JobId::new("job-1").into(),
     });
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Exited
-    );
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Exited);
 }
 
 #[test]
 fn gone_status() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
+    let mut state = state_with_job_agent("job-1", "agent-1");
 
     state.apply_event(&Event::AgentGone {
-        agent_id: oj_core::AgentId::new("agent-1"),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
+        exit_code: None,
     });
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Gone
-    );
-}
-
-#[test]
-fn session_id_set_by_session_created() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
-    assert!(state.agents["agent-1"].session_id.is_none());
-
-    state.apply_event(&session_create_event("sess-1", "pipe-1"));
-
-    assert_eq!(
-        state.agents["agent-1"].session_id.as_deref(),
-        Some("sess-1")
-    );
-}
-
-#[test]
-fn session_id_cleared_by_session_deleted() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
-    state.apply_event(&session_create_event("sess-1", "pipe-1"));
-    state.apply_event(&session_delete_event("sess-1"));
-
-    assert!(state.agents["agent-1"].session_id.is_none());
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Gone);
 }
 
 #[test]
 fn removed_on_job_deleted() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
+    let mut state = state_with_job_agent("job-1", "agent-1");
     assert!(state.agents.contains_key("agent-1"));
 
-    state.apply_event(&job_delete_event("pipe-1"));
+    state.apply_event(&job_delete_event("job-1"));
 
     assert!(!state.agents.contains_key("agent-1"));
 }
 
 #[test]
-fn removed_on_agent_run_deleted() {
+fn removed_on_crew_deleted() {
     let mut state = MaterializedState::default();
-    let ar_id = AgentRunId::new("ar-1");
+    let run_id = CrewId::new("run-1");
 
-    state.apply_event(&Event::AgentRunCreated {
-        id: ar_id.clone(),
-        agent_name: "fixer".to_string(),
-        command_name: "fix".to_string(),
-        namespace: "myproj".to_string(),
+    state.apply_event(&Event::CrewCreated {
+        id: run_id.clone(),
+        agent: "fixer".to_string(),
+        command: "fix".to_string(),
+        project: "myproj".to_string(),
         cwd: PathBuf::from("/work"),
         runbook_hash: "abc".to_string(),
         vars: HashMap::new(),
-        created_at_epoch_ms: 1_000,
+        created_at_ms: 1_000,
     });
 
-    state.apply_event(&Event::AgentRunStarted {
-        id: ar_id.clone(),
+    state.apply_event(&Event::CrewStarted {
+        id: run_id.clone(),
         agent_id: oj_core::AgentId::new("agent-1"),
     });
 
     assert!(state.agents.contains_key("agent-1"));
 
-    state.apply_event(&Event::AgentRunDeleted { id: ar_id });
+    state.apply_event(&Event::CrewDeleted { id: run_id });
 
     assert!(!state.agents.contains_key("agent-1"));
 }
@@ -189,86 +153,66 @@ fn removed_on_agent_run_deleted() {
 
 #[test]
 fn agent_gone_does_not_overwrite_terminal_job() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
+    let mut state = state_with_job_agent("job-1", "agent-1");
     // Advance job to terminal "done"
-    state.apply_event(&job_transition_event("pipe-1", "done"));
-    assert!(state.jobs["pipe-1"].is_terminal());
-    assert_eq!(
-        state.jobs["pipe-1"].step_status,
-        oj_core::StepStatus::Completed
-    );
+    state.apply_event(&job_transition_event("job-1", "done"));
+    assert!(state.jobs["job-1"].is_terminal());
+    assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
 
     // Session closes after job already completed
     state.apply_event(&Event::AgentGone {
-        agent_id: oj_core::AgentId::new("agent-1"),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
+        exit_code: None,
     });
 
     // Job should still be completed, not failed
-    assert_eq!(
-        state.jobs["pipe-1"].step_status,
-        oj_core::StepStatus::Completed
-    );
-    assert!(state.jobs["pipe-1"].error.is_none());
+    assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
+    assert!(state.jobs["job-1"].error.is_none());
     // Agent record should still update
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Gone
-    );
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Gone);
 }
 
 #[test]
 fn agent_exited_does_not_overwrite_terminal_job() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
-    state.apply_event(&job_transition_event("pipe-1", "done"));
+    let mut state = state_with_job_agent("job-1", "agent-1");
+    state.apply_event(&job_transition_event("job-1", "done"));
 
     state.apply_event(&Event::AgentExited {
-        agent_id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::new("agent-1"),
         exit_code: Some(1),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        owner: JobId::new("job-1").into(),
     });
 
-    assert_eq!(
-        state.jobs["pipe-1"].step_status,
-        oj_core::StepStatus::Completed
-    );
-    assert!(state.jobs["pipe-1"].error.is_none());
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Exited
-    );
+    assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
+    assert!(state.jobs["job-1"].error.is_none());
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Exited);
 }
 
 #[test]
 fn agent_failed_does_not_overwrite_terminal_job() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
-    state.apply_event(&job_transition_event("pipe-1", "done"));
+    let mut state = state_with_job_agent("job-1", "agent-1");
+    state.apply_event(&job_transition_event("job-1", "done"));
 
     state.apply_event(&Event::AgentFailed {
-        agent_id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::new("agent-1"),
         error: oj_core::AgentError::Other("api error".to_string()),
-        owner: OwnerId::Job(JobId::new("pipe-1")),
+        owner: JobId::new("job-1").into(),
     });
 
-    assert_eq!(
-        state.jobs["pipe-1"].step_status,
-        oj_core::StepStatus::Completed
-    );
-    assert!(state.jobs["pipe-1"].error.is_none());
-    assert_eq!(
-        state.agents["agent-1"].status,
-        oj_core::AgentRecordStatus::Exited
-    );
+    assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
+    assert!(state.jobs["job-1"].error.is_none());
+    assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Exited);
 }
 
 // ── Idempotency ─────────────────────────────────────────────────────────────
 
 #[test]
 fn idempotent_step_started() {
-    let mut state = state_with_job_agent("pipe-1", "agent-1");
+    let mut state = state_with_job_agent("job-1", "agent-1");
 
     // Apply again — should not panic or duplicate
-    state.apply_event(&step_started_with_agent("pipe-1", "agent-1"));
+    state.apply_event(&step_started_with_agent("job-1", "agent-1"));
 
     assert_eq!(state.agents.len(), 1);
     assert!(state.agents.contains_key("agent-1"));

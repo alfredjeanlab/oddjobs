@@ -20,9 +20,8 @@ use crate::protocol::Response;
 pub(super) fn validate_queue_data(
     data: &serde_json::Value,
 ) -> Result<&serde_json::Map<String, serde_json::Value>, Response> {
-    data.as_object().ok_or_else(|| Response::Error {
-        message: "data must be a JSON object".to_string(),
-    })
+    data.as_object()
+        .ok_or_else(|| Response::Error { message: "data must be a JSON object".to_string() })
 }
 
 /// Check that all required fields are present in the data.
@@ -73,12 +72,12 @@ pub(super) fn apply_defaults(
 /// Returns the item ID if a duplicate is found, or `None` if no duplicate exists.
 pub(super) fn find_duplicate_item(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     data: &HashMap<String, String>,
 ) -> Option<String> {
     let st = state.lock();
-    let key = scoped_name(namespace, queue_name);
+    let key = scoped_name(project, queue_name);
     st.queue_items.get(&key).and_then(|items| {
         items
             .iter()

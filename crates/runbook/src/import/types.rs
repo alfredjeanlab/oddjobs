@@ -48,10 +48,7 @@ pub struct ImportDef {
 impl ImportDef {
     /// Flatten const values into a simple string map.
     pub fn const_values(&self) -> HashMap<String, String> {
-        self.consts
-            .iter()
-            .map(|(k, v)| (k.clone(), v.value.clone()))
-            .collect()
+        self.consts.iter().map(|(k, v)| (k.clone(), v.value.clone())).collect()
     }
 }
 
@@ -59,11 +56,7 @@ impl ImportDef {
 #[derive(Debug, Clone)]
 pub enum ImportWarning {
     /// Local entity overrides an imported entity with the same name.
-    LocalOverride {
-        entity_type: &'static str,
-        name: String,
-        source: String,
-    },
+    LocalOverride { entity_type: &'static str, name: String, source: String },
     /// Unknown const provided at import site.
     UnknownConst { source: String, name: String },
 }
@@ -71,15 +64,9 @@ pub enum ImportWarning {
 impl std::fmt::Display for ImportWarning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ImportWarning::LocalOverride {
-                entity_type,
-                name,
-                source,
-            } => write!(
-                f,
-                "local {} '{}' overrides imported from '{}'",
-                entity_type, name, source
-            ),
+            ImportWarning::LocalOverride { entity_type, name, source } => {
+                write!(f, "local {} '{}' overrides imported from '{}'", entity_type, name, source)
+            }
             ImportWarning::UnknownConst { source, name } => {
                 write!(f, "unknown const '{}' for import '{}'", name, source)
             }

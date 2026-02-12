@@ -17,13 +17,7 @@ fn list_projects_empty_state() {
     let temp = tempdir().unwrap();
     let start = Instant::now();
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
             assert!(projects.is_empty());
@@ -41,25 +35,16 @@ fn list_projects_from_workers() {
     {
         let mut s = state.lock();
         let mut worker = make_worker("build-worker", "myapp", "build", 1);
-        worker.project_root = std::path::PathBuf::from("/home/user/myapp");
+        worker.project_path = std::path::PathBuf::from("/home/user/myapp");
         s.workers.insert("myapp/build-worker".to_string(), worker);
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0].name, "myapp");
-            assert_eq!(
-                projects[0].root,
-                std::path::PathBuf::from("/home/user/myapp")
-            );
+            assert_eq!(projects[0].root, std::path::PathBuf::from("/home/user/myapp"));
             assert_eq!(projects[0].workers, 1);
             assert_eq!(projects[0].active_jobs, 0);
             assert_eq!(projects[0].crons, 0);
@@ -82,21 +67,12 @@ fn list_projects_from_crons() {
         );
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0].name, "webapp");
-            assert_eq!(
-                projects[0].root,
-                std::path::PathBuf::from("/home/user/webapp")
-            );
+            assert_eq!(projects[0].root, std::path::PathBuf::from("/home/user/webapp"));
             assert_eq!(projects[0].crons, 1);
             assert_eq!(projects[0].workers, 0);
         }
@@ -125,30 +101,21 @@ fn list_projects_from_jobs_with_agents() {
                 1000,
             ),
         );
-        // Add a stopped worker so project_root can be resolved
+        // Add a stopped worker so project_path can be resolved
         let mut worker = make_worker("w1", "oddjobs", "q1", 0);
         worker.status = "stopped".to_string();
-        worker.project_root = std::path::PathBuf::from("/home/user/oddjobs");
+        worker.project_path = std::path::PathBuf::from("/home/user/oddjobs");
         s.workers.insert("oddjobs/w1".to_string(), worker);
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
             assert_eq!(projects.len(), 1);
             assert_eq!(projects[0].name, "oddjobs");
             assert_eq!(projects[0].active_jobs, 1);
             assert_eq!(projects[0].active_agents, 1);
-            assert_eq!(
-                projects[0].root,
-                std::path::PathBuf::from("/home/user/oddjobs")
-            );
+            assert_eq!(projects[0].root, std::path::PathBuf::from("/home/user/oddjobs"));
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -163,21 +130,15 @@ fn list_projects_multiple_namespaces_sorted() {
     {
         let mut s = state.lock();
         let mut w1 = make_worker("w1", "zebra", "q1", 1);
-        w1.project_root = std::path::PathBuf::from("/home/user/zebra");
+        w1.project_path = std::path::PathBuf::from("/home/user/zebra");
         s.workers.insert("zebra/w1".to_string(), w1);
 
         let mut w2 = make_worker("w2", "alpha", "q2", 0);
-        w2.project_root = std::path::PathBuf::from("/home/user/alpha");
+        w2.project_path = std::path::PathBuf::from("/home/user/alpha");
         s.workers.insert("alpha/w2".to_string(), w2);
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
             assert_eq!(projects.len(), 2);
@@ -199,23 +160,14 @@ fn list_projects_excludes_stopped_only() {
         // Stopped worker with no active jobs or crons
         let mut w = make_worker("w1", "inactive", "q1", 0);
         w.status = "stopped".to_string();
-        w.project_root = std::path::PathBuf::from("/home/user/inactive");
+        w.project_path = std::path::PathBuf::from("/home/user/inactive");
         s.workers.insert("inactive/w1".to_string(), w);
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
-            assert!(
-                projects.is_empty(),
-                "stopped-only projects should be excluded"
-            );
+            assert!(projects.is_empty(), "stopped-only projects should be excluded");
         }
         other => panic!("unexpected response: {:?}", other),
     }
@@ -244,19 +196,10 @@ fn list_projects_excludes_terminal_jobs() {
         );
     }
 
-    let response = handle_query(
-        Query::ListProjects,
-        &state,
-        &empty_orphans(),
-        temp.path(),
-        start,
-    );
+    let response = handle_query(Query::ListProjects, &state, &empty_orphans(), temp.path(), start);
     match response {
         Response::Projects { projects } => {
-            assert!(
-                projects.is_empty(),
-                "terminal jobs should not create active projects"
-            );
+            assert!(projects.is_empty(), "terminal jobs should not create active projects");
         }
         other => panic!("unexpected response: {:?}", other),
     }

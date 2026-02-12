@@ -5,7 +5,7 @@
 
 use super::super::Runtime;
 use crate::error::RuntimeError;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
 use oj_core::{Clock, Effect, Event, JobId};
 use oj_runbook::{NotifyConfig, Runbook};
 use std::collections::HashMap;
@@ -20,13 +20,12 @@ pub(crate) struct CreateJobParams {
     pub runbook_hash: String,
     pub runbook_json: Option<serde_json::Value>,
     pub runbook: Runbook,
-    pub namespace: String,
+    pub project: String,
     pub cron_name: Option<String>,
 }
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -43,7 +42,7 @@ where
             runbook_hash,
             runbook_json,
             runbook,
-            namespace,
+            project,
             cron_name,
         } = params;
 
@@ -51,10 +50,6 @@ where
         // where the triggering event is re-processed), skip creation.
         // This prevents workspace creation from failing on the second attempt.
         if self.get_job(job_id.as_str()).is_some() {
-            tracing::debug!(
-                job_id = %job_id,
-                "job already exists, skipping duplicate creation"
-            );
             return Ok(vec![]);
         }
 
@@ -71,7 +66,7 @@ where
                 .flat_map(|(k, v)| vec![(k.clone(), v.clone()), (format!("var.{}", k), v.clone())])
                 .collect();
             let raw = oj_runbook::interpolate(name_template, &lookup);
-            oj_runbook::job_display_name(&raw, nonce, &namespace)
+            oj_runbook::job_display_name(&raw, nonce, &project)
         } else {
             job_name
         };
@@ -81,7 +76,7 @@ where
 
         // Determine execution path and workspace metadata (path, id, type)
         let is_worktree;
-        let execution_path = match (&job_def.cwd, &job_def.workspace) {
+        let execution_path = match (&job_def.cwd, &job_def.source) {
             (Some(cwd), None) => {
                 // cwd set, workspace omitted: run directly in cwd (interpolated)
                 is_worktree = false;
@@ -101,29 +96,15 @@ where
                 let workspaces_dir = self.state_dir.join("workspaces");
                 let workspace_path = workspaces_dir.join(&ws_id);
 
-                is_worktree = job_def
-                    .workspace
-                    .as_ref()
-                    .map(|w| w.is_git_worktree())
-                    .unwrap_or(false);
+                is_worktree = job_def.source.as_ref().map(|w| w.is_git_worktree()).unwrap_or(false);
 
-                // Inject workspace template variables
-                vars.insert("workspace.id".to_string(), ws_id);
-                vars.insert(
-                    "workspace.root".to_string(),
-                    workspace_path.display().to_string(),
-                );
-                vars.insert("workspace.nonce".to_string(), nonce.to_string());
-
-                // Store workspace type in vars so handle_job_created can rebuild CreateWorkspace
-                vars.insert(
-                    "workspace.type".to_string(),
-                    if is_worktree {
-                        "worktree".to_string()
-                    } else {
-                        "folder".to_string()
-                    },
-                );
+                // Inject source template variables
+                let ws_root = workspace_path.display().to_string();
+                let ws_type = if is_worktree { "worktree" } else { "folder" }.to_string();
+                vars.insert("source.id".to_string(), ws_id);
+                vars.insert("source.root".to_string(), ws_root);
+                vars.insert("source.nonce".to_string(), nonce.to_string());
+                vars.insert("source.type".to_string(), ws_type);
 
                 workspace_path
             }
@@ -136,9 +117,9 @@ where
             }
         };
 
-        // Interpolate workspace.branch and workspace.ref from workspace config
-        // (before locals, so locals can reference ${workspace.branch} if needed)
-        let workspace_block = match &job_def.workspace {
+        // Interpolate source.branch and source.ref from source config
+        // (before locals, so locals can reference ${source.branch} if needed)
+        let workspace_block = match &job_def.source {
             Some(oj_runbook::WorkspaceConfig::Block(block)) => Some(block.clone()),
             _ => None,
         };
@@ -163,7 +144,7 @@ where
             } else {
                 format!("ws-{}", nonce)
             };
-            vars.insert("workspace.branch".to_string(), branch_name);
+            vars.insert("source.branch".to_string(), branch_name);
 
             // Ref: interpolate from workspace config, eagerly evaluate $(...) shell expressions
             if let Some(ref template) = workspace_block.as_ref().and_then(|b| b.from_ref.clone()) {
@@ -174,31 +155,27 @@ where
                         .map(PathBuf::from)
                         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
                     let mut cmd = tokio::process::Command::new("bash");
-                    cmd.arg("-c")
-                        .arg(format!("printf '%s' {}", value))
-                        .current_dir(&cwd);
+                    cmd.arg("-c").arg(format!("printf '%s' {}", value)).current_dir(&cwd);
                     let output = oj_adapters::subprocess::run_with_timeout(
                         cmd,
                         oj_adapters::subprocess::SHELL_EVAL_TIMEOUT,
-                        "evaluate workspace.ref",
+                        "evaluate source.ref",
                     )
                     .await
                     .map_err(RuntimeError::ShellError)?;
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr);
                         return Err(RuntimeError::ShellError(format!(
-                            "workspace.ref evaluation failed: {}",
+                            "source.ref evaluation failed: {}",
                             stderr.trim()
                         )));
                     }
                     // Strip trailing newlines to match standard $() substitution behavior
-                    String::from_utf8_lossy(&output.stdout)
-                        .trim_end_matches('\n')
-                        .to_string()
+                    String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_string()
                 } else {
                     value
                 };
-                vars.insert("workspace.ref".to_string(), value);
+                vars.insert("source.ref".to_string(), value);
             }
 
             // Resolve repo root now so it's persisted in vars for handle_job_created
@@ -207,14 +184,9 @@ where
                 .map(PathBuf::from)
                 .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
             let mut cmd = tokio::process::Command::new("git");
-            cmd.args([
-                "-C",
-                &invoke_dir.display().to_string(),
-                "rev-parse",
-                "--show-toplevel",
-            ])
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE");
+            cmd.args(["-C", &invoke_dir.display().to_string(), "rev-parse", "--show-toplevel"])
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE");
             let repo_root_output = oj_adapters::subprocess::run_with_timeout(
                 cmd,
                 oj_adapters::subprocess::SHELL_EVAL_TIMEOUT,
@@ -227,10 +199,8 @@ where
                     "git rev-parse --show-toplevel failed: not a git repository".to_string(),
                 ));
             }
-            let repo_root = String::from_utf8_lossy(&repo_root_output.stdout)
-                .trim()
-                .to_string();
-            vars.insert("workspace.repo_root".to_string(), repo_root);
+            let repo_root = String::from_utf8_lossy(&repo_root_output.stdout).trim().to_string();
+            vars.insert("source.repo_root".to_string(), repo_root);
         }
 
         // Evaluate locals: interpolate each value with current vars, then add as local.*
@@ -286,9 +256,7 @@ where
                         )));
                     }
                     // Strip trailing newlines to match standard $() substitution behavior
-                    String::from_utf8_lossy(&output.stdout)
-                        .trim_end_matches('\n')
-                        .to_string()
+                    String::from_utf8_lossy(&output.stdout).trim_end_matches('\n').to_string()
                 } else {
                     value
                 };
@@ -299,10 +267,8 @@ where
         }
 
         // Compute initial step
-        let initial_step = job_def
-            .first_step()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "init".to_string());
+        let initial_step =
+            job_def.first_step().map(|p| p.name.clone()).unwrap_or_else(|| "init".to_string());
 
         // Persist job record — workspace creation and step start are handled
         // asynchronously by handle_job_created() when the JobCreated event
@@ -330,18 +296,15 @@ where
                 cwd: execution_path.clone(),
                 vars: namespaced_vars,
                 initial_step: initial_step.clone(),
-                created_at_epoch_ms: self.clock().epoch_ms(),
-                namespace: namespace.clone(),
-                cron_name,
+                created_at_ms: self.executor.clock().epoch_ms(),
+                project: project.clone(),
+                cron: cron_name,
             },
         });
 
         // Insert into in-process cache
         {
-            self.runbook_cache
-                .lock()
-                .entry(runbook_hash)
-                .or_insert(runbook);
+            self.runbook_cache.lock().entry(runbook_hash).or_insert(runbook);
         }
 
         let mut result_events = self.executor.execute_all(creation_effects).await?;
@@ -359,13 +322,8 @@ where
             notify_vars.insert("name".to_string(), job_name.clone());
 
             let message = NotifyConfig::render(template, &notify_vars);
-            if let Some(event) = self
-                .executor
-                .execute(Effect::Notify {
-                    title: job_name.clone(),
-                    message,
-                })
-                .await?
+            if let Some(event) =
+                self.executor.execute(Effect::Notify { title: job_name.clone(), message }).await?
             {
                 result_events.push(event);
             }

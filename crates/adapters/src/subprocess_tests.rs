@@ -8,9 +8,7 @@ use tokio::process::Command;
 async fn run_with_timeout_success() {
     let mut cmd = Command::new("echo");
     cmd.arg("hello");
-    let output = run_with_timeout(cmd, Duration::from_secs(5), "echo")
-        .await
-        .unwrap();
+    let output = run_with_timeout(cmd, Duration::from_secs(5), "echo").await.unwrap();
     assert!(output.status.success());
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
 }
@@ -18,9 +16,7 @@ async fn run_with_timeout_success() {
 #[tokio::test]
 async fn run_with_timeout_nonzero_exit_is_not_an_error() {
     let cmd = Command::new("false");
-    let output = run_with_timeout(cmd, Duration::from_secs(5), "false")
-        .await
-        .unwrap();
+    let output = run_with_timeout(cmd, Duration::from_secs(5), "false").await.unwrap();
     assert!(!output.status.success());
 }
 

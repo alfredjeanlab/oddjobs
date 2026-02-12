@@ -66,13 +66,10 @@ const CLAUDE_MULTI_VALUE_OPTIONS: &[&str] = &[
 
 /// Namespaces that are only available in job context, not in command.run.
 ///
-/// Each entry maps from the invalid namespace to a suggestion for the user.
+/// Each entry maps from the invalid project to a suggestion for the user.
 const JOB_ONLY_NAMESPACES: &[(&str, &str)] = &[
     ("var.", "use ${args.<name>} to reference command arguments"),
-    (
-        "input.",
-        "use ${args.<name>} to reference command arguments",
-    ),
+    ("input.", "use ${args.<name>} to reference command arguments"),
     ("local.", "${local.*} is only available in job steps"),
     ("step.", "${step.*} is only available in job steps"),
 ];
@@ -96,13 +93,14 @@ pub(crate) fn validate_command_template_refs(
                 });
             }
         }
-        // Also reject ${workspace.*} (dotted), since command context only has ${workspace}
-        if var_name.starts_with("workspace.") {
+        // Also reject ${source.*} (dotted), since command context
+        // only has ${workspace} (the execution path)
+        if var_name.starts_with("source.") {
             return Err(ParseError::InvalidFormat {
                 location: location.to_string(),
                 message: format!(
                     "template reference ${{{}}} is not available in command.run; \
-                     commands have ${{workspace}} (the execution path), not ${{workspace.*}}",
+                     commands have ${{workspace}} (the execution path), not ${{source.*}}",
                     var_name,
                 ),
             });
@@ -149,9 +147,7 @@ pub(crate) fn validate_duration_str(s: &str) -> Result<(), String> {
         .map(|(i, _)| (&s[..i], &s[i..]))
         .unwrap_or((s, ""));
 
-    let _num: u64 = num_str
-        .parse()
-        .map_err(|_| format!("invalid number in duration: {}", s))?;
+    let _num: u64 = num_str.parse().map_err(|_| format!("invalid number in duration: {}", s))?;
 
     match suffix.trim() {
         "" | "s" | "sec" | "secs" | "second" | "seconds" | "ms" | "millis" | "millisecond"
@@ -214,12 +210,12 @@ pub(crate) fn validate_agent_command(
         });
     }
 
-    // Reject --session-id flag (the system adds it automatically)
+    // Reject --session-id flag (session management is handled by coop)
     if simple.has_long_option("session-id") {
         return Err(ParseError::InvalidFormat {
             location: location.to_string(),
             message: format!(
-                "{} command must not include '--session-id' (added automatically)",
+                "{} command must not include '--session-id' (managed automatically)",
                 basename,
             ),
         });
@@ -247,16 +243,8 @@ pub(crate) fn validate_agent_command(
 ///
 /// Template references must use one of these known prefixes to prevent typos
 /// like `${vra.name}` from silently failing at runtime.
-const VALID_TEMPLATE_NAMESPACES: &[&str] = &[
-    "var",
-    "args",
-    "item",
-    "local",
-    "workspace",
-    "invoke",
-    "prompt",
-    "step",
-];
+const VALID_TEMPLATE_NAMESPACES: &[&str] =
+    &["var", "args", "item", "local", "source", "invoke", "prompt", "step"];
 
 /// Validate that template references use recognized namespaces.
 ///
@@ -271,13 +259,13 @@ pub(crate) fn validate_template_namespaces(
         let var_name = &cap[1];
         // Only validate namespaced refs (containing a dot)
         if let Some(dot_pos) = var_name.find('.') {
-            let namespace = &var_name[..dot_pos];
-            if !VALID_TEMPLATE_NAMESPACES.contains(&namespace) {
+            let project = &var_name[..dot_pos];
+            if !VALID_TEMPLATE_NAMESPACES.contains(&project) {
                 return Err(ParseError::InvalidFormat {
                     location: location.to_string(),
                     message: format!(
-                        "unrecognized template namespace '{}' in ${{{}}}; valid namespaces: {}",
-                        namespace,
+                        "unrecognized template project '{}' in ${{{}}}; valid namespaces: {}",
+                        project,
                         var_name,
                         VALID_TEMPLATE_NAMESPACES.join(", "),
                     ),

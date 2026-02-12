@@ -31,7 +31,7 @@ queue "bugs" {
 
 worker "bug" {
   source      = { queue = "bugs" }
-  handler     = { job = "bug" }
+  run = { job = "bug" }
   concurrency = 3
 }
 
@@ -41,9 +41,9 @@ job "bug" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "fix/${var.bug.id}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "fix/${var.bug.id}-${source.nonce}"
   }
 
   locals {
@@ -67,7 +67,7 @@ job "bug" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        branch="${workspace.branch}" title="${local.title}"
+        branch="${source.branch}" title="${local.title}"
         git push origin "$branch"
         wok done ${var.bug.id}
         %{ if const.submit != "" }
@@ -108,15 +108,6 @@ agent "bugs" {
       Keep working. Fix the bug, write tests, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Bug: ${var.bug.id}"
-    status {
-      left  = "${var.bug.id}: ${var.bug.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

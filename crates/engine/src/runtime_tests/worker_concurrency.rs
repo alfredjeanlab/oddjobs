@@ -7,27 +7,23 @@ use super::*;
 
 use super::worker::{
     count_dispatched, dispatched_job_ids, push_persisted_items, start_worker_and_poll,
-    CONCURRENT_WORKER_RUNBOOK,
 };
 
 /// With concurrency=2 and 3 queued items, only 2 should be dispatched immediately.
 #[tokio::test]
 async fn concurrency_2_dispatches_two_items_simultaneously() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 3);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
 
-    assert_eq!(
-        count_dispatched(&events),
-        2,
-        "concurrency=2 should dispatch exactly 2 items"
-    );
+    assert_eq!(count_dispatched(&events), 2, "concurrency=2 should dispatch exactly 2 items");
 
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(state.active_jobs.len(), 2);
+        assert_eq!(state.active.len(), 2);
     }
 
     let pending_count = ctx.runtime.lock_state(|state| {
@@ -35,10 +31,7 @@ async fn concurrency_2_dispatches_two_items_simultaneously() {
             .queue_items
             .get("bugs")
             .map(|items| {
-                items
-                    .iter()
-                    .filter(|i| i.status == oj_storage::QueueItemStatus::Pending)
-                    .count()
+                items.iter().filter(|i| i.status == oj_storage::QueueItemStatus::Pending).count()
             })
             .unwrap_or(0)
     });
@@ -48,31 +41,28 @@ async fn concurrency_2_dispatches_two_items_simultaneously() {
 /// Regression guard: concurrency=1 still dispatches only 1 item.
 #[tokio::test]
 async fn concurrency_1_still_dispatches_one_item() {
-    let runbook_c1 = CONCURRENT_WORKER_RUNBOOK.replace("concurrency = 2", "concurrency = 1");
-    let ctx = setup_with_runbook(&runbook_c1).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
     push_persisted_items(&ctx, "bugs", 3);
 
-    let events = start_worker_and_poll(&ctx, &runbook_c1, "fixer", 1).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 1).await;
 
-    assert_eq!(
-        count_dispatched(&events),
-        1,
-        "concurrency=1 should dispatch exactly 1 item"
-    );
+    assert_eq!(count_dispatched(&events), 1, "concurrency=1 should dispatch exactly 1 item");
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(state.active_jobs.len(), 1);
+    assert_eq!(state.active.len(), 1);
 }
 
 /// When one of two active jobs completes, the worker re-polls and fills the free slot.
 #[tokio::test]
 async fn job_completion_triggers_repoll_and_fills_slot() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 3);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
     let dispatched = dispatched_job_ids(&events);
@@ -80,53 +70,40 @@ async fn job_completion_triggers_repoll_and_fills_slot() {
 
     let completion_events = ctx
         .runtime
-        .handle_event(Event::JobAdvanced {
-            id: completed_id.clone(),
-            step: "done".to_string(),
-        })
+        .handle_event(Event::JobAdvanced { id: completed_id.clone(), step: "done".to_string() })
         .await
         .unwrap();
 
     let mut all_events = completion_events.clone();
     for event in &completion_events {
-        if matches!(event, Event::WorkerPollComplete { .. }) {
+        if matches!(event, Event::WorkerPolled { .. }) {
             let result = ctx.runtime.handle_event(event.clone()).await.unwrap();
             all_events.extend(result);
         }
     }
 
-    assert_eq!(
-        count_dispatched(&all_events),
-        1,
-        "re-poll should dispatch the 3rd item"
-    );
+    assert_eq!(count_dispatched(&all_events), 1, "re-poll should dispatch the 3rd item");
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(
-        state.active_jobs.len(),
-        2,
-        "worker should have 2 active jobs again"
-    );
+    assert_eq!(state.active.len(), 2, "worker should have 2 active jobs again");
 }
 
 /// Stopping a worker marks it stopped but lets active jobs finish.
 #[tokio::test]
 async fn worker_stop_leaves_active_jobs_running() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 2);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
     let dispatched = dispatched_job_ids(&events);
 
     let stop_events = ctx
         .runtime
-        .handle_event(Event::WorkerStopped {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerStopped { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -141,28 +118,26 @@ async fn worker_stop_leaves_active_jobs_running() {
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
     assert_eq!(state.status, WorkerStatus::Stopped);
-    assert_eq!(state.active_jobs.len(), 2);
+    assert_eq!(state.active.len(), 2);
     for pid in &dispatched {
-        assert!(state.active_jobs.contains(pid));
+        assert!(state.active.contains(&pid.into()));
     }
 }
 
 /// A stopped worker should not dispatch new items on wake.
 #[tokio::test]
 async fn stopped_worker_does_not_dispatch_on_wake() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 1);
 
     // Start and dispatch first item
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 1).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 1).await;
     assert_eq!(count_dispatched(&events), 1);
 
     // Stop the worker
     ctx.runtime
-        .handle_event(Event::WorkerStopped {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerStopped { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -170,10 +145,7 @@ async fn stopped_worker_does_not_dispatch_on_wake() {
     push_persisted_items(&ctx, "bugs", 1);
     let wake_events = ctx
         .runtime
-        .handle_event(Event::WorkerWake {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerWake { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -184,32 +156,26 @@ async fn stopped_worker_does_not_dispatch_on_wake() {
 /// A worker at capacity should not dispatch new items even when woken.
 #[tokio::test]
 async fn worker_at_capacity_does_not_dispatch() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 2);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
+            queue: "bugs".to_string(),
             item_id: "item-extra".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "extra bug".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 2000,
-            namespace: String::new(),
+            data: vars!("title" => "extra bug"),
+            pushed_at_ms: 2000,
+            project: String::new(),
         });
     });
 
     let wake_events = ctx
         .runtime
-        .handle_event(Event::WorkerWake {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerWake { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -227,5 +193,5 @@ async fn worker_at_capacity_does_not_dispatch() {
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(state.active_jobs.len(), 2);
+    assert_eq!(state.active.len(), 2);
 }

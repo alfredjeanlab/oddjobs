@@ -39,10 +39,10 @@ mod daemon_job_queue;
 mod daemon_lifecycle;
 #[path = "specs/daemon/logs.rs"]
 mod daemon_logs;
-#[path = "specs/daemon/namespace.rs"]
-mod daemon_namespace;
 #[path = "specs/daemon/on_stop.rs"]
 mod daemon_on_stop;
+#[path = "specs/daemon/project.rs"]
+mod daemon_project;
 #[path = "specs/daemon/restart_queue.rs"]
 mod daemon_restart_queue;
 #[path = "specs/daemon/step_fallback.rs"]

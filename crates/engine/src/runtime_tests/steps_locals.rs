@@ -27,24 +27,9 @@ run = "echo ${local.branch} ${local.title}"
 async fn locals_interpolate_var_references() {
     let ctx = setup_with_runbook(RUNBOOK_WITH_LOCALS).await;
 
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [
-                ("name".to_string(), "auth".to_string()),
-                ("instructions".to_string(), "add login".to_string()),
-            ]
-            .into_iter()
-            .collect(),
-            &ctx.project_root,
-        ),
-    )
-    .await;
-
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id =
+        create_job_for_runbook(&ctx, "build", &[("name", "auth"), ("instructions", "add login")])
+            .await;
     let job = ctx.runtime.get_job(&job_id).unwrap();
 
     assert_eq!(
@@ -59,43 +44,16 @@ async fn locals_interpolate_var_references() {
     );
 }
 
-/// Runbook with locals that reference workspace variables
-const RUNBOOK_LOCALS_WITH_WORKSPACE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-workspace = "folder"
-
-[job.build.locals]
-branch = "feature/${var.name}-${workspace.nonce}"
-
-[[job.build.step]]
-name = "init"
-run = "echo ${local.branch}"
-"#;
-
+/// Runbook with locals that reference source variables
 #[tokio::test]
-async fn locals_interpolate_workspace_variables() {
-    let ctx = setup_with_runbook(RUNBOOK_LOCALS_WITH_WORKSPACE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "auth".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn locals_interpolate_source_variables() {
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "source = \"folder\"\n\n[job.build.locals]\nbranch = \"feature/${var.name}-${source.nonce}\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[("name", "auth")]).await;
     let job = ctx.runtime.get_job(&job_id).unwrap();
 
     let branch = job.vars.get("local.branch").cloned().unwrap_or_default();
@@ -112,41 +70,15 @@ async fn locals_interpolate_workspace_variables() {
 
 /// Locals containing shell expressions $(...) are eagerly evaluated at job
 /// creation time. The output of the shell command is stored as plain data.
-const RUNBOOK_LOCALS_SHELL_SUBST: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[job.build.locals]
-repo = "$(echo /some/repo)"
-
-[[job.build.step]]
-name = "init"
-run = "echo ${local.repo}"
-"#;
-
 #[tokio::test]
 async fn locals_eagerly_evaluate_shell_expressions() {
-    let ctx = setup_with_runbook(RUNBOOK_LOCALS_SHELL_SUBST).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "\n[job.build.locals]\nrepo = \"$(echo /some/repo)\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     let job = ctx.runtime.get_job(&job_id).unwrap();
 
     // After eager evaluation, $(echo /some/repo) should be resolved
@@ -157,51 +89,24 @@ async fn locals_eagerly_evaluate_shell_expressions() {
     );
 }
 
-/// Runbook with folder workspace and variables referencing workspace.nonce
-/// Tests runtime interpolation of workspace variables (not just parsing).
-const RUNBOOK_WORKSPACE_VAR_INTERPOLATION: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-workspace = "folder"
-
-[job.build.locals]
-branch = "feature/${var.name}-${workspace.nonce}"
-
-[[job.build.step]]
-name = "init"
-run = "echo ${local.branch}"
-"#;
-
+/// Runbook with folder source and variables referencing source.nonce
+/// Tests runtime interpolation of source variables (not just parsing).
 #[tokio::test]
-async fn workspace_variables_interpolate_at_runtime() {
-    let ctx = setup_with_runbook(RUNBOOK_WORKSPACE_VAR_INTERPOLATION).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "auth".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn source_variables_interpolate_at_runtime() {
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "source = \"folder\"\n\n[job.build.locals]\nbranch = \"feature/${var.name}-${source.nonce}\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[("name", "auth")]).await;
     let job = ctx.runtime.get_job(&job_id).unwrap();
 
-    // workspace.nonce should be set
-    let nonce = job.vars.get("workspace.nonce").cloned().unwrap_or_default();
-    assert!(!nonce.is_empty(), "workspace.nonce should be set");
+    // source.nonce should be set
+    let nonce = job.vars.get("source.nonce").cloned().unwrap_or_default();
+    assert!(!nonce.is_empty(), "source.nonce should be set");
 
-    // local.branch should be interpolated with var.name and workspace.nonce
+    // local.branch should be interpolated with var.name and source.nonce
     let branch = job.vars.get("local.branch").cloned().unwrap_or_default();
     assert!(
         branch.starts_with("feature/auth-"),
@@ -215,6 +120,6 @@ async fn workspace_variables_interpolate_at_runtime() {
     // Verify the nonce portion is in the branch
     assert!(
         branch.ends_with(&nonce),
-        "local.branch should end with workspace.nonce '{nonce}', got: {branch}"
+        "local.branch should end with source.nonce '{nonce}', got: {branch}"
     );
 }

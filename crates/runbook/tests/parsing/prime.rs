@@ -42,10 +42,7 @@ if [ -f PLAN.md ]; then
 fi
 """
 "#;
-    assert!(matches!(
-        parse_runbook(toml).unwrap().agents["w"].prime,
-        Some(PrimeDef::Script(_))
-    ));
+    assert!(matches!(parse_runbook(toml).unwrap().agents["w"].prime, Some(PrimeDef::Script(_))));
 }
 
 #[test]
@@ -59,11 +56,7 @@ fn hcl_prime_array() {
 
 #[test]
 fn prime_absent() {
-    assert!(
-        parse_runbook("[agent.w]\nrun = \"claude\"").unwrap().agents["w"]
-            .prime
-            .is_none()
-    );
+    assert!(parse_runbook("[agent.w]\nrun = \"claude\"").unwrap().agents["w"].prime.is_none());
 }
 
 #[test]
@@ -123,10 +116,7 @@ agent "w" {
     let msg = err.to_string();
     assert!(msg.contains("unknown prime source 'bogus'"), "got: {msg}");
     for source in VALID_PRIME_SOURCES {
-        assert!(
-            msg.contains(source),
-            "should list valid source '{source}': {msg}"
-        );
+        assert!(msg.contains(source), "should list valid source '{source}': {msg}");
     }
 }
 

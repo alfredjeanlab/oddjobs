@@ -5,24 +5,17 @@
 
 use super::*;
 
-// =============================================================================
-// Liveness timer happy paths
-// =============================================================================
-
 #[tokio::test]
-async fn liveness_timer_reschedules_when_session_alive() {
+async fn liveness_timer_reschedules_when_agent_alive() {
     let mut ctx = setup().await;
-    let (job_id, session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
+    let (job_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
-    // Register the session as alive in the fake adapter
-    ctx.sessions.add_session(&session_id, true);
+    // Agent is alive by default after spawn (FakeAgentAdapter sets alive=true)
 
     // Fire the liveness timer
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 
@@ -47,18 +40,17 @@ async fn liveness_timer_reschedules_when_session_alive() {
 }
 
 #[tokio::test]
-async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
+async fn liveness_timer_schedules_deferred_exit_when_agent_dead() {
     let mut ctx = setup().await;
-    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
+    let (job_id, agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
-    // Don't add the session to FakeSessionAdapter — is_alive returns false for unknown sessions
+    // Mark the agent as dead so liveness check fails
+    ctx.agents.set_agent_alive(&agent_id, false);
 
     // Fire the liveness timer
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::liveness(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 
@@ -81,26 +73,13 @@ async fn liveness_timer_schedules_deferred_exit_when_session_dead() {
     assert!(timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()));
 }
 
-// =============================================================================
-// Deferred exit timer happy paths
-// =============================================================================
-
 #[tokio::test]
 async fn exit_deferred_timer_noop_when_job_terminal() {
     let mut ctx = setup().await;
-    let (job_id, _session_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
+    let (job_id, _agent_id) = setup_job_at_agent_step(&mut ctx).await;
 
     // Fail the job to make it terminal
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "plan".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "plan")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert!(job.is_terminal());
@@ -108,9 +87,7 @@ async fn exit_deferred_timer_noop_when_job_terminal() {
     // Deferred exit on a terminal job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 
@@ -123,16 +100,7 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
     ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -141,15 +109,12 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to WaitingForInput
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 
@@ -164,16 +129,7 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
     ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -190,9 +146,7 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 
@@ -207,16 +161,7 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
     let job_id = create_job(&ctx).await;
 
     // Advance to agent step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
     ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -225,17 +170,12 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // Set agent state to Exited (maps to on_dead fallback)
-    ctx.agents.set_agent_state(
-        &agent_id,
-        oj_core::AgentState::Exited { exit_code: Some(0) },
-    );
+    ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::Exited { exit_code: Some(0) });
 
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::exit_deferred(&JobId::new(job_id.clone())),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
         .await
         .unwrap();
 

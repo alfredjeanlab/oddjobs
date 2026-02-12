@@ -9,64 +9,36 @@ fn write_hcl(dir: &Path, name: &str, content: &str) {
     fs::write(dir.join(name), content).unwrap();
 }
 
-// ============================================================================
-// Cross-Runbook Duplicate Detection (validate_runbook_dir)
-// ============================================================================
-
-#[test]
-fn validate_duplicate_command_across_files() {
-    let tmp = TempDir::new().unwrap();
-    write_hcl(tmp.path(), "a.hcl", CMD_RUNBOOK);
-    write_hcl(tmp.path(), "b.hcl", CMD_RUNBOOK); // same "deploy" command
-
-    let errs = validate_runbook_dir(tmp.path()).unwrap_err();
-    assert!(!errs.is_empty());
-    let msg = errs[0].to_string();
-    assert!(
-        msg.contains("command") && msg.contains("deploy"),
-        "expected duplicate command error, got: {msg}"
-    );
-}
-
-#[test]
-fn validate_duplicate_agent_across_files() {
-    let tmp = TempDir::new().unwrap();
-    let agent_hcl = r#"
+const AGENT_HCL: &str = r#"
 agent "planner" {
   run = "claude"
 }
 "#;
-    write_hcl(tmp.path(), "a.hcl", agent_hcl);
-    write_hcl(tmp.path(), "b.hcl", agent_hcl);
 
-    let errs = validate_runbook_dir(tmp.path()).unwrap_err();
-    assert!(!errs.is_empty());
-    let msg = errs[0].to_string();
-    assert!(
-        msg.contains("agent") && msg.contains("planner"),
-        "expected duplicate agent error, got: {msg}"
-    );
-}
-
-#[test]
-fn validate_duplicate_job_across_files() {
-    let tmp = TempDir::new().unwrap();
-    let job_hcl = r#"
+const JOB_HCL: &str = r#"
 job "build" {
   step "run" {
     run = "echo build"
   }
 }
 "#;
-    write_hcl(tmp.path(), "a.hcl", job_hcl);
-    write_hcl(tmp.path(), "b.hcl", job_hcl);
+
+#[yare::parameterized(
+    command = { CMD_RUNBOOK, "command", "deploy" },
+    agent   = { AGENT_HCL,  "agent",   "planner" },
+    job     = { JOB_HCL,    "job",     "build" },
+)]
+fn validate_duplicate_across_files(hcl: &str, entity_type: &str, entity_name: &str) {
+    let tmp = TempDir::new().unwrap();
+    write_hcl(tmp.path(), "a.hcl", hcl);
+    write_hcl(tmp.path(), "b.hcl", hcl);
 
     let errs = validate_runbook_dir(tmp.path()).unwrap_err();
     assert!(!errs.is_empty());
     let msg = errs[0].to_string();
     assert!(
-        msg.contains("job") && msg.contains("build"),
-        "expected duplicate job error, got: {msg}"
+        msg.contains(entity_type) && msg.contains(entity_name),
+        "expected duplicate {entity_type} error, got: {msg}"
     );
 }
 
@@ -144,7 +116,7 @@ queue "tasks" {
 
 worker "builder" {
   source  = { queue = "tasks" }
-  handler = { job = "build" }
+  run = { job = "build" }
 }
 
 job "build" {
@@ -263,10 +235,7 @@ fn only_invalid_runbooks_returns_not_found_skipped() {
 
     let err = find_runbook_by_command(tmp.path(), "deploy").unwrap_err();
     let msg = err.to_string();
-    assert!(
-        msg.contains("skipped due to errors"),
-        "expected skipped mention, got: {msg}"
-    );
+    assert!(msg.contains("skipped due to errors"), "expected skipped mention, got: {msg}");
     assert!(msg.contains("bad.hcl"), "expected file path, got: {msg}");
 }
 
@@ -355,33 +324,38 @@ fn collect_all_queues_skips_invalid() {
 
 // extract_file_comment tests
 
-#[test]
-fn extract_comment_multi_paragraph() {
-    let content = "# Build Runbook\n# Feature development workflow\n#\n# Usage:\n#   oj run build <name>\n\ncommand \"build\" {}\n";
-    let comment = extract_file_comment(content).unwrap();
-    assert_eq!(comment.short, "Build Runbook\nFeature development workflow");
-    assert_eq!(comment.long, "Usage:\n  oj run build <name>");
-}
-
-#[test]
-fn extract_comment_single_line() {
-    let content = "# Simple command\n\ncommand \"test\" {}\n";
-    let comment = extract_file_comment(content).unwrap();
-    assert_eq!(comment.short, "Simple command");
-    assert!(comment.long.is_empty());
-}
-
-#[test]
-fn extract_comment_no_comment() {
-    let content = "command \"test\" {}\n";
-    assert!(extract_file_comment(content).is_none());
-}
-
-#[test]
-fn extract_comment_leading_blank_lines() {
-    let content = "\n\n# After blanks\n\ncommand \"test\" {}\n";
-    let comment = extract_file_comment(content).unwrap();
-    assert_eq!(comment.short, "After blanks");
+#[yare::parameterized(
+    multi_paragraph     = {
+        "# Build Runbook\n# Feature development workflow\n#\n# Usage:\n#   oj run build <name>\n\ncommand \"build\" {}\n",
+        Some("Build Runbook\nFeature development workflow"),
+        Some("Usage:\n  oj run build <name>")
+    },
+    single_line         = {
+        "# Simple command\n\ncommand \"test\" {}\n",
+        Some("Simple command"),
+        Some("")
+    },
+    no_comment          = {
+        "command \"test\" {}\n",
+        None,
+        None
+    },
+    leading_blank_lines = {
+        "\n\n# After blanks\n\ncommand \"test\" {}\n",
+        Some("After blanks"),
+        Some("")
+    },
+)]
+fn extract_comment(content: &str, exp_short: Option<&str>, exp_long: Option<&str>) {
+    let comment = extract_file_comment(content);
+    match (exp_short, exp_long) {
+        (Some(short), Some(long)) => {
+            let c = comment.unwrap();
+            assert_eq!(c.short, short);
+            assert_eq!(c.long, long);
+        }
+        _ => assert!(comment.is_none()),
+    }
 }
 
 #[test]
@@ -428,10 +402,7 @@ fn collect_all_commands_populates_description_from_comment() {
 
     let commands = collect_all_commands(tmp.path()).unwrap();
     assert_eq!(commands.len(), 1);
-    assert_eq!(
-        commands[0].2.as_deref(),
-        Some("Feature workflow: init → plan → implement")
-    );
+    assert_eq!(commands[0].2.as_deref(), Some("Feature workflow: init → plan → implement"));
 }
 
 #[test]
@@ -443,10 +414,6 @@ fn collect_all_commands_single_line_comment_used_as_description() {
     let commands = collect_all_commands(tmp.path()).unwrap();
     assert_eq!(commands[0].2.as_deref(), Some("Simple command"));
 }
-
-// ============================================================================
-// collect_all_workers / collect_all_crons tests
-// ============================================================================
 
 const CRON_RUNBOOK: &str = r#"
 cron "daily-backup" {
@@ -470,7 +437,7 @@ queue "issues" {
 
 worker "triager" {
   source  = { queue = "issues" }
-  handler = { job = "triage" }
+  run = { job = "triage" }
 }
 
 job "triage" {
@@ -548,10 +515,6 @@ fn collect_all_crons_skips_invalid() {
     assert_eq!(crons.len(), 1);
     assert_eq!(crons[0].0, "daily-backup");
 }
-
-// ============================================================================
-// extract_block_comments tests
-// ============================================================================
 
 #[test]
 fn extract_block_comments_multi_command_file() {
@@ -674,10 +637,6 @@ command "beta" {
     assert_eq!(comment.short, "Beta-specific description");
 }
 
-// ============================================================================
-// Alias suffix-matching tests (find entities from aliased imports)
-// ============================================================================
-
 /// Set up .oj/{runbooks,libraries/<lib_name>} with an aliased import.
 fn setup_aliased_import(tmp: &TempDir, alias: &str, lib_name: &str, lib_hcl: &str) -> PathBuf {
     let oj_dir = tmp.path().join(".oj");
@@ -696,13 +655,8 @@ fn find_worker_by_aliased_and_unaliased_name() {
     let tmp = TempDir::new().unwrap();
     let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", WORKER_RUNBOOK);
 
-    let rb = find_runbook_by_worker(&runbooks_dir, "builder")
-        .unwrap()
-        .unwrap();
-    assert!(
-        rb.get_worker("builder").is_some(),
-        "should resolve unaliased name"
-    );
+    let rb = find_runbook_by_worker(&runbooks_dir, "builder").unwrap().unwrap();
+    assert!(rb.get_worker("builder").is_some(), "should resolve unaliased name");
 
     let result = find_runbook_by_worker(&runbooks_dir, "ci:builder").unwrap();
     assert!(result.is_some(), "should find worker by aliased name");
@@ -712,9 +666,7 @@ fn find_worker_by_aliased_and_unaliased_name() {
 fn find_queue_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
     let runbooks_dir = setup_aliased_import(&tmp, "ci", "mylib", QUEUE_RUNBOOK);
-    let rb = find_runbook_by_queue(&runbooks_dir, "tasks")
-        .unwrap()
-        .unwrap();
+    let rb = find_runbook_by_queue(&runbooks_dir, "tasks").unwrap().unwrap();
     assert!(rb.get_queue("tasks").is_some());
 }
 
@@ -722,9 +674,7 @@ fn find_queue_by_unaliased_name() {
 fn find_command_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
     let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", CMD_RUNBOOK);
-    let rb = find_runbook_by_command(&runbooks_dir, "deploy")
-        .unwrap()
-        .unwrap();
+    let rb = find_runbook_by_command(&runbooks_dir, "deploy").unwrap().unwrap();
     assert!(rb.get_command("deploy").is_some());
 }
 
@@ -732,15 +682,9 @@ fn find_command_by_unaliased_name() {
 fn find_cron_by_unaliased_name() {
     let tmp = TempDir::new().unwrap();
     let runbooks_dir = setup_aliased_import(&tmp, "ops", "mylib", CRON_RUNBOOK);
-    let rb = find_runbook_by_cron(&runbooks_dir, "daily-backup")
-        .unwrap()
-        .unwrap();
+    let rb = find_runbook_by_cron(&runbooks_dir, "daily-backup").unwrap().unwrap();
     assert!(rb.get_cron("daily-backup").is_some());
 }
-
-// ============================================================================
-// Imported command comment tests (bug: oj-92dbf159)
-// ============================================================================
 
 /// Set up a project dir with runbooks/ and libraries/ for import tests.
 fn setup_import_project(
@@ -771,10 +715,7 @@ fn imported_commands_use_library_comment_not_importer_comment() {
     let commands = collect_all_commands(&runbooks).unwrap();
     assert_eq!(commands.len(), 1);
     assert_eq!(commands[0].0, "deploy");
-    assert_eq!(
-        commands[0].2.as_deref(),
-        Some("Library command description")
-    );
+    assert_eq!(commands[0].2.as_deref(), Some("Library command description"));
 }
 
 #[test]
@@ -862,9 +803,38 @@ command "test" {
     assert_eq!(test.2.as_deref(), Some("Run local tests"));
 }
 
-// ============================================================================
-// Aliased import duplicate detection (exact vs suffix matching)
-// ============================================================================
+// Libraries with HCL conditional templates (bug: oj-9552e697)
+
+const LIB_WITH_TEMPLATES: &str = r#"const "check" { default = "true" }
+# Deploy to production
+command "deploy" {
+  run = <<-SHELL
+    %{ if const.check != "true" }
+    ${raw(const.check)}
+    %{ endif }
+    echo deploy
+  SHELL
+}
+"#;
+
+#[test]
+fn imported_command_comments_survive_conditional_templates() {
+    let base = "import \"mylib\" {}\n";
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", LIB_WITH_TEMPLATES)]);
+    let commands = collect_all_commands(&runbooks).unwrap();
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].0, "deploy");
+    assert_eq!(commands[0].2.as_deref(), Some("Deploy to production"));
+}
+
+#[test]
+fn find_command_with_comment_from_templated_library() {
+    let base = "import \"mylib\" {}\n";
+    let (_tmp, runbooks) = setup_import_project(base, "mylib", &[("cmd.hcl", LIB_WITH_TEMPLATES)]);
+    let (cmd, comment) = find_command_with_comment(&runbooks, "deploy").unwrap().unwrap();
+    assert_eq!(cmd.name, "deploy");
+    assert_eq!(comment.unwrap().short, "Deploy to production");
+}
 
 /// Shorthand: set up aliased import with "wok" alias from "woklib" library.
 fn setup_wok_import(lib_hcl: &str) -> (TempDir, PathBuf) {
@@ -885,10 +855,7 @@ fn aliased_import_plus_local_same_name_prefers_local() {
     write_hcl(&dir, "b.hcl", r#"command "bug" { run = "echo local-bug" }"#);
 
     let rb = find_runbook_by_command(&dir, "bug").unwrap().unwrap();
-    assert_eq!(
-        rb.commands.get("bug").unwrap().run.shell_command(),
-        Some("echo local-bug")
-    );
+    assert_eq!(rb.commands.get("bug").unwrap().run.shell_command(), Some("echo local-bug"));
 }
 
 #[test]
@@ -902,10 +869,7 @@ fn aliased_import_only_falls_back_to_suffix_match() {
 fn same_aliased_name_in_two_files_is_duplicate() {
     let (_tmp, dir) = setup_wok_import(CMD_LIB_BUG);
     write_hcl(&dir, "b.hcl", r#"import "woklib" { alias = "wok" }"#);
-    assert!(matches!(
-        find_runbook_by_command(&dir, "bug"),
-        Err(FindError::Duplicate(_))
-    ));
+    assert!(matches!(find_runbook_by_command(&dir, "bug"), Err(FindError::Duplicate(_))));
 }
 
 const WORKER_LIB_CHORE: &str = r#"
@@ -917,7 +881,7 @@ queue "tasks" {
 
 worker "chore" {
   source  = { queue = "tasks" }
-  handler = { job = "do-chore" }
+  run = { job = "do-chore" }
 }
 
 job "do-chore" {
@@ -936,7 +900,7 @@ queue "local-tasks" {
 
 worker "chore" {
   source  = { queue = "local-tasks" }
-  handler = { job = "local-chore" }
+  run = { job = "local-chore" }
 }
 
 job "local-chore" {

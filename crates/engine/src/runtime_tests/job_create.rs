@@ -8,172 +8,90 @@
 //! - Name template resolution
 //! - Runbook caching and RunbookLoaded event emission
 //! - Namespace propagation
-//! - Workspace setup failure → job marked failed
+//! - Workspace setup failure -> job marked failed
 //! - cron_name propagation
 
 use super::*;
 
 /// Helper: create a job via the standard command event chain.
 async fn run_job(ctx: &TestContext, job_id: &str, command: &str, args: HashMap<String, String>) {
-    handle_event_chain(
-        ctx,
-        command_event(job_id, command, command, args, &ctx.project_root),
-    )
-    .await;
+    handle_event_chain(ctx, command_event(job_id, command, command, args, &ctx.project_path)).await;
 }
 
 /// Shorthand: create a job with a single "name" arg.
 async fn run_job_named(ctx: &TestContext, job_id: &str, command: &str, name: &str) {
-    run_job(
-        ctx,
-        job_id,
-        command,
-        [("name".to_string(), name.to_string())]
-            .into_iter()
-            .collect(),
-    )
-    .await;
+    run_job(ctx, job_id, command, vars!("name" => name)).await;
 }
 
 // =============================================================================
 // Job with explicit cwd, no workspace
 // =============================================================================
 
-const CWD_ONLY_RUNBOOK: &str = r#"
-[command.deploy]
-args = "<name>"
-run = { job = "deploy" }
-
-[job.deploy]
-input = ["name"]
-cwd = "${invoke.dir}/subdir"
-
-[[job.deploy.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn job_with_cwd_uses_interpolated_path() {
-    let ctx = setup_with_runbook(CWD_ONLY_RUNBOOK).await;
+    let ctx =
+        setup_with_runbook(&test_runbook_shell("deploy", "cwd = \"${invoke.dir}/subdir\"")).await;
 
-    run_job_named(&ctx, "pipe-1", "deploy", "test").await;
+    run_job_named(&ctx, "job-1", "deploy", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     // cwd should be the interpolated path
-    let expected_cwd = ctx.project_root.join("subdir");
-    assert_eq!(
-        job.cwd, expected_cwd,
-        "cwd should be interpolated from template"
-    );
+    let expected_cwd = ctx.project_path.join("subdir");
+    assert_eq!(job.cwd, expected_cwd, "cwd should be interpolated from template");
     // No workspace should be created
-    assert!(
-        job.workspace_id.is_none(),
-        "cwd-only job should not have workspace_id"
-    );
-    assert!(
-        job.workspace_path.is_none(),
-        "cwd-only job should not have workspace_path"
-    );
+    assert!(job.workspace_id.is_none(), "cwd-only job should not have workspace_id");
+    assert!(job.workspace_path.is_none(), "cwd-only job should not have workspace_path");
 }
 
 // =============================================================================
 // Job with no cwd, no workspace (default to invoke.dir)
 // =============================================================================
 
-const NO_CWD_NO_WORKSPACE_RUNBOOK: &str = r#"
-[command.simple]
-args = "<name>"
-run = { job = "simple" }
-
-[job.simple]
-input = ["name"]
-
-[[job.simple.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn job_without_cwd_or_workspace_uses_invoke_dir() {
-    let ctx = setup_with_runbook(NO_CWD_NO_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("simple", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "simple", "test").await;
+    run_job_named(&ctx, "job-1", "simple", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    // cwd should be the invoke directory (project_root in our test)
-    assert_eq!(
-        job.cwd, ctx.project_root,
-        "default cwd should be invoke.dir"
-    );
-    assert!(
-        job.workspace_id.is_none(),
-        "no-workspace job should not have workspace_id"
-    );
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    // cwd should be the invoke directory (project_path in our test)
+    assert_eq!(job.cwd, ctx.project_path, "default cwd should be invoke.dir");
+    assert!(job.workspace_id.is_none(), "no-workspace job should not have workspace_id");
 }
 
 // =============================================================================
 // Job with folder workspace
 // =============================================================================
 
-const FOLDER_WORKSPACE_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-workspace = "folder"
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn job_with_folder_workspace_creates_workspace() {
-    let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "source = \"folder\"")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
 
     // Workspace should be created under state_dir/workspaces/
-    assert!(
-        job.workspace_id.is_some(),
-        "folder workspace job should have workspace_id"
-    );
+    assert!(job.workspace_id.is_some(), "folder workspace job should have workspace_id");
 
     let ws_id = job.workspace_id.as_ref().unwrap().to_string();
-    assert!(
-        ws_id.starts_with("ws-"),
-        "workspace id should start with 'ws-', got: {ws_id}"
-    );
+    assert!(ws_id.starts_with("ws-"), "workspace id should start with 'ws-', got: {ws_id}");
 
-    // workspace vars should be injected
-    assert!(
-        job.vars.get("workspace.id").is_some(),
-        "workspace.id var should be set"
-    );
-    assert!(
-        job.vars.get("workspace.root").is_some(),
-        "workspace.root var should be set"
-    );
-    assert!(
-        job.vars.get("workspace.nonce").is_some(),
-        "workspace.nonce var should be set"
-    );
+    // source vars should be injected
+    assert!(job.vars.contains_key("source.id"), "source.id var should be set");
+    assert!(job.vars.contains_key("source.root"), "source.root var should be set");
+    assert!(job.vars.contains_key("source.nonce"), "source.nonce var should be set");
 }
 
 #[tokio::test]
 async fn folder_workspace_path_is_under_state_dir() {
-    let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "source = \"folder\"")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    let ws_root = job.vars.get("workspace.root").unwrap();
-    let workspaces_dir = ctx.project_root.join("workspaces");
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    let ws_root = job.vars.get("source.root").unwrap();
+    let workspaces_dir = ctx.project_path.join("workspaces");
 
     assert!(
         ws_root.starts_with(&workspaces_dir.display().to_string()),
@@ -185,27 +103,14 @@ async fn folder_workspace_path_is_under_state_dir() {
 // Name template resolution
 // =============================================================================
 
-const NAME_TEMPLATE_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-name = "build-${var.name}"
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn job_name_template_is_interpolated() {
-    let ctx = setup_with_runbook(NAME_TEMPLATE_RUNBOOK).await;
+    let ctx =
+        setup_with_runbook(&test_runbook_shell("build", "name = \"build-${var.name}\"")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "auth-module").await;
+    run_job_named(&ctx, "job-1", "build", "auth-module").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     // The name should contain the interpolated value and a nonce suffix
     assert!(
         job.name.contains("auth-module"),
@@ -216,135 +121,84 @@ async fn job_name_template_is_interpolated() {
 
 #[tokio::test]
 async fn job_without_name_template_uses_args_name() {
-    let ctx = setup_with_runbook(NO_CWD_NO_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("simple", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "simple", "my-feature").await;
+    run_job_named(&ctx, "job-1", "simple", "my-feature").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    assert_eq!(
-        job.name, "my-feature",
-        "without name template, job name should be args.name"
-    );
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    assert_eq!(job.name, "my-feature", "without name template, job name should be args.name");
 }
 
 // =============================================================================
 // Namespace propagation
 // =============================================================================
 
-const SIMPLE_JOB_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn job_namespace_is_propagated() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    // Use a command event with a non-empty namespace
+    // Use a command event with a non-empty project
     let event = Event::CommandRun {
-        job_id: JobId::new("pipe-1"),
-        job_name: "build".to_string(),
-        project_root: ctx.project_root.clone(),
-        invoke_dir: ctx.project_root.clone(),
+        owner: JobId::new("job-1").into(),
+        name: "build".to_string(),
+        project_path: ctx.project_path.clone(),
+        invoke_dir: ctx.project_path.clone(),
         command: "build".to_string(),
-        namespace: "my-project".to_string(),
-        args: [("name".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
+        project: "my-project".to_string(),
+        args: vars!("name" => "test"),
     };
 
     ctx.runtime.handle_event(event).await.unwrap();
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    assert_eq!(
-        job.namespace, "my-project",
-        "job namespace should match the command event namespace"
-    );
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    assert_eq!(job.project, "my-project", "job project should match the command event project");
 }
-
-// =============================================================================
-// Runbook caching
-// =============================================================================
 
 #[tokio::test]
 async fn runbook_is_cached_after_creation() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
 
     // Runbook should be cached by its hash
     let cached = ctx.runtime.cached_runbook(&job.runbook_hash);
-    assert!(
-        cached.is_ok(),
-        "runbook should be retrievable from cache after job creation"
-    );
+    assert!(cached.is_ok(), "runbook should be retrievable from cache after job creation");
 
     let runbook = cached.unwrap();
-    assert!(
-        runbook.get_job("build").is_some(),
-        "cached runbook should contain the job definition"
-    );
+    assert!(runbook.get_job("build").is_some(), "cached runbook should contain the job definition");
 }
-
-// =============================================================================
-// RunbookLoaded event emitted
-// =============================================================================
 
 #[tokio::test]
 async fn runbook_loaded_event_is_emitted() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
     // Verify the runbook was stored in materialized state (via RunbookLoaded event)
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    let stored = ctx
-        .runtime
-        .lock_state(|s| s.runbooks.contains_key(&job.runbook_hash));
-    assert!(
-        stored,
-        "RunbookLoaded event should store runbook in materialized state"
-    );
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    let stored = ctx.runtime.lock_state(|s| s.runbooks.contains_key(&job.runbook_hash));
+    assert!(stored, "RunbookLoaded event should store runbook in materialized state");
 }
-
-// =============================================================================
-// Second job reuses cached runbook (no duplicate RunbookLoaded)
-// =============================================================================
 
 #[tokio::test]
 async fn second_job_reuses_cached_runbook() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
     // Create first job
-    run_job_named(&ctx, "pipe-1", "build", "first").await;
+    run_job_named(&ctx, "job-1", "build", "first").await;
 
-    let job1 = ctx.runtime.get_job("pipe-1").unwrap();
+    let job1 = ctx.runtime.get_job("job-1").unwrap();
 
     // Create second job with same command (same runbook)
-    run_job_named(&ctx, "pipe-2", "build", "second").await;
+    run_job_named(&ctx, "job-2", "build", "second").await;
 
-    let job2 = ctx.runtime.get_job("pipe-2").unwrap();
+    let job2 = ctx.runtime.get_job("job-2").unwrap();
 
     // Both jobs should reference the same runbook hash
-    assert_eq!(
-        job1.runbook_hash, job2.runbook_hash,
-        "both jobs should use the same runbook hash"
-    );
+    assert_eq!(job1.runbook_hash, job2.runbook_hash, "both jobs should use the same runbook hash");
 }
-
-// =============================================================================
-// Job def not found error
-// =============================================================================
 
 const MISMATCHED_JOB_RUNBOOK: &str = r#"
 [command.deploy]
@@ -362,112 +216,73 @@ async fn job_def_not_found_returns_error() {
 
     let result = ctx
         .runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "deploy",
-            "deploy",
-            HashMap::new(),
-            &ctx.project_root,
-        ))
+        .handle_event(command_event("job-1", "deploy", "deploy", HashMap::new(), &ctx.project_path))
         .await;
 
     assert!(result.is_err(), "should return error for missing job def");
     let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("not found"),
-        "error should mention 'not found', got: {err}"
-    );
+    assert!(err.contains("not found"), "error should mention 'not found', got: {err}");
 }
-
-// =============================================================================
-// Initial step is started
-// =============================================================================
 
 #[tokio::test]
 async fn job_starts_at_first_step() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     assert_eq!(job.step, "init", "job should start at first step");
-    assert_eq!(
-        job.step_status,
-        StepStatus::Running,
-        "first step should be running"
-    );
+    assert_eq!(job.step_status, StepStatus::Running, "first step should be running");
 }
 
 // =============================================================================
 // Job with cwd and workspace (cwd is overridden by workspace)
 // =============================================================================
 
-const CWD_AND_WORKSPACE_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-cwd = "/some/base"
-workspace = "folder"
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn cwd_with_workspace_creates_workspace() {
-    let ctx = setup_with_runbook(CWD_AND_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "cwd = \"/some/base\"\nsource = \"folder\"",
+    ))
+    .await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     // When both cwd and workspace are set, workspace takes precedence
-    assert!(
-        job.workspace_id.is_some(),
-        "should create workspace even when cwd is also set"
-    );
+    assert!(job.workspace_id.is_some(), "should create workspace even when cwd is also set");
 }
-
-// =============================================================================
-// Multiple jobs get distinct workspace IDs
-// =============================================================================
 
 #[tokio::test]
 async fn multiple_jobs_get_distinct_workspaces() {
-    let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "source = \"folder\"")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "first").await;
+    run_job_named(&ctx, "job-1", "build", "first").await;
 
-    run_job_named(&ctx, "pipe-2", "build", "second").await;
+    run_job_named(&ctx, "job-2", "build", "second").await;
 
-    let job1 = ctx.runtime.get_job("pipe-1").unwrap();
-    let job2 = ctx.runtime.get_job("pipe-2").unwrap();
+    let job1 = ctx.runtime.get_job("job-1").unwrap();
+    let job2 = ctx.runtime.get_job("job-2").unwrap();
 
     assert_ne!(
         job1.workspace_id, job2.workspace_id,
         "different jobs should have distinct workspace IDs"
     );
     assert_ne!(
-        job1.vars.get("workspace.root"),
-        job2.vars.get("workspace.root"),
+        job1.vars.get("source.root"),
+        job2.vars.get("source.root"),
         "different jobs should have distinct workspace paths"
     );
 }
 
-// =============================================================================
-// Vars are namespaced in the created job
-// =============================================================================
-
 #[tokio::test]
 async fn job_vars_are_namespaced() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test-feature").await;
+    run_job_named(&ctx, "job-1", "build", "test-feature").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
 
     // User vars should be prefixed with var.
     assert!(
@@ -484,20 +299,16 @@ async fn job_vars_are_namespaced() {
     );
 }
 
-// =============================================================================
-// Job created_at uses clock
-// =============================================================================
-
 #[tokio::test]
 async fn job_created_at_uses_clock() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
     // Advance the fake clock
     ctx.clock.advance(std::time::Duration::from_secs(1000));
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     // Job should exist and be in running state (verifying clock didn't break creation)
     assert_eq!(job.step, "init");
     assert_eq!(job.step_status, StepStatus::Running);
@@ -507,26 +318,15 @@ async fn job_created_at_uses_clock() {
 // Job with on_start notification and name template
 // =============================================================================
 
-const NOTIFY_NAME_TEMPLATE_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-name = "build-${var.name}"
-notify = { on_start = "Started ${name}" }
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn on_start_notification_uses_resolved_name() {
-    let ctx = setup_with_runbook(NOTIFY_NAME_TEMPLATE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "name = \"build-${var.name}\"\nnotify = { on_start = \"Started ${name}\" }",
+    ))
+    .await;
 
-    run_job_named(&ctx, "pipe-1", "build", "auth").await;
+    run_job_named(&ctx, "job-1", "build", "auth").await;
 
     let calls = ctx.notifier.calls();
     assert_eq!(calls.len(), 1, "on_start should emit one notification");
@@ -543,60 +343,38 @@ async fn on_start_notification_uses_resolved_name() {
     );
 }
 
-// =============================================================================
-// Workspace nonce derived from job_id
-// =============================================================================
-
 #[tokio::test]
 async fn workspace_nonce_is_derived_from_job_id() {
-    let ctx = setup_with_runbook(FOLDER_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "source = \"folder\"")).await;
 
     run_job_named(&ctx, "oj-abc12345-deadbeef", "build", "test").await;
 
     let job = ctx.runtime.get_job("oj-abc12345-deadbeef").unwrap();
-    let nonce = job.vars.get("workspace.nonce").unwrap();
+    let nonce = job.vars.get("source.nonce").unwrap();
 
     // Nonce is first 8 chars of the job_id
-    assert_eq!(
-        nonce.len(),
-        8,
-        "workspace.nonce should be 8 chars, got: {nonce}"
-    );
+    assert_eq!(nonce.len(), 8, "source.nonce should be 8 chars, got: {nonce}");
 }
 
 // =============================================================================
 // Job with name template containing workspace nonce
 // =============================================================================
 
-const NAME_TEMPLATE_WITH_WORKSPACE_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-name = "${var.name}"
-workspace = "folder"
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn name_template_with_workspace_creates_matching_ws_id() {
-    let ctx = setup_with_runbook(NAME_TEMPLATE_WITH_WORKSPACE_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "name = \"${var.name}\"\nsource = \"folder\"",
+    ))
+    .await;
 
-    run_job_named(&ctx, "pipe-1", "build", "my-feature").await;
+    run_job_named(&ctx, "job-1", "build", "my-feature").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     let ws_id = job.workspace_id.as_ref().unwrap().to_string();
 
     // The workspace ID should incorporate the name template result
-    assert!(
-        ws_id.starts_with("ws-"),
-        "workspace id should start with 'ws-', got: {ws_id}"
-    );
+    assert!(ws_id.starts_with("ws-"), "workspace id should start with 'ws-', got: {ws_id}");
     assert!(
         ws_id.contains("my-feature"),
         "workspace id should contain name from template, got: {ws_id}"
@@ -607,30 +385,17 @@ async fn name_template_with_workspace_creates_matching_ws_id() {
 // Job with multiple independent locals
 // =============================================================================
 
-const MULTI_LOCALS_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[job.build.locals]
-prefix = "feat"
-branch = "feature/${var.name}"
-
-[[job.build.step]]
-name = "init"
-run = "echo ${local.branch}"
-"#;
-
 #[tokio::test]
 async fn multiple_locals_are_evaluated() {
-    let ctx = setup_with_runbook(MULTI_LOCALS_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell(
+        "build",
+        "\n[job.build.locals]\nprefix = \"feat\"\nbranch = \"feature/${var.name}\"",
+    ))
+    .await;
 
-    run_job_named(&ctx, "pipe-1", "build", "auth").await;
+    run_job_named(&ctx, "job-1", "build", "auth").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
 
     assert_eq!(
         job.vars.get("local.prefix").map(String::as_str),
@@ -644,23 +409,15 @@ async fn multiple_locals_are_evaluated() {
     );
 }
 
-// =============================================================================
-// Job with empty locals
-// =============================================================================
-
 #[tokio::test]
 async fn job_without_locals_has_no_local_vars() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
 
-    let local_keys: Vec<_> = job
-        .vars
-        .keys()
-        .filter(|k| k.starts_with("local."))
-        .collect();
+    let local_keys: Vec<_> = job.vars.keys().filter(|k| k.starts_with("local.")).collect();
     assert!(
         local_keys.is_empty(),
         "job without locals should have no local.* vars, got: {:?}",
@@ -668,82 +425,55 @@ async fn job_without_locals_has_no_local_vars() {
     );
 }
 
-// =============================================================================
-// Job kind is stored correctly
-// =============================================================================
-
 #[tokio::test]
 async fn job_kind_matches_definition_name() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    assert_eq!(
-        job.kind, "build",
-        "job kind should match the job definition name"
-    );
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    assert_eq!(job.kind, "build", "job kind should match the job definition name");
 }
 
 // =============================================================================
 // Multiple steps: first step is picked correctly
 // =============================================================================
 
-const MULTI_STEP_RUNBOOK: &str = r#"
-[command.pipeline]
-args = "<name>"
-run = { job = "pipeline" }
-
-[job.pipeline]
-input = ["name"]
-
-[[job.pipeline.step]]
-name = "prepare"
-run = "echo prepare"
-on_done = "execute"
-
-[[job.pipeline.step]]
-name = "execute"
-run = "echo execute"
-"#;
-
 #[tokio::test]
 async fn job_starts_at_first_defined_step() {
-    let ctx = setup_with_runbook(MULTI_STEP_RUNBOOK).await;
-
-    run_job_named(&ctx, "pipe-1", "pipeline", "test").await;
-
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
-    assert_eq!(
-        job.step, "prepare",
-        "job should start at the first defined step, not 'execute'"
+    let runbook = test_runbook_steps(
+        "pipeline",
+        "",
+        &[
+            ("prepare", "echo prepare", "on_done = { step = \"execute\" }"),
+            ("execute", "echo execute", ""),
+        ],
     );
-}
+    let ctx = setup_with_runbook(&runbook).await;
 
-// =============================================================================
-// Breadcrumb is written after job creation
-// =============================================================================
+    run_job_named(&ctx, "job-1", "pipeline", "test").await;
+
+    let job = ctx.runtime.get_job("job-1").unwrap();
+    assert_eq!(job.step, "prepare", "job should start at the first defined step, not 'execute'");
+}
 
 #[tokio::test]
 async fn breadcrumb_is_written_after_creation() {
-    let ctx = setup_with_runbook(SIMPLE_JOB_RUNBOOK).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("build", "")).await;
 
-    run_job_named(&ctx, "pipe-1", "build", "test").await;
+    run_job_named(&ctx, "job-1", "build", "test").await;
 
     // Breadcrumb file should exist in the log dir
-    let breadcrumb_dir = ctx.project_root.join("logs/breadcrumbs");
+    let breadcrumb_dir = ctx.project_path.join("logs/breadcrumbs");
     let has_breadcrumbs = breadcrumb_dir.exists() && breadcrumb_dir.is_dir();
 
     // We just verify the job was created successfully and the breadcrumb code
     // ran without error. The BreadcrumbWriter creates files in logs/breadcrumbs/.
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     assert_eq!(job.step, "init");
     // If breadcrumb dir exists, it should contain a file
     if has_breadcrumbs {
         let entries: Vec<_> = std::fs::read_dir(&breadcrumb_dir).unwrap().collect();
-        assert!(
-            !entries.is_empty(),
-            "breadcrumb directory should contain at least one file"
-        );
+        assert!(!entries.is_empty(), "breadcrumb directory should contain at least one file");
     }
 }

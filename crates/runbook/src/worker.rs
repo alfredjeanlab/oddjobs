@@ -18,7 +18,7 @@ pub struct WorkerDef {
     /// Source reference: { queue = "name" }
     pub source: WorkerSource,
     /// Handler reference: { job = "name" }
-    pub handler: WorkerHandler,
+    pub run: WorkerHandler,
     /// Max concurrent job instances (default 1)
     #[serde(default = "default_concurrency")]
     pub concurrency: u32,

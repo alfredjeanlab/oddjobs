@@ -12,9 +12,8 @@ use oj_storage::{MaterializedState, Wal};
 
 use crate::protocol::Response;
 
-use super::{
-    handle_worker_restart, handle_worker_start, handle_worker_stop, resolve_effective_project_root,
-};
+use super::super::{resolve_effective_project_path, test_ctx};
+use super::{handle_worker_restart, handle_worker_start, handle_worker_stop};
 
 /// Collect all events from the WAL.
 fn drain_events(wal: &Arc<Mutex<Wal>>) -> Vec<oj_core::Event> {
@@ -64,7 +63,7 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { job = "handle" }
+  run = { job = "handle" }
 }
 
 job "handle" {
@@ -85,80 +84,44 @@ job "handle" {
     );
 }
 
-#[test]
-fn stop_unknown_worker_returns_error() {
+#[yare::parameterized(
+    unknown_worker  = { None,                                                     "nonexistent", "",           "unknown worker" },
+    similar_name    = { Some(("processor", "",              "processor")),          "processer",   "",           "did you mean: processor?" },
+    cross_namespace = { Some(("fix",       "other-project", "other-project/fix")), "fix",         "my-project", "--project other-project" },
+)]
+fn stop_error_suggestions(
+    worker: Option<(&str, &str, &str)>,
+    query_name: &str,
+    query_ns: &str,
+    expected_msg: &str,
+) {
     let dir = tempdir().unwrap();
-    let ctx = super::super::test_ctx(dir.path());
+    let ctx = test_ctx(dir.path());
 
-    let result = handle_worker_stop(&ctx, "nonexistent", "", None, false).unwrap();
-
-    assert!(
-        matches!(result, Response::Error { ref message } if message.contains("unknown worker")),
-        "expected unknown worker error, got {:?}",
-        result
-    );
-}
-
-#[test]
-fn stop_suggests_similar_worker_from_state() {
-    let dir = tempdir().unwrap();
-    let ctx = super::super::test_ctx(dir.path());
-
-    {
+    if let Some((name, ns, key)) = worker {
         let mut state = ctx.state.lock();
         state.workers.insert(
-            "processor".to_string(),
+            key.to_string(),
             oj_storage::WorkerRecord {
-                name: "processor".to_string(),
-                project_root: PathBuf::from("/fake"),
+                name: name.to_string(),
+                project_path: PathBuf::from("/fake"),
                 runbook_hash: "fake-hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "tasks".to_string(),
+                active: vec![],
+                queue: "tasks".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: String::new(),
+                owners: HashMap::new(),
+                project: ns.to_string(),
             },
         );
     }
 
-    let result = handle_worker_stop(&ctx, "processer", "", None, false).unwrap();
+    let result = handle_worker_stop(&ctx, query_name, query_ns, None, false).unwrap();
 
     assert!(
-        matches!(result, Response::Error { ref message } if message.contains("did you mean: processor?")),
-        "expected suggestion for 'processor', got {:?}",
-        result
-    );
-}
-
-#[test]
-fn stop_suggests_cross_namespace_worker() {
-    let dir = tempdir().unwrap();
-    let ctx = super::super::test_ctx(dir.path());
-
-    {
-        let mut state = ctx.state.lock();
-        state.workers.insert(
-            "other-project/fix".to_string(),
-            oj_storage::WorkerRecord {
-                name: "fix".to_string(),
-                project_root: PathBuf::from("/other"),
-                runbook_hash: "fake-hash".to_string(),
-                status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "issues".to_string(),
-                concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "other-project".to_string(),
-            },
-        );
-    }
-
-    let result = handle_worker_stop(&ctx, "fix", "my-project", None, false).unwrap();
-
-    assert!(
-        matches!(result, Response::Error { ref message } if message.contains("--project other-project")),
-        "expected cross-project suggestion, got {:?}",
+        matches!(result, Response::Error { ref message } if message.contains(expected_msg)),
+        "expected '{}' in error, got {:?}",
+        expected_msg,
         result
     );
 }
@@ -189,14 +152,14 @@ fn restart_stops_existing_then_starts() {
             "processor".to_string(),
             oj_storage::WorkerRecord {
                 name: "processor".to_string(),
-                project_root: PathBuf::from("/fake"),
+                project_path: PathBuf::from("/fake"),
                 runbook_hash: "fake-hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "tasks".to_string(),
+                active: vec![],
+                queue: "tasks".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: String::new(),
+                owners: HashMap::new(),
+                project: String::new(),
             },
         );
     }
@@ -232,7 +195,7 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { job = "handle" }
+  run = { job = "handle" }
 }
 
 job "handle" {
@@ -251,14 +214,14 @@ job "handle" {
             "processor".to_string(),
             oj_storage::WorkerRecord {
                 name: "processor".to_string(),
-                project_root: project.path().to_path_buf(),
+                project_path: project.path().to_path_buf(),
                 runbook_hash: "old-hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "tasks".to_string(),
+                active: vec![],
+                queue: "tasks".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: String::new(),
+                owners: HashMap::new(),
+                project: String::new(),
             },
         );
     }
@@ -266,7 +229,7 @@ job "handle" {
     let result = handle_worker_restart(&ctx, project.path(), "", "processor").unwrap();
 
     assert!(
-        matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "processor"),
+        matches!(result, Response::WorkerStarted { ref worker } if worker == "processor"),
         "expected WorkerStarted response, got {:?}",
         result
     );
@@ -282,27 +245,21 @@ job "handle" {
     // Verify emitted events: WorkerStopped then WorkerStarted (not WorkerWake)
     let events = drain_events(&wal);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, oj_core::Event::WorkerStopped { .. })),
+        events.iter().any(|e| matches!(e, oj_core::Event::WorkerStopped { .. })),
         "restart should emit WorkerStopped"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
+        events.iter().any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
         "restart should emit WorkerStarted (not WorkerWake)"
     );
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, oj_core::Event::WorkerWake { .. })),
+        !events.iter().any(|e| matches!(e, oj_core::Event::WorkerWake { .. })),
         "restart should NOT emit WorkerWake"
     );
 }
 
 #[test]
-fn resolve_effective_project_root_uses_known_root_when_namespace_differs() {
+fn resolve_effective_project_path_uses_known_path_when_namespace_differs() {
     // Create two projects with different namespaces
     let project_a = tempdir().unwrap();
     let project_b = tempdir().unwrap();
@@ -311,73 +268,67 @@ fn resolve_effective_project_root_uses_known_root_when_namespace_differs() {
     std::fs::create_dir_all(project_a.path().join(".oj")).unwrap();
     std::fs::create_dir_all(project_b.path().join(".oj")).unwrap();
 
-    // Configure project_b with a specific namespace "wok"
-    std::fs::write(
-        project_b.path().join(".oj/config.toml"),
-        "[project]\nname = \"wok\"\n",
-    )
-    .unwrap();
+    // Configure project_b with a specific project "wok"
+    std::fs::write(project_b.path().join(".oj/config.toml"), "[project]\nname = \"wok\"\n")
+        .unwrap();
 
-    // Set up state with a known worker from project_b namespace
+    // Set up state with a known worker from project_b project
     let mut initial_state = MaterializedState::default();
     initial_state.workers.insert(
         "wok/merge".to_string(),
         oj_storage::WorkerRecord {
             name: "merge".to_string(),
-            project_root: project_b.path().to_path_buf(),
+            project_path: project_b.path().to_path_buf(),
             runbook_hash: "hash".to_string(),
             status: "running".to_string(),
-            active_job_ids: vec![],
-            queue_name: "merges".to_string(),
+            active: vec![],
+            queue: "merges".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
-            namespace: "wok".to_string(),
+            owners: HashMap::new(),
+            project: "wok".to_string(),
         },
     );
     let state = Arc::new(Mutex::new(initial_state));
 
-    // When called with project_a's path but namespace "wok",
+    // When called with project_a's path but project "wok",
     // should resolve to project_b's path (the known root for "wok")
-    let result = resolve_effective_project_root(project_a.path(), "wok", &state);
+    let result = resolve_effective_project_path(project_a.path(), "wok", &state);
 
     assert_eq!(
         result,
         project_b.path().to_path_buf(),
-        "should use known root for namespace 'wok', not the provided project_a path"
+        "should use known path for project 'wok', not the provided project_a path"
     );
 }
 
 #[test]
-fn resolve_effective_project_root_uses_provided_root_when_namespace_matches() {
+fn resolve_effective_project_path_uses_provided_path_when_namespace_matches() {
     // Create a project
     let project = tempdir().unwrap();
     std::fs::create_dir_all(project.path().join(".oj")).unwrap();
 
-    // Configure project with namespace "myproject"
-    std::fs::write(
-        project.path().join(".oj/config.toml"),
-        "[project]\nname = \"myproject\"\n",
-    )
-    .unwrap();
+    // Configure project with project "myproject"
+    std::fs::write(project.path().join(".oj/config.toml"), "[project]\nname = \"myproject\"\n")
+        .unwrap();
 
     let state = Arc::new(Mutex::new(MaterializedState::default()));
 
-    // When called with matching namespace, should use provided root
-    let result = resolve_effective_project_root(project.path(), "myproject", &state);
+    // When called with matching project, should use provided root
+    let result = resolve_effective_project_path(project.path(), "myproject", &state);
 
     assert_eq!(
         result,
         project.path().to_path_buf(),
-        "should use provided root when namespace matches"
+        "should use provided path when project matches"
     );
 }
 
 #[test]
-fn start_uses_known_root_when_namespace_differs_from_project_root() {
+fn start_uses_known_path_when_namespace_differs_from_project_path() {
     let dir = tempdir().unwrap();
     let ctx = super::super::test_ctx(dir.path());
 
-    // Create two projects: project_a (wrong one) and project_b (correct one with "wok" namespace)
+    // Create two projects: project_a (wrong one) and project_b (correct one with "wok" project)
     let project_a = tempdir().unwrap();
     let project_b = tempdir().unwrap();
 
@@ -385,12 +336,9 @@ fn start_uses_known_root_when_namespace_differs_from_project_root() {
     std::fs::create_dir_all(project_a.path().join(".oj/runbooks")).unwrap();
     std::fs::create_dir_all(project_b.path().join(".oj/runbooks")).unwrap();
 
-    // Configure project_b with namespace "wok"
-    std::fs::write(
-        project_b.path().join(".oj/config.toml"),
-        "[project]\nname = \"wok\"\n",
-    )
-    .unwrap();
+    // Configure project_b with project "wok"
+    std::fs::write(project_b.path().join(".oj/config.toml"), "[project]\nname = \"wok\"\n")
+        .unwrap();
 
     // Create a worker "merge" in project_b
     std::fs::write(
@@ -403,7 +351,7 @@ queue "merges" {
 
 worker "merge" {
   source  = { queue = "merges" }
-  handler = { job = "handle-merge" }
+  run = { job = "handle-merge" }
 }
 
 job "handle-merge" {
@@ -415,32 +363,32 @@ job "handle-merge" {
     )
     .unwrap();
 
-    // Set up state with known project root for "wok" namespace
+    // Set up state with known project root for "wok" project
     {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "wok/other-worker".to_string(),
             oj_storage::WorkerRecord {
                 name: "other-worker".to_string(),
-                project_root: project_b.path().to_path_buf(),
+                project_path: project_b.path().to_path_buf(),
                 runbook_hash: "hash".to_string(),
                 status: "stopped".to_string(),
-                active_job_ids: vec![],
-                queue_name: "other".to_string(),
+                active: vec![],
+                queue: "other".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "wok".to_string(),
+                owners: HashMap::new(),
+                project: "wok".to_string(),
             },
         );
     }
 
-    // Start worker with project_a's path but namespace "wok"
+    // Start worker with project_a's path but project "wok"
     // This simulates `oj --project wok worker start merge` from a different directory
     let result = handle_worker_start(&ctx, project_a.path(), "wok", "merge", false).unwrap();
 
     // Should succeed by using project_b's root (the known root for "wok")
     assert!(
-        matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "merge"),
+        matches!(result, Response::WorkerStarted { ref worker } if worker == "merge"),
         "expected WorkerStarted for 'merge', got {:?}",
         result
     );
@@ -465,7 +413,7 @@ queue "bugs" {
 
 worker "fixer" {
   source  = { queue = "bugs" }
-  handler = { job = "build" }
+  run = { job = "build" }
   concurrency = 3
 }
 
@@ -485,14 +433,14 @@ job "build" {
             "fixer".to_string(),
             oj_storage::WorkerRecord {
                 name: "fixer".to_string(),
-                project_root: project.path().to_path_buf(),
+                project_path: project.path().to_path_buf(),
                 runbook_hash: "old-hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "bugs".to_string(),
+                active: vec![],
+                queue: "bugs".to_string(),
                 concurrency: 3,
-                item_job_map: HashMap::new(),
-                namespace: String::new(),
+                owners: HashMap::new(),
+                project: String::new(),
             },
         );
     }
@@ -502,7 +450,7 @@ job "build" {
 
     // Response should still be WorkerStarted (preserving CLI contract)
     assert!(
-        matches!(result, Response::WorkerStarted { ref worker_name } if worker_name == "fixer"),
+        matches!(result, Response::WorkerStarted { ref worker } if worker == "fixer"),
         "expected WorkerStarted response, got {:?}",
         result
     );
@@ -510,16 +458,12 @@ job "build" {
     // But the emitted event should be WorkerWake, not WorkerStarted
     let events = drain_events(&wal);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, oj_core::Event::WorkerWake { .. })),
+        events.iter().any(|e| matches!(e, oj_core::Event::WorkerWake { .. })),
         "should emit WorkerWake for already-running worker, got events: {:?}",
         events.iter().map(|e| e.name()).collect::<Vec<_>>()
     );
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
+        !events.iter().any(|e| matches!(e, oj_core::Event::WorkerStarted { .. })),
         "should NOT emit WorkerStarted for already-running worker"
     );
 }
@@ -529,64 +473,64 @@ fn stop_all_stops_running_workers_in_namespace() {
     let dir = tempdir().unwrap();
     let (ctx, wal) = super::super::test_ctx_with_wal(dir.path());
 
-    // Insert two running workers and one stopped worker in namespace "proj"
+    // Insert two running workers and one stopped worker in project "proj"
     {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "proj/alpha".to_string(),
             oj_storage::WorkerRecord {
                 name: "alpha".to_string(),
-                project_root: PathBuf::from("/fake"),
+                project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "q1".to_string(),
+                active: vec![],
+                queue: "q1".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "proj".to_string(),
+                owners: HashMap::new(),
+                project: "proj".to_string(),
             },
         );
         state.workers.insert(
             "proj/beta".to_string(),
             oj_storage::WorkerRecord {
                 name: "beta".to_string(),
-                project_root: PathBuf::from("/fake"),
+                project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "q2".to_string(),
+                active: vec![],
+                queue: "q2".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "proj".to_string(),
+                owners: HashMap::new(),
+                project: "proj".to_string(),
             },
         );
         state.workers.insert(
             "proj/gamma".to_string(),
             oj_storage::WorkerRecord {
                 name: "gamma".to_string(),
-                project_root: PathBuf::from("/fake"),
+                project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
                 status: "stopped".to_string(),
-                active_job_ids: vec![],
-                queue_name: "q3".to_string(),
+                active: vec![],
+                queue: "q3".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "proj".to_string(),
+                owners: HashMap::new(),
+                project: "proj".to_string(),
             },
         );
-        // Worker in a different namespace — should not be stopped
+        // Worker in a different project — should not be stopped
         state.workers.insert(
             "other/delta".to_string(),
             oj_storage::WorkerRecord {
                 name: "delta".to_string(),
-                project_root: PathBuf::from("/other"),
+                project_path: PathBuf::from("/other"),
                 runbook_hash: "hash".to_string(),
                 status: "running".to_string(),
-                active_job_ids: vec![],
-                queue_name: "q4".to_string(),
+                active: vec![],
+                queue: "q4".to_string(),
                 concurrency: 1,
-                item_job_map: HashMap::new(),
-                namespace: "other".to_string(),
+                owners: HashMap::new(),
+                project: "other".to_string(),
             },
         );
     }
@@ -594,10 +538,7 @@ fn stop_all_stops_running_workers_in_namespace() {
     let result = handle_worker_stop(&ctx, "", "proj", None, true).unwrap();
 
     match result {
-        Response::WorkersStopped {
-            mut stopped,
-            skipped,
-        } => {
+        Response::WorkersStopped { mut stopped, skipped } => {
             stopped.sort();
             assert_eq!(stopped, vec!["alpha", "beta"]);
             assert!(skipped.is_empty(), "expected no skipped, got {:?}", skipped);
@@ -610,16 +551,11 @@ fn stop_all_stops_running_workers_in_namespace() {
     let stop_events: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
-            oj_core::Event::WorkerStopped { worker_name, .. } => Some(worker_name.clone()),
+            oj_core::Event::WorkerStopped { worker, .. } => Some(worker.clone()),
             _ => None,
         })
         .collect();
-    assert_eq!(
-        stop_events.len(),
-        2,
-        "expected 2 stop events, got {:?}",
-        stop_events
-    );
+    assert_eq!(stop_events.len(), 2, "expected 2 stop events, got {:?}", stop_events);
 }
 
 #[test]

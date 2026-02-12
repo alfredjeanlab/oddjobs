@@ -14,16 +14,16 @@ async fn executor_emit_event_effect() {
         .executor
         .execute(Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("pipe-1"),
+                id: JobId::new("job-1"),
                 kind: "build".to_string(),
                 name: "test".to_string(),
                 runbook_hash: "testhash".to_string(),
                 cwd: std::path::PathBuf::from("/test"),
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
-                created_at_epoch_ms: 1_000_000,
-                namespace: String::new(),
-                cron_name: None,
+                created_at_ms: 1_000_000,
+                project: String::new(),
+                cron: None,
             },
         })
         .await
@@ -36,7 +36,7 @@ async fn executor_emit_event_effect() {
     // Verify state was applied
     let state = harness.executor.state();
     let state = state.lock();
-    assert!(state.jobs.contains_key("pipe-1"));
+    assert!(state.jobs.contains_key("job-1"));
 }
 
 #[tokio::test]
@@ -81,9 +81,7 @@ async fn cancel_timer_effect() {
     // Cancel the timer
     harness
         .executor
-        .execute(Effect::CancelTimer {
-            id: TimerId::new("timer-to-cancel"),
-        })
+        .execute(Effect::CancelTimer { id: TimerId::new("timer-to-cancel") })
         .await
         .unwrap();
 
@@ -91,39 +89,6 @@ async fn cancel_timer_effect() {
     let scheduler = harness.executor.scheduler();
     let scheduler = scheduler.lock();
     assert!(!scheduler.has_timers());
-}
-
-#[tokio::test]
-async fn send_to_session_is_fire_and_forget() {
-    let harness = setup().await;
-
-    let result = harness
-        .executor
-        .execute(Effect::SendToSession {
-            session_id: SessionId::new("nonexistent"),
-            input: "continue\n".to_string(),
-        })
-        .await;
-
-    // Deferred fire-and-forget: returns Ok(None) even for nonexistent sessions
-    assert!(result.is_ok());
-    assert!(result.unwrap().is_none());
-}
-
-#[tokio::test]
-async fn kill_session_effect() {
-    let harness = setup().await;
-
-    let result = harness
-        .executor
-        .execute(Effect::KillSession {
-            session_id: SessionId::new("sess-1"),
-        })
-        .await;
-
-    // Kill should succeed with fake adapter
-    assert!(result.is_ok());
-    assert!(result.unwrap().is_none());
 }
 
 #[tokio::test]
@@ -153,18 +118,12 @@ async fn multiple_notify_effects_recorded() {
 
     harness
         .executor
-        .execute(Effect::Notify {
-            title: "First".to_string(),
-            message: "msg1".to_string(),
-        })
+        .execute(Effect::Notify { title: "First".to_string(), message: "msg1".to_string() })
         .await
         .unwrap();
     harness
         .executor
-        .execute(Effect::Notify {
-            title: "Second".to_string(),
-            message: "msg2".to_string(),
-        })
+        .execute(Effect::Notify { title: "Second".to_string(), message: "msg2".to_string() })
         .await
         .unwrap();
 
@@ -190,9 +149,9 @@ async fn execute_all_collects_emitted_events() {
                 cwd: std::path::PathBuf::from("/test"),
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
-                created_at_epoch_ms: 1_000,
-                namespace: String::new(),
-                cron_name: None,
+                created_at_ms: 1_000,
+                project: String::new(),
+                cron: None,
             },
         },
         Effect::Emit {
@@ -204,9 +163,9 @@ async fn execute_all_collects_emitted_events() {
                 cwd: std::path::PathBuf::from("/test"),
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
-                created_at_epoch_ms: 2_000,
-                namespace: String::new(),
-                cron_name: None,
+                created_at_ms: 2_000,
+                project: String::new(),
+                cron: None,
             },
         },
     ];
@@ -232,22 +191,20 @@ async fn execute_all_mixed_effects() {
                 cwd: std::path::PathBuf::from("/test"),
                 vars: HashMap::new(),
                 initial_step: "init".to_string(),
-                created_at_epoch_ms: 1_000,
-                namespace: String::new(),
-                cron_name: None,
+                created_at_ms: 1_000,
+                project: String::new(),
+                cron: None,
             },
         },
         Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("j-mix"))),
+            owner: Some(JobId::new("j-mix").into()),
             step: "init".to_string(),
             command: "echo mixed".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
+            container: None,
         },
-        Effect::Notify {
-            title: "Done".to_string(),
-            message: "mixed test".to_string(),
-        },
+        Effect::Notify { title: "Done".to_string(), message: "mixed test".to_string() },
     ];
 
     let inline_events = harness.executor.execute_all(effects).await.unwrap();
@@ -263,36 +220,38 @@ async fn execute_all_mixed_effects() {
 // === Accessor method tests ===
 
 #[tokio::test]
-async fn check_session_alive_returns_false_for_nonexistent() {
+async fn check_agent_alive_returns_false_for_unknown() {
     let harness = setup().await;
 
-    let alive = harness
-        .executor
-        .check_session_alive("no-such-session")
-        .await;
+    let alive = harness.executor.agents.is_alive(&AgentId::new("no-such-agent")).await;
     assert!(!alive);
 }
 
 #[tokio::test]
-async fn check_session_alive_returns_true_for_existing() {
-    let harness = setup().await;
+async fn check_agent_alive_returns_true_after_spawn() {
+    let mut harness = setup().await;
 
-    // Add a session to the fake adapter
-    harness.sessions.add_session("sess-alive", true);
+    // Spawn an agent — FakeAgentAdapter defaults alive=true
+    harness.executor.execute(spawn_agent("agent-alive")).await.unwrap();
 
-    let alive = harness.executor.check_session_alive("sess-alive").await;
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
+
+    let alive = harness.executor.agents.is_alive(&AgentId::new("agent-alive")).await;
     assert!(alive);
 }
 
 #[tokio::test]
-async fn check_process_running_returns_false_by_default() {
-    let harness = setup().await;
+async fn check_agent_alive_returns_false_when_marked_dead() {
+    let mut harness = setup().await;
 
-    let running = harness
-        .executor
-        .check_process_running("sess-1", "claude")
-        .await;
-    assert!(!running);
+    let agent_id = AgentId::new("agent-dead");
+    harness.executor.execute(spawn_agent("agent-dead")).await.unwrap();
+
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
+
+    harness.agents.set_agent_alive(&agent_id, false);
+    let alive = harness.executor.agents.is_alive(&agent_id).await;
+    assert!(!alive);
 }
 
 #[tokio::test]
@@ -300,75 +259,13 @@ async fn get_agent_state_returns_state() {
     let mut harness = setup().await;
 
     // Spawn an agent first so it has state
-    harness
-        .executor
-        .execute(Effect::SpawnAgent {
-            agent_id: AgentId::new("agent-state"),
-            agent_name: "builder".to_string(),
-            owner: OwnerId::Job(JobId::new("job-1")),
-            workspace_path: std::path::PathBuf::from("/tmp/ws"),
-            input: HashMap::new(),
-            command: "claude".to_string(),
-            env: vec![],
-            cwd: None,
-            unset_env: vec![],
-            session_config: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    harness.executor.execute(spawn_agent("agent-state")).await.unwrap();
 
     // Wait for the background spawn task to complete
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
-    let state = harness
-        .executor
-        .get_agent_state(&AgentId::new("agent-state"))
-        .await;
+    let state = harness.executor.get_agent_state(&AgentId::new("agent-state")).await;
     assert!(state.is_ok());
-}
-
-#[tokio::test]
-async fn get_session_log_size_returns_none_for_unknown() {
-    let harness = setup().await;
-
-    let size = harness
-        .executor
-        .get_session_log_size(&AgentId::new("no-such-agent"))
-        .await;
-    assert!(size.is_none());
-}
-
-#[tokio::test]
-async fn get_session_log_size_returns_value_when_set() {
-    let mut harness = setup().await;
-
-    let agent_id = AgentId::new("agent-log");
-
-    // Spawn agent then set log size
-    harness
-        .executor
-        .execute(Effect::SpawnAgent {
-            agent_id: agent_id.clone(),
-            agent_name: "builder".to_string(),
-            owner: OwnerId::Job(JobId::new("job-1")),
-            workspace_path: std::path::PathBuf::from("/tmp/ws"),
-            input: HashMap::new(),
-            command: "claude".to_string(),
-            env: vec![],
-            cwd: None,
-            unset_env: vec![],
-            session_config: HashMap::new(),
-        })
-        .await
-        .unwrap();
-
-    // Wait for the background spawn task to complete
-    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
-
-    harness.agents.set_session_log_size(&agent_id, Some(42));
-
-    let size = harness.executor.get_session_log_size(&agent_id).await;
-    assert_eq!(size, Some(42));
 }
 
 #[tokio::test]
@@ -377,7 +274,6 @@ async fn reconnect_agent_delegates_to_adapter() {
 
     let config = AgentReconnectConfig {
         agent_id: AgentId::new("agent-recon"),
-        session_id: "sess-recon".to_string(),
         workspace_path: std::path::PathBuf::from("/tmp/ws"),
         process_name: "claude".to_string(),
         owner: OwnerId::Job(JobId::default()),

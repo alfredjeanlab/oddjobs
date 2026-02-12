@@ -39,9 +39,7 @@ fn validate_required_positional_with_default() {
         name: "build".to_string(),
 
         args: parse_arg_spec("<name>").unwrap(),
-        defaults: [("name".to_string(), "default-name".to_string())]
-            .into_iter()
-            .collect(),
+        defaults: [("name".to_string(), "default-name".to_string())].into_iter().collect(),
         run: RunDirective::Shell("echo".to_string()),
     };
 
@@ -68,12 +66,8 @@ fn validate_required_option_missing() {
     ));
 
     // Required option provided via named args
-    let result = cmd.validate_args(
-        &[],
-        &[("env".to_string(), "prod".to_string())]
-            .into_iter()
-            .collect(),
-    );
+    let result =
+        cmd.validate_args(&[], &[("env".to_string(), "prod".to_string())].into_iter().collect());
     assert!(result.is_ok());
 }
 
@@ -195,22 +189,16 @@ fn parse_complex_spec() {
     assert!(spec.variadic.is_some());
 }
 
-#[test]
-fn parse_error_variadic_not_last() {
-    let result = parse_arg_spec("<files...> <other>");
-    assert!(result.is_err());
-}
-
-#[test]
-fn parse_error_optional_before_required() {
-    let result = parse_arg_spec("[optional] <required>");
-    assert!(result.is_err());
-}
-
-#[test]
-fn parse_error_duplicate_name() {
-    let result = parse_arg_spec("<name> <name>");
-    assert!(result.is_err());
+#[yare::parameterized(
+    variadic_not_last            = { "<files...> <other>" },
+    optional_before_required     = { "[optional] <required>" },
+    duplicate_name               = { "<name> <name>" },
+    ellipsis_outside_not_last    = { "<files>... <other>" },
+    ellipsis_on_flag             = { "[--flag]..." },
+    ellipsis_on_option           = { "[--opt <val>]..." },
+)]
+fn parse_arg_spec_errors(spec: &str) {
+    assert!(parse_arg_spec(spec).is_err());
 }
 
 // RunDirective tests
@@ -224,9 +212,7 @@ fn run_directive_shell() {
 
 #[test]
 fn run_directive_job() {
-    let directive = RunDirective::Job {
-        job: "build".to_string(),
-    };
+    let directive = RunDirective::Job { job: "build".to_string() };
     assert!(directive.is_job());
     assert!(!directive.is_shell());
     assert_eq!(directive.job_name(), Some("build"));
@@ -234,89 +220,55 @@ fn run_directive_job() {
 
 #[test]
 fn run_directive_agent() {
-    let directive = RunDirective::Agent {
-        agent: "planning".to_string(),
-        attach: None,
-    };
+    let directive = RunDirective::Agent { agent: "planning".to_string(), attach: None };
     assert!(directive.is_agent());
     assert_eq!(directive.agent_name(), Some("planning"));
     assert_eq!(directive.attach(), None);
 }
 
 // TOML deserialization tests
+
+#[derive(Deserialize)]
+struct RunTest {
+    run: RunDirective,
+}
+
 #[test]
 fn deserialize_shell_run() {
-    #[derive(Deserialize)]
-    struct Test {
-        run: RunDirective,
-    }
-    let toml = r#"run = "echo hello""#;
-    let test: Test = toml::from_str(toml).unwrap();
-    assert!(test.run.is_shell());
-    assert_eq!(test.run.shell_command(), Some("echo hello"));
+    let t: RunTest = toml::from_str(r#"run = "echo hello""#).unwrap();
+    assert!(t.run.is_shell());
+    assert_eq!(t.run.shell_command(), Some("echo hello"));
 }
 
 #[test]
 fn deserialize_job_run() {
-    #[derive(Deserialize)]
-    struct Test {
-        run: RunDirective,
-    }
-    let toml = r#"run = { job = "build" }"#;
-    let test: Test = toml::from_str(toml).unwrap();
-    assert_eq!(test.run.job_name(), Some("build"));
+    let t: RunTest = toml::from_str(r#"run = { job = "build" }"#).unwrap();
+    assert_eq!(t.run.job_name(), Some("build"));
 }
 
 #[test]
-fn deserialize_agent_run() {
-    #[derive(Deserialize)]
-    struct Test {
-        run: RunDirective,
-    }
-    let toml = r#"run = { agent = "planning" }"#;
-    let test: Test = toml::from_str(toml).unwrap();
-    assert_eq!(test.run.agent_name(), Some("planning"));
-    assert_eq!(test.run.attach(), None);
+fn deserialize_crew() {
+    let t: RunTest = toml::from_str(r#"run = { agent = "planning" }"#).unwrap();
+    assert_eq!(t.run.agent_name(), Some("planning"));
+    assert_eq!(t.run.attach(), None);
 }
 
 #[test]
-fn deserialize_agent_run_with_attach_true() {
-    #[derive(Deserialize)]
-    struct Test {
-        run: RunDirective,
-    }
-    let toml = r#"run = { agent = "planning", attach = true }"#;
-    let test: Test = toml::from_str(toml).unwrap();
-    assert_eq!(
-        test.run,
-        RunDirective::Agent {
-            agent: "planning".to_string(),
-            attach: Some(true),
-        }
-    );
-    assert_eq!(test.run.attach(), Some(true));
+fn deserialize_crew_with_attach_true() {
+    let t: RunTest = toml::from_str(r#"run = { agent = "planning", attach = true }"#).unwrap();
+    assert_eq!(t.run, RunDirective::Agent { agent: "planning".to_string(), attach: Some(true) });
+    assert_eq!(t.run.attach(), Some(true));
 }
 
 #[test]
-fn deserialize_agent_run_with_attach_false() {
-    #[derive(Deserialize)]
-    struct Test {
-        run: RunDirective,
-    }
-    let toml = r#"run = { agent = "planning", attach = false }"#;
-    let test: Test = toml::from_str(toml).unwrap();
-    assert_eq!(
-        test.run,
-        RunDirective::Agent {
-            agent: "planning".to_string(),
-            attach: Some(false),
-        }
-    );
-    assert_eq!(test.run.attach(), Some(false));
+fn deserialize_crew_with_attach_false() {
+    let t: RunTest = toml::from_str(r#"run = { agent = "planning", attach = false }"#).unwrap();
+    assert_eq!(t.run, RunDirective::Agent { agent: "planning".to_string(), attach: Some(false) });
+    assert_eq!(t.run.attach(), Some(false));
 }
 
 #[test]
-fn deserialize_agent_run_hcl_with_attach() {
+fn deserialize_crew_hcl_with_attach() {
     let hcl = r#"
 command "mayor" {
   run = { agent = "mayor", attach = true }
@@ -331,13 +283,7 @@ command "mayor" {
 #[test]
 fn attach_accessor_returns_none_for_non_agent() {
     assert_eq!(RunDirective::Shell("echo".to_string()).attach(), None);
-    assert_eq!(
-        RunDirective::Job {
-            job: "build".to_string()
-        }
-        .attach(),
-        None
-    );
+    assert_eq!(RunDirective::Job { job: "build".to_string() }.attach(), None);
 }
 
 #[test]
@@ -360,31 +306,18 @@ fn command_parse_args() {
 
         args: ArgSpec {
             positional: vec![
-                ArgDef {
-                    name: "name".to_string(),
-                    required: true,
-                },
-                ArgDef {
-                    name: "prompt".to_string(),
-                    required: true,
-                },
+                ArgDef { name: "name".to_string(), required: true },
+                ArgDef { name: "prompt".to_string(), required: true },
             ],
             flags: Vec::new(),
             options: Vec::new(),
             variadic: None,
         },
-        defaults: [("branch".to_string(), "main".to_string())]
-            .into_iter()
-            .collect(),
-        run: RunDirective::Job {
-            job: "build".to_string(),
-        },
+        defaults: [("branch".to_string(), "main".to_string())].into_iter().collect(),
+        run: RunDirective::Job { job: "build".to_string() },
     };
 
-    let result = cmd.parse_args(
-        &["feature".to_string(), "Add login".to_string()],
-        &HashMap::new(),
-    );
+    let result = cmd.parse_args(&["feature".to_string(), "Add login".to_string()], &HashMap::new());
 
     assert_eq!(result.get("name"), Some(&"feature".to_string()));
     assert_eq!(result.get("prompt"), Some(&"Add login".to_string()));
@@ -397,31 +330,18 @@ fn command_named_overrides() {
         name: "build".to_string(),
 
         args: ArgSpec {
-            positional: vec![ArgDef {
-                name: "name".to_string(),
-                required: true,
-            }],
+            positional: vec![ArgDef { name: "name".to_string(), required: true }],
             flags: Vec::new(),
-            options: vec![OptionDef {
-                name: "branch".to_string(),
-                short: None,
-                required: false,
-            }],
+            options: vec![OptionDef { name: "branch".to_string(), short: None, required: false }],
             variadic: None,
         },
-        defaults: [("branch".to_string(), "main".to_string())]
-            .into_iter()
-            .collect(),
-        run: RunDirective::Job {
-            job: "build".to_string(),
-        },
+        defaults: [("branch".to_string(), "main".to_string())].into_iter().collect(),
+        run: RunDirective::Job { job: "build".to_string() },
     };
 
     let result = cmd.parse_args(
         &["feature".to_string()],
-        &[("branch".to_string(), "develop".to_string())]
-            .into_iter()
-            .collect(),
+        &[("branch".to_string(), "develop".to_string())].into_iter().collect(),
     );
 
     assert_eq!(result.get("branch"), Some(&"develop".to_string()));
@@ -433,16 +353,10 @@ fn command_variadic_args() {
         name: "deploy".to_string(),
 
         args: ArgSpec {
-            positional: vec![ArgDef {
-                name: "env".to_string(),
-                required: true,
-            }],
+            positional: vec![ArgDef { name: "env".to_string(), required: true }],
             flags: Vec::new(),
             options: Vec::new(),
-            variadic: Some(VariadicDef {
-                name: "targets".to_string(),
-                required: false,
-            }),
+            variadic: Some(VariadicDef { name: "targets".to_string(), required: false }),
         },
         defaults: HashMap::new(),
         run: RunDirective::Shell("deploy.sh".to_string()),
@@ -487,11 +401,7 @@ fn validate_unexpected_positional_variadic_ok() {
 
     // Extra args allowed with variadic
     let result = cmd.validate_args(
-        &[
-            "foo".to_string(),
-            "extra1".to_string(),
-            "extra2".to_string(),
-        ],
+        &["foo".to_string(), "extra1".to_string(), "extra2".to_string()],
         &HashMap::new(),
     );
     assert!(result.is_ok());
@@ -510,9 +420,7 @@ fn validate_unknown_option() {
     // Unknown named arg
     let result = cmd.validate_args(
         &["prod".to_string()],
-        &[("unknown".to_string(), "value".to_string())]
-            .into_iter()
-            .collect(),
+        &[("unknown".to_string(), "value".to_string())].into_iter().collect(),
     );
     assert!(matches!(
         result,
@@ -533,9 +441,7 @@ fn validate_known_option_by_name() {
     // Known option is OK
     let result = cmd.validate_args(
         &["prod".to_string()],
-        &[("tag".to_string(), "v1.0".to_string())]
-            .into_iter()
-            .collect(),
+        &[("tag".to_string(), "v1.0".to_string())].into_iter().collect(),
     );
     assert!(result.is_ok());
 }
@@ -553,9 +459,7 @@ fn validate_positional_by_name() {
     // Providing positional arg by name is allowed
     let result = cmd.validate_args(
         &["feature".to_string()],
-        &[("prompt".to_string(), "Add login".to_string())]
-            .into_iter()
-            .collect(),
+        &[("prompt".to_string(), "Add login".to_string())].into_iter().collect(),
     );
     assert!(result.is_ok());
 }
@@ -573,60 +477,23 @@ fn validate_flag_by_name() {
     // Providing flag by name is allowed
     let result = cmd.validate_args(
         &["prod".to_string()],
-        &[("force".to_string(), "true".to_string())]
-            .into_iter()
-            .collect(),
+        &[("force".to_string(), "true".to_string())].into_iter().collect(),
     );
     assert!(result.is_ok());
 }
 
 // usage_line tests
-#[test]
-fn usage_line_empty_spec() {
-    let spec = parse_arg_spec("").unwrap();
-    assert_eq!(spec.usage_line(), "");
-}
-
-#[test]
-fn usage_line_positional_only() {
-    let spec = parse_arg_spec("<name> <prompt>").unwrap();
-    assert_eq!(spec.usage_line(), "<name> <prompt>");
-}
-
-#[test]
-fn usage_line_optional_positional() {
-    let spec = parse_arg_spec("<name> [description]").unwrap();
-    assert_eq!(spec.usage_line(), "<name> [description]");
-}
-
-#[test]
-fn usage_line_with_variadic() {
-    let spec = parse_arg_spec("<cmd> [args...]").unwrap();
-    assert_eq!(spec.usage_line(), "<cmd> [args...]");
-}
-
-#[test]
-fn usage_line_required_variadic() {
-    let spec = parse_arg_spec("<files...>").unwrap();
-    assert_eq!(spec.usage_line(), "<files...>");
-}
-
-#[test]
-fn usage_line_with_options_and_flags() {
-    let spec = parse_arg_spec("<name> [--base <branch>] [--rebase] [--new <folder>]").unwrap();
-    assert_eq!(
-        spec.usage_line(),
-        "<name> [--base <base>] [--new <new>] [--rebase]"
-    );
-}
-
-#[test]
-fn usage_line_mixed() {
-    let spec = parse_arg_spec("<env> [-t/--tag <version>] [-f/--force] [targets...]").unwrap();
-    assert_eq!(
-        spec.usage_line(),
-        "<env> [targets...] [--tag <tag>] [--force]"
-    );
+#[yare::parameterized(
+    empty_spec         = { "",                                                          "" },
+    positional_only    = { "<name> <prompt>",                                           "<name> <prompt>" },
+    optional_pos       = { "<name> [description]",                                      "<name> [description]" },
+    with_variadic      = { "<cmd> [args...]",                                           "<cmd> [args...]" },
+    required_variadic  = { "<files...>",                                                "<files...>" },
+    options_and_flags  = { "<name> [--base <branch>] [--rebase] [--new <folder>]",      "<name> [--base <base>] [--new <new>] [--rebase]" },
+    mixed              = { "<env> [-t/--tag <version>] [-f/--force] [targets...]",      "<env> [targets...] [--tag <tag>] [--force]" },
+)]
+fn usage_line(spec_str: &str, expected: &str) {
+    assert_eq!(parse_arg_spec(spec_str).unwrap().usage_line(), expected);
 }
 
 // split_raw_args tests
@@ -647,10 +514,8 @@ fn split_raw_args_flags_after_positional() {
 #[test]
 fn split_raw_args_flags_before_positional() {
     let spec = parse_arg_spec("<name> [--new <value>]").unwrap();
-    let raw: Vec<String> = vec!["--new", "kanban-board", "kanban"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let raw: Vec<String> =
+        vec!["--new", "kanban-board", "kanban"].into_iter().map(String::from).collect();
 
     let (positional, named) = spec.split_raw_args(&raw);
     assert_eq!(positional, vec!["kanban"]);
@@ -674,10 +539,7 @@ fn split_raw_args_intermixed() {
 #[test]
 fn split_raw_args_short_flags() {
     let spec = parse_arg_spec("<env> [-f/--force] [-t/--tag <version>]").unwrap();
-    let raw: Vec<String> = vec!["prod", "-f", "-t", "v1.0"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let raw: Vec<String> = vec!["prod", "-f", "-t", "v1.0"].into_iter().map(String::from).collect();
 
     let (positional, named) = spec.split_raw_args(&raw);
     assert_eq!(positional, vec!["prod"]);
@@ -688,10 +550,7 @@ fn split_raw_args_short_flags() {
 #[test]
 fn split_raw_args_double_dash_stops_parsing() {
     let spec = parse_arg_spec("<name> [--force]").unwrap();
-    let raw: Vec<String> = vec!["kanban", "--", "--force"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let raw: Vec<String> = vec!["kanban", "--", "--force"].into_iter().map(String::from).collect();
 
     let (positional, named) = spec.split_raw_args(&raw);
     assert_eq!(positional, vec!["kanban", "--force"]);
@@ -701,10 +560,8 @@ fn split_raw_args_double_dash_stops_parsing() {
 #[test]
 fn split_raw_args_unknown_flags_kept_as_positional() {
     let spec = parse_arg_spec("<name> [extras...]").unwrap();
-    let raw: Vec<String> = vec!["kanban", "--unknown", "value"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let raw: Vec<String> =
+        vec!["kanban", "--unknown", "value"].into_iter().map(String::from).collect();
 
     let (positional, named) = spec.split_raw_args(&raw);
     assert_eq!(positional, vec!["kanban", "--unknown", "value"]);
@@ -714,10 +571,8 @@ fn split_raw_args_unknown_flags_kept_as_positional() {
 #[test]
 fn split_raw_args_no_flags() {
     let spec = parse_arg_spec("<name> <prompt>").unwrap();
-    let raw: Vec<String> = vec!["kanban", "build the thing"]
-        .into_iter()
-        .map(String::from)
-        .collect();
+    let raw: Vec<String> =
+        vec!["kanban", "build the thing"].into_iter().map(String::from).collect();
 
     let (positional, named) = spec.split_raw_args(&raw);
     assert_eq!(positional, vec!["kanban", "build the thing"]);
@@ -745,10 +600,7 @@ fn parse_variadic_ellipsis_outside_optional() {
 fn parse_variadic_both_syntaxes_equivalent() {
     let spec1 = parse_arg_spec("<files...>").unwrap();
     let spec2 = parse_arg_spec("<files>...").unwrap();
-    assert_eq!(
-        spec1.variadic.as_ref().unwrap().name,
-        spec2.variadic.as_ref().unwrap().name
-    );
+    assert_eq!(spec1.variadic.as_ref().unwrap().name, spec2.variadic.as_ref().unwrap().name);
     assert_eq!(
         spec1.variadic.as_ref().unwrap().required,
         spec2.variadic.as_ref().unwrap().required
@@ -759,10 +611,7 @@ fn parse_variadic_both_syntaxes_equivalent() {
 fn parse_variadic_optional_both_syntaxes_equivalent() {
     let spec1 = parse_arg_spec("[files...]").unwrap();
     let spec2 = parse_arg_spec("[files]...").unwrap();
-    assert_eq!(
-        spec1.variadic.as_ref().unwrap().name,
-        spec2.variadic.as_ref().unwrap().name
-    );
+    assert_eq!(spec1.variadic.as_ref().unwrap().name, spec2.variadic.as_ref().unwrap().name);
     assert_eq!(
         spec1.variadic.as_ref().unwrap().required,
         spec2.variadic.as_ref().unwrap().required
@@ -770,26 +619,8 @@ fn parse_variadic_optional_both_syntaxes_equivalent() {
 }
 
 #[test]
-fn parse_error_variadic_ellipsis_outside_not_last() {
-    let result = parse_arg_spec("<files>... <other>");
-    assert!(result.is_err());
-}
-
-#[test]
 fn usage_line_variadic_ellipsis_outside() {
     // Both syntaxes should produce the same canonical usage line (ellipsis inside brackets)
     let spec = parse_arg_spec("<cmd> <files>...").unwrap();
     assert_eq!(spec.usage_line(), "<cmd> <files...>");
-}
-
-#[test]
-fn parse_error_ellipsis_on_flag() {
-    let result = parse_arg_spec("[--flag]...");
-    assert!(result.is_err());
-}
-
-#[test]
-fn parse_error_ellipsis_on_option() {
-    let result = parse_arg_spec("[--opt <val>]...");
-    assert!(result.is_err());
 }

@@ -9,17 +9,7 @@ use super::*;
 async fn shell_effect_runs_command() {
     let mut harness = setup().await;
 
-    let event = harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "echo hello".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    let event = harness.executor.execute(shell("echo hello")).await.unwrap();
 
     assert!(event.is_none(), "shell effects return None (async)");
 
@@ -31,17 +21,7 @@ async fn shell_effect_runs_command() {
 async fn shell_failure_returns_nonzero() {
     let mut harness = setup().await;
 
-    let event = harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "exit 1".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    let event = harness.executor.execute(shell("exit 1")).await.unwrap();
 
     assert!(event.is_none(), "shell effects return None (async)");
 
@@ -53,17 +33,7 @@ async fn shell_failure_returns_nonzero() {
 async fn shell_intermediate_failure_propagates() {
     let mut harness = setup().await;
 
-    let event = harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "false\ntrue".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    let event = harness.executor.execute(shell("false\ntrue")).await.unwrap();
 
     assert!(event.is_none(), "shell effects return None (async)");
 
@@ -80,17 +50,7 @@ async fn shell_intermediate_failure_propagates() {
 async fn shell_pipefail_propagates() {
     let mut harness = setup().await;
 
-    let event = harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "exit 1 | cat".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    let event = harness.executor.execute(shell("exit 1 | cat")).await.unwrap();
 
     assert!(event.is_none(), "shell effects return None (async)");
 
@@ -107,26 +67,11 @@ async fn shell_pipefail_propagates() {
 async fn shell_captures_stdout_and_stderr() {
     let mut harness = setup().await;
 
-    harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "echo stdout_output && echo stderr_output >&2".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    harness.executor.execute(shell("echo stdout_output && echo stderr_output >&2")).await.unwrap();
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::ShellExited {
-            exit_code,
-            stdout,
-            stderr,
-            ..
-        } => {
+        Event::ShellExited { exit_code, stdout, stderr, .. } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout.unwrap().trim(), "stdout_output");
             assert_eq!(stderr.unwrap().trim(), "stderr_output");
@@ -145,20 +90,19 @@ async fn shell_with_env_vars() {
     harness
         .executor
         .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
+            owner: Some(JobId::new("test").into()),
             step: "init".to_string(),
             command: "echo $MY_TEST_VAR".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env,
+            container: None,
         })
         .await
         .unwrap();
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::ShellExited {
-            exit_code, stdout, ..
-        } => {
+        Event::ShellExited { exit_code, stdout, .. } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout.unwrap().trim(), "hello_from_env");
         }
@@ -178,15 +122,14 @@ async fn shell_with_none_owner() {
             command: "echo no_owner".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
+            container: None,
         })
         .await
         .unwrap();
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::ShellExited {
-            exit_code, stdout, ..
-        } => {
+        Event::ShellExited { exit_code, stdout, .. } => {
             assert_eq!(exit_code, 0);
             assert_eq!(stdout.unwrap().trim(), "no_owner");
         }
@@ -195,28 +138,27 @@ async fn shell_with_none_owner() {
 }
 
 #[tokio::test]
-async fn shell_with_agent_run_owner() {
+async fn shell_with_crew_owner() {
     let mut harness = setup().await;
 
     harness
         .executor
         .execute(Effect::Shell {
-            owner: Some(OwnerId::AgentRun(AgentRunId::new("ar-1"))),
+            owner: Some(CrewId::new("run-1").into()),
             step: "run".to_string(),
-            command: "echo agent_run_shell".to_string(),
+            command: "echo crew_shell".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
+            container: None,
         })
         .await
         .unwrap();
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::ShellExited {
-            exit_code, stdout, ..
-        } => {
+        Event::ShellExited { exit_code, stdout, .. } => {
             assert_eq!(exit_code, 0);
-            assert_eq!(stdout.unwrap().trim(), "agent_run_shell");
+            assert_eq!(stdout.unwrap().trim(), "crew_shell");
         }
         other => panic!("expected ShellExited, got {:?}", other),
     }
@@ -226,26 +168,11 @@ async fn shell_with_agent_run_owner() {
 async fn shell_no_stdout_when_empty() {
     let mut harness = setup().await;
 
-    harness
-        .executor
-        .execute(Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("test"))),
-            step: "init".to_string(),
-            command: "true".to_string(),
-            cwd: std::path::PathBuf::from("/tmp"),
-            env: HashMap::new(),
-        })
-        .await
-        .unwrap();
+    harness.executor.execute(shell("true")).await.unwrap();
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::ShellExited {
-            exit_code,
-            stdout,
-            stderr,
-            ..
-        } => {
+        Event::ShellExited { exit_code, stdout, stderr, .. } => {
             assert_eq!(exit_code, 0);
             assert!(stdout.is_none(), "empty stdout should be None");
             assert!(stderr.is_none(), "empty stderr should be None");
@@ -260,26 +187,25 @@ async fn execute_all_shell_effects_are_async() {
 
     let effects = vec![
         Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("pipe-1"))),
+            owner: Some(JobId::new("job-1").into()),
             step: "init".to_string(),
             command: "echo first".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
+            container: None,
         },
         Effect::Shell {
-            owner: Some(OwnerId::Job(JobId::new("pipe-1"))),
+            owner: Some(JobId::new("job-1").into()),
             step: "build".to_string(),
             command: "echo second".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             env: HashMap::new(),
+            container: None,
         },
     ];
 
     let inline_events = harness.executor.execute_all(effects).await.unwrap();
-    assert!(
-        inline_events.is_empty(),
-        "shell effects produce no inline events"
-    );
+    assert!(inline_events.is_empty(), "shell effects produce no inline events");
 
     // Both completions arrive via channel
     let e1 = harness.event_rx.recv().await.unwrap();

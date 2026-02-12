@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! AST validator for shell commands.
-//!
-//! This module provides semantic validation for parsed shell ASTs,
-//! checking for completeness and detecting common errors.
+//! Semantic validation for parsed shell ASTs.
 
 use super::ast::{
     AstVisitor, BraceGroup, Command, CommandItem, CommandList, Job, SimpleCommand, Subshell,
@@ -13,59 +10,24 @@ use super::ast::{
 use super::token::Span;
 pub use crate::validation::ValidationError;
 
-/// Configuration for validation strictness.
 #[derive(Debug, Clone)]
 pub struct ValidatorConfig {
-    /// Maximum allowed nesting depth (0 = unlimited).
+    /// 0 = unlimited.
     pub max_nesting_depth: usize,
-    /// Whether standalone assignments are allowed (bash allows them).
+    /// Bash allows standalone assignments; POSIX does not.
     pub allow_standalone_assignments: bool,
 }
 
 impl Default for ValidatorConfig {
     fn default() -> Self {
-        Self {
-            max_nesting_depth: 0,
-            allow_standalone_assignments: true,
-        }
+        Self { max_nesting_depth: 0, allow_standalone_assignments: true }
     }
 }
 
-/// Validate a parsed command list for semantic correctness.
-///
-/// Returns `Ok(())` if the AST is valid, or `Err(errors)` with all
-/// validation errors found.
-///
-/// # Example
-///
-/// ```ignore
-/// use oj_shell::{Parser, validate};
-///
-/// let ast = Parser::parse("echo hello").unwrap();
-/// assert!(validate(&ast).is_ok());
-///
-/// let ast = Parser::parse("( )").unwrap();
-/// assert!(validate(&ast).is_err());
-/// ```
 pub fn validate(ast: &CommandList) -> Result<(), Vec<ValidationError>> {
     validate_with_config(ast, ValidatorConfig::default())
 }
 
-/// Validate with custom configuration.
-///
-/// # Example
-///
-/// ```ignore
-/// use oj_shell::{Parser, validate_with_config, ValidatorConfig};
-///
-/// let config = ValidatorConfig {
-///     max_nesting_depth: 3,
-///     allow_standalone_assignments: false,
-/// };
-///
-/// let ast = Parser::parse("echo hello").unwrap();
-/// assert!(validate_with_config(&ast, config).is_ok());
-/// ```
 pub fn validate_with_config(
     ast: &CommandList,
     config: ValidatorConfig,
@@ -73,9 +35,6 @@ pub fn validate_with_config(
     Validator::new(config).validate(ast)
 }
 
-/// Shell AST validator.
-///
-/// Uses the `AstVisitor` pattern to traverse the AST and collect validation errors.
 struct Validator {
     config: ValidatorConfig,
     errors: Vec<ValidationError>,
@@ -84,11 +43,7 @@ struct Validator {
 
 impl Validator {
     fn new(config: ValidatorConfig) -> Self {
-        Self {
-            config,
-            errors: Vec::new(),
-            current_depth: 0,
-        }
+        Self { config, errors: Vec::new(), current_depth: 0 }
     }
 
     fn validate(mut self, ast: &CommandList) -> Result<(), Vec<ValidationError>> {
@@ -114,12 +69,10 @@ impl Validator {
         }
     }
 
-    /// Check if a SimpleCommand has an actual command (not just assignments).
     fn has_command_name(cmd: &SimpleCommand) -> bool {
         !cmd.name.parts.is_empty()
     }
 
-    /// Extract a string representation of the first assignment value for error messages.
     fn assignment_value_str(cmd: &SimpleCommand) -> Option<String> {
         cmd.env.first().map(|env| {
             env.value
@@ -137,12 +90,10 @@ impl Validator {
 
 impl AstVisitor for Validator {
     fn visit_command_list(&mut self, list: &CommandList) {
-        // Empty command list is valid (empty input)
         self.walk_command_list(list);
     }
 
     fn visit_command_item(&mut self, item: &CommandItem) {
-        // Check the underlying command
         self.visit_command(&item.command);
     }
 
@@ -151,14 +102,12 @@ impl AstVisitor for Validator {
     }
 
     fn visit_simple_command(&mut self, cmd: &SimpleCommand) {
-        // Check for IFS assignments (not supported - we use fixed default word splitting)
         for env in &cmd.env {
             if env.name == "IFS" {
                 self.report(ValidationError::IfsAssignment { span: cmd.span });
             }
         }
 
-        // Check for command without name (only assignments)
         if !Self::has_command_name(cmd)
             && !cmd.env.is_empty()
             && !self.config.allow_standalone_assignments
@@ -175,7 +124,6 @@ impl AstVisitor for Validator {
     }
 
     fn visit_job(&mut self, job: &Job) {
-        // Check for empty job segments (commands with no name)
         for cmd in &job.commands {
             if !Self::has_command_name(cmd) {
                 self.report(ValidationError::EmptyJobSegment { span: cmd.span });
@@ -189,9 +137,7 @@ impl AstVisitor for Validator {
         self.check_nesting_depth(subshell.span);
 
         if subshell.body.commands.is_empty() {
-            self.report(ValidationError::EmptySubshell {
-                span: subshell.span,
-            });
+            self.report(ValidationError::EmptySubshell { span: subshell.span });
         }
 
         self.walk_subshell(subshell);

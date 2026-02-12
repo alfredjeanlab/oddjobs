@@ -24,47 +24,40 @@ pub(super) fn handle_list_projects(state: &Arc<Mutex<MaterializedState>>) -> Res
 
     for w in state.workers.values() {
         if w.status == "running" {
-            ns_roots
-                .entry(w.namespace.clone())
-                .or_insert_with(|| w.project_root.clone());
-            *ns_workers.entry(w.namespace.clone()).or_default() += 1;
+            ns_roots.entry(w.project.clone()).or_insert_with(|| w.project_path.clone());
+            *ns_workers.entry(w.project.clone()).or_default() += 1;
         }
     }
 
     for c in state.crons.values() {
         if c.status == "running" {
-            ns_roots
-                .entry(c.namespace.clone())
-                .or_insert_with(|| c.project_root.clone());
-            *ns_crons.entry(c.namespace.clone()).or_default() += 1;
+            ns_roots.entry(c.project.clone()).or_insert_with(|| c.project_path.clone());
+            *ns_crons.entry(c.project.clone()).or_default() += 1;
         }
     }
 
     for p in state.jobs.values() {
         if !p.is_terminal() {
-            *ns_jobs.entry(p.namespace.clone()).or_default() += 1;
+            *ns_jobs.entry(p.project.clone()).or_default() += 1;
 
             // Count active agents from the current step
             if let Some(last_step) = p.step_history.last() {
                 if last_step.agent_id.is_some()
-                    && matches!(
-                        &last_step.outcome,
-                        StepOutcome::Running | StepOutcome::Waiting(_)
-                    )
+                    && matches!(&last_step.outcome, StepOutcome::Running | StepOutcome::Waiting(_))
                 {
-                    *ns_agents.entry(p.namespace.clone()).or_default() += 1;
+                    *ns_agents.entry(p.project.clone()).or_default() += 1;
                 }
             }
 
-            // Use stopped workers/crons as fallback for project_root
-            if !ns_roots.contains_key(&p.namespace) {
-                if let Some(w) = state.workers.values().find(|w| w.namespace == p.namespace) {
-                    ns_roots.insert(w.namespace.clone(), w.project_root.clone());
+            // Use stopped workers/crons as fallback for project_path
+            if !ns_roots.contains_key(&p.project) {
+                if let Some(w) = state.workers.values().find(|w| w.project == p.project) {
+                    ns_roots.insert(w.project.clone(), w.project_path.clone());
                 }
             }
-            if !ns_roots.contains_key(&p.namespace) {
-                if let Some(c) = state.crons.values().find(|c| c.namespace == p.namespace) {
-                    ns_roots.insert(c.namespace.clone(), c.project_root.clone());
+            if !ns_roots.contains_key(&p.project) {
+                if let Some(c) = state.crons.values().find(|c| c.project == p.project) {
+                    ns_roots.insert(c.project.clone(), c.project_path.clone());
                 }
             }
         }

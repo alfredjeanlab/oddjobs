@@ -26,20 +26,14 @@ fn job() {
     let job = &parse_epic().jobs["epic"];
     assert_eq!(job.name.as_deref(), Some("${var.name}"));
     assert_eq!(job.vars, vec!["name", "instructions", "blocked-by"]);
-    assert_eq!(
-        job.workspace,
-        Some(WorkspaceConfig::Simple(WorkspaceType::Folder))
-    );
+    assert_eq!(job.source, Some(WorkspaceConfig::Simple(WorkspaceType::Folder)));
     assert_eq!(job.steps.len(), 5);
 
     let steps: Vec<_> = job.steps.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(steps, ["init", "decompose", "build", "submit", "cleanup"]);
 
     assert!(job.steps[0].run.is_shell());
-    assert_eq!(
-        job.steps[0].on_done.as_ref().map(|t| t.step_name()),
-        Some("decompose")
-    );
+    assert_eq!(job.steps[0].on_done.as_ref().map(|t| t.step_name()), Some("decompose"));
     assert!(job.steps[1].run.is_agent());
     assert_eq!(job.steps[1].agent_name(), Some("decompose"));
     assert!(job.steps[2].run.is_agent());
@@ -61,8 +55,8 @@ fn decompose_agent() {
     assert!(agent.run.contains("claude"));
     assert!(agent.run.contains("--disallowed-tools"));
     assert!(agent.prompt.is_some());
-    assert_eq!(agent.on_idle.action(), &AgentAction::Gate);
-    assert_eq!(agent.on_idle.run(), Some("test -s .epic-root-id"));
+    assert_eq!(agent.on_idle.as_ref().unwrap().action(), &AgentAction::Gate);
+    assert_eq!(agent.on_idle.as_ref().unwrap().run(), Some("test -s .epic-root-id"));
     assert_eq!(agent.on_dead.action(), &AgentAction::Fail);
     match &agent.prime {
         Some(PrimeDef::Commands(cmds)) => assert_eq!(cmds.len(), 5),
@@ -75,8 +69,8 @@ fn builder_agent() {
     let agent = parse_epic().get_agent("epic-builder").unwrap().clone();
     assert!(agent.run.contains("claude"));
     assert!(agent.prompt.is_some());
-    assert_eq!(agent.on_idle.action(), &AgentAction::Gate);
-    assert_eq!(agent.on_idle.attempts(), Attempts::Forever);
+    assert_eq!(agent.on_idle.as_ref().unwrap().action(), &AgentAction::Gate);
+    assert_eq!(agent.on_idle.as_ref().unwrap().attempts(), Attempts::Forever);
     assert_eq!(agent.on_dead.action(), &AgentAction::Resume);
     assert!(agent.on_dead.append());
     assert!(agent.on_dead.message().is_some());

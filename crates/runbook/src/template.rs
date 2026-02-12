@@ -7,7 +7,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-/// Regex pattern for ${variable_name} or ${namespace.variable_name}
+/// Regex pattern for ${variable_name} or ${project.variable_name}
 // Allow expect here as the regex is compile-time verified to be valid
 #[allow(clippy::expect_used)]
 pub static VAR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
@@ -79,7 +79,7 @@ fn interpolate_inner(template: &str, vars: &HashMap<String, String>, shell_escap
         })
         .to_string();
 
-    // Then expand ${var} or ${namespace.var} patterns from provided vars,
+    // Then expand ${var} or ${project.var} patterns from provided vars,
     // with optional ${var:offset:length} substring extraction.
     VAR_PATTERN
         .replace_all(&result, |caps: &regex::Captures| {

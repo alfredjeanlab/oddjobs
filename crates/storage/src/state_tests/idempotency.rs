@@ -6,79 +6,73 @@ use super::*;
 #[test]
 fn job_advanced_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&job_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_create_event("job-1", "build", "test", "init"));
+    state.apply_event(&job_transition_event("job-1", "plan"));
 
-    let history_len = state.jobs["pipe-1"].step_history.len();
+    let history_len = state.jobs["job-1"].step_history.len();
 
     // Apply the same transition again (simulates WAL round-trip double-apply)
-    state.apply_event(&job_transition_event("pipe-1", "plan"));
+    state.apply_event(&job_transition_event("job-1", "plan"));
 
     // Step history should NOT grow — the duplicate is a no-op
-    assert_eq!(state.jobs["pipe-1"].step_history.len(), history_len);
-    assert_eq!(state.jobs["pipe-1"].step, "plan");
+    assert_eq!(state.jobs["job-1"].step_history.len(), history_len);
+    assert_eq!(state.jobs["job-1"].step, "plan");
 }
 
 #[test]
 fn step_completed_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
+    state.apply_event(&job_create_event("job-1", "build", "test", "init"));
     state.apply_event(&Event::StepCompleted {
-        job_id: JobId::new("pipe-1"),
+        job_id: JobId::new("job-1"),
         step: "init".to_string(),
     });
 
-    let finished_at = state.jobs["pipe-1"].step_history[0].finished_at_ms;
+    let finished_at = state.jobs["job-1"].step_history[0].finished_at_ms;
 
     state.apply_event(&Event::StepCompleted {
-        job_id: JobId::new("pipe-1"),
+        job_id: JobId::new("job-1"),
         step: "init".to_string(),
     });
 
-    assert_eq!(
-        state.jobs["pipe-1"].step_history[0].finished_at_ms,
-        finished_at
-    );
+    assert_eq!(state.jobs["job-1"].step_history[0].finished_at_ms, finished_at);
 }
 
 #[test]
 fn step_failed_idempotent() {
     let mut state = MaterializedState::default();
-    state.apply_event(&job_create_event("pipe-1", "build", "test", "init"));
-    state.apply_event(&step_failed_event("pipe-1", "init", "boom"));
+    state.apply_event(&job_create_event("job-1", "build", "test", "init"));
+    state.apply_event(&step_failed_event("job-1", "init", "boom"));
 
-    let finished_at = state.jobs["pipe-1"].step_history[0].finished_at_ms;
+    let finished_at = state.jobs["job-1"].step_history[0].finished_at_ms;
 
-    state.apply_event(&step_failed_event("pipe-1", "init", "boom"));
+    state.apply_event(&step_failed_event("job-1", "init", "boom"));
 
-    assert_eq!(
-        state.jobs["pipe-1"].step_history[0].finished_at_ms,
-        finished_at
-    );
+    assert_eq!(state.jobs["job-1"].step_history[0].finished_at_ms, finished_at);
 }
 
 #[test]
 fn worker_item_dispatched_idempotent() {
     let mut state = MaterializedState::default();
     state.apply_event(&worker_start_event("fixer", ""));
-    state.apply_event(&Event::WorkerItemDispatched {
-        worker_name: "fixer".to_string(),
+    state.apply_event(&Event::WorkerDispatched {
+        worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        job_id: JobId::new("pipe-1"),
-        namespace: String::new(),
+        owner: JobId::new("job-1").into(),
+        project: String::new(),
     });
 
-    assert_eq!(state.workers["fixer"].active_job_ids.len(), 1);
+    assert_eq!(state.workers["fixer"].active.len(), 1);
 
     // Apply again — should not add a duplicate
-    state.apply_event(&Event::WorkerItemDispatched {
-        worker_name: "fixer".to_string(),
+    state.apply_event(&Event::WorkerDispatched {
+        worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        job_id: JobId::new("pipe-1"),
-        namespace: String::new(),
+        owner: JobId::new("job-1").into(),
+        project: String::new(),
     });
 
-    assert_eq!(state.workers["fixer"].active_job_ids.len(), 1);
+    assert_eq!(state.workers["fixer"].active.len(), 1);
 }
 
 #[test]
@@ -97,18 +91,18 @@ fn queue_failed_idempotent() {
     state.apply_event(&queue_pushed_event("bugs", "item-1"));
     state.apply_event(&queue_taken_event("bugs", "item-1", "fixer"));
 
-    assert_eq!(state.queue_items["bugs"][0].failure_count, 0);
+    assert_eq!(state.queue_items["bugs"][0].failures, 0);
     assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Active);
 
     state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
-    assert_eq!(state.queue_items["bugs"][0].failure_count, 1);
+    assert_eq!(state.queue_items["bugs"][0].failures, 1);
     assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
 
     // Second apply — should NOT increment again (idempotent)
     state.apply_event(&queue_failed_event("bugs", "item-1", "job failed"));
     assert_eq!(
-        state.queue_items["bugs"][0].failure_count, 1,
-        "failure_count must not double-increment on idempotent re-apply"
+        state.queue_items["bugs"][0].failures, 1,
+        "failures must not double-increment on idempotent re-apply"
     );
     assert_eq!(state.queue_items["bugs"][0].status, QueueItemStatus::Failed);
 }

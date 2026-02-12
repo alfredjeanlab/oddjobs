@@ -15,6 +15,7 @@ async fn poll_queue_with_valid_json() {
         .executor
         .execute(Effect::PollQueue {
             worker_name: "poller".to_string(),
+            project: String::new(),
             list_command: r#"echo '[{"id":"1"},{"id":"2"}]'"#.to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
         })
@@ -25,15 +26,13 @@ async fn poll_queue_with_valid_json() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerPollComplete {
-            worker_name, items, ..
-        } => {
-            assert_eq!(worker_name, "poller");
+        Event::WorkerPolled { worker, items, .. } => {
+            assert_eq!(worker, "poller");
             assert_eq!(items.len(), 2);
             assert_eq!(items[0]["id"], "1");
             assert_eq!(items[1]["id"], "2");
         }
-        other => panic!("expected WorkerPollComplete, got {:?}", other),
+        other => panic!("expected WorkerPolled, got {:?}", other),
     }
 }
 
@@ -45,6 +44,7 @@ async fn poll_queue_with_empty_output() {
         .executor
         .execute(Effect::PollQueue {
             worker_name: "poller".to_string(),
+            project: String::new(),
             list_command: "echo '[]'".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
         })
@@ -53,10 +53,10 @@ async fn poll_queue_with_empty_output() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerPollComplete { items, .. } => {
+        Event::WorkerPolled { items, .. } => {
             assert!(items.is_empty());
         }
-        other => panic!("expected WorkerPollComplete, got {:?}", other),
+        other => panic!("expected WorkerPolled, got {:?}", other),
     }
 }
 
@@ -68,6 +68,7 @@ async fn poll_queue_with_invalid_json_returns_empty() {
         .executor
         .execute(Effect::PollQueue {
             worker_name: "poller".to_string(),
+            project: String::new(),
             list_command: "echo 'not json'".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
         })
@@ -76,13 +77,10 @@ async fn poll_queue_with_invalid_json_returns_empty() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerPollComplete { items, .. } => {
-            assert!(
-                items.is_empty(),
-                "invalid JSON should result in empty items"
-            );
+        Event::WorkerPolled { items, .. } => {
+            assert!(items.is_empty(), "invalid JSON should result in empty items");
         }
-        other => panic!("expected WorkerPollComplete, got {:?}", other),
+        other => panic!("expected WorkerPolled, got {:?}", other),
     }
 }
 
@@ -94,6 +92,7 @@ async fn poll_queue_command_failure_returns_empty() {
         .executor
         .execute(Effect::PollQueue {
             worker_name: "poller".to_string(),
+            project: String::new(),
             list_command: "exit 1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
         })
@@ -102,13 +101,10 @@ async fn poll_queue_command_failure_returns_empty() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerPollComplete { items, .. } => {
-            assert!(
-                items.is_empty(),
-                "failed command should result in empty items"
-            );
+        Event::WorkerPolled { items, .. } => {
+            assert!(items.is_empty(), "failed command should result in empty items");
         }
-        other => panic!("expected WorkerPollComplete, got {:?}", other),
+        other => panic!("expected WorkerPolled, got {:?}", other),
     }
 }
 
@@ -122,6 +118,7 @@ async fn take_queue_item_effect_runs_async() {
         .executor
         .execute(Effect::TakeQueueItem {
             worker_name: "test-worker".to_string(),
+            project: String::new(),
             take_command: "echo taken".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             item_id: "item-1".to_string(),
@@ -132,20 +129,15 @@ async fn take_queue_item_effect_runs_async() {
 
     assert!(event.is_none(), "TakeQueueItem should return None (async)");
 
-    // WorkerTakeComplete arrives via event_tx
+    // WorkerTook arrives via event_tx
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerTakeComplete {
-            worker_name,
-            item_id,
-            exit_code,
-            ..
-        } => {
-            assert_eq!(worker_name, "test-worker");
+        Event::WorkerTook { worker, item_id, exit_code, .. } => {
+            assert_eq!(worker, "test-worker");
             assert_eq!(item_id, "item-1");
             assert_eq!(exit_code, 0);
         }
-        other => panic!("expected WorkerTakeComplete, got {:?}", other),
+        other => panic!("expected WorkerTook, got {:?}", other),
     }
 }
 
@@ -157,6 +149,7 @@ async fn take_queue_item_failure_returns_nonzero() {
         .executor
         .execute(Effect::TakeQueueItem {
             worker_name: "test-worker".to_string(),
+            project: String::new(),
             take_command: "exit 1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             item_id: "item-2".to_string(),
@@ -169,13 +162,11 @@ async fn take_queue_item_failure_returns_nonzero() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerTakeComplete {
-            exit_code, item_id, ..
-        } => {
+        Event::WorkerTook { exit_code, item_id, .. } => {
             assert_eq!(item_id, "item-2");
             assert_ne!(exit_code, 0, "failed take should have nonzero exit code");
         }
-        other => panic!("expected WorkerTakeComplete, got {:?}", other),
+        other => panic!("expected WorkerTook, got {:?}", other),
     }
 }
 
@@ -187,6 +178,7 @@ async fn take_queue_item_with_stderr() {
         .executor
         .execute(Effect::TakeQueueItem {
             worker_name: "test-worker".to_string(),
+            project: String::new(),
             take_command: "echo stderr_msg >&2 && exit 1".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             item_id: "item-3".to_string(),
@@ -197,14 +189,12 @@ async fn take_queue_item_with_stderr() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerTakeComplete {
-            exit_code, stderr, ..
-        } => {
+        Event::WorkerTook { exit_code, stderr, .. } => {
             assert_ne!(exit_code, 0);
             assert!(stderr.is_some());
             assert!(stderr.unwrap().contains("stderr_msg"));
         }
-        other => panic!("expected WorkerTakeComplete, got {:?}", other),
+        other => panic!("expected WorkerTook, got {:?}", other),
     }
 }
 
@@ -222,6 +212,7 @@ async fn take_queue_item_preserves_item_data() {
         .executor
         .execute(Effect::TakeQueueItem {
             worker_name: "test-worker".to_string(),
+            project: String::new(),
             take_command: "true".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
             item_id: "item-4".to_string(),
@@ -232,10 +223,10 @@ async fn take_queue_item_preserves_item_data() {
 
     let completed = harness.event_rx.recv().await.unwrap();
     match completed {
-        Event::WorkerTakeComplete { item, item_id, .. } => {
+        Event::WorkerTook { item, item_id, .. } => {
             assert_eq!(item_id, "item-4");
             assert_eq!(item, item_data);
         }
-        other => panic!("expected WorkerTakeComplete, got {:?}", other),
+        other => panic!("expected WorkerTook, got {:?}", other),
     }
 }

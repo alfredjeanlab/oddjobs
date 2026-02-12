@@ -39,28 +39,17 @@ fn workspace_id_serde() {
 fn workspace_status_display() {
     assert_eq!(WorkspaceStatus::Creating.to_string(), "creating");
     assert_eq!(WorkspaceStatus::Ready.to_string(), "ready");
-    assert_eq!(
-        WorkspaceStatus::InUse {
-            by: "pipe-1".to_string()
-        }
-        .to_string(),
-        "in_use(pipe-1)"
-    );
+    assert_eq!(WorkspaceStatus::InUse { by: "job-1".to_string() }.to_string(), "in_use(job-1)");
     assert_eq!(WorkspaceStatus::Cleaning.to_string(), "cleaning");
     assert_eq!(
-        WorkspaceStatus::Failed {
-            reason: "disk full".to_string()
-        }
-        .to_string(),
+        WorkspaceStatus::Failed { reason: "disk full".to_string() }.to_string(),
         "failed: disk full"
     );
 }
 
 #[test]
 fn workspace_status_serde() {
-    let status = WorkspaceStatus::InUse {
-        by: "test-job".to_string(),
-    };
+    let status = WorkspaceStatus::InUse { by: "test-job".to_string() };
     let json = serde_json::to_string(&status).unwrap();
     let parsed: WorkspaceStatus = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed, status);

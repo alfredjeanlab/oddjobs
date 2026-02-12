@@ -4,272 +4,143 @@
 //! On_fail cycle preservation and circuit breaker tests
 
 use super::*;
-use oj_core::JobId;
-
-/// Runbook with on_fail self-cycle: step retries itself on failure
-const RUNBOOK_ON_FAIL_SELF_CYCLE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = "false"
-on_fail = "work"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-"#;
 
 #[tokio::test]
-async fn on_fail_self_cycle_preserves_action_attempts() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn on_fail_self_cycle_preserves_attempts() {
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("work", "false", "on_fail = { step = \"work\" }\non_done = { step = \"done\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
 
-    // Set some action_attempts to simulate agent retry tracking
+    // Set some attempts to simulate agent retry tracking
     ctx.runtime.lock_state_mut(|state| {
         if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.increment_action_attempt("exit", 0);
-            p.increment_action_attempt("exit", 0);
+            p.increment_attempt("exit", 0);
+            p.increment_attempt("exit", 0);
         }
     });
 
     // Verify attempts are set
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.get_action_attempt("exit", 0), 2);
+    assert_eq!(job.actions.get_action_attempt("exit", 0), 2);
 
-    // Shell fails → on_fail = "work" (self-cycle)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "work".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    // Shell fails → on_fail = { step = "work" } (self-cycle)
+    ctx.runtime.handle_event(shell_fail(&job_id, "work")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work", "should cycle back to work step");
-    // action_attempts should be preserved across the on_fail cycle
+    // attempts should be preserved across the on_fail cycle
     assert_eq!(
-        job.get_action_attempt("exit", 0),
+        job.actions.get_action_attempt("exit", 0),
         2,
-        "action_attempts must be preserved on on_fail self-cycle"
+        "attempts must be preserved on on_fail self-cycle"
     );
 }
 
-/// Runbook with multi-step on_fail cycle: A fails→B, B fails→A
-const RUNBOOK_ON_FAIL_MULTI_STEP_CYCLE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = "false"
-on_fail = "recover"
-on_done = "done"
-
-[[job.build.step]]
-name = "recover"
-run = "false"
-on_fail = "work"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-"#;
-
 #[tokio::test]
-async fn on_fail_multi_step_cycle_preserves_action_attempts() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_MULTI_STEP_CYCLE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn on_fail_multi_step_cycle_preserves_attempts() {
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("work", "false", "on_fail = { step = \"recover\" }\non_done = { step = \"done\" }"),
+            ("recover", "false", "on_fail = { step = \"work\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
-    // Set action_attempts to simulate prior attempts
+    // Set attempts to simulate prior attempts
     ctx.runtime.lock_state_mut(|state| {
         if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.increment_action_attempt("exit", 0);
+            p.increment_attempt("exit", 0);
         }
     });
 
     // work fails → on_fail → recover
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "work".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "work")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "recover");
     assert_eq!(
-        job.get_action_attempt("exit", 0),
+        job.actions.get_action_attempt("exit", 0),
         1,
-        "action_attempts preserved after work→recover on_fail transition"
+        "attempts preserved after work→recover on_fail transition"
     );
 
     // recover fails → on_fail → work (completing the cycle)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "recover".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "recover")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work");
     assert_eq!(
-        job.get_action_attempt("exit", 0),
+        job.actions.get_action_attempt("exit", 0),
         1,
-        "action_attempts preserved across full on_fail cycle"
+        "attempts preserved across full on_fail cycle"
     );
 }
 
 #[tokio::test]
-async fn on_done_transition_resets_action_attempts() {
-    let ctx = setup_with_runbook(RUNBOOK_ON_FAIL_SELF_CYCLE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn on_done_transition_resets_attempts() {
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("work", "false", "on_fail = { step = \"work\" }\non_done = { step = \"done\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
 
-    // Set action_attempts
+    // Set attempts
     ctx.runtime.lock_state_mut(|state| {
         if let Some(p) = state.jobs.get_mut(&job_id) {
-            p.increment_action_attempt("exit", 0);
-            p.increment_action_attempt("exit", 0);
+            p.increment_attempt("exit", 0);
+            p.increment_attempt("exit", 0);
         }
     });
 
-    // Shell succeeds → on_done = "done"
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "work".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    // Shell succeeds → on_done = { step = "done" }
+    ctx.runtime.handle_event(shell_ok(&job_id, "work")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
-    // action_attempts should be reset on success transition
+    // attempts should be reset on success transition
     assert_eq!(
-        job.get_action_attempt("exit", 0),
+        job.actions.get_action_attempt("exit", 0),
         0,
-        "action_attempts must be reset on on_done transition"
+        "attempts must be reset on on_done transition"
     );
 }
 
 // --- Circuit breaker tests ---
 
-/// Runbook with a cycle: work fails→retry, retry fails→work
-const RUNBOOK_CYCLE_CIRCUIT_BREAKER: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = "false"
-on_fail = "retry"
-on_done = "done"
-
-[[job.build.step]]
-name = "retry"
-run = "false"
-on_fail = "work"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-"#;
-
 #[tokio::test]
 async fn circuit_breaker_fails_job_after_max_step_visits() {
-    let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("work", "false", "on_fail = { step = \"retry\" }\non_done = { step = \"done\" }"),
+            ("retry", "false", "on_fail = { step = \"work\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
 
     // Drive the cycle: work→retry→work→retry→... until circuit breaker fires.
@@ -288,10 +159,7 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
             );
             assert_eq!(job.step, "failed");
             assert!(
-                job.error
-                    .as_deref()
-                    .unwrap_or("")
-                    .contains("circuit breaker"),
+                job.error.as_deref().unwrap_or("").contains("circuit breaker"),
                 "error should mention circuit breaker, got: {:?}",
                 job.error
             );
@@ -299,16 +167,7 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
         }
 
         let step = job.step.clone();
-        ctx.runtime
-            .handle_event(Event::ShellExited {
-                job_id: JobId::new(job_id.clone()),
-                step,
-                exit_code: 1,
-                stdout: None,
-                stderr: None,
-            })
-            .await
-            .unwrap();
+        ctx.runtime.handle_event(shell_fail(&job_id, &step)).await.unwrap();
     }
 
     panic!("circuit breaker never fired after 50 iterations");
@@ -316,55 +175,32 @@ async fn circuit_breaker_fails_job_after_max_step_visits() {
 
 #[tokio::test]
 async fn step_visits_tracked_across_transitions() {
-    let ctx = setup_with_runbook(RUNBOOK_CYCLE_CIRCUIT_BREAKER).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("work", "false", "on_fail = { step = \"retry\" }\non_done = { step = \"done\" }"),
+            ("retry", "false", "on_fail = { step = \"work\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
 
     // Initial step "work" - step_visits not yet tracked (initial step)
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.get_step_visits("work"), 0);
 
     // work fails → retry (visit 1 for retry)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "work".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "work")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "retry");
     assert_eq!(job.get_step_visits("retry"), 1);
 
     // retry fails → work (visit 1 for work via JobAdvanced)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "retry".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "retry")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work");

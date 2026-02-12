@@ -5,9 +5,8 @@
 
 use crate::error::RuntimeError;
 use crate::executor::ExecuteError;
-use oj_adapters::agent::find_session_log;
-use oj_core::{AgentId, AgentRunId, Effect, Job, JobId, OwnerId, ShortId};
-use oj_runbook::{AgentDef, StopAction};
+use oj_core::{AgentId, CrewId, Effect, Job, JobId, OwnerId};
+use oj_runbook::AgentDef;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -18,43 +17,30 @@ pub const LIVENESS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Context for spawning an agent, abstracting over jobs and standalone runs.
 pub struct SpawnCtx<'a> {
-    /// Owner of this agent (job or agent_run)
+    /// Owner of this agent (job or crew)
     pub owner: OwnerId,
     /// Display name (job name or command name)
     pub name: &'a str,
     /// Namespace for scoping
-    pub namespace: &'a str,
+    pub project: &'a str,
 }
 
 impl<'a> SpawnCtx<'a> {
     /// Create a SpawnCtx from a Job.
     pub fn from_job(job: &'a Job, job_id: &JobId) -> Self {
-        Self {
-            owner: OwnerId::Job(job_id.clone()),
-            name: &job.name,
-            namespace: &job.namespace,
-        }
+        Self { owner: OwnerId::Job(job_id.clone()), name: &job.name, project: &job.project }
     }
 
-    /// Create a SpawnCtx for a standalone agent run.
-    pub fn from_agent_run(agent_run_id: &AgentRunId, name: &'a str, namespace: &'a str) -> Self {
-        Self {
-            owner: OwnerId::AgentRun(agent_run_id.clone()),
-            name,
-            namespace,
-        }
-    }
-
-    /// Returns true if this is a standalone agent run (not job-owned).
-    pub fn is_standalone(&self) -> bool {
-        matches!(self.owner, OwnerId::AgentRun(_))
+    /// Create a SpawnCtx for a crew.
+    pub fn from_crew(crew_id: &CrewId, name: &'a str, project: &'a str) -> Self {
+        Self { owner: OwnerId::Crew(crew_id.clone()), name, project }
     }
 }
 
 /// Spawn an agent for a job or standalone run.
 ///
 /// Returns the effects to execute for spawning the agent.
-/// When `resume_session_id` is `Some`, the agent is spawned with `--resume <id>`
+/// When `resume` is true, the agent is spawned with coop's `--resume` flag
 /// to preserve conversation history from a previous run.
 pub fn build_spawn_effects(
     agent_def: &AgentDef,
@@ -63,206 +49,106 @@ pub fn build_spawn_effects(
     input: &HashMap<String, String>,
     workspace_path: &Path,
     state_dir: &Path,
-    resume_session_id: Option<&str>,
+    resume: bool,
 ) -> Result<Vec<Effect>, RuntimeError> {
-    // Use workspace_path as project root for settings lookup
-    // After the workspace refactor, the runbook's init step clones the project
-    // into workspace_path, so settings are found there.
-    let project_root = workspace_path.to_path_buf();
-
-    let owner_str = match &ctx.owner {
-        OwnerId::Job(id) => format!("job:{}", id),
-        OwnerId::AgentRun(id) => format!("agent_run:{}", id),
-    };
-
-    // Validate resume_session_id: only use if the EXACT session file exists.
-    // If the previous agent died before writing to JSONL, resuming will fail.
-    // Note: find_session_log has a fallback to return the most recent file,
-    // so we must verify the returned path matches the expected session ID.
-    let resume_session_id = resume_session_id.filter(|id| {
-        let expected_filename = format!("{}.jsonl", id);
-        let exists = find_session_log(workspace_path, id)
-            .map(|p| {
-                p.file_name()
-                    .map(|f| f.to_string_lossy() == expected_filename)
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-        if !exists {
-            tracing::warn!(
-                session_id = %id,
-                workspace = %workspace_path.display(),
-                "resume session file not found, starting fresh"
-            );
-        }
-        exists
-    });
-
-    tracing::debug!(
-        owner = %owner_str,
-        agent_name,
-        workspace_path = %workspace_path.display(),
-        project_root = %project_root.display(),
-        resume_session_id,
-        "building spawn effects"
-    );
-
     // Step 1: Build variables for prompt interpolation
     let mut prompt_vars = crate::vars::namespace_vars(input);
 
     // Add system variables (not namespaced - these are always available)
     // These overwrite any bare input keys with the same name.
-    // When resuming, reuse the resume session ID as agent_id (Claude continues with same session).
-    // Otherwise generate a new UUID for agent_id (used as --session-id for claude/claudeless).
-    let agent_id = resume_session_id
-        .map(|id| id.to_string())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    // Always generate a fresh UUID for agent_id (oddjobs tracking concept,
+    // decoupled from Claude's internal session/conversation ID).
+    let agent_id = Uuid::new_v4().to_string();
     prompt_vars.insert("agent_id".to_string(), agent_id.clone());
-    // Insert owner-specific ID: job_id for jobs, agent_run_id for standalone runs
+    // Insert owner-specific ID: job_id for jobs, crew_id for standalone runs
     match &ctx.owner {
         OwnerId::Job(job_id) => {
             prompt_vars.insert("job_id".to_string(), job_id.to_string());
         }
-        OwnerId::AgentRun(ar_id) => {
-            prompt_vars.insert("agent_run_id".to_string(), ar_id.to_string());
+        OwnerId::Crew(run_id) => {
+            prompt_vars.insert("crew_id".to_string(), run_id.to_string());
         }
     }
     prompt_vars.insert("name".to_string(), ctx.name.to_string());
-    prompt_vars.insert(
-        "workspace".to_string(),
-        workspace_path.display().to_string(),
-    );
+    prompt_vars.insert("workspace".to_string(), workspace_path.display().to_string());
 
-    // Expose invoke.*, local.*, and workspace.* at top level
+    // Expose invoke.*, local.*, and source.* at top level
     for (key, val) in input.iter() {
-        if key.starts_with("invoke.") || key.starts_with("local.") || key.starts_with("workspace.")
-        {
+        if key.starts_with("invoke.") || key.starts_with("local.") || key.starts_with("source.") {
             prompt_vars.insert(key.clone(), val.clone());
         }
     }
 
     // Step 2: Render the agent's prompt template
-    let rendered_prompt =
-        agent_def
-            .get_prompt(&prompt_vars)
-            .map_err(|e| RuntimeError::PromptError {
-                agent: agent_name.to_string(),
-                message: e.to_string(),
-            })?;
+    let rendered_prompt = agent_def.get_prompt(&prompt_vars).map_err(|e| {
+        RuntimeError::PromptError { agent: agent_name.to_string(), message: e.to_string() }
+    })?;
 
     // Step 3: Build variables for command interpolation
     // Include rendered prompt so ${prompt} in run command gets the full agent prompt
     // The prompt must be escaped for shell context since it will be embedded in
-    // a command string that tmux runs via /bin/sh -c. Characters like backticks,
+    // a command string that coop runs via bash -c. Characters like backticks,
     // dollar signs, and backslashes have special meaning in shell double-quoted strings.
     let mut vars = prompt_vars.clone();
-    vars.insert(
-        "prompt".to_string(),
-        oj_runbook::escape_for_shell(&rendered_prompt),
-    );
+    vars.insert("prompt".to_string(), oj_runbook::escape_for_shell(&rendered_prompt));
 
-    // Prepare workspace directory (no longer writes settings)
-    tracing::debug!(workspace_path = %workspace_path.display(), "preparing workspace");
-    crate::agent_setup::prepare_for_agent(workspace_path).map_err(|e| {
-        tracing::error!(error = %e, "workspace preparation failed");
-        RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-    })?;
-
-    // Write prime script(s) if agent has prime config
-    let prime_paths = if let Some(ref prime) = agent_def.prime {
-        crate::agent_setup::prepare_agent_prime(&agent_id, prime, &prompt_vars, state_dir).map_err(
-            |e| {
-                tracing::error!(error = %e, "agent prime preparation failed");
-                RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-            },
-        )?
-    } else {
-        HashMap::new()
+    // Write agent-config file with settings, stop config, and start config for primes.
+    // Coop reads this file and handles passing --settings to claude.
+    //
+    // Resolve on_idle action for stop config. The runbook default is `escalate`;
+    // for job-owned agents we override to `done` (complete on stop) unless
+    // explicitly configured.
+    let effective_action = match (&agent_def.on_idle, &ctx.owner) {
+        (None, OwnerId::Job(_)) => "done",
+        (None, _) => "escalate",
+        (Some(cfg), _) => cfg.action().as_str(),
     };
-
-    // Prepare settings file with hooks in OJ state directory
-    let settings_path = crate::agent_setup::prepare_agent_settings(
+    let on_idle_message = agent_def.on_idle.as_ref().and_then(|c| c.message());
+    crate::agent_setup::write_agent_config_file(
         &agent_id,
         workspace_path,
-        &prime_paths,
+        agent_def.prime.as_ref(),
+        &prompt_vars,
+        effective_action,
+        on_idle_message,
         state_dir,
     )
     .map_err(|e| {
-        tracing::error!(error = %e, "agent settings preparation failed");
+        tracing::error!(error = %e, "agent config file write failed");
         RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
     })?;
 
-    // Write on_stop config: resolve from agent def or context-dependent default
-    let on_stop_config = agent_def.on_stop.as_ref();
-    let on_stop_action =
-        on_stop_config
-            .map(|c| c.action())
-            .cloned()
-            .unwrap_or(if ctx.is_standalone() {
-                StopAction::Escalate
-            } else {
-                StopAction::Signal
-            });
-    let on_stop_str = match on_stop_action {
-        StopAction::Signal => "signal",
-        StopAction::Idle => "idle",
-        StopAction::Escalate => "escalate",
-        StopAction::Ask => "ask",
-    };
-    let on_stop_message = on_stop_config.and_then(|c| c.message());
-    crate::agent_setup::write_agent_config(&agent_id, on_stop_str, on_stop_message, state_dir)
-        .map_err(|e| {
-            tracing::error!(error = %e, "agent config write failed");
-            RuntimeError::Execute(ExecuteError::Shell(e.to_string()))
-        })?;
-
-    // Build base command and append session-id, settings, and prompt (if not inline)
-    // Trim trailing whitespace (including newlines from heredocs) so appended args stay on same line
+    // Build base command and append prompt or resume message.
+    // Settings are passed via coop's --agent-config, not via claude's --settings.
+    // Trim trailing whitespace (including newlines from heredocs) so appended args stay on same line.
     let base_command = agent_def.build_command(&vars).trim_end().to_string();
-    let command = if let Some(resume_id) = resume_session_id {
-        // Resume mode: use --resume to continue existing session.
-        // Don't pass --session-id; Claude uses the resume ID as the session.
-        let resume_msg = input.get("resume_message").cloned().unwrap_or_default();
+    let command = if resume {
+        // Resume mode: coop handles --resume via session discovery.
+        // Prefer resume_message (append mode), fall back to prompt (original prompt).
+        // The prompt fallback ensures `-p` mode agents get their prompt on retry.
+        let resume_msg = input
+            .get("resume_message")
+            .or_else(|| input.get("prompt"))
+            .cloned()
+            .unwrap_or_default();
         if resume_msg.is_empty() {
-            format!(
-                "{} --resume {} --settings {}",
-                base_command,
-                resume_id,
-                settings_path.display()
-            )
+            base_command
         } else {
-            format!(
-                "{} --resume {} --settings {} \"{}\"",
-                base_command,
-                resume_id,
-                settings_path.display(),
-                oj_runbook::escape_for_shell(&resume_msg)
-            )
+            format!("{} \"{}\"", base_command, oj_runbook::escape_for_shell(&resume_msg))
         }
     } else if agent_def.run.contains("${prompt}") {
-        // Prompt is inline in the command, add session-id and settings
-        format!(
-            "{} --session-id {} --settings {}",
-            base_command,
-            agent_id,
-            settings_path.display()
-        )
+        // Prompt is inline in the command
+        base_command
     } else {
         // Append prompt (may be empty if no prompt configured)
-        format!(
-            "{} --session-id {} --settings {} \"{}\"",
-            base_command,
-            agent_id,
-            settings_path.display(),
-            vars.get("prompt").unwrap_or(&String::new())
-        )
+        format!("{} \"{}\"", base_command, vars.get("prompt").unwrap_or(&String::new()))
     };
     let mut env = agent_def.build_env(&vars);
     let mut unset_env: Vec<String> = Vec::new();
 
-    // Pass OJ_NAMESPACE so nested `oj` calls inherit the project namespace
-    if !ctx.namespace.is_empty() {
-        env.push(("OJ_NAMESPACE".to_string(), ctx.namespace.to_string()));
+    // Pass OJ_PROJECT so nested `oj` calls inherit the project project
+    if !ctx.project.is_empty() {
+        env.push(("OJ_PROJECT".to_string(), ctx.project.to_string()));
     }
 
     // Always pass OJ_STATE_DIR so `oj` commands (including hooks) connect to
@@ -270,29 +156,16 @@ pub fn build_spawn_effects(
     // state directory — rather than reading from the environment. The daemon may
     // have resolved its state_dir via XDG_STATE_HOME or $HOME fallback without
     // OJ_STATE_DIR being set, so the env var alone is unreliable.
-    env.push((
-        "OJ_STATE_DIR".to_string(),
-        state_dir.to_string_lossy().into_owned(),
-    ));
+    env.push(("OJ_STATE_DIR".to_string(), state_dir.to_string_lossy().into_owned()));
 
     // Pass OJ_DAEMON_BINARY so agents can find the correct daemon binary when
-    // running `oj` commands (prevents tmux environment inheritance issues)
+    // running `oj` commands (prevents environment inheritance issues)
     if let Ok(daemon_binary) = std::env::var("OJ_DAEMON_BINARY") {
         env.push(("OJ_DAEMON_BINARY".to_string(), daemon_binary));
     } else if let Ok(current_exe) = std::env::current_exe() {
         // The engine runs inside ojd, so current_exe is the daemon binary
-        env.push((
-            "OJ_DAEMON_BINARY".to_string(),
-            current_exe.display().to_string(),
-        ));
+        env.push(("OJ_DAEMON_BINARY".to_string(), current_exe.display().to_string()));
     }
-
-    // Prevent TMUX_TMPDIR leakage — the daemon sets this to isolate its tmux
-    // server, but agents must not inherit it.  If they do, `cargo test --all`
-    // (or any child that calls tmux) operates on the daemon's real tmux server,
-    // letting test cleanup (`tmux kill-server`, `kill-session`) destroy live
-    // agent sessions.
-    unset_env.push("TMUX_TMPDIR".to_string());
 
     // Forward CLAUDE_CONFIG_DIR only if explicitly set — never fabricate a default.
     //
@@ -301,21 +174,17 @@ pub fn build_spawn_effects(
     // defaulting CLAUDE_CONFIG_DIR to $HOME/.claude when unset.  These are two
     // different files at two different paths.
     //
-    // If we fabricate CLAUDE_CONFIG_DIR=$HOME/.claude and pass it via tmux -e,
+    // If we fabricate CLAUDE_CONFIG_DIR=$HOME/.claude and pass it to coop,
     // Claude Code looks for .claude.json at $HOME/.claude/.claude.json (the
     // config copy, which has no auth) instead of $HOME/.claude.json (the real
     // one with oauthAccount).  Result: agents get the onboarding/login flow
     // even though the user is already authenticated.
-    //
-    // The watcher (find_session_log) independently defaults to ~/.claude for
-    // log discovery, matching Claude Code's own default — so both sides agree
-    // without us needing to set anything.
     if !env.iter().any(|(k, _)| k == "CLAUDE_CONFIG_DIR") {
         if let Ok(claude_state) = std::env::var("CLAUDE_CONFIG_DIR") {
             env.push(("CLAUDE_CONFIG_DIR".to_string(), claude_state));
         } else {
-            // Prevent tmux server env leakage — stale CLAUDE_CONFIG_DIR
-            // values cause agents to look for auth at the wrong path.
+            // Prevent stale CLAUDE_CONFIG_DIR from parent environment
+            // causing agents to look for auth at the wrong path.
             unset_env.push("CLAUDE_CONFIG_DIR".to_string());
         }
     }
@@ -330,18 +199,6 @@ pub fn build_spawn_effects(
                 "CLAUDE_CONFIG_DIR is set but CLAUDE_CODE_OAUTH_TOKEN is not; \
                  agents may fail to authenticate if no interactive login session exists"
             );
-        }
-    }
-
-    // Inject user-managed env vars (global + per-project).
-    // Read fresh on every spawn so changes take effect immediately.
-    let user_env = crate::env::load_merged_env(state_dir, ctx.namespace);
-    for (key, value) in user_env {
-        // Don't override env vars already set by the agent definition or system.
-        // Agent-defined and system vars (OJ_NAMESPACE, OJ_STATE_DIR, etc.)
-        // take precedence over user env files.
-        if !env.iter().any(|(k, _)| k == &key) {
-            env.push((key, value));
         }
     }
 
@@ -360,42 +217,16 @@ pub fn build_spawn_effects(
     );
 
     tracing::info!(
-        owner = %owner_str,
+        owner = %ctx.owner,
         agent_name,
         command,
         effective_cwd = ?effective_cwd,
         "spawn effects prepared"
     );
 
-    // Build session config with defaults
-    // Note: use prompt_vars (not vars) to avoid shell-escaped ${prompt}
-    let session_config = {
-        let mut config: HashMap<String, serde_json::Value> = HashMap::new();
-        if let Some(tmux_cfg) = agent_def.session.get("tmux") {
-            // Interpolate variables in session config (title, status left/right)
-            let interpolated = tmux_cfg.interpolate(&prompt_vars);
-            if let Ok(val) = serde_json::to_value(interpolated) {
-                config.insert("tmux".to_string(), val);
-            }
-        }
-        // Always ensure tmux has default status bars (even without explicit session block)
-        let tmux_value = config
-            .entry("tmux".to_string())
-            .or_insert_with(|| serde_json::json!({}));
-        if let serde_json::Value::Object(ref mut map) = tmux_value {
-            let status = map.entry("status").or_insert_with(|| serde_json::json!({}));
-            if let serde_json::Value::Object(ref mut status_map) = status {
-                let short_id = agent_id.short(8);
-                status_map.entry("left").or_insert_with(|| {
-                    serde_json::json!(format!("{} {}/{}", ctx.namespace, ctx.name, agent_name))
-                });
-                status_map
-                    .entry("right")
-                    .or_insert_with(|| serde_json::json!(short_id));
-            }
-        }
-        config
-    };
+    // Resolve container config: agent-level takes priority, then falls back to
+    // the container config passed in by the caller (from the job definition).
+    let container = agent_def.container.as_ref().map(|c| oj_core::ContainerConfig::new(&c.image));
 
     Ok(vec![Effect::SpawnAgent {
         agent_id: AgentId::new(agent_id),
@@ -407,7 +238,8 @@ pub fn build_spawn_effects(
         env,
         unset_env,
         cwd: Some(effective_cwd),
-        session_config,
+        resume,
+        container,
     }])
 }
 

@@ -75,22 +75,16 @@ On macOS, notifications appear from the `ojd` daemon process. You may need to:
 
 On Linux, ensure a notification daemon is running (most desktop environments include one).
 
-## tmux Integration
+## Agent Process Integration
 
-Agents run in tmux sessions for persistence and observability. Session names follow the format `oj-{job}-{agent_name}-{random}`, where the `oj-` prefix is added by `TmuxAdapter`, the job and agent names are sanitized (invalid characters replaced with hyphens, truncated to 20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness.
+Agents run in coop processes for persistence and observability. Session names follow the format `oj-{job}-{agent_name}-{random}`, where the `oj-` prefix is added by `LocalAdapter`, the job and agent names are sanitized (invalid characters replaced with hyphens, truncated to 20 and 15 characters respectively), and a 4-character random suffix ensures uniqueness.
 
 ```bash
-# List all oj sessions
-tmux list-sessions | grep '^oj-'
-
 # Attach to a job's active agent session via CLI
 oj job attach <job-id>
 
-# Attach to a specific session by ID
-oj session attach <session-id>
-
-# Or directly via tmux (session IDs visible in `oj session list`)
-tmux attach -t <session-id>
+# Attach to a specific agent by ID
+oj agent attach <agent-id>
 ```
 
-The `oj job attach` command looks up the job's current `session_id` and attaches to that tmux session. The `oj job peek` command captures the terminal contents without attaching.
+The `oj job attach` command looks up the job's current agent and attaches to that agent process. The `oj job peek` command captures the terminal contents without attaching.

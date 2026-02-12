@@ -15,13 +15,13 @@
 job "polecat-work" {
   name      = "${var.bug.id}"
   vars      = ["bug"]
-  workspace = "folder"
+  source    = "folder"
   on_cancel = { step = "cancel" }
   on_fail   = { step = "reopen" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "polecat/${var.bug.id}-${workspace.nonce}"
+    branch = "polecat/${var.bug.id}-${source.nonce}"
     title  = "fix: ${var.bug.title}"
     actor  = "polecat/${var.bug.id}"
   }
@@ -32,10 +32,10 @@ job "polecat-work" {
     on_fail  = "Polecat failed: ${var.bug.title}"
   }
 
-  # Initialize workspace (worktree from shared repo)
+  # Initialize source (worktree from shared repo)
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" HEAD
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${source.root}" HEAD
 
       # Store state for agent discovery
       echo "${var.bug.id}" > .hook-bead
@@ -90,7 +90,7 @@ job "polecat-work" {
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+    run = "git -C \"${local.repo}\" worktree remove --force \"${source.root}\" 2>/dev/null || true"
   }
 }
 

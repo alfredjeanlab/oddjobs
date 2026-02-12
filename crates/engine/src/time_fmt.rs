@@ -7,9 +7,7 @@ use std::time::SystemTime;
 
 /// Format the current UTC time as `YYYY-MM-DDTHH:MM:SSZ`.
 pub(crate) fn format_utc_now() -> String {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default();
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
     let secs = now.as_secs();
 
     // Convert epoch seconds to date/time components
@@ -22,10 +20,7 @@ pub(crate) fn format_utc_now() -> String {
     // Convert days since epoch to y/m/d (civil date from days)
     let (year, month, day) = days_to_civil(days);
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-        year, month, day, hours, minutes, seconds
-    )
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hours, minutes, seconds)
 }
 
 /// Convert days since Unix epoch to (year, month, day).

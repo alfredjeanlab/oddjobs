@@ -9,33 +9,27 @@ mod workspace;
 
 use super::*;
 use crate::RuntimeDeps;
-use oj_adapters::{
-    AgentAdapterError, AgentReconnectConfig, FakeAgentAdapter, FakeNotifyAdapter,
-    FakeSessionAdapter,
-};
-use oj_core::{AgentId, AgentRunId, FakeClock, JobId, OwnerId, SessionId, TimerId, WorkspaceId};
+use oj_adapters::{AgentAdapterError, AgentReconnectConfig, FakeAgentAdapter, FakeNotifyAdapter};
+use oj_core::{AgentId, CrewId, FakeClock, JobId, OwnerId, TimerId, WorkspaceId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-type TestExecutor = Executor<FakeSessionAdapter, FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
+type TestExecutor = Executor<FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
 
 struct TestHarness {
     executor: TestExecutor,
     event_rx: mpsc::Receiver<Event>,
-    sessions: FakeSessionAdapter,
     agents: FakeAgentAdapter,
     notifier: FakeNotifyAdapter,
 }
 
 async fn setup() -> TestHarness {
     let (event_tx, event_rx) = mpsc::channel(100);
-    let sessions = FakeSessionAdapter::new();
     let agents = FakeAgentAdapter::new();
     let notifier = FakeNotifyAdapter::new();
 
     let executor = Executor::new(
         RuntimeDeps {
-            sessions: sessions.clone(),
             agents: agents.clone(),
             notifier: notifier.clone(),
             state: Arc::new(Mutex::new(MaterializedState::default())),
@@ -45,11 +39,34 @@ async fn setup() -> TestHarness {
         event_tx,
     );
 
-    TestHarness {
-        executor,
-        event_rx,
-        sessions,
-        agents,
-        notifier,
+    TestHarness { executor, event_rx, agents, notifier }
+}
+
+/// Build a default `Effect::SpawnAgent` for executor tests.
+fn spawn_agent(id: &str) -> Effect {
+    Effect::SpawnAgent {
+        agent_id: AgentId::new(id),
+        agent_name: "builder".to_string(),
+        owner: JobId::new("job-1").into(),
+        workspace_path: std::path::PathBuf::from("/tmp/ws"),
+        input: HashMap::new(),
+        command: "claude".to_string(),
+        env: vec![],
+        cwd: None,
+        unset_env: vec![],
+        resume: false,
+        container: None,
+    }
+}
+
+/// Build a default `Effect::Shell` for executor tests.
+fn shell(command: &str) -> Effect {
+    Effect::Shell {
+        owner: Some(JobId::new("test").into()),
+        step: "init".to_string(),
+        command: command.to_string(),
+        cwd: std::path::PathBuf::from("/tmp"),
+        env: HashMap::new(),
+        container: None,
     }
 }

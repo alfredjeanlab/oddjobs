@@ -38,13 +38,7 @@ async fn create_and_start_job_is_idempotent() {
     let ctx = setup_with_runbook(JOB_RUNBOOK).await;
 
     let args: HashMap<String, String> = HashMap::new();
-    let event = command_event(
-        "pipe-1",
-        "test-job",
-        "job-test",
-        args.clone(),
-        &ctx.project_root,
-    );
+    let event = command_event("job-1", "test-job", "job-test", args.clone(), &ctx.project_path);
 
     // First call: creates the job
     let events1 = ctx.runtime.handle_event(event.clone()).await.unwrap();
@@ -55,10 +49,7 @@ async fn create_and_start_job_is_idempotent() {
 
     // Second call: should be a no-op due to idempotency guard
     let events2 = ctx.runtime.handle_event(event).await.unwrap();
-    assert!(
-        events2.is_empty(),
-        "second call should produce no events (idempotent)"
-    );
+    assert!(events2.is_empty(), "second call should produce no events (idempotent)");
 
     // Still exactly one job
     let jobs = ctx.runtime.jobs();
@@ -71,13 +62,8 @@ async fn shell_command_is_idempotent() {
     let ctx = setup_with_runbook(SHELL_RUNBOOK).await;
 
     let args: HashMap<String, String> = HashMap::new();
-    let event = command_event(
-        "shell-1",
-        "shell-test",
-        "shell-test",
-        args.clone(),
-        &ctx.project_root,
-    );
+    let event =
+        command_event("shell-1", "shell-test", "shell-test", args.clone(), &ctx.project_path);
 
     // First call: creates the job and runs shell
     let events1 = ctx.runtime.handle_event(event.clone()).await.unwrap();
@@ -88,10 +74,7 @@ async fn shell_command_is_idempotent() {
 
     // Second call: should be a no-op due to idempotency guard
     let events2 = ctx.runtime.handle_event(event).await.unwrap();
-    assert!(
-        events2.is_empty(),
-        "second call should produce no events (idempotent)"
-    );
+    assert!(events2.is_empty(), "second call should produce no events (idempotent)");
 
     // Still exactly one job
     let jobs = ctx.runtime.jobs();
@@ -104,30 +87,22 @@ async fn standalone_agent_command_is_idempotent() {
     let ctx = setup_with_runbook(AGENT_RUNBOOK).await;
 
     let args: HashMap<String, String> = HashMap::new();
-    let event = command_event(
-        "agent-1",
-        "agent-test",
-        "agent-test",
-        args.clone(),
-        &ctx.project_root,
-    );
+    let event =
+        crew_command_event("agent-1", "test-agent", "agent-test", args.clone(), &ctx.project_path);
 
-    // First call: creates the agent run
+    // First call: creates the crew
     let events1 = ctx.runtime.handle_event(event.clone()).await.unwrap();
     assert!(!events1.is_empty(), "first call should produce events");
 
-    // Verify agent run was created
-    let agent_runs = ctx.runtime.lock_state(|s| s.agent_runs.len());
-    assert_eq!(agent_runs, 1, "should have exactly one agent run");
+    // Verify crew was created
+    let crew = ctx.runtime.lock_state(|s| s.crew.len());
+    assert_eq!(crew, 1, "should have exactly one crew");
 
     // Second call: should be a no-op due to idempotency guard
     let events2 = ctx.runtime.handle_event(event).await.unwrap();
-    assert!(
-        events2.is_empty(),
-        "second call should produce no events (idempotent)"
-    );
+    assert!(events2.is_empty(), "second call should produce no events (idempotent)");
 
-    // Still exactly one agent run
-    let agent_runs = ctx.runtime.lock_state(|s| s.agent_runs.len());
-    assert_eq!(agent_runs, 1, "should still have exactly one agent run");
+    // Still exactly one crew
+    let crew = ctx.runtime.lock_state(|s| s.crew.len());
+    assert_eq!(crew, 1, "should still have exactly one crew");
 }

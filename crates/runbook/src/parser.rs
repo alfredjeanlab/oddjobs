@@ -40,25 +40,11 @@ pub enum ParseError {
     #[error("invalid format for {location}: {message}")]
     InvalidFormat { location: String, message: String },
 
-    #[error(
-        "invalid shell command in {location}:\n{}",
-        shell_diagnostic(inner, source_text)
-    )]
-    ShellError {
-        location: String,
-        inner: Box<shell::ParseError>,
-        source_text: String,
-    },
+    #[error("invalid shell command in {location}:\n{}", shell_diagnostic(inner, source_text))]
+    ShellError { location: String, inner: Box<shell::ParseError>, source_text: String },
 
-    #[error(
-        "invalid shell command in {location}:\n{}",
-        validation_diagnostic(inner, source_text)
-    )]
-    ShellValidation {
-        location: String,
-        inner: Box<shell::ValidationError>,
-        source_text: String,
-    },
+    #[error("invalid shell command in {location}:\n{}", validation_diagnostic(inner, source_text))]
+    ShellValidation { location: String, inner: Box<shell::ValidationError>, source_text: String },
 
     #[error("invalid argument spec: {0}")]
     ArgSpec(#[from] ArgSpecError),
@@ -292,20 +278,14 @@ fn parse_runbook_inner(
     for (name, queue) in &runbook.queues {
         match queue.queue_type {
             QueueType::External => {
-                let list = queue
-                    .list
-                    .as_deref()
-                    .ok_or_else(|| ParseError::InvalidFormat {
-                        location: format!("queue.{}", name),
-                        message: "external queue requires 'list' field".to_string(),
-                    })?;
-                let take = queue
-                    .take
-                    .as_deref()
-                    .ok_or_else(|| ParseError::InvalidFormat {
-                        location: format!("queue.{}", name),
-                        message: "external queue requires 'take' field".to_string(),
-                    })?;
+                let list = queue.list.as_deref().ok_or_else(|| ParseError::InvalidFormat {
+                    location: format!("queue.{}", name),
+                    message: "external queue requires 'list' field".to_string(),
+                })?;
+                let take = queue.take.as_deref().ok_or_else(|| ParseError::InvalidFormat {
+                    location: format!("queue.{}", name),
+                    message: "external queue requires 'take' field".to_string(),
+                })?;
                 validate_shell_command(list, &format!("queue.{}.list", name))?;
                 validate_shell_command(take, &format!("queue.{}.take", name))?;
                 if queue.retry.is_some() {
@@ -382,37 +362,21 @@ fn parse_runbook_inner(
         }
     }
 
-    // 6.7. Validate tmux session config colors
-    for (agent_name, agent) in &runbook.agents {
-        if let Some(tmux_config) = agent.session.get("tmux") {
-            if let Some(ref color) = tmux_config.color {
-                if !crate::agent::VALID_SESSION_COLORS.contains(&color.as_str()) {
-                    return Err(ParseError::InvalidFormat {
-                        location: format!("agent.{}.session.tmux.color", agent_name),
-                        message: format!(
-                            "unknown color '{}'; valid colors: {}",
-                            color,
-                            crate::agent::VALID_SESSION_COLORS.join(", ")
-                        ),
-                    });
-                }
-            }
-        }
-    }
-
     // 7. Validate action-trigger compatibility
     for (agent_name, agent) in &runbook.agents {
-        // Validate on_idle action
-        let idle_action = agent.on_idle.action();
-        if !idle_action.is_valid_for_trigger(ActionTrigger::OnIdle) {
-            return Err(ParseError::InvalidFormat {
-                location: format!("agent.{}.on_idle", agent_name),
-                message: format!(
-                    "action '{}' is not valid for on_idle: {}",
-                    idle_action.as_str(),
-                    idle_action.invalid_reason(ActionTrigger::OnIdle)
-                ),
-            });
+        // Validate on_idle action (if explicitly set)
+        if let Some(ref on_idle) = agent.on_idle {
+            let idle_action = on_idle.action();
+            if !idle_action.is_valid_for_trigger(ActionTrigger::OnIdle) {
+                return Err(ParseError::InvalidFormat {
+                    location: format!("agent.{}.on_idle", agent_name),
+                    message: format!(
+                        "action '{}' is not valid for on_idle: {}",
+                        idle_action.as_str(),
+                        idle_action.invalid_reason(ActionTrigger::OnIdle)
+                    ),
+                });
+            }
         }
 
         // Validate on_dead action
@@ -454,28 +418,6 @@ fn parse_runbook_inner(
                 });
             }
         }
-
-        // Validate 'ask' action requires 'message' field
-        if matches!(agent.on_idle.action(), crate::AgentAction::Ask)
-            && agent.on_idle.message().is_none()
-        {
-            return Err(ParseError::InvalidFormat {
-                location: format!("agent.{}.on_idle", agent_name),
-                message: "ask action requires a 'message' field with the question topic"
-                    .to_string(),
-            });
-        }
-        if let Some(ref stop_config) = agent.on_stop {
-            if matches!(stop_config.action(), crate::StopAction::Ask)
-                && stop_config.message().is_none()
-            {
-                return Err(ParseError::InvalidFormat {
-                    location: format!("agent.{}.on_stop", agent_name),
-                    message: "ask action requires a 'message' field with the question topic"
-                        .to_string(),
-                });
-            }
-        }
     }
 
     // 8. Detect duplicate step names within jobs
@@ -496,11 +438,9 @@ fn parse_runbook_inner(
         let step_names: HashSet<&str> = job.steps.iter().map(|s| s.name.as_str()).collect();
 
         // Check job-level transitions
-        for (field, transition) in [
-            ("on_done", &job.on_done),
-            ("on_fail", &job.on_fail),
-            ("on_cancel", &job.on_cancel),
-        ] {
+        for (field, transition) in
+            [("on_done", &job.on_done), ("on_fail", &job.on_fail), ("on_cancel", &job.on_cancel)]
+        {
             if let Some(t) = transition {
                 if !step_names.contains(t.step_name()) {
                     return Err(ParseError::InvalidFormat {
@@ -549,17 +489,11 @@ fn parse_runbook_inner(
             continue;
         }
         let mut referenced: HashSet<&str> = HashSet::new();
-        for t in [&job.on_done, &job.on_fail, &job.on_cancel]
-            .into_iter()
-            .flatten()
-        {
+        for t in [&job.on_done, &job.on_fail, &job.on_cancel].into_iter().flatten() {
             referenced.insert(t.step_name());
         }
         for step in &job.steps {
-            for t in [&step.on_done, &step.on_fail, &step.on_cancel]
-                .into_iter()
-                .flatten()
-            {
+            for t in [&step.on_done, &step.on_fail, &step.on_cancel].into_iter().flatten() {
                 referenced.insert(t.step_name());
             }
         }
@@ -599,21 +533,16 @@ pub(crate) fn validate_cross_refs(runbook: &Runbook) -> Result<(), ParseError> {
                 message: format!(
                     "references unknown queue '{}'; available queues: {}",
                     worker.source.queue,
-                    runbook
-                        .queues
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", "),
+                    runbook.queues.keys().cloned().collect::<Vec<_>>().join(", "),
                 ),
             });
         }
-        if !runbook.jobs.contains_key(&worker.handler.job) {
+        if !runbook.jobs.contains_key(&worker.run.job) {
             return Err(ParseError::InvalidFormat {
                 location: format!("worker.{}.handler.job", name),
                 message: format!(
                     "references unknown job '{}'; available jobs: {}",
-                    worker.handler.job,
+                    worker.run.job,
                     runbook.jobs.keys().cloned().collect::<Vec<_>>().join(", "),
                 ),
             });

@@ -1,6 +1,6 @@
 use serial_test::serial;
 
-use super::super::{filter_namespaces, format_text};
+use super::super::format_text;
 use oj_core::StepStatusKind;
 
 use super::{empty_ns, job_entry, make_ns, setup_no_color};
@@ -20,10 +20,7 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
 
     let output = format_text(30, &[ns], None, None);
 
-    let line = output
-        .lines()
-        .find(|l| l.contains("abcd1234"))
-        .expect("should find job row");
+    let line = output.lines().find(|l| l.contains("abcd1234")).expect("should find job row");
 
     let id_pos = line.find("abcd1234").unwrap();
     let name_pos = line.find("fix-login-abcd1234").unwrap();
@@ -32,18 +29,9 @@ fn column_order_is_id_name_kindstep_status_elapsed() {
     let elapsed_pos = line.find("7m").unwrap();
 
     assert!(id_pos < name_pos, "id should come before name: {line}");
-    assert!(
-        name_pos < kind_step_pos,
-        "name should come before kind/step: {line}"
-    );
-    assert!(
-        kind_step_pos < status_pos,
-        "kind/step should come before status: {line}"
-    );
-    assert!(
-        status_pos < elapsed_pos,
-        "status should come before elapsed: {line}"
-    );
+    assert!(name_pos < kind_step_pos, "name should come before kind/step: {line}");
+    assert!(kind_step_pos < status_pos, "kind/step should come before status: {line}");
+    assert!(status_pos < elapsed_pos, "status should come before elapsed: {line}");
 }
 
 // ── column alignment ────────────────────────────────────────────────
@@ -65,10 +53,8 @@ fn columns_are_aligned_across_rows() {
 
     let output = format_text(30, &[ns], None, None);
 
-    let lines: Vec<&str> = output
-        .lines()
-        .filter(|l| l.contains("aaaa1111") || l.contains("bbbb2222"))
-        .collect();
+    let lines: Vec<&str> =
+        output.lines().filter(|l| l.contains("aaaa1111") || l.contains("bbbb2222")).collect();
     assert_eq!(lines.len(), 2, "should find exactly 2 job rows");
 
     let ks_pos_0 = lines[0].find("build/check").unwrap();
@@ -105,10 +91,7 @@ fn name_column_omitted_when_all_names_hidden() {
 
     let output = format_text(30, &[ns], None, None);
 
-    let line = output
-        .lines()
-        .find(|l| l.contains("aaaa1111"))
-        .expect("should find first job row");
+    let line = output.lines().find(|l| l.contains("aaaa1111")).expect("should find first job row");
 
     let id_end = line.find("aaaa1111").unwrap() + "aaaa1111".len();
     let ks_start = line.find("build/check").unwrap();
@@ -129,7 +112,7 @@ fn worker_columns_are_aligned_across_rows() {
     let mut ns = empty_ns("myproject");
     ns.workers.push(oj_daemon::WorkerSummary {
         name: "a".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         queue: "default".to_string(),
         status: "running".to_string(),
         active: 1,
@@ -138,7 +121,7 @@ fn worker_columns_are_aligned_across_rows() {
     });
     ns.workers.push(oj_daemon::WorkerSummary {
         name: "long-worker-name".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         queue: "default".to_string(),
         status: "stopped".to_string(),
         active: 0,
@@ -168,7 +151,7 @@ fn worker_shows_full_at_max_concurrency() {
     let mut ns = empty_ns("myproject");
     ns.workers.push(oj_daemon::WorkerSummary {
         name: "busy".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         queue: "default".to_string(),
         status: "running".to_string(),
         active: 3,
@@ -178,14 +161,8 @@ fn worker_shows_full_at_max_concurrency() {
 
     let output = format_text(30, &[ns], None, None);
     let line = output.lines().find(|l| l.contains("busy")).unwrap();
-    assert!(
-        line.contains("full"),
-        "worker at max concurrency should show 'full': {line}"
-    );
-    assert!(
-        !line.contains("on"),
-        "worker at max concurrency should show 'full' not 'on': {line}"
-    );
+    assert!(line.contains("full"), "worker at max concurrency should show 'full': {line}");
+    assert!(!line.contains("on"), "worker at max concurrency should show 'full' not 'on': {line}");
 }
 
 // ── cron layout ─────────────────────────────────────────────────────
@@ -198,27 +175,25 @@ fn cron_columns_are_aligned_across_rows() {
     let mut ns = empty_ns("myproject");
     ns.crons.push(oj_daemon::CronSummary {
         name: "a".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         interval: "30m".to_string(),
-        job: "job:check".to_string(),
+        target: "job:check".to_string(),
         status: "running".to_string(),
         time: "in 12m".to_string(),
     });
     ns.crons.push(oj_daemon::CronSummary {
         name: "long-cron-name".to_string(),
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
         interval: "1h".to_string(),
-        job: "job:deploy".to_string(),
+        target: "job:deploy".to_string(),
         status: "stopped".to_string(),
         time: "3h ago".to_string(),
     });
 
     let output = format_text(30, &[ns], None, None);
 
-    let lines: Vec<&str> = output
-        .lines()
-        .filter(|l| l.contains("30m") || l.contains("1h"))
-        .collect();
+    let lines: Vec<&str> =
+        output.lines().filter(|l| l.contains("30m") || l.contains("1h")).collect();
     assert_eq!(lines.len(), 2, "should find exactly 2 cron rows");
 
     let st_pos_0 = lines[0].find("on").unwrap();
@@ -239,9 +214,9 @@ fn crons_sorted_alphabetically() {
     for name in ["zebra", "alpha", "mid"] {
         ns.crons.push(oj_daemon::CronSummary {
             name: name.to_string(),
-            namespace: "myproject".to_string(),
+            project: "myproject".to_string(),
             interval: "1h".to_string(),
-            job: "job:check".to_string(),
+            target: "job:check".to_string(),
             status: "running".to_string(),
             time: "in 5m".to_string(),
         });
@@ -336,47 +311,19 @@ fn agent_columns_are_aligned_across_rows() {
     );
 }
 
-// ── filter_namespaces ───────────────────────────────────────────────
-
-#[test]
-fn filter_namespaces_none_returns_all() {
-    let namespaces = vec![make_ns("alpha"), make_ns("beta"), make_ns("gamma")];
-    let filtered = filter_namespaces(namespaces, None);
-    assert_eq!(filtered.len(), 3);
-}
-
-#[test]
-fn filter_namespaces_matches_project() {
-    let namespaces = vec![make_ns("alpha"), make_ns("beta"), make_ns("gamma")];
-    let filtered = filter_namespaces(namespaces, Some("beta"));
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].namespace, "beta");
-}
-
-#[test]
-fn filter_namespaces_no_match_returns_empty() {
-    let namespaces = vec![make_ns("alpha"), make_ns("beta")];
-    let filtered = filter_namespaces(namespaces, Some("nonexistent"));
-    assert!(filtered.is_empty());
-}
+// ── project filtering ──────────────────────────────────────────────
 
 #[test]
 #[serial]
 fn project_filter_restricts_text_output() {
     setup_no_color();
 
-    let namespaces = vec![make_ns("alpha"), make_ns("beta")];
-    let filtered = filter_namespaces(namespaces, Some("alpha"));
+    let mut filtered = vec![make_ns("alpha"), make_ns("beta")];
+    filtered.retain(|ns| ns.project == "alpha");
     let output = format_text(60, &filtered, None, None);
 
-    assert!(
-        output.contains("alpha"),
-        "output should contain the filtered project:\n{output}"
-    );
-    assert!(
-        !output.contains("beta"),
-        "output should not contain other projects:\n{output}"
-    );
+    assert!(output.contains("alpha"), "output should contain the filtered project:\n{output}");
+    assert!(!output.contains("beta"), "output should not contain other projects:\n{output}");
 }
 
 // ── sorting ─────────────────────────────────────────────────────────
@@ -390,7 +337,7 @@ fn workers_sorted_alphabetically() {
     for (name, active) in [("zebra", 1usize), ("alpha", 0), ("mid", 0)] {
         ns.workers.push(oj_daemon::WorkerSummary {
             name: name.to_string(),
-            namespace: "myproject".to_string(),
+            project: "myproject".to_string(),
             queue: "default".to_string(),
             status: if active > 0 { "running" } else { "idle" }.to_string(),
             active,

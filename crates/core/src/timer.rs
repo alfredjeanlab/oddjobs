@@ -6,10 +6,10 @@
 //! TimerId uniquely identifies a timer instance used for scheduling delayed
 //! actions such as timeouts, heartbeats, or periodic checks.
 
-use crate::agent_run::AgentRunId;
+use crate::crew::CrewId;
 use crate::job::JobId;
-use crate::namespace::scoped_name;
 use crate::owner::OwnerId;
+use crate::project::scoped_name;
 
 crate::define_id! {
     /// Unique identifier for a timer instance.
@@ -20,196 +20,139 @@ crate::define_id! {
 }
 
 impl TimerId {
-    /// Timer ID for liveness monitoring of a job.
-    pub fn liveness(job_id: &JobId) -> Self {
-        Self::new(format!("liveness:{}", job_id))
+    pub fn liveness(owner: impl Into<OwnerId>) -> Self {
+        TimerKind::Liveness(owner.into()).to_timer_id()
     }
 
-    /// Timer ID for deferred exit handling of a job.
-    pub fn exit_deferred(job_id: &JobId) -> Self {
-        Self::new(format!("exit-deferred:{}", job_id))
+    pub fn exit_deferred(owner: impl Into<OwnerId>) -> Self {
+        TimerKind::ExitDeferred(owner.into()).to_timer_id()
     }
 
-    /// Timer ID for cooldown between action attempts.
-    pub fn cooldown(job_id: &JobId, trigger: &str, chain_pos: usize) -> Self {
-        Self::new(format!("cooldown:{}:{}:{}", job_id, trigger, chain_pos))
+    pub fn cooldown(owner: impl Into<OwnerId>, trigger: &str, chain_pos: usize) -> Self {
+        TimerKind::Cooldown { owner: owner.into(), trigger, chain_pos }.to_timer_id()
     }
 
-    /// Returns true if this is a liveness timer.
-    pub fn is_liveness(&self) -> bool {
-        self.0.starts_with("liveness:")
+    pub fn queue_retry(queue: &str, item_id: &str) -> Self {
+        TimerKind::QueueRetry { scoped_queue: queue, item_id }.to_timer_id()
     }
 
-    /// Returns true if this is an exit-deferred timer.
-    pub fn is_exit_deferred(&self) -> bool {
-        self.0.starts_with("exit-deferred:")
+    pub fn cron(cron_name: &str, project: &str) -> Self {
+        Self::new(format!("cron:{}", scoped_name(project, cron_name)))
     }
 
-    /// Returns true if this is a cooldown timer.
-    pub fn is_cooldown(&self) -> bool {
-        self.0.starts_with("cooldown:")
+    pub fn queue_poll(worker_name: &str, project: &str) -> Self {
+        Self::new(format!("queue-poll:{}", scoped_name(project, worker_name)))
     }
 
-    /// Timer ID for queue item retry cooldown.
-    pub fn queue_retry(queue_name: &str, item_id: &str) -> Self {
-        Self::new(format!("queue-retry:{}:{}", queue_name, item_id))
+    /// Parse this timer ID into a typed `TimerKind`.
+    pub fn kind(&self) -> Option<TimerKind<'_>> {
+        TimerKind::parse(self.as_str())
     }
-
-    /// Returns true if this is a queue retry timer.
-    pub fn is_queue_retry(&self) -> bool {
-        self.0.starts_with("queue-retry:")
-    }
-
-    /// Timer ID for a cron interval tick.
-    pub fn cron(cron_name: &str, namespace: &str) -> Self {
-        Self::new(format!("cron:{}", scoped_name(namespace, cron_name)))
-    }
-
-    /// Returns true if this is a cron timer.
-    pub fn is_cron(&self) -> bool {
-        self.0.starts_with("cron:")
-    }
-
-    /// Timer ID for periodic queue polling.
-    pub fn queue_poll(worker_name: &str, namespace: &str) -> Self {
-        Self::new(format!(
-            "queue-poll:{}",
-            scoped_name(namespace, worker_name)
-        ))
-    }
-
-    /// Returns true if this is a queue poll timer.
-    pub fn is_queue_poll(&self) -> bool {
-        self.0.starts_with("queue-poll:")
-    }
-
-    /// Timer ID for liveness monitoring of a standalone agent run.
-    pub fn liveness_agent_run(agent_run_id: &AgentRunId) -> Self {
-        Self::new(format!("liveness:ar:{}", agent_run_id))
-    }
-
-    /// Timer ID for deferred exit handling of a standalone agent run.
-    pub fn exit_deferred_agent_run(agent_run_id: &AgentRunId) -> Self {
-        Self::new(format!("exit-deferred:ar:{}", agent_run_id))
-    }
-
-    /// Timer ID for cooldown between action attempts on a standalone agent run.
-    pub fn cooldown_agent_run(agent_run_id: &AgentRunId, trigger: &str, chain_pos: usize) -> Self {
-        Self::new(format!(
-            "cooldown:ar:{}:{}:{}",
-            agent_run_id, trigger, chain_pos
-        ))
-    }
-
-    /// Timer ID for idle grace period before triggering on_idle for a job.
-    pub fn idle_grace(job_id: &JobId) -> Self {
-        Self::new(format!("idle-grace:{}", job_id))
-    }
-
-    /// Timer ID for idle grace period before triggering on_idle for a standalone agent run.
-    pub fn idle_grace_agent_run(agent_run_id: &AgentRunId) -> Self {
-        Self::new(format!("idle-grace:ar:{}", agent_run_id))
-    }
-
-    /// Returns true if this is an idle grace timer.
-    pub fn is_idle_grace(&self) -> bool {
-        self.0.starts_with("idle-grace:")
-    }
-
-    // -------------------------------------------------------------------------
-    // OwnerId-based constructors (unified across Job/AgentRun owners)
-    // -------------------------------------------------------------------------
-
-    /// Timer ID for liveness monitoring, dispatching to the appropriate owner type.
-    pub fn owner_liveness(owner: &OwnerId) -> Self {
-        match owner {
-            OwnerId::Job(job_id) => Self::liveness(job_id),
-            OwnerId::AgentRun(ar_id) => Self::liveness_agent_run(ar_id),
-        }
-    }
-
-    /// Timer ID for deferred exit handling, dispatching to the appropriate owner type.
-    pub fn owner_exit_deferred(owner: &OwnerId) -> Self {
-        match owner {
-            OwnerId::Job(job_id) => Self::exit_deferred(job_id),
-            OwnerId::AgentRun(ar_id) => Self::exit_deferred_agent_run(ar_id),
-        }
-    }
-
-    /// Timer ID for cooldown between action attempts, dispatching to the appropriate owner type.
-    pub fn owner_cooldown(owner: &OwnerId, trigger: &str, chain_pos: usize) -> Self {
-        match owner {
-            OwnerId::Job(job_id) => Self::cooldown(job_id, trigger, chain_pos),
-            OwnerId::AgentRun(ar_id) => Self::cooldown_agent_run(ar_id, trigger, chain_pos),
-        }
-    }
-
-    /// Timer ID for idle grace period, dispatching to the appropriate owner type.
-    pub fn owner_idle_grace(owner: &OwnerId) -> Self {
-        match owner {
-            OwnerId::Job(job_id) => Self::idle_grace(job_id),
-            OwnerId::AgentRun(ar_id) => Self::idle_grace_agent_run(ar_id),
-        }
-    }
-
     /// Extract the OwnerId if this timer is associated with an owner.
     pub fn owner_id(&self) -> Option<OwnerId> {
-        // Check for agent_run timers first (they have :ar: marker)
-        if let Some(ar_id_str) = self.agent_run_id_str() {
-            return Some(OwnerId::AgentRun(AgentRunId::new(ar_id_str)));
+        match self.kind()? {
+            TimerKind::Liveness(owner)
+            | TimerKind::ExitDeferred(owner)
+            | TimerKind::Cooldown { owner, .. } => Some(owner),
+            _ => None,
         }
-        // Then check for job timers
-        if let Some(job_id_str) = self.job_id_str() {
-            return Some(OwnerId::Job(JobId::new(job_id_str)));
+    }
+}
+
+/// Parsed representation of a timer ID for type-safe routing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TimerKind<'a> {
+    Liveness(OwnerId),
+    ExitDeferred(OwnerId),
+    Cooldown { owner: OwnerId, trigger: &'a str, chain_pos: usize },
+    QueueRetry { scoped_queue: &'a str, item_id: &'a str },
+    Cron { scoped_name: &'a str },
+    QueuePoll { scoped_name: &'a str },
+}
+
+impl<'a> TimerKind<'a> {
+    /// Parse a timer ID string into a typed `TimerKind`.
+    ///
+    /// Returns `None` for unrecognized timer ID formats.
+    pub fn parse(id: &'a str) -> Option<TimerKind<'a>> {
+        if let Some(rest) = id.strip_prefix("liveness:") {
+            return Some(TimerKind::Liveness(parse_owner(rest)?.0));
+        }
+        if let Some(rest) = id.strip_prefix("exit-deferred:") {
+            return Some(TimerKind::ExitDeferred(parse_owner(rest)?.0));
+        }
+        if let Some(rest) = id.strip_prefix("cooldown:") {
+            let (owner, after) = parse_owner(rest)?;
+            if after.is_empty() {
+                return None;
+            }
+            let (trigger, chain_pos_str) = after.rsplit_once(':')?;
+            return Some(TimerKind::Cooldown {
+                owner,
+                trigger,
+                chain_pos: chain_pos_str.parse().unwrap_or(0),
+            });
+        }
+        if let Some(rest) = id.strip_prefix("queue-retry:") {
+            let (scoped_queue, item_id) = rest.rsplit_once(':')?;
+            return Some(TimerKind::QueueRetry { scoped_queue, item_id });
+        }
+        if let Some(rest) = id.strip_prefix("cron:") {
+            return Some(TimerKind::Cron { scoped_name: rest });
+        }
+        if let Some(rest) = id.strip_prefix("queue-poll:") {
+            return Some(TimerKind::QueuePoll { scoped_name: rest });
         }
         None
     }
 
-    /// Returns the AgentRunId portion if this is an agent-run-related timer.
-    pub fn agent_run_id_str(&self) -> Option<&str> {
-        if let Some(rest) = self.0.strip_prefix("liveness:ar:") {
-            Some(rest)
-        } else if let Some(rest) = self.0.strip_prefix("exit-deferred:ar:") {
-            Some(rest)
-        } else if let Some(rest) = self.0.strip_prefix("cooldown:ar:") {
-            // Format: "cooldown:ar:agent_run_id:trigger:chain_pos"
-            rest.split(':').next()
-        } else if let Some(rest) = self.0.strip_prefix("idle-grace:ar:") {
-            Some(rest)
-        } else {
-            None
+    /// Format this `TimerKind` back into a canonical `TimerId`.
+    pub fn to_timer_id(&self) -> TimerId {
+        match self {
+            TimerKind::Cron { scoped_name } => TimerId::new(format!("cron:{scoped_name}")),
+            TimerKind::Liveness(o) => TimerId::new(format!("liveness:{}", owner_segment(o))),
+            TimerKind::ExitDeferred(o) => {
+                TimerId::new(format!("exit-deferred:{}", owner_segment(o)))
+            }
+            TimerKind::Cooldown { owner, trigger, chain_pos } => {
+                TimerId::new(format!("cooldown:{}:{}:{}", owner_segment(owner), trigger, chain_pos))
+            }
+            TimerKind::QueueRetry { scoped_queue, item_id } => {
+                TimerId::new(format!("queue-retry:{scoped_queue}:{item_id}"))
+            }
+            TimerKind::QueuePoll { scoped_name } => {
+                TimerId::new(format!("queue-poll:{scoped_name}"))
+            }
         }
     }
+}
 
-    /// Returns true if this is an agent-run-related timer.
-    pub fn is_agent_run_timer(&self) -> bool {
-        self.agent_run_id_str().is_some()
-    }
+/// Parse an owner segment from a timer ID string.
+///
+/// Returns `(owner, remaining)` where remaining is text after the owner's id
+/// (separated by `:`), or empty if the owner consumes the full string.
+///
+/// Format: `job:<id>` or `agent:<id>`.
+fn parse_owner(s: &str) -> Option<(OwnerId, &str)> {
+    let (prefix, rest) = if let Some(r) = s.strip_prefix("job:") {
+        ("job", r)
+    } else if let Some(r) = s.strip_prefix("agent:") {
+        ("agent", r)
+    } else {
+        return None;
+    };
+    let (id, remaining) = rest.split_once(':').unwrap_or((rest, ""));
+    let owner = match prefix {
+        "agent" => CrewId::new(id).into(),
+        _ => JobId::new(id).into(),
+    };
+    Some((owner, remaining))
+}
 
-    /// Extracts the job ID portion if this is a job-related timer.
-    ///
-    /// Returns `Some(&str)` for liveness, exit-deferred, cooldown, and idle-grace timers.
-    /// For cooldown timers, extracts the job_id from "cooldown:job_id:trigger:pos".
-    ///
-    /// NOTE: Returns `None` for agent_run timers (which have `:ar:` marker).
-    pub fn job_id_str(&self) -> Option<&str> {
-        // Agent-run timers have `:ar:` marker — exclude them
-        if self.is_agent_run_timer() {
-            return None;
-        }
-
-        if let Some(rest) = self.0.strip_prefix("liveness:") {
-            Some(rest)
-        } else if let Some(rest) = self.0.strip_prefix("exit-deferred:") {
-            Some(rest)
-        } else if let Some(rest) = self.0.strip_prefix("cooldown:") {
-            // Format: "cooldown:job_id:trigger:chain_pos"
-            rest.split(':').next()
-        } else if let Some(rest) = self.0.strip_prefix("idle-grace:") {
-            Some(rest)
-        } else {
-            None
-        }
+fn owner_segment(owner: &OwnerId) -> String {
+    match owner {
+        OwnerId::Job(id) => format!("job:{id}"),
+        OwnerId::Crew(id) => format!("agent:{id}"),
     }
 }
 

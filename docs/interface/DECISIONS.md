@@ -4,7 +4,7 @@ Human-in-the-loop decisions let jobs and agents pause for human input when they 
 
 ## Overview
 
-A decision is created when an agent escalates — via `on_idle`, `on_dead`, `on_error`, `on_prompt`, or a failed `gate` command. The owning job (or agent run) enters a waiting state until the decision is resolved. Each decision carries a context message explaining what happened and a set of numbered options appropriate to the escalation source.
+A decision is created when an agent escalates — via `on_idle`, `on_dead`, `on_error`, `on_prompt`, or a failed `gate` command. The owning job (or crew) enters a waiting state until the decision is resolved. Each decision carries a context message explaining what happened and a set of numbered options appropriate to the escalation source.
 
 ## CLI
 
@@ -14,7 +14,7 @@ List pending (unresolved) decisions.
 
 ```bash
 oj decision list                     # List pending decisions
-oj decision list --project <name>    # Filter by project namespace
+oj decision list --project <name>    # Filter by project project
 oj decision list -o json             # JSON output
 ```
 
@@ -47,7 +47,7 @@ Interactively walk through all pending decisions.
 
 ```bash
 oj decision review                   # Review all pending decisions
-oj decision review --project <name>  # Filter by project namespace
+oj decision review --project <name>  # Filter by project project
 ```
 
 For each unresolved decision, `review` displays the full context and options, then prompts for input:
@@ -63,7 +63,7 @@ Decisions are created by different escalation triggers, each with its own defaul
 
 | Source | Trigger | Default Options |
 |--------|---------|-----------------|
-| `idle` | Agent idle past grace period | Nudge *(rec)*, Done, Cancel, Dismiss |
+| `idle` | Agent idle (stop hook fired) | Nudge *(rec)*, Done, Cancel, Dismiss |
 | `error` | Agent API/runtime error or unexpected exit | Retry *(rec)*, Skip, Cancel |
 | `gate` | Gate command exited non-zero | Retry *(rec)*, Skip, Cancel |
 | `approval` | Agent showing a permission prompt | Approve, Deny, Cancel |
@@ -115,8 +115,8 @@ Two events track the decision lifecycle:
 
 | Type tag | Variant | Fields |
 |----------|---------|--------|
-| `decision:created` | DecisionCreated | `id`, `job_id`, `agent_id?`, `owner`, `source`, `context`, `options[]`, `created_at_ms`, `namespace` |
-| `decision:resolved` | DecisionResolved | `id`, `chosen?`, `message?`, `resolved_at_ms`, `namespace` |
+| `decision:created` | DecisionCreated | `id`, `job_id`, `agent_id?`, `owner`, `source`, `context`, `options[]`, `created_at_ms`, `project` |
+| `decision:resolved` | DecisionResolved | `id`, `chosen?`, `message?`, `resolved_at_ms`, `project` |
 
 `decision:created` sets the owning job's step to `Waiting(decision_id)`. `decision:resolved` updates the decision record and emits the mapped action event (e.g. `job:resume`, `job:cancel`, `step:completed`).
 

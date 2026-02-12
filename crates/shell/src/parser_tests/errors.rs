@@ -7,19 +7,11 @@ use crate::ast::{Command, WordPart};
 use crate::parser::{ParseError, Parser};
 use crate::token::TokenKind;
 
-// =============================================================================
-// Macro-based Error Tests
-// =============================================================================
-
 parse_error_tests! {
     macro_pipe_at_start: "| cmd" => ParseError::UnexpectedToken { .. },
     macro_and_at_end: "cmd &&" => ParseError::UnexpectedEof { .. },
     macro_or_at_end: "cmd ||" => ParseError::UnexpectedEof { .. },
 }
-
-// =============================================================================
-// Context Helper Tests
-// =============================================================================
 
 #[test]
 fn test_error_span() {
@@ -79,56 +71,28 @@ fn test_error_context_utf8() {
     }
 }
 
-// =============================================================================
-// Standard Tests
-// =============================================================================
-
 #[test]
 fn test_unexpected_pipe_at_start() {
     let err = Parser::parse("| cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Pipe,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::Pipe, .. }));
 }
 
 #[test]
 fn test_unexpected_and_at_start() {
     let err = Parser::parse("&& cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::And,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::And, .. }));
 }
 
 #[test]
 fn test_unexpected_or_at_start() {
     let err = Parser::parse("|| cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Or,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::Or, .. }));
 }
 
 #[test]
 fn test_unexpected_ampersand_at_start() {
     let err = Parser::parse("& cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Ampersand,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::Ampersand, .. }));
 }
 
 #[test]
@@ -253,48 +217,15 @@ fn test_recovery_with_all_errors() {
     assert_eq!(result.errors.len(), 3);
 }
 
-#[test]
-fn test_double_pipe_error() {
-    // cmd || || should fail (missing command after first ||)
-    let err = Parser::parse("cmd || ||").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Or,
-            ..
-        }
-    ));
+#[yare::parameterized(
+    double_pipe    = { "cmd || ||", TokenKind::Or },
+    double_and     = { "cmd && &&", TokenKind::And },
+    pipe_after_and = { "cmd && |",  TokenKind::Pipe },
+)]
+fn double_operator_error(input: &str, expected_token: TokenKind) {
+    let err = Parser::parse(input).unwrap_err();
+    assert!(matches!(err, ParseError::UnexpectedToken { found, .. } if found == expected_token));
 }
-
-#[test]
-fn test_double_and_error() {
-    // cmd && && should fail (missing command after first &&)
-    let err = Parser::parse("cmd && &&").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::And,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn test_pipe_after_and_error() {
-    // cmd && | should fail (unexpected |)
-    let err = Parser::parse("cmd && |").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Pipe,
-            ..
-        }
-    ));
-}
-
-// =============================================================================
-// Compound Command Edge Cases
-// =============================================================================
 
 #[test]
 fn test_empty_subshell_allowed() {
@@ -326,44 +257,22 @@ fn test_empty_brace_group_allowed() {
     }
 }
 
-#[test]
-fn test_unclosed_subshell() {
-    let err = Parser::parse("(echo hello").unwrap_err();
-    // Missing closing parenthesis
+#[yare::parameterized(
+    unclosed_subshell    = { "(echo hello" },
+    unclosed_brace_group = { "{ echo hello" },
+)]
+fn unclosed_group(input: &str) {
+    let err = Parser::parse(input).unwrap_err();
     assert!(matches!(err, ParseError::UnexpectedEof { .. }));
 }
 
-#[test]
-fn test_unclosed_brace_group() {
-    let err = Parser::parse("{ echo hello").unwrap_err();
-    // Missing closing brace
-    assert!(matches!(err, ParseError::UnexpectedEof { .. }));
-}
-
-#[test]
-fn test_stray_closing_paren() {
-    let err = Parser::parse("echo hello )").unwrap_err();
-    // Unexpected closing paren without opening
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::RParen,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn test_stray_closing_brace() {
-    let err = Parser::parse("echo hello }").unwrap_err();
-    // Unexpected closing brace without opening
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::RBrace,
-            ..
-        }
-    ));
+#[yare::parameterized(
+    stray_rparen = { "echo hello )", TokenKind::RParen },
+    stray_rbrace = { "echo hello }", TokenKind::RBrace },
+)]
+fn stray_closing_char(input: &str, expected: TokenKind) {
+    let err = Parser::parse(input).unwrap_err();
+    assert!(matches!(err, ParseError::UnexpectedToken { found, .. } if found == expected));
 }
 
 #[test]
@@ -372,11 +281,7 @@ fn test_nested_subshell_requires_separator() {
     // This is because `(inner)` inside `(echo ...)` is parsed differently
     // Valid: `(echo; (inner))` or `((inner))`
     let result = Parser::parse("((inner))");
-    assert!(
-        result.is_ok(),
-        "Nested subshell with separator should parse: {:?}",
-        result
-    );
+    assert!(result.is_ok(), "Nested subshell with separator should parse: {:?}", result);
 }
 
 #[test]
@@ -384,13 +289,7 @@ fn test_subshell_not_in_job_segment() {
     // Subshell followed by pipe is not supported in this parser
     // (subshells are compound commands, not simple commands)
     let err = Parser::parse("(echo hello) | cat").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Pipe,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::Pipe, .. }));
 }
 
 #[test]
@@ -400,72 +299,24 @@ fn test_deeply_nested_unclosed() {
     assert!(matches!(err, ParseError::UnexpectedEof { .. }));
 }
 
-// =============================================================================
-// Shell Keywords as Commands
-// =============================================================================
 //
 // The parser does NOT have special handling for shell control flow keywords.
 // Keywords like 'if', 'for', 'while', 'case' are treated as regular command
 // names. These tests document the current behavior.
 
-#[test]
-fn test_if_treated_as_command() {
-    // "if" is parsed as a command name, not a keyword
-    let result = Parser::parse("if").unwrap();
+#[yare::parameterized(
+    keyword_if    = { "if" },
+    keyword_for   = { "for" },
+    keyword_while = { "while" },
+    keyword_case  = { "case" },
+    keyword_then  = { "then" },
+    keyword_fi    = { "fi" },
+)]
+fn keyword_treated_as_command(keyword: &str) {
+    let result = Parser::parse(keyword).unwrap();
     assert_eq!(result.commands.len(), 1);
-
     let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("if")]);
-}
-
-#[test]
-fn test_for_treated_as_command() {
-    // "for" is parsed as a command name
-    let result = Parser::parse("for").unwrap();
-    assert_eq!(result.commands.len(), 1);
-
-    let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("for")]);
-}
-
-#[test]
-fn test_while_treated_as_command() {
-    // "while" is parsed as a command name
-    let result = Parser::parse("while").unwrap();
-    assert_eq!(result.commands.len(), 1);
-
-    let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("while")]);
-}
-
-#[test]
-fn test_case_treated_as_command() {
-    // "case" is parsed as a command name
-    let result = Parser::parse("case").unwrap();
-    assert_eq!(result.commands.len(), 1);
-
-    let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("case")]);
-}
-
-#[test]
-fn test_then_treated_as_command() {
-    // "then" is parsed as a command name
-    let result = Parser::parse("then").unwrap();
-    assert_eq!(result.commands.len(), 1);
-
-    let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("then")]);
-}
-
-#[test]
-fn test_fi_treated_as_command() {
-    // "fi" is parsed as a command name
-    let result = Parser::parse("fi").unwrap();
-    assert_eq!(result.commands.len(), 1);
-
-    let cmd = get_simple_command(&result.commands[0]);
-    assert_eq!(cmd.name.parts, vec![WordPart::literal("fi")]);
+    assert_eq!(cmd.name.parts, vec![WordPart::literal(keyword)]);
 }
 
 #[test]
@@ -497,9 +348,6 @@ fn test_for_loop_parsed_as_sequence() {
     assert!(result.commands.len() >= 2, "should have multiple commands");
 }
 
-// =============================================================================
-// Function Definition Tests
-// =============================================================================
 //
 // Function definitions (foo() { ... }) are NOT supported.
 // The parser expects ';' or newline after a command, not '('.
@@ -508,31 +356,16 @@ fn test_for_loop_parsed_as_sequence() {
 fn test_function_like_syntax_error() {
     // "foo()" causes an error: after "foo", parser expects separator not '('
     let err = Parser::parse("foo()").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::LParen,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::LParen, .. }));
 }
 
 #[test]
 fn test_function_with_body_error() {
     // "foo() { echo; }" also errors on the '('
     let err = Parser::parse("foo() { echo; }").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::LParen,
-            ..
-        }
-    ));
+    assert!(matches!(err, ParseError::UnexpectedToken { found: TokenKind::LParen, .. }));
 }
 
-// =============================================================================
-// Conditional Expression Tests
-// =============================================================================
 //
 // [[ expr ]] double-bracket conditionals are NOT specially handled.
 // [ expr ] single-bracket is the test command.
@@ -559,9 +392,6 @@ fn test_double_bracket_not_special() {
     assert_eq!(cmd.name.parts, vec![WordPart::literal("[[")]);
 }
 
-// =============================================================================
-// Heredoc Parser Limitations (Documentation Tests)
-// =============================================================================
 //
 // The lexer correctly tokenizes heredocs (<<EOF...EOF), but the parser does
 // NOT yet handle HereDoc tokens. The parser expects simple command structure.
@@ -585,10 +415,7 @@ fn test_heredoc_now_supported() {
     };
     assert_eq!(cmd.redirections.len(), 1);
     assert!(
-        matches!(
-            &cmd.redirections[0],
-            crate::ast::Redirection::HereDoc { .. }
-        ),
+        matches!(&cmd.redirections[0], crate::ast::Redirection::HereDoc { .. }),
         "expected HereDoc redirection"
     );
 }
@@ -604,10 +431,6 @@ fn test_multiline_with_continuation() {
     assert_eq!(cmd.args.len(), 1);
     assert_eq!(cmd.args[0].parts, vec![WordPart::literal("hello")]);
 }
-
-// =============================================================================
-// Multi-line Input Tests
-// =============================================================================
 
 #[test]
 fn test_error_multiline_span_locates_correct_line() {
@@ -625,16 +448,8 @@ fn test_error_multiline_recovery() {
     let result = Parser::parse_with_recovery(input);
     // Should recover: cmd1 parses, | is error, cmd2 parses
     assert_eq!(result.errors.len(), 1, "Should have 1 error");
-    assert_eq!(
-        result.commands.commands.len(),
-        2,
-        "Should have 2 valid commands"
-    );
+    assert_eq!(result.commands.commands.len(), 2, "Should have 2 valid commands");
 }
-
-// =============================================================================
-// Substitution Error Tests
-// =============================================================================
 
 #[test]
 fn test_substitution_error_preserves_context() {
@@ -669,10 +484,6 @@ fn test_nested_substitution_error() {
     }
 }
 
-// =============================================================================
-// Recovery Order Tests
-// =============================================================================
-
 #[test]
 fn test_recovery_preserves_error_order() {
     let result = Parser::parse_with_recovery("| ; && ; ||");
@@ -683,14 +494,8 @@ fn test_recovery_preserves_error_order() {
     let span1 = result.errors[1].span().unwrap();
     let span2 = result.errors[2].span().unwrap();
 
-    assert!(
-        span0.start < span1.start,
-        "Error 0 should come before error 1"
-    );
-    assert!(
-        span1.start < span2.start,
-        "Error 1 should come before error 2"
-    );
+    assert!(span0.start < span1.start, "Error 0 should come before error 1");
+    assert!(span1.start < span2.start, "Error 1 should come before error 2");
 }
 
 #[test]
@@ -702,10 +507,6 @@ fn test_lexer_error_stops_parsing() {
     // Parser stops at lexer error, so no valid commands parsed
     assert!(result.commands.commands.is_empty());
 }
-
-// =============================================================================
-// Diagnostic Tests
-// =============================================================================
 
 #[test]
 fn test_diagnostic_method() {
@@ -732,9 +533,5 @@ fn test_diagnostic_multiline_shows_correct_line() {
     let err = Parser::parse(input).unwrap_err();
     let diag = err.diagnostic(input).unwrap();
     assert!(diag.contains("line 3"), "Should show line 3: {}", diag);
-    assert!(
-        diag.contains("&& bad"),
-        "Should show line content: {}",
-        diag
-    );
+    assert!(diag.contains("&& bad"), "Should show line content: {}", diag);
 }

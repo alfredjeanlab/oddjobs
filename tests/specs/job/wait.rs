@@ -63,11 +63,7 @@ fn wait_single_job_succeeds() {
     temp.oj().args(&["run", "succeed"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete");
 
@@ -91,11 +87,7 @@ fn wait_single_job_failed_exits_nonzero() {
     assert!(done, "job should fail");
 
     let id = extract_job_id(&temp, "fail_cmd");
-    temp.oj()
-        .args(&["job", "wait", &id])
-        .env("OJ_WAIT_POLL_MS", "10")
-        .fails()
-        .stderr_has("failed");
+    temp.oj().args(&["job", "wait", &id]).env("OJ_WAIT_POLL_MS", "10").fails().stderr_has("failed");
 }
 
 #[test]
@@ -156,15 +148,9 @@ fn wait_multiple_ids_all_mode() {
     // Both should be mentioned in output (match final "Job ... completed" lines,
     // not step progress lines like "execute completed (0s)")
     let stdout = result.stdout();
-    let job_completed_count = stdout
-        .lines()
-        .filter(|l| l.starts_with("Job") && l.contains("completed"))
-        .count();
-    assert_eq!(
-        job_completed_count, 2,
-        "should report both jobs as completed, got: {}",
-        stdout
-    );
+    let job_completed_count =
+        stdout.lines().filter(|l| l.starts_with("Job") && l.contains("completed")).count();
+    assert_eq!(job_completed_count, 2, "should report both jobs as completed, got: {}", stdout);
 }
 
 #[test]
@@ -212,11 +198,7 @@ fn wait_exits_on_sigint() {
 
     // Wait for the job to appear
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("slow")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("slow")
     });
     assert!(found, "job should appear in list");
 
@@ -243,15 +225,11 @@ fn wait_exits_on_sigint() {
     assert!(started, "wait process should be running");
     std::thread::sleep(std::time::Duration::from_millis(100));
 
-    Command::new("kill")
-        .args(["-2", &child_pid])
-        .status()
-        .expect("should send SIGINT");
+    Command::new("kill").args(["-2", &child_pid]).status().expect("should send SIGINT");
 
     // Wait for exit with a safety timeout (don't hang for 5 minutes)
-    let exited = wait_for(SPEC_WAIT_MAX_MS, || {
-        child.try_wait().expect("try_wait failed").is_some()
-    });
+    let exited =
+        wait_for(SPEC_WAIT_MAX_MS, || child.try_wait().expect("try_wait failed").is_some());
     assert!(exited, "wait process should exit after SIGINT");
 
     let output = child.wait_with_output().expect("should collect output");
@@ -278,11 +256,7 @@ fn wait_sigint_during_poll_is_not_lost() {
     temp.oj().args(&["run", "slow"]).passes();
 
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("slow")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("slow")
     });
     assert!(found, "job should appear in list");
 
@@ -306,14 +280,10 @@ fn wait_sigint_during_poll_is_not_lost() {
     // when SIGINT arrives (not in the initial setup).
     std::thread::sleep(std::time::Duration::from_millis(300));
 
-    Command::new("kill")
-        .args(["-2", &child_pid])
-        .status()
-        .expect("should send SIGINT");
+    Command::new("kill").args(["-2", &child_pid]).status().expect("should send SIGINT");
 
-    let exited = wait_for(SPEC_WAIT_MAX_MS, || {
-        child.try_wait().expect("try_wait failed").is_some()
-    });
+    let exited =
+        wait_for(SPEC_WAIT_MAX_MS, || child.try_wait().expect("try_wait failed").is_some());
     assert!(
         exited,
         "wait process should exit after SIGINT (signal must not be lost between poll iterations)"

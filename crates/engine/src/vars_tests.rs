@@ -13,9 +13,8 @@ fn bare_keys_get_var_prefix() {
 
 #[test]
 fn dotted_bare_keys_get_var_prefix() {
-    let input: HashMap<String, String> = [("mr.branch".into(), "feat/x".into())]
-        .into_iter()
-        .collect();
+    let input: HashMap<String, String> =
+        [("mr.branch".into(), "feat/x".into())].into_iter().collect();
     let result = namespace_vars(&input);
     assert_eq!(result.get("var.mr.branch"), Some(&"feat/x".to_string()));
 }
@@ -25,7 +24,7 @@ fn already_prefixed_keys_are_kept() {
     let input: HashMap<String, String> = [
         ("var.mr.branch".into(), "feat/x".into()),
         ("invoke.dir".into(), "/tmp".into()),
-        ("workspace.root".into(), "/ws".into()),
+        ("source.root".into(), "/ws".into()),
         ("local.repo".into(), "/repo".into()),
         ("args.name".into(), "test".into()),
     ]
@@ -34,8 +33,10 @@ fn already_prefixed_keys_are_kept() {
     let result = namespace_vars(&input);
     assert_eq!(result.get("var.mr.branch"), Some(&"feat/x".to_string()));
     assert_eq!(result.get("invoke.dir"), Some(&"/tmp".to_string()));
+    assert_eq!(result.get("source.root"), Some(&"/ws".to_string()));
     assert!(!result.contains_key("var.var.mr.branch"));
     assert!(!result.contains_key("var.invoke.dir"));
+    assert!(!result.contains_key("var.source.root"));
 }
 
 #[test]
@@ -43,13 +44,13 @@ fn mixed_bare_and_prefixed() {
     let input: HashMap<String, String> = [
         ("title".into(), "hello".into()),
         ("var.mr.branch".into(), "feat/x".into()),
-        ("workspace.nonce".into(), "abc123".into()),
+        ("source.nonce".into(), "abc123".into()),
     ]
     .into_iter()
     .collect();
     let result = namespace_vars(&input);
     assert_eq!(result.get("var.title"), Some(&"hello".to_string()));
     assert_eq!(result.get("var.mr.branch"), Some(&"feat/x".to_string()));
-    assert_eq!(result.get("workspace.nonce"), Some(&"abc123".to_string()));
+    assert_eq!(result.get("source.nonce"), Some(&"abc123".to_string()));
     assert!(!result.contains_key("var.var.mr.branch"));
 }

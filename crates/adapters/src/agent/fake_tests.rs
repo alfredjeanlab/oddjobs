@@ -5,8 +5,8 @@ use super::*;
 use oj_core::JobId;
 use std::path::PathBuf;
 
-fn test_spawn_config(agent_id: &str) -> AgentSpawnConfig {
-    AgentSpawnConfig::new(
+fn test_spawn_config(agent_id: &str) -> AgentConfig {
+    AgentConfig::new(
         AgentId::new(agent_id),
         "claude",
         PathBuf::from("/workspace"),
@@ -15,8 +15,8 @@ fn test_spawn_config(agent_id: &str) -> AgentSpawnConfig {
     .agent_name("claude")
     .prompt("Test")
     .job_name("test")
-    .job_id("pipe-1")
-    .project_root(PathBuf::from("/project"))
+    .job_id("job-1")
+    .project_path(PathBuf::from("/project"))
 }
 
 #[tokio::test]
@@ -54,20 +54,13 @@ async fn state_changes() {
 
     // Emit a state change event
     adapter
-        .emit_state_change(
-            &AgentId::new("agent-1"),
-            AgentState::Exited { exit_code: Some(0) },
-        )
+        .emit_state_change(&AgentId::new("agent-1"), AgentState::Exited { exit_code: Some(0) })
         .await;
 
     let event = rx.recv().await.unwrap();
     match event {
-        Event::AgentExited {
-            agent_id,
-            exit_code,
-            ..
-        } => {
-            assert_eq!(agent_id, AgentId::new("agent-1"));
+        Event::AgentExited { id, exit_code, .. } => {
+            assert_eq!(id, AgentId::new("agent-1"));
             assert_eq!(exit_code, Some(0));
         }
         _ => panic!("unexpected event: {:?}", event),
@@ -92,7 +85,7 @@ async fn call_recording() {
     let adapter = FakeAgentAdapter::new();
     let (tx, _rx) = mpsc::channel(10);
 
-    let config = AgentSpawnConfig::new(
+    let config = AgentConfig::new(
         AgentId::new("agent-1"),
         "claude code",
         PathBuf::from("/workspace"),
@@ -101,14 +94,11 @@ async fn call_recording() {
     .agent_name("claude")
     .prompt("Test")
     .job_name("test")
-    .job_id("pipe-1")
-    .project_root(PathBuf::from("/project"));
+    .job_id("job-1")
+    .project_path(PathBuf::from("/project"));
 
     adapter.spawn(config, tx).await.unwrap();
-    adapter
-        .send(&AgentId::new("agent-1"), "hello")
-        .await
-        .unwrap();
+    adapter.send(&AgentId::new("agent-1"), "hello").await.unwrap();
     adapter.get_state(&AgentId::new("agent-1")).await.unwrap();
     adapter.kill(&AgentId::new("agent-1")).await.unwrap();
 

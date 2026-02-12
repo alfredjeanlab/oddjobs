@@ -6,85 +6,39 @@
 use crate::lexer::{Lexer, LexerError};
 use crate::token::{Span, TokenKind};
 
-// Variable tests - Simple Variables
-
-#[test]
-fn test_simple_variable() {
-    let tokens = Lexer::tokenize("$HOME").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 5));
+lex_tests! {
+    simple_variable: "$HOME" => [
+        TokenKind::Variable { name: "HOME".into(), modifier: None },
+    ],
+    variable_with_underscore: "$MY_VAR" => [
+        TokenKind::Variable { name: "MY_VAR".into(), modifier: None },
+    ],
+    variable_starting_with_underscore: "$_private" => [
+        TokenKind::Variable { name: "_private".into(), modifier: None },
+    ],
+    variable_with_numbers: "$VAR123" => [
+        TokenKind::Variable { name: "VAR123".into(), modifier: None },
+    ],
+    var_name_underscore: "$VAR_NAME" => [
+        TokenKind::Variable { name: "VAR_NAME".into(), modifier: None },
+    ],
+    var_hyphen_terminates: "$VAR-NAME" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: None },
+        TokenKind::Word("-NAME".into()),
+    ],
+    consecutive_variables: "$A$B$C" => [
+        TokenKind::Variable { name: "A".into(), modifier: None },
+        TokenKind::Variable { name: "B".into(), modifier: None },
+        TokenKind::Variable { name: "C".into(), modifier: None },
+    ],
+    variable_followed_by_and: "$VAR&&" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: None },
+        TokenKind::And,
+    ],
 }
 
-#[test]
-fn test_variable_with_underscore() {
-    let tokens = Lexer::tokenize("$MY_VAR").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "MY_VAR".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_variable_starting_with_underscore() {
-    let tokens = Lexer::tokenize("$_private").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "_private".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_variable_with_numbers() {
-    let tokens = Lexer::tokenize("$VAR123").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR123".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_var_name_vs_var_hyphen_name() {
-    // Underscore is part of variable name
-    let tokens = Lexer::tokenize("$VAR_NAME").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR_NAME".into(),
-            modifier: None,
-        }
-    );
-
-    // Hyphen terminates variable name
-    let tokens = Lexer::tokenize("$VAR-NAME").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("-NAME".into()));
+span_tests! {
+    simple_variable_span: "$HOME" => [(0, 5)],
 }
 
 #[test]
@@ -97,267 +51,75 @@ fn test_variable_terminates_at_special_chars() {
     ] {
         let tokens = Lexer::tokenize(input).unwrap();
         assert_eq!(tokens.len(), 2, "input: {}", input);
-        assert_eq!(
-            tokens[0].kind,
-            TokenKind::Variable {
-                name: var_name.into(),
-                modifier: None,
-            }
-        );
+        assert_eq!(tokens[0].kind, TokenKind::Variable { name: var_name.into(), modifier: None });
         assert_eq!(tokens[1].kind, TokenKind::Word(word.into()));
     }
 }
 
-#[test]
-fn test_consecutive_variables() {
-    let tokens = Lexer::tokenize("$A$B$C").unwrap();
-    assert_eq!(tokens.len(), 3);
-    for (i, name) in ["A", "B", "C"].iter().enumerate() {
-        assert_eq!(
-            tokens[i].kind,
-            TokenKind::Variable {
-                name: (*name).into(),
-                modifier: None,
-            }
-        );
-    }
+lex_tests! {
+    braced_variable: "${HOME}" => [
+        TokenKind::Variable { name: "HOME".into(), modifier: None },
+    ],
+    braced_variable_adjacent_to_text: "${HOME}/bin" => [
+        TokenKind::Variable { name: "HOME".into(), modifier: None },
+        TokenKind::Word("/bin".into()),
+    ],
+    braced_variable_adjacent_text_both_sides: "x${VAR}y" => [
+        TokenKind::Word("x".into()),
+        TokenKind::Variable { name: "VAR".into(), modifier: None },
+        TokenKind::Word("y".into()),
+    ],
+    alternating_braced_vars_and_text: "${A}B${C}D" => [
+        TokenKind::Variable { name: "A".into(), modifier: None },
+        TokenKind::Word("B".into()),
+        TokenKind::Variable { name: "C".into(), modifier: None },
+        TokenKind::Word("D".into()),
+    ],
+    two_consecutive_braced_vars: "${VAR}${OTHER}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: None },
+        TokenKind::Variable { name: "OTHER".into(), modifier: None },
+    ],
 }
 
-#[test]
-fn test_variable_followed_by_and() {
-    let tokens = Lexer::tokenize("$VAR&&").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert!(matches!(tokens[0].kind, TokenKind::Variable { .. }));
-    assert_eq!(tokens[1].kind, TokenKind::And);
+span_tests! {
+    braced_variable_span: "${HOME}" => [(0, 7)],
 }
 
-// Variable tests - Braced Variables
-
-#[test]
-fn test_braced_variable() {
-    let tokens = Lexer::tokenize("${HOME}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 7));
-}
-
-#[test]
-fn test_braced_variable_adjacent_to_text() {
-    let tokens = Lexer::tokenize("${HOME}/bin").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("/bin".into()));
-}
-
-#[test]
-fn test_braced_variable_adjacent_text_both_sides() {
-    let tokens = Lexer::tokenize("x${VAR}y").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].kind, TokenKind::Word("x".into()));
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[2].kind, TokenKind::Word("y".into()));
-}
-
-#[test]
-fn test_alternating_braced_vars_and_text() {
-    let tokens = Lexer::tokenize("${A}B${C}D").unwrap();
-    assert_eq!(tokens.len(), 4);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "A".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("B".into()));
-    assert_eq!(
-        tokens[2].kind,
-        TokenKind::Variable {
-            name: "C".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[3].kind, TokenKind::Word("D".into()));
-}
-
-#[test]
-fn test_two_consecutive_braced_vars() {
-    let tokens = Lexer::tokenize("${VAR}${OTHER}").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert!(matches!(tokens[0].kind, TokenKind::Variable { .. }));
-    assert!(matches!(tokens[1].kind, TokenKind::Variable { .. }));
-}
-
-#[test]
-fn test_braced_variable_span_accuracy() {
-    let tokens = Lexer::tokenize("${HOME}").unwrap();
-    assert_eq!(tokens[0].span, Span::new(0, 7)); // $ { H O M E }
-}
-
-// Variable tests - Variables with Modifiers
-
-#[test]
-fn test_variable_default_value() {
-    let tokens = Lexer::tokenize("${HOME:-/tmp}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: Some(":-/tmp".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_assign_default() {
-    let tokens = Lexer::tokenize("${VAR:=default}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":=default".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_nested_in_modifier() {
-    let tokens = Lexer::tokenize("${VAR:-${OTHER}}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":-${OTHER}".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_use_alternative() {
-    let tokens = Lexer::tokenize("${VAR:+value}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":+value".into()),
-        }
-    );
-}
-
-#[test]
-fn test_deeply_nested_defaults() {
-    let tokens = Lexer::tokenize("${A:-${B:-${C}}}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "A".into(),
-            modifier: Some(":-${B:-${C}}".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_error_if_unset() {
-    let tokens = Lexer::tokenize("${VAR:?error message}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":?error message".into()),
-        }
-    );
-}
-
-#[test]
-fn test_multiple_nested_vars_in_modifier() {
-    let tokens = Lexer::tokenize("${VAR:-${X}${Y}}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":-${X}${Y}".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_prefix_removal() {
-    let tokens = Lexer::tokenize("${VAR#pattern}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some("#pattern".into()),
-        }
-    );
-}
-
-#[test]
-fn test_literal_braces_in_modifier() {
-    // Literal braces that aren't ${...} should still be counted for depth
-    let tokens = Lexer::tokenize("${VAR:-{literal}}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":-{literal}".into()),
-        }
-    );
-}
-
-#[test]
-fn test_variable_suffix_removal() {
-    let tokens = Lexer::tokenize("${VAR%pattern}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some("%pattern".into()),
-        }
-    );
-}
-
-#[test]
-fn test_modifier_followed_by_text() {
-    // The first } at depth 0 closes the variable
-    let tokens = Lexer::tokenize("${VAR:-a}rest").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":-a".into()),
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("rest".into()));
+lex_tests! {
+    variable_default_value: "${HOME:-/tmp}" => [
+        TokenKind::Variable { name: "HOME".into(), modifier: Some(":-/tmp".into()) },
+    ],
+    variable_assign_default: "${VAR:=default}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":=default".into()) },
+    ],
+    variable_nested_in_modifier: "${VAR:-${OTHER}}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":-${OTHER}".into()) },
+    ],
+    variable_use_alternative: "${VAR:+value}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":+value".into()) },
+    ],
+    deeply_nested_defaults: "${A:-${B:-${C}}}" => [
+        TokenKind::Variable { name: "A".into(), modifier: Some(":-${B:-${C}}".into()) },
+    ],
+    variable_error_if_unset: "${VAR:?error message}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":?error message".into()) },
+    ],
+    multiple_nested_vars_in_modifier: "${VAR:-${X}${Y}}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":-${X}${Y}".into()) },
+    ],
+    variable_prefix_removal: "${VAR#pattern}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some("#pattern".into()) },
+    ],
+    literal_braces_in_modifier: "${VAR:-{literal}}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":-{literal}".into()) },
+    ],
+    variable_suffix_removal: "${VAR%pattern}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some("%pattern".into()) },
+    ],
+    modifier_followed_by_text: "${VAR:-a}rest" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":-a".into()) },
+        TokenKind::Word("rest".into()),
+    ],
 }
 
 #[test]
@@ -376,35 +138,23 @@ fn test_all_modifier_operators() {
         assert_eq!(tokens.len(), 1, "input: {}", input);
         assert_eq!(
             tokens[0].kind,
-            TokenKind::Variable {
-                name: "VAR".into(),
-                modifier: Some(expected_mod.into()),
-            }
+            TokenKind::Variable { name: "VAR".into(), modifier: Some(expected_mod.into()) }
         );
     }
 }
 
-// Variable tests - Error Cases
-
-#[test]
-fn test_empty_variable_dollar_only() {
-    let result = Lexer::tokenize("$");
-    assert!(matches!(
-        result,
-        Err(LexerError::EmptyVariable { span }) if span == Span::new(0, 1)
-    ));
-}
-
-#[test]
-fn test_empty_variable_dollar_space() {
-    let result = Lexer::tokenize("$ ");
-    assert!(matches!(result, Err(LexerError::EmptyVariable { .. })));
-}
-
-#[test]
-fn test_empty_variable_operator() {
-    let result = Lexer::tokenize("$&&");
-    assert!(matches!(result, Err(LexerError::EmptyVariable { .. })));
+lex_error_tests! {
+    empty_variable_dollar_only: "$" => LexerError::EmptyVariable { .. },
+    empty_variable_dollar_space: "$ " => LexerError::EmptyVariable { .. },
+    empty_variable_operator: "$&&" => LexerError::EmptyVariable { .. },
+    unterminated_brace_eof: "${VAR" => LexerError::UnterminatedVariable { .. },
+    unterminated_modifier: "${VAR:-default" => LexerError::UnterminatedVariable { .. },
+    unterminated_nested: "${VAR:-${OTHER}" => LexerError::UnterminatedVariable { .. },
+    invalid_variable_starts_with_number: "${123}" => LexerError::InvalidVariableName { .. },
+    invalid_name_starts_with_hyphen: "${-name}" => LexerError::InvalidVariableName { .. },
+    invalid_name_unicode: "${日本}" => LexerError::InvalidVariableName { .. },
+    error_dollar_in_command: "echo $" => LexerError::EmptyVariable { .. },
+    unterminated_brace_after_dollar: "${" => LexerError::UnterminatedVariable { .. },
 }
 
 #[test]
@@ -417,233 +167,79 @@ fn test_empty_braced_variable() {
 }
 
 #[test]
-fn test_unterminated_brace_eof() {
-    let result = Lexer::tokenize("${VAR");
+fn test_empty_variable_dollar_only_span() {
+    let result = Lexer::tokenize("$");
     assert!(matches!(
         result,
-        Err(LexerError::UnterminatedVariable { .. })
+        Err(LexerError::EmptyVariable { span }) if span == Span::new(0, 1)
     ));
-}
-
-#[test]
-fn test_unterminated_modifier() {
-    let result = Lexer::tokenize("${VAR:-default");
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedVariable { .. })
-    ));
-}
-
-#[test]
-fn test_unterminated_nested() {
-    let result = Lexer::tokenize("${VAR:-${OTHER}");
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedVariable { .. })
-    ));
-}
-
-#[test]
-fn test_invalid_variable_starts_with_number() {
-    let result = Lexer::tokenize("${123}");
-    assert!(matches!(
-        result,
-        Err(LexerError::InvalidVariableName { .. })
-    ));
-}
-
-#[test]
-fn test_invalid_name_starts_with_hyphen() {
-    let result = Lexer::tokenize("${-name}");
-    assert!(matches!(
-        result,
-        Err(LexerError::InvalidVariableName { .. })
-    ));
-}
-
-#[test]
-fn test_invalid_name_unicode() {
-    let result = Lexer::tokenize("${日本}");
-    assert!(matches!(
-        result,
-        Err(LexerError::InvalidVariableName { .. })
-    ));
-}
-
-#[test]
-fn test_error_dollar_in_command() {
-    // Error should only affect the problematic variable
-    let result = Lexer::tokenize("echo $");
-    assert!(matches!(result, Err(LexerError::EmptyVariable { .. })));
 }
 
 #[test]
 fn test_error_span_accuracy_unterminated() {
     let result = Lexer::tokenize("${LONGNAME");
     if let Err(LexerError::UnterminatedVariable { span }) = result {
-        // Span should cover from $ to end of input
         assert_eq!(span.start, 0);
-        assert!(span.end >= 10); // At least to end of "LONGNAME"
+        assert!(span.end >= 10);
     } else {
         panic!("Expected UnterminatedVariable error");
     }
 }
 
-// Variable tests - Integration with Other Tokens
-
-#[test]
-fn test_variable_in_command() {
-    let tokens = Lexer::tokenize("echo $HOME").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].kind, TokenKind::Word("echo".into()));
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: None,
-        }
-    );
+lex_tests! {
+    variable_in_command: "echo $HOME" => [
+        TokenKind::Word("echo".into()),
+        TokenKind::Variable { name: "HOME".into(), modifier: None },
+    ],
+    variable_with_operators: "$A && $B" => [
+        TokenKind::Variable { name: "A".into(), modifier: None },
+        TokenKind::And,
+        TokenKind::Variable { name: "B".into(), modifier: None },
+    ],
+    variable_with_pipe: "echo $VAR | cat" => [
+        TokenKind::Word("echo".into()),
+        TokenKind::Variable { name: "VAR".into(), modifier: None },
+        TokenKind::Pipe,
+        TokenKind::Word("cat".into()),
+    ],
+    variable_with_semicolon: "$A; $B" => [
+        TokenKind::Variable { name: "A".into(), modifier: None },
+        TokenKind::Semi,
+        TokenKind::Variable { name: "B".into(), modifier: None },
+    ],
+    variable_with_newline: "$A\n$B" => [
+        TokenKind::Variable { name: "A".into(), modifier: None },
+        TokenKind::Newline,
+        TokenKind::Variable { name: "B".into(), modifier: None },
+    ],
+    variable_after_pipe: "cmd | $PAGER" => [
+        TokenKind::Word("cmd".into()),
+        TokenKind::Pipe,
+        TokenKind::Variable { name: "PAGER".into(), modifier: None },
+    ],
 }
 
-#[test]
-fn test_variable_with_operators() {
-    let tokens = Lexer::tokenize("$A && $B").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "A".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::And);
-    assert_eq!(
-        tokens[2].kind,
-        TokenKind::Variable {
-            name: "B".into(),
-            modifier: None,
-        }
-    );
+lex_tests! {
+    simple_variable_followed_by_slash: "$HOME/bin" => [
+        TokenKind::Variable { name: "HOME".into(), modifier: None },
+        TokenKind::Word("/bin".into()),
+    ],
+    variable_followed_by_dot: "$FILE.txt" => [
+        TokenKind::Variable { name: "FILE".into(), modifier: None },
+        TokenKind::Word(".txt".into()),
+    ],
+    braced_variable_in_path: "/usr/${LOCAL}/bin" => [
+        TokenKind::Word("/usr/".into()),
+        TokenKind::Variable { name: "LOCAL".into(), modifier: None },
+        TokenKind::Word("/bin".into()),
+    ],
+    variable_with_deeply_nested_braces: "${VAR:-${A:-${B}}}" => [
+        TokenKind::Variable { name: "VAR".into(), modifier: Some(":-${A:-${B}}".into()) },
+    ],
 }
-
-#[test]
-fn test_variable_with_pipe() {
-    let tokens = Lexer::tokenize("echo $VAR | cat").unwrap();
-    assert_eq!(tokens.len(), 4);
-    assert_eq!(tokens[0].kind, TokenKind::Word("echo".into()));
-    assert!(matches!(tokens[1].kind, TokenKind::Variable { .. }));
-    assert_eq!(tokens[2].kind, TokenKind::Pipe);
-    assert_eq!(tokens[3].kind, TokenKind::Word("cat".into()));
-}
-
-#[test]
-fn test_variable_with_semicolon() {
-    let tokens = Lexer::tokenize("$A; $B").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert!(matches!(tokens[0].kind, TokenKind::Variable { .. }));
-    assert_eq!(tokens[1].kind, TokenKind::Semi);
-    assert!(matches!(tokens[2].kind, TokenKind::Variable { .. }));
-}
-
-#[test]
-fn test_variable_with_newline() {
-    let tokens = Lexer::tokenize("$A\n$B").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert!(matches!(tokens[0].kind, TokenKind::Variable { .. }));
-    assert_eq!(tokens[1].kind, TokenKind::Newline);
-    assert!(matches!(tokens[2].kind, TokenKind::Variable { .. }));
-}
-
-#[test]
-fn test_variable_after_pipe() {
-    let tokens = Lexer::tokenize("cmd | $PAGER").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].kind, TokenKind::Word("cmd".into()));
-    assert_eq!(tokens[1].kind, TokenKind::Pipe);
-    assert_eq!(
-        tokens[2].kind,
-        TokenKind::Variable {
-            name: "PAGER".into(),
-            modifier: None,
-        }
-    );
-}
-
-// Variable tests - Edge Cases
-
-#[test]
-fn test_simple_variable_followed_by_slash() {
-    // $HOME/bin should be Variable + Word
-    let tokens = Lexer::tokenize("$HOME/bin").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "HOME".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("/bin".into()));
-}
-
-#[test]
-fn test_variable_followed_by_dot() {
-    let tokens = Lexer::tokenize("$FILE.txt").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "FILE".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word(".txt".into()));
-}
-
-#[test]
-fn test_braced_variable_in_path() {
-    let tokens = Lexer::tokenize("/usr/${LOCAL}/bin").unwrap();
-    assert_eq!(tokens.len(), 3);
-    assert_eq!(tokens[0].kind, TokenKind::Word("/usr/".into()));
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::Variable {
-            name: "LOCAL".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[2].kind, TokenKind::Word("/bin".into()));
-}
-
-#[test]
-fn test_variable_with_deeply_nested_braces() {
-    let tokens = Lexer::tokenize("${VAR:-${A:-${B}}}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "VAR".into(),
-            modifier: Some(":-${A:-${B}}".into()),
-        }
-    );
-}
-
-#[test]
-fn test_unterminated_brace_after_dollar() {
-    let result = Lexer::tokenize("${");
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedVariable { .. })
-    ));
-}
-
-// =============================================================================
-// Extreme variable nesting stress tests (Step 2)
-// =============================================================================
 
 #[test]
 fn test_variable_nesting_depth_20() {
-    // ${A:-${B:-${C:-...}}} with 20 levels
     let mut input = String::new();
     for i in 0..20 {
         input.push_str(&format!("${{V{}:-", i));
@@ -659,7 +255,6 @@ fn test_variable_nesting_depth_20() {
 
 #[test]
 fn test_variable_nesting_depth_50() {
-    // 50 levels of variable nesting
     let mut input = String::new();
     for i in 0..50 {
         input.push_str(&format!("${{V{}:-", i));
@@ -674,19 +269,13 @@ fn test_variable_nesting_depth_50() {
     assert_eq!(tokens.len(), 1);
 }
 
-// =============================================================================
-// AST content preservation tests (Step 4)
-// =============================================================================
-
 #[test]
 fn test_ast_preserves_nested_variable_verbatim() {
-    // Verify nested ${} in modifier is stored as raw string, not recursively parsed
     let tokens = Lexer::tokenize("${A:-${B}}").unwrap();
     assert_eq!(tokens.len(), 1);
     if let TokenKind::Variable { name, modifier } = &tokens[0].kind {
         assert_eq!(name, "A");
         assert_eq!(modifier.as_ref().unwrap(), ":-${B}");
-        // The inner ${B} is NOT parsed - it's just part of the modifier string
     } else {
         panic!("Expected Variable token");
     }
@@ -694,36 +283,23 @@ fn test_ast_preserves_nested_variable_verbatim() {
 
 #[test]
 fn test_ast_preserves_deeply_nested_variable() {
-    // Three levels of variable nesting
     let tokens = Lexer::tokenize("${A:-${B:-${C}}}").unwrap();
     assert_eq!(tokens.len(), 1);
     if let TokenKind::Variable { name, modifier } = &tokens[0].kind {
         assert_eq!(name, "A");
         assert_eq!(modifier.as_ref().unwrap(), ":-${B:-${C}}");
-        // Modifier contains literal ":-${B:-${C}}" - NOT parsed to AST
     } else {
         panic!("Expected Variable token");
     }
 }
 
-// =============================================================================
-// Unbalanced grouping error handling tests (Step 5)
-// =============================================================================
-
-#[test]
-fn test_error_nested_variable_unterminated() {
-    // ${A:-${B:-${C}  <- missing outer }}
-    let result = Lexer::tokenize("${A:-${B:-${C}");
-    assert!(
-        matches!(result, Err(LexerError::UnterminatedVariable { .. })),
-        "Expected UnterminatedVariable, got: {:?}",
-        result
-    );
+lex_error_tests! {
+    error_nested_variable_unterminated: "${A:-${B:-${C}" => LexerError::UnterminatedVariable { .. },
+    error_literal_braces_unbalanced: "${VAR:-{incomplete" => LexerError::UnterminatedVariable { .. },
 }
 
 #[test]
 fn test_error_variable_span_points_to_outermost() {
-    // Verify span starts at the outermost ${ that's unterminated
     let result = Lexer::tokenize("${A:-${B:-${C}");
     if let Err(LexerError::UnterminatedVariable { span }) = result {
         assert_eq!(span.start, 0, "Span should point to outermost ${{");
@@ -732,199 +308,54 @@ fn test_error_variable_span_points_to_outermost() {
     }
 }
 
-#[test]
-fn test_error_literal_braces_unbalanced() {
-    // Literal { in modifier without matching } should still be tracked
-    let result = Lexer::tokenize("${VAR:-{incomplete");
-    assert!(
-        matches!(result, Err(LexerError::UnterminatedVariable { .. })),
-        "Expected UnterminatedVariable, got: {:?}",
-        result
-    );
+lex_tests! {
+    special_variable_exit_code: "$?" => [
+        TokenKind::Variable { name: "?".into(), modifier: None },
+    ],
+    special_variable_pid: "$$" => [
+        TokenKind::Variable { name: "$".into(), modifier: None },
+    ],
+    special_variable_arg_count: "$#" => [
+        TokenKind::Variable { name: "#".into(), modifier: None },
+    ],
+    special_variable_script_name: "$0" => [
+        TokenKind::Variable { name: "0".into(), modifier: None },
+    ],
+    special_variable_braced_exit_code: "${?}" => [
+        TokenKind::Variable { name: "?".into(), modifier: None },
+    ],
+    special_variable_braced_pid: "${$}" => [
+        TokenKind::Variable { name: "$".into(), modifier: None },
+    ],
+    special_variable_braced_arg_count: "${#}" => [
+        TokenKind::Variable { name: "#".into(), modifier: None },
+    ],
+    special_variable_braced_script_name: "${0}" => [
+        TokenKind::Variable { name: "0".into(), modifier: None },
+    ],
+    special_variable_with_modifier: "${?:-default}" => [
+        TokenKind::Variable { name: "?".into(), modifier: Some(":-default".into()) },
+    ],
+    special_variable_pid_with_modifier: "${$:-0}" => [
+        TokenKind::Variable { name: "$".into(), modifier: Some(":-0".into()) },
+    ],
+    special_variable_in_command: "echo $?" => [
+        TokenKind::Word("echo".into()),
+        TokenKind::Variable { name: "?".into(), modifier: None },
+    ],
+    special_variable_followed_by_text: "$?foo" => [
+        TokenKind::Variable { name: "?".into(), modifier: None },
+        TokenKind::Word("foo".into()),
+    ],
+    consecutive_special_variables: "$?$$" => [
+        TokenKind::Variable { name: "?".into(), modifier: None },
+        TokenKind::Variable { name: "$".into(), modifier: None },
+    ],
 }
 
-// =============================================================================
-// Special shell variables ($?, $$, $#, $0)
-// =============================================================================
-
-#[test]
-fn test_special_variable_exit_code() {
-    let tokens = Lexer::tokenize("$?").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 2));
-}
-
-#[test]
-fn test_special_variable_pid() {
-    let tokens = Lexer::tokenize("$$").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "$".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 2));
-}
-
-#[test]
-fn test_special_variable_arg_count() {
-    let tokens = Lexer::tokenize("$#").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "#".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 2));
-}
-
-#[test]
-fn test_special_variable_script_name() {
-    let tokens = Lexer::tokenize("$0").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "0".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[0].span, Span::new(0, 2));
-}
-
-#[test]
-fn test_special_variable_braced_exit_code() {
-    let tokens = Lexer::tokenize("${?}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_braced_pid() {
-    let tokens = Lexer::tokenize("${$}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "$".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_braced_arg_count() {
-    let tokens = Lexer::tokenize("${#}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "#".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_braced_script_name() {
-    let tokens = Lexer::tokenize("${0}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "0".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_with_modifier() {
-    let tokens = Lexer::tokenize("${?:-default}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: Some(":-default".into()),
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_pid_with_modifier() {
-    let tokens = Lexer::tokenize("${$:-0}").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "$".into(),
-            modifier: Some(":-0".into()),
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_in_command() {
-    let tokens = Lexer::tokenize("echo $?").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(tokens[0].kind, TokenKind::Word("echo".into()));
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: None,
-        }
-    );
-}
-
-#[test]
-fn test_special_variable_followed_by_text() {
-    let tokens = Lexer::tokenize("$?foo").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(tokens[1].kind, TokenKind::Word("foo".into()));
-}
-
-#[test]
-fn test_consecutive_special_variables() {
-    let tokens = Lexer::tokenize("$?$$").unwrap();
-    assert_eq!(tokens.len(), 2);
-    assert_eq!(
-        tokens[0].kind,
-        TokenKind::Variable {
-            name: "?".into(),
-            modifier: None,
-        }
-    );
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::Variable {
-            name: "$".into(),
-            modifier: None,
-        }
-    );
+span_tests! {
+    special_variable_exit_code_span: "$?" => [(0, 2)],
+    special_variable_pid_span: "$$" => [(0, 2)],
+    special_variable_arg_count_span: "$#" => [(0, 2)],
+    special_variable_script_name_span: "$0" => [(0, 2)],
 }

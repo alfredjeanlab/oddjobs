@@ -5,9 +5,6 @@
 
 use oj_core::AgentId;
 use std::fmt;
-use std::fs::File;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
-use std::path::Path;
 
 /// Message carrying agent log entries over a channel.
 ///
@@ -27,27 +24,17 @@ pub enum EntryKind {
     /// File read via Read tool
     FileRead { path: String },
     /// File written via Write tool
-    FileWrite {
-        path: String,
-        new: bool,
-        lines: usize,
-    },
+    FileWrite { path: String, new: bool, lines: usize },
     /// File edited via Edit tool
     FileEdit { path: String },
     /// Notebook edited via NotebookEdit tool
     NotebookEdit { path: String },
     /// Bash command executed
-    BashCommand {
-        command: String,
-        exit_code: Option<i32>,
-    },
+    BashCommand { command: String, exit_code: Option<i32> },
     /// oj CLI call (oj run, oj emit, etc.)
     OjCall { args: Vec<String> },
     /// Turn completed (assistant message finished)
-    TurnComplete {
-        duration_secs: Option<u64>,
-        tokens: Option<u64>,
-    },
+    TurnComplete { duration_secs: Option<u64>, tokens: Option<u64> },
     /// Error encountered
     Error { message: String },
 }
@@ -73,16 +60,9 @@ impl fmt::Display for EntryKind {
                 None => write!(f, "bash: {}", command),
             },
             EntryKind::OjCall { args } => write!(f, "oj: {}", args.join(" ")),
-            EntryKind::TurnComplete {
-                duration_secs,
-                tokens,
-            } => {
-                let dur = duration_secs
-                    .map(|s| format!("{s}s"))
-                    .unwrap_or_else(|| "?s".into());
-                let tok = tokens
-                    .map(format_tokens)
-                    .unwrap_or_else(|| "? tokens".into());
+            EntryKind::TurnComplete { duration_secs, tokens } => {
+                let dur = duration_secs.map(|s| format!("{s}s")).unwrap_or_else(|| "?s".into());
+                let tok = tokens.map(format_tokens).unwrap_or_else(|| "? tokens".into());
                 write!(f, "turn complete ({dur}, {tok})")
             }
             EntryKind::Error { message } => write!(f, "error: {}", message),
@@ -108,56 +88,8 @@ fn get_str<'a>(obj: &'a serde_json::Value, key: &str) -> Option<&'a str> {
     obj.get(key).and_then(|v| v.as_str())
 }
 
-/// Parse new log entries from a JSONL session log starting at the given byte offset.
-pub fn parse_entries_from(path: &Path, offset: u64) -> (Vec<AgentLogEntry>, u64) {
-    let file = match File::open(path) {
-        Ok(f) => f,
-        Err(_) => return (Vec::new(), offset),
-    };
-
-    let mut reader = BufReader::new(file);
-    if reader.seek(SeekFrom::Start(offset)).is_err() {
-        return (Vec::new(), offset);
-    }
-
-    let mut entries = Vec::new();
-    let mut current_offset = offset;
-    let mut last_user_timestamp: Option<String> = None;
-
-    let mut line = String::new();
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => break, // EOF
-            Ok(n) => {
-                // Only process complete lines (ending with newline)
-                if !line.ends_with('\n') {
-                    // Incomplete line — don't advance offset, will re-read next time
-                    break;
-                }
-                current_offset += n as u64;
-
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-
-                let json: serde_json::Value = match serde_json::from_str(trimmed) {
-                    Ok(v) => v,
-                    Err(_) => continue,
-                };
-
-                extract_entries(&json, &mut entries, &mut last_user_timestamp);
-            }
-            Err(_) => break,
-        }
-    }
-
-    (entries, current_offset)
-}
-
 /// Extract log entries from a single JSONL record.
-fn extract_entries(
+pub fn extract_entries(
     json: &serde_json::Value,
     entries: &mut Vec<AgentLogEntry>,
     last_user_timestamp: &mut Option<String>,
@@ -173,10 +105,7 @@ fn extract_entries(
 
     if let Some(error_msg) = extract_error(json) {
         let timestamp = extract_timestamp(json).unwrap_or_default();
-        entries.push(AgentLogEntry {
-            timestamp,
-            kind: EntryKind::Error { message: error_msg },
-        });
+        entries.push(AgentLogEntry { timestamp, kind: EntryKind::Error { message: error_msg } });
         return;
     }
 
@@ -194,19 +123,13 @@ fn extract_entries(
                 let Some(tool_name) = get_str(block, "name") else {
                     continue;
                 };
-                let input = block
-                    .get("input")
-                    .cloned()
-                    .unwrap_or(serde_json::Value::Null);
+                let input = block.get("input").cloned().unwrap_or(serde_json::Value::Null);
                 let timestamp = extract_timestamp(json).unwrap_or_default();
 
                 let kind = match tool_name {
                     "Read" | "Edit" | "NotebookEdit" => {
-                        let key = if tool_name == "NotebookEdit" {
-                            "notebook_path"
-                        } else {
-                            "file_path"
-                        };
+                        let key =
+                            if tool_name == "NotebookEdit" { "notebook_path" } else { "file_path" };
                         let Some(path) = get_str(&input, key) else {
                             continue;
                         };
@@ -222,11 +145,7 @@ fn extract_entries(
                             continue;
                         };
                         let lines = get_str(&input, "content").unwrap_or("").lines().count();
-                        EntryKind::FileWrite {
-                            path: path.to_string(),
-                            new: true,
-                            lines,
-                        }
+                        EntryKind::FileWrite { path: path.to_string(), new: true, lines }
                     }
                     "Bash" => {
                         let command = get_str(&input, "command").unwrap_or("").to_string();
@@ -248,10 +167,7 @@ fn extract_entries(
                             } else {
                                 command
                             };
-                            EntryKind::BashCommand {
-                                command: cmd,
-                                exit_code: None,
-                            }
+                            EntryKind::BashCommand { command: cmd, exit_code: None }
                         }
                     }
                     _ => continue,
@@ -262,18 +178,13 @@ fn extract_entries(
 
         if get_str(message, "stop_reason").unwrap_or("") == "end_turn" {
             let timestamp = extract_timestamp(json).unwrap_or_default();
-            let tokens = message
-                .get("usage")
-                .and_then(|u| u.get("output_tokens"))
-                .and_then(|t| t.as_u64());
+            let tokens =
+                message.get("usage").and_then(|u| u.get("output_tokens")).and_then(|t| t.as_u64());
             let duration_secs =
                 compute_duration_secs(last_user_timestamp.as_deref(), timestamp.as_str());
             entries.push(AgentLogEntry {
                 timestamp,
-                kind: EntryKind::TurnComplete {
-                    duration_secs,
-                    tokens,
-                },
+                kind: EntryKind::TurnComplete { duration_secs, tokens },
             });
         }
     }
@@ -281,11 +192,7 @@ fn extract_entries(
     if record_type == "result" {
         if let Some(exit_code) = get_str(json, "content").and_then(extract_exit_code) {
             for entry in entries.iter_mut().rev() {
-                if let EntryKind::BashCommand {
-                    exit_code: ref mut ec,
-                    ..
-                } = entry.kind
-                {
+                if let EntryKind::BashCommand { exit_code: ref mut ec, .. } = entry.kind {
                     if ec.is_none() {
                         *ec = Some(exit_code);
                         break;
@@ -351,12 +258,7 @@ fn parse_iso_epoch(s: &str) -> Option<u64> {
 fn extract_exit_code(content: &str) -> Option<i32> {
     let pos = content.to_lowercase().find("exit code:")?;
     let after = content[pos + 10..].trim();
-    after
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-')
-        .collect::<String>()
-        .parse()
-        .ok()
+    after.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect::<String>().parse().ok()
 }
 
 #[cfg(test)]

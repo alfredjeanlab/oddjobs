@@ -10,36 +10,7 @@
 //! - Workspaces
 
 use super::*;
-use oj_adapters::SessionCall;
-use oj_core::{Event, JobId, OwnerId};
-
-// =============================================================================
-// Runbook definitions
-// =============================================================================
-
-/// Runbook with an agent step that triggers timers
-const RUNBOOK_WITH_AGENT: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = { agent = "worker" }
-on_done = "finish"
-
-[[job.build.step]]
-name = "finish"
-run = "echo done"
-
-[agent.worker]
-run = "claude --print"
-on_idle = "done"
-on_dead = "done"
-"#;
+use oj_adapters::AgentCall;
 
 // =============================================================================
 // Timer cancellation tests
@@ -47,74 +18,44 @@ on_dead = "done"
 
 #[tokio::test]
 async fn job_deleted_cancels_timers() {
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let mut ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
+    .await;
 
     // Create a job that will be on an agent step (creates timers)
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
-    .await;
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     ctx.process_background_events().await;
-
-    let job_id = "pipe-1".to_string();
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "work");
 
     // Liveness timer should be pending from spawn
     let scheduler = ctx.runtime.executor.scheduler();
-    assert!(
-        scheduler.lock().has_timers(),
-        "should have timers before delete"
-    );
+    assert!(scheduler.lock().has_timers(), "should have timers before delete");
 
     // Now delete the job
-    ctx.runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
 
     // All job-scoped timers should be cancelled
-    let timer_ids = pending_timer_ids(&ctx);
+    let timer_ids = ctx.pending_timer_ids();
     assert_no_timer_with_prefix(&timer_ids, &format!("liveness:{}", job_id));
     assert_no_timer_with_prefix(&timer_ids, &format!("exit-deferred:{}", job_id));
     assert_no_timer_with_prefix(&timer_ids, &format!("cooldown:{}", job_id));
 }
 
-// =============================================================================
-// Agent mapping tests
-// =============================================================================
-
 #[tokio::test]
 async fn job_deleted_deregisters_agent_mapping() {
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let mut ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
     .await;
-    ctx.process_background_events().await;
 
-    let job_id = "pipe-1".to_string();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
+    ctx.process_background_events().await;
 
     // Get the agent_id that was assigned
     let agent_id = get_agent_id(&ctx, &job_id).expect("should have agent_id in step history");
@@ -122,19 +63,11 @@ async fn job_deleted_deregisters_agent_mapping() {
     // Verify agent→job mapping exists
     {
         let agent_owners = ctx.runtime.agent_owners.lock();
-        assert!(
-            agent_owners.contains_key(&agent_id),
-            "agent mapping should exist before delete"
-        );
+        assert!(agent_owners.contains_key(&agent_id), "agent mapping should exist before delete");
     }
 
     // Delete the job
-    ctx.runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
 
     // Agent→job mapping should be removed
     {
@@ -146,81 +79,47 @@ async fn job_deleted_deregisters_agent_mapping() {
     }
 }
 
-// =============================================================================
-// Session cleanup tests
-// =============================================================================
-
 #[tokio::test]
-async fn job_deleted_kills_session() {
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+async fn job_deleted_kills_agent() {
+    let mut ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
     .await;
+
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     ctx.process_background_events().await;
 
-    let job_id = "pipe-1".to_string();
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-
-    // Get the session_id
-    let session_id = job.session_id.clone().expect("job should have session_id");
-
-    // Verify session exists
-    assert!(
-        ctx.runtime
-            .lock_state(|s| s.sessions.contains_key(&session_id)),
-        "session should exist before delete"
-    );
+    let agent_id = get_agent_id(&ctx, &job_id).expect("should have agent_id in step history");
 
     // Delete the job
-    ctx.runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
 
-    // Yield to let fire-and-forget KillSession task complete
+    // Yield to let fire-and-forget KillAgent task complete
     tokio::task::yield_now().await;
 
-    // Check that KillSession was called via the fake adapter
-    let calls = ctx.sessions.calls();
+    // Check that KillAgent was called via the fake adapter
+    let calls = ctx.agents.calls();
     let kill_calls: Vec<_> = calls
         .iter()
-        .filter(|c| matches!(c, SessionCall::Kill { id } if id == &session_id))
+        .filter(|c| matches!(c, AgentCall::Kill { agent_id: aid } if *aid == agent_id))
         .collect();
-    assert!(
-        !kill_calls.is_empty(),
-        "session should have been killed; calls: {:?}",
-        calls
-    );
+    assert!(!kill_calls.is_empty(), "agent should have been killed; calls: {:?}", calls);
 }
-
-// =============================================================================
-// Idempotency tests
-// =============================================================================
 
 #[tokio::test]
 async fn job_deleted_idempotent_for_missing_job() {
-    let ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
+    let ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
+    .await;
 
     // Delete a job that doesn't exist
-    let result = ctx
-        .runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new("nonexistent-job"),
-        })
-        .await;
+    let result =
+        ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new("nonexistent-job") }).await;
 
     // Should not error
     assert!(result.is_ok(), "deleting nonexistent job should not error");
@@ -228,78 +127,43 @@ async fn job_deleted_idempotent_for_missing_job() {
 
 #[tokio::test]
 async fn job_deleted_idempotent_when_resources_already_gone() {
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let mut ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
     .await;
+
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
     ctx.process_background_events().await;
 
-    let job_id = "pipe-1".to_string();
-
     // First delete
-    ctx.runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
 
     // Second delete (resources already cleaned up)
-    let result = ctx
-        .runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await;
+    let result = ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await;
 
     // Should not error
-    assert!(
-        result.is_ok(),
-        "duplicate job delete should not error (idempotent)"
-    );
+    assert!(result.is_ok(), "duplicate job delete should not error (idempotent)");
 }
 
 #[tokio::test]
 async fn job_deleted_handles_terminal_job() {
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_AGENT).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let mut ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "finish",
+        "run = \"claude --print\"\non_idle = \"done\"\non_dead = \"done\"",
+    ))
     .await;
-    ctx.process_background_events().await;
 
-    let job_id = "pipe-1".to_string();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
+    ctx.process_background_events().await;
 
     // Advance to completion (terminal state)
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(Event::AgentWaiting {
-            agent_id: agent_id.clone(),
-            owner: OwnerId::Job(JobId::new(&job_id)),
-        })
+        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
         .await
         .unwrap();
 
@@ -308,28 +172,14 @@ async fn job_deleted_handles_terminal_job() {
     assert_eq!(job.step, "finish");
 
     // Complete the shell step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(&job_id),
-            step: "finish".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "finish")).await.unwrap();
 
     // Job should be terminal (done)
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert!(job.is_terminal(), "job should be terminal");
 
     // Delete the terminal job
-    let result = ctx
-        .runtime
-        .handle_event(Event::JobDeleted {
-            id: JobId::new(&job_id),
-        })
-        .await;
+    let result = ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await;
 
     assert!(result.is_ok(), "deleting terminal job should succeed");
 }

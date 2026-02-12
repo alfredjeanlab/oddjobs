@@ -4,9 +4,6 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Shell Constructs in Job Steps
-// =============================================================================
 //
 // These tests verify that shell constructs (conditionals, jobs, variables,
 // subshells) work correctly in runbook step commands.
@@ -23,7 +20,7 @@ vars  = ["name"]
 [[job.conditional.step]]
 name = "execute"
 run = "true && echo 'and_success:${name}' >> ${workspace}/output.log"
-on_done = "done"
+on_done = { step = "done" }
 
 [[job.conditional.step]]
 name = "done"
@@ -41,11 +38,7 @@ fn shell_conditional_and_succeeds() {
 
     // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete");
 
@@ -87,19 +80,10 @@ fn shell_job_executes() {
 
     // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     if !done {
-        let output = temp
-            .oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .to_string();
+        let output = temp.oj().args(&["job", "list"]).passes().stdout().to_string();
         eprintln!("=== JOB LIST ===\n{output}\n=== END ===");
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
@@ -131,11 +115,7 @@ fn shell_variable_expansion() {
 
     // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete");
 }
@@ -165,11 +145,7 @@ fn shell_subshell_executes() {
 
     // Wait for job to complete
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(done, "job should complete");
 }
@@ -205,16 +181,9 @@ fn shell_exit_code_failure() {
         // Job should either fail or show error state
         output.contains("failed") || output.contains("execute")
     });
-    assert!(
-        failed,
-        "job should fail on exit 1, got output:\n{}",
-        last_output
-    );
+    assert!(failed, "job should fail on exit 1, got output:\n{}", last_output);
 }
 
-// =============================================================================
-// Quoting Safety in Job Steps
-// =============================================================================
 //
 // Verify that user-provided arguments containing shell-special characters
 // (quotes, backticks, etc.) don't break shell command execution.
@@ -268,11 +237,7 @@ fn shell_step_with_single_quote_in_arg() {
     let found = wait_for(SPEC_WAIT_MAX_MS, || output_path.exists());
     assert!(found, "output file should exist");
     let content = std::fs::read_to_string(&output_path).unwrap_or_default();
-    assert!(
-        content.contains("hello:it's"),
-        "output should preserve single quote: {}",
-        content
-    );
+    assert!(content.contains("hello:it's"), "output should preserve single quote: {}", content);
 }
 
 #[test]
@@ -317,10 +282,6 @@ fn shell_step_with_double_quote_in_arg() {
     );
 }
 
-// =============================================================================
-// Original Tests
-// =============================================================================
-
 /// Shell-only runbook that writes to a file for verification
 const SHELL_RUNBOOK: &str = r#"
 [command.test]
@@ -333,17 +294,17 @@ vars  = ["name"]
 [[job.test.step]]
 name = "init"
 run = "echo 'init:${name}' >> ${workspace}/output.log"
-on_done = "plan"
+on_done = { step = "plan" }
 
 [[job.test.step]]
 name = "plan"
 run = "echo 'plan:${name}' >> ${workspace}/output.log"
-on_done = "execute"
+on_done = { step = "execute" }
 
 [[job.test.step]]
 name = "execute"
 run = "echo 'execute:${name}' >> ${workspace}/output.log"
-on_done = "merge"
+on_done = { step = "merge" }
 
 [[job.test.step]]
 name = "merge"
@@ -357,18 +318,11 @@ fn job_starts_and_runs_init_step() {
     temp.file(".oj/runbooks/test.toml", SHELL_RUNBOOK);
     temp.oj().args(&["daemon", "start"]).passes();
 
-    temp.oj()
-        .args(&["run", "test", "hello"])
-        .passes()
-        .stdout_has("Command: test");
+    temp.oj().args(&["run", "test", "hello"]).passes().stdout_has("Command: test");
 
     // Wait for job to appear (event processing is async)
     let found = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("hello")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("hello")
     });
 
     if !found {
@@ -389,20 +343,12 @@ fn job_completes_all_steps() {
 
     // Wait for job to reach done step
     let done = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("done")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("done")
     });
     assert!(done, "job should reach done step");
 
     // Verify final state
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_has("done")
-        .stdout_has("completed");
+    temp.oj().args(&["job", "list"]).passes().stdout_has("done").stdout_has("completed");
 }
 
 #[test]
@@ -422,7 +368,7 @@ vars  = ["name"]
 [[job.custom.step]]
 name = "step1"
 run = "echo 'step1'"
-on_done = "step2"
+on_done = { step = "step2" }
 
 [[job.custom.step]]
 name = "step2"

@@ -6,31 +6,23 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
 /// Agent responds once and exits (for use with -p mode)
 fn scenario_simple() -> &'static str {
     r#"
-name = "gate-test"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Task complete."
 
-[responses.response]
-text = "Task complete."
-
-[tool_execution]
+[tools]
 mode = "live"
-tools.Bash.auto_approve = true
+
+[tools.Bash]
+approve = true
 "#
 }
-
-// =============================================================================
-// Runbooks
-// =============================================================================
 
 /// Runbook with on_dead gate that runs `true` (always exits 0).
 /// Job should complete successfully.
@@ -107,10 +99,6 @@ on_dead = {{ action = "gate", run = "test -f output.txt" }}
     )
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
 /// Tests the full on_dead gate lifecycle with a passing gate command.
 ///
 /// Lifecycle: agent spawns → agent exits → on_dead triggers → gate runs `true`
@@ -131,11 +119,7 @@ fn on_dead_gate_exit_zero_advances_job() {
     // claudeless -p exits immediately. The watcher detects session death
     // and runs the gate command. Exit 0 should advance the job.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
@@ -164,11 +148,7 @@ fn on_dead_gate_nonzero_exit_escalates_job() {
     // claudeless -p exits immediately. The watcher detects session death
     // and runs the gate command. Non-zero exit should escalate the job.
     let waiting = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("waiting")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("waiting")
     });
     assert!(
         waiting,
@@ -189,22 +169,22 @@ fn on_dead_gate_verifies_agent_output() {
 
     // Scenario where agent creates a file
     let scenario = r#"
-name = "creates-output"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Creating output file."
 
-[responses.response]
-text = "Creating output file."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "echo 'result' > output.txt" }
 
-[tool_execution]
+[tools]
 mode = "live"
-tools.Bash.auto_approve = true
+
+[tools.Bash]
+approve = true
 "#;
 
     temp.file(".oj/scenarios/creates-output.toml", scenario);
@@ -217,11 +197,7 @@ tools.Bash.auto_approve = true
 
     // Agent creates output.txt, then exits. Gate checks file exists.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,

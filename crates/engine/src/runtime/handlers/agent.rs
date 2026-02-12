@@ -4,53 +4,52 @@
 //! Agent state change handling
 
 use super::super::Runtime;
-use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::error::RuntimeError;
-use crate::monitor::{self, MonitorState};
-use oj_adapters::agent::find_session_log;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use crate::lifecycle::RunLifecycle;
+use crate::monitor::MonitorState;
+use oj_adapters::{AgentAdapter, NotifyAdapter};
 use oj_core::{
-    AgentId, AgentRun, AgentRunId, AgentRunStatus, AgentState, Clock, Effect, Event, Job, JobId,
-    OwnerId, PromptType, QuestionData, SessionId, TimerId,
+    AgentId, AgentState, Clock, Crew, Effect, Event, Job, JobId, OwnerId, PromptType, QuestionData,
+    TimerId,
 };
 use std::collections::HashMap;
-use std::time::Duration;
-
-/// Grace period before acting on idle detection.
-/// Prevents false idle triggers between tool calls.
-/// Override with `OJ_IDLE_GRACE_MS` for integration tests.
-pub(crate) fn idle_grace_period() -> Duration {
-    match std::env::var("OJ_IDLE_GRACE_MS") {
-        Ok(val) => Duration::from_millis(val.parse().unwrap_or(60_000)),
-        Err(_) => Duration::from_secs(60),
-    }
-}
 
 /// Result of looking up an agent's owner context.
 enum OwnerCtx {
     /// Agent is owned by a job
-    Job { job: Box<Job>, job_id: JobId },
-    /// Agent is owned by a standalone agent run
-    AgentRun {
-        agent_run: Box<AgentRun>,
-        agent_run_id: AgentRunId,
-    },
+    Job { job: Box<Job> },
+    /// Agent is owned by a crew
+    Agent { agent: Box<Crew> },
     /// Owner found but should be skipped (terminal or stale)
     Skip,
     /// No owner registered for this agent_id
     Unknown,
 }
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl OwnerCtx {
+    /// Extract the RunLifecycle trait object, or None for Skip/Unknown.
+    fn as_run(&self) -> Option<&dyn RunLifecycle> {
+        match self {
+            OwnerCtx::Job { job } => Some(job.as_ref()),
+            OwnerCtx::Agent { agent } => Some(agent.as_ref()),
+            OwnerCtx::Skip | OwnerCtx::Unknown => None,
+        }
+    }
+
+    fn is_unknown(&self) -> bool {
+        matches!(self, OwnerCtx::Unknown)
+    }
+}
+
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
 {
     /// Look up and validate an agent's owner context by agent_id.
     ///
-    /// Returns the owner (Job or AgentRun) if found and valid for processing,
+    /// Returns a resolved entity if found and valid for processing,
     /// Skip if the owner is terminal or the agent_id is stale, or Unknown if
     /// no owner is registered.
     fn get_owner_context(&self, agent_id: &AgentId) -> OwnerCtx {
@@ -60,12 +59,9 @@ where
 
         match owner {
             OwnerId::Job(job_id) => {
-                // Get the job from state
                 let Some(job) = self.get_job(job_id.as_str()) else {
                     return OwnerCtx::Unknown;
                 };
-
-                // Skip if terminal
                 if job.is_terminal() {
                     return OwnerCtx::Skip;
                 }
@@ -77,195 +73,95 @@ where
                     .rfind(|r| r.name == job.step)
                     .and_then(|r| r.agent_id.as_deref());
                 if current_agent_id != Some(agent_id.as_str()) {
-                    tracing::debug!(
-                        agent_id = %agent_id,
-                        job_id = %job.id,
-                        step = %job.step,
-                        current_agent = ?current_agent_id,
-                        "dropping stale agent event (agent_id mismatch)"
-                    );
                     return OwnerCtx::Skip;
                 }
 
-                OwnerCtx::Job {
-                    job: Box::new(job),
-                    job_id,
-                }
+                OwnerCtx::Job { job: Box::new(job) }
             }
-            OwnerId::AgentRun(agent_run_id) => {
-                // Get the agent run from state
-                let Some(agent_run) =
-                    self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned())
-                else {
+            OwnerId::Crew(crew_id) => {
+                let Some(crew) = self.lock_state(|s| s.crew.get(crew_id.as_str()).cloned()) else {
                     return OwnerCtx::Unknown;
                 };
-
-                // Skip if terminal
-                if agent_run.status.is_terminal() {
+                if crew.status.is_terminal() {
                     return OwnerCtx::Skip;
                 }
 
                 // Verify agent_id matches
-                if agent_run.agent_id.as_deref() != Some(agent_id.as_str()) {
-                    tracing::debug!(
-                        agent_id = %agent_id,
-                        agent_run_id = %agent_run.id,
-                        "dropping stale standalone agent event (agent_id mismatch)"
-                    );
+                if crew.agent_id.as_deref() != Some(agent_id.as_str()) {
                     return OwnerCtx::Skip;
                 }
 
-                OwnerCtx::AgentRun {
-                    agent_run: Box::new(agent_run),
-                    agent_run_id,
-                }
+                OwnerCtx::Agent { agent: Box::new(crew) }
             }
         }
     }
 
-    pub(crate) async fn handle_agent_state_changed(
+    pub(crate) async fn handle_agent_status(
         &self,
         agent_id: &oj_core::AgentId,
         state: &oj_core::AgentState,
     ) -> Result<Vec<Event>, RuntimeError> {
-        match self.get_owner_context(agent_id) {
-            OwnerCtx::Job { job, .. } => {
-                let runbook = self.cached_runbook(&job.runbook_hash)?;
-                let agent_def = match monitor::get_agent_def(&runbook, &job) {
-                    Ok(def) => def.clone(),
-                    Err(_) => {
-                        // Job already advanced past the agent step
-                        return Ok(vec![]);
-                    }
-                };
-                self.handle_monitor_state(&job, &agent_def, MonitorState::from_agent_state(state))
-                    .await
-            }
-            OwnerCtx::AgentRun { agent_run, .. } => {
-                let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
-                let agent_def = runbook
-                    .get_agent(&agent_run.agent_name)
-                    .ok_or_else(|| RuntimeError::AgentNotFound(agent_run.agent_name.clone()))?
-                    .clone();
-                self.handle_standalone_monitor_state(
-                    &agent_run,
-                    &agent_def,
-                    MonitorState::from_agent_state(state),
-                )
-                .await
-            }
-            OwnerCtx::Skip => Ok(vec![]),
-            OwnerCtx::Unknown => {
+        let ctx = self.get_owner_context(agent_id);
+        let Some(run) = ctx.as_run() else {
+            if ctx.is_unknown() {
                 tracing::warn!(agent_id = %agent_id, "received AgentStateChanged for unknown agent");
-                Ok(vec![])
             }
-        }
+            return Ok(vec![]);
+        };
+        let runbook = self.cached_runbook(run.runbook_hash())?;
+        let Ok(agent_def) = run.resolve_agent_def(&runbook) else {
+            return Ok(vec![]); // Job advanced past the agent step
+        };
+        self.handle_monitor_state_for(run, &agent_def, MonitorState::from_agent_state(state)).await
     }
 
-    /// Handle agent:idle from Notification hook
+    /// Handle agent:idle — dispatches the on_idle action.
     ///
-    /// Instead of acting immediately, sets a 60-second grace timer and records
-    /// the current session log file size. When the timer fires, we check if the
-    /// log has grown (any activity = not idle) and re-verify the agent state.
+    /// This is the primary trigger for on_idle dispatch. For allow-mode actions
+    /// (done/fail), this is the sole trigger. For gate-mode actions (nudge,
+    /// gate, resume, escalate), stop:blocked may fire first as a faster path;
+    /// the is_waiting() guard in handle_monitor_state_for prevents double-dispatch.
+    /// For auto, the engine does not intervene.
+    ///
+    /// Print-mode agents may briefly transition through idle before exiting.
+    /// A liveness check prevents false-positive idle dispatch — if the agent
+    /// process is already dead, we skip dispatch and let the exit path (on_dead)
+    /// handle it.
     pub(crate) async fn handle_agent_idle_hook(
         &self,
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        match self.get_owner_context(agent_id) {
-            OwnerCtx::Job { job, job_id } => {
-                // If job has a signal or is already waiting for a decision, ignore
-                if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
-                    return Ok(vec![]);
-                }
-
-                // Deduplicate: if grace timer already pending, skip
-                if job.idle_grace_log_size.is_some() {
-                    tracing::debug!(
-                        job_id = %job.id,
-                        "idle grace timer already pending, deduplicating"
-                    );
-                    return Ok(vec![]);
-                }
-
-                // Record session log size and set grace timer
-                let log_size = self
-                    .executor
-                    .get_session_log_size(agent_id)
-                    .await
-                    .unwrap_or(0);
-                self.lock_state_mut(|state| {
-                    if let Some(p) = state.jobs.get_mut(job_id.as_str()) {
-                        p.idle_grace_log_size = Some(log_size);
-                    }
-                });
-
-                tracing::debug!(
-                    job_id = %job.id,
-                    log_size,
-                    "setting idle grace timer"
-                );
-                self.executor
-                    .execute(Effect::SetTimer {
-                        id: TimerId::idle_grace(&job_id),
-                        duration: idle_grace_period(),
-                    })
-                    .await?;
-
-                Ok(vec![])
-            }
-            OwnerCtx::AgentRun {
-                agent_run,
-                agent_run_id,
-            } => {
-                // Additional skip checks for idle handling
-                if agent_run.action_tracker.agent_signal.is_some()
-                    || agent_run.status == AgentRunStatus::Waiting
-                    || agent_run.status == AgentRunStatus::Escalated
-                {
-                    return Ok(vec![]);
-                }
-
-                // Deduplicate: if grace timer already pending, skip
-                if agent_run.idle_grace_log_size.is_some() {
-                    tracing::debug!(
-                        agent_run_id = %agent_run.id,
-                        "idle grace timer already pending, deduplicating"
-                    );
-                    return Ok(vec![]);
-                }
-
-                // Record session log size and set grace timer
-                let log_size = self
-                    .executor
-                    .get_session_log_size(agent_id)
-                    .await
-                    .unwrap_or(0);
-                self.lock_state_mut(|state| {
-                    if let Some(ar) = state.agent_runs.get_mut(agent_run_id.as_str()) {
-                        ar.idle_grace_log_size = Some(log_size);
-                    }
-                });
-
-                tracing::debug!(
-                    agent_run_id = %agent_run.id,
-                    log_size,
-                    "setting idle grace timer for standalone agent"
-                );
-                self.executor
-                    .execute(Effect::SetTimer {
-                        id: TimerId::idle_grace_agent_run(&agent_run_id),
-                        duration: idle_grace_period(),
-                    })
-                    .await?;
-
-                Ok(vec![])
-            }
-            OwnerCtx::Skip => Ok(vec![]),
-            OwnerCtx::Unknown => {
-                tracing::debug!(agent_id = %agent_id, "agent:idle for unknown agent");
-                Ok(vec![])
-            }
+        let ctx = self.get_owner_context(agent_id);
+        let Some(run) = ctx.as_run() else {
+            return Ok(vec![]);
+        };
+        if run.is_waiting() {
+            return Ok(vec![]);
         }
+
+        // Guard: if the agent process is already dead, skip on_idle dispatch.
+        // Print-mode agents (-p) briefly transition through idle before exiting;
+        // dispatching on_idle here would race with the exit path (on_dead).
+        if !self.executor.agents.is_alive(agent_id).await {
+            return Ok(vec![]);
+        }
+
+        let runbook = self.cached_runbook(run.runbook_hash())?;
+        let Ok(agent_def) = run.resolve_agent_def(&runbook) else {
+            return Ok(vec![]);
+        };
+
+        // Auto mode: engine does not intervene (coop handles self-determination).
+        let on_idle = agent_def
+            .on_idle
+            .as_ref()
+            .map(|c| c.action().clone())
+            .unwrap_or(oj_runbook::AgentAction::Escalate);
+        if matches!(on_idle, oj_runbook::AgentAction::Auto) {
+            return Ok(vec![]);
+        }
+
+        self.handle_monitor_state_for(run, &agent_def, MonitorState::WaitingForInput).await
     }
 
     /// Handle agent:prompt from Notification hook
@@ -273,151 +169,72 @@ where
         &self,
         agent_id: &AgentId,
         prompt_type: &PromptType,
-        question_data: Option<&QuestionData>,
-        assistant_context: Option<&str>,
+        questions: Option<&QuestionData>,
+        last_message: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        match self.get_owner_context(agent_id) {
-            OwnerCtx::Job { job, .. } => {
-                // If job has a signal or is already waiting for a decision, ignore
-                if job.action_tracker.agent_signal.is_some() || job.step_status.is_waiting() {
-                    return Ok(vec![]);
-                }
-
-                let runbook = self.cached_runbook(&job.runbook_hash)?;
-                let agent_def = monitor::get_agent_def(&runbook, &job)?.clone();
-                self.handle_monitor_state(
-                    &job,
-                    &agent_def,
-                    MonitorState::Prompting {
-                        prompt_type: prompt_type.clone(),
-                        question_data: question_data.cloned(),
-                        assistant_context: assistant_context.map(|s| s.to_string()),
-                    },
-                )
-                .await
-            }
-            OwnerCtx::AgentRun { agent_run, .. } => {
-                // Additional skip checks for prompt handling
-                if agent_run.action_tracker.agent_signal.is_some()
-                    || agent_run.status == AgentRunStatus::Waiting
-                    || agent_run.status == AgentRunStatus::Escalated
-                {
-                    return Ok(vec![]);
-                }
-                let runbook = self.cached_runbook(&agent_run.runbook_hash)?;
-                let agent_def = runbook
-                    .get_agent(&agent_run.agent_name)
-                    .ok_or_else(|| RuntimeError::AgentNotFound(agent_run.agent_name.clone()))?
-                    .clone();
-                self.handle_standalone_monitor_state(
-                    &agent_run,
-                    &agent_def,
-                    MonitorState::Prompting {
-                        prompt_type: prompt_type.clone(),
-                        question_data: question_data.cloned(),
-                        assistant_context: assistant_context.map(|s| s.to_string()),
-                    },
-                )
-                .await
-            }
-            OwnerCtx::Skip => Ok(vec![]),
-            OwnerCtx::Unknown => {
-                tracing::debug!(agent_id = %agent_id, "agent:prompt for unknown agent");
-                Ok(vec![])
-            }
+        let ctx = self.get_owner_context(agent_id);
+        let Some(run) = ctx.as_run() else {
+            return Ok(vec![]);
+        };
+        if run.is_waiting() {
+            return Ok(vec![]);
         }
+        let runbook = self.cached_runbook(run.runbook_hash())?;
+        let agent_def = run.resolve_agent_def(&runbook)?;
+        let monitor_state = MonitorState::Prompting {
+            prompt_type: prompt_type.clone(),
+            questions: questions.cloned(),
+            last_message: last_message.map(|s| s.to_string()),
+        };
+        self.handle_monitor_state_for(run, &agent_def, monitor_state).await
     }
 
-    /// Handle agent:stop — fired when on_stop=escalate and agent tries to exit.
+    /// Handle agent:stop:blocked — coop blocked the agent from stopping.
     ///
-    /// Escalates to human: sends notification and sets job/agent_run to waiting.
-    /// Idempotent: skips if already in waiting/escalated status.
-    pub(crate) async fn handle_agent_stop_hook(
+    /// Used for gate-mode actions (nudge, gate, resume, escalate).
+    /// Resolves the stop (allows the agent to proceed) then dispatches on_idle.
+    /// This is a fast path — AgentIdle also dispatches as a fallback.
+    pub(crate) async fn handle_agent_stop_blocked(
         &self,
         agent_id: &AgentId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        match self.get_owner_context(agent_id) {
-            OwnerCtx::Job { job, job_id } => {
-                if job.step_status.is_waiting() {
-                    return Ok(vec![]); // Already escalated — no-op
-                }
+        let ctx = self.get_owner_context(agent_id);
+        let Some(run) = ctx.as_run() else {
+            return Ok(vec![]);
+        };
+        let runbook = self.cached_runbook(run.runbook_hash())?;
+        let Ok(agent_def) = run.resolve_agent_def(&runbook) else {
+            return Ok(vec![]);
+        };
 
-                let trigger = EscalationTrigger::Idle {
-                    assistant_context: None,
-                };
-                let (decision_id, decision_event) =
-                    EscalationDecisionBuilder::for_job(job_id.clone(), job.name.clone(), trigger)
-                        .agent_id(job.session_id.clone().unwrap_or_default())
-                        .namespace(job.namespace.clone())
-                        .build();
+        // Resolve the stop so the agent can proceed
+        self.executor.agents.resolve_stop(agent_id).await;
 
-                let effects = vec![
-                    Effect::Emit {
-                        event: decision_event,
-                    },
-                    Effect::Notify {
-                        title: format!("Job needs attention: {}", job.name),
-                        message: "Agent tried to stop without signaling completion".to_string(),
-                    },
-                    Effect::Emit {
-                        event: Event::StepWaiting {
-                            job_id: job_id.clone(),
-                            step: job.step.clone(),
-                            reason: Some("on_stop: escalate".to_string()),
-                            decision_id: Some(decision_id),
-                        },
-                    },
-                    Effect::CancelTimer {
-                        id: TimerId::exit_deferred(&job_id),
-                    },
-                ];
-                Ok(self.executor.execute_all(effects).await?)
-            }
-            OwnerCtx::AgentRun {
-                agent_run,
-                agent_run_id,
-            } => {
-                // Additional skip check: already escalated
-                if agent_run.status == AgentRunStatus::Escalated {
-                    return Ok(vec![]);
-                }
+        // Dispatch on_idle via the unified monitor path
+        self.handle_monitor_state_for(run, &agent_def, MonitorState::WaitingForInput).await
+    }
 
-                let trigger = EscalationTrigger::Idle {
-                    assistant_context: None,
-                };
-                let (_decision_id, decision_event) = EscalationDecisionBuilder::for_agent_run(
-                    agent_run_id.clone(),
-                    agent_run.command_name.clone(),
-                    trigger,
-                )
-                .agent_id(agent_run.agent_id.clone().unwrap_or_default())
-                .namespace(agent_run.namespace.clone())
-                .build();
+    /// Handle agent:stop:allowed — coop allowed the turn to end naturally.
+    ///
+    /// Used for allow-mode actions (done, fail). The agent's turn ended
+    /// without interception; dispatch on_idle to execute the configured action.
+    /// This is a fast path — AgentIdle also dispatches as a fallback.
+    pub(crate) async fn handle_agent_stop_allowed(
+        &self,
+        agent_id: &AgentId,
+    ) -> Result<Vec<Event>, RuntimeError> {
+        let ctx = self.get_owner_context(agent_id);
+        let Some(run) = ctx.as_run() else {
+            return Ok(vec![]);
+        };
+        let runbook = self.cached_runbook(run.runbook_hash())?;
+        let Ok(agent_def) = run.resolve_agent_def(&runbook) else {
+            return Ok(vec![]);
+        };
 
-                // Fire standalone escalation with decision
-                let effects = vec![
-                    Effect::Emit {
-                        event: decision_event,
-                    },
-                    Effect::Notify {
-                        title: format!("Agent needs attention: {}", agent_run.command_name),
-                        message: "Agent tried to stop without signaling completion".to_string(),
-                    },
-                    Effect::Emit {
-                        event: Event::AgentRunStatusChanged {
-                            id: agent_run_id.clone(),
-                            status: AgentRunStatus::Escalated,
-                            reason: Some("on_stop: escalate".to_string()),
-                        },
-                    },
-                    Effect::CancelTimer {
-                        id: TimerId::exit_deferred_agent_run(&agent_run_id),
-                    },
-                ];
-                Ok(self.executor.execute_all(effects).await?)
-            }
-            OwnerCtx::Skip | OwnerCtx::Unknown => Ok(vec![]),
-        }
+        // Dispatch on_idle via the unified monitor path
+        // No resolve_stop needed — coop already allowed the turn to end
+        self.handle_monitor_state_for(run, &agent_def, MonitorState::WaitingForInput).await
     }
 
     /// Handle resume for agent step: nudge if alive, recover if dead
@@ -454,10 +271,8 @@ where
         };
 
         // If agent is alive and not killing, nudge it
-        let is_alive = matches!(
-            agent_state,
-            Some(AgentState::Working) | Some(AgentState::WaitingForInput)
-        );
+        let is_alive =
+            matches!(agent_state, Some(AgentState::Working) | Some(AgentState::WaitingForInput));
         if !kill && is_alive {
             if let Some(id) = &agent_id {
                 self.executor
@@ -502,54 +317,24 @@ where
         // the job can be detected as suspending and resumed later.
         if kill && is_alive {
             self.executor
-                .execute(Effect::Emit {
-                    event: Event::JobSuspending {
-                        id: JobId::new(&job.id),
-                    },
-                })
+                .execute(Effect::Emit { event: Event::JobSuspending { id: JobId::new(&job.id) } })
                 .await?;
         }
 
         // Capture terminal + session log before killing old session
         self.capture_before_kill_job(job).await;
 
-        // Kill old tmux session if it exists (cleanup - Claude conversation persists in JSONL)
-        if let Some(session_id) = &job.session_id {
-            let _ = self
-                .executor
-                .execute(Effect::KillSession {
-                    session_id: SessionId::new(session_id),
-                })
-                .await;
+        // Kill old agent if it exists (cleanup - Claude conversation persists in JSONL)
+        if let Some(id) = all_agent_ids.first() {
+            let _ = self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(id) }).await;
         }
 
-        // Find a previous agent_id that has a valid session file to resume from.
-        // Walk backwards through all agent_ids for this step (most recent first).
-        // This recovers context even after failed resume attempts that died before writing JSONL.
-        let workspace_path = self.execution_dir(job);
-        let resume_id = all_agent_ids
-            .iter()
-            .find(|id| find_session_log(&workspace_path, id).is_some());
-
-        if resume_id.is_none() && !all_agent_ids.is_empty() {
-            tracing::warn!(
-                job_id = %job.id,
-                tried = ?all_agent_ids,
-                "no valid session file found for any previous agent, starting fresh"
-            );
-        }
-
+        // Resume with coop's --resume flag (coop discovers session ID from JSONL)
+        let resume = !all_agent_ids.is_empty();
         let job_id = JobId::new(&job.id);
-        let result = self
-            .spawn_agent_with_resume(
-                &job_id,
-                agent_name,
-                &new_inputs,
-                resume_id.map(|s| s.as_str()),
-            )
-            .await?;
+        let result = self.spawn_agent_with_resume(&job_id, agent_name, &new_inputs, resume).await?;
 
-        tracing::info!(job_id = %job.id, kill, ?resume_id, "resumed agent with --resume");
+        tracing::info!(job_id = %job.id, kill, resume, "resumed agent with --resume");
         Ok(result)
     }
 }

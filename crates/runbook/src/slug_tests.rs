@@ -72,10 +72,7 @@ fn all_special_chars() {
 #[test]
 fn exact_max_len() {
     // "abcdefghijklmnopqrstuvwxyz12" is exactly 28 chars
-    assert_eq!(
-        slugify("abcdefghijklmnopqrstuvwxyz12", 28),
-        "abcdefghijklmnopqrstuvwxyz12"
-    );
+    assert_eq!(slugify("abcdefghijklmnopqrstuvwxyz12", 28), "abcdefghijklmnopqrstuvwxyz12");
 }
 
 #[test]
@@ -143,10 +140,7 @@ fn non_consecutive_duplicates_preserved() {
 
 #[test]
 fn display_name_normal() {
-    assert_eq!(
-        job_display_name("fix-login-button", "a1b2c3d4", ""),
-        "fix-login-button-a1b2c3d4"
-    );
+    assert_eq!(job_display_name("fix-login-button", "a1b2c3d4", ""), "fix-login-button-a1b2c3d4");
 }
 
 #[test]
@@ -165,11 +159,8 @@ fn display_name_with_special_chars() {
 #[test]
 fn display_name_truncation() {
     // Long input should be truncated to 28 chars before nonce
-    let result = job_display_name(
-        "implement user authentication system for the app",
-        "12345678",
-        "",
-    );
+    let result =
+        job_display_name("implement user authentication system for the app", "12345678", "");
     let parts: Vec<&str> = result.rsplitn(2, '-').collect();
     assert_eq!(parts[0], "12345678");
     let slug_part = parts[1];
@@ -194,8 +185,5 @@ fn display_name_no_strip_without_prefix() {
 
 #[test]
 fn display_name_empty_namespace() {
-    assert_eq!(
-        job_display_name("oj-queue-list", "90158779", ""),
-        "oj-queue-list-90158779"
-    );
+    assert_eq!(job_display_name("oj-queue-list", "90158779", ""), "oj-queue-list-90158779");
 }

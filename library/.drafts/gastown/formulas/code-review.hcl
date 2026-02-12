@@ -36,7 +36,7 @@ command "gt-review" {
 job "code-review" {
   name      = "review-${var.branch}"
   vars      = ["branch", "base"]
-  workspace = "folder"
+  source    = "folder"
 
   locals {
     repo = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
@@ -53,17 +53,17 @@ job "code-review" {
     run = <<-SHELL
       git -C "${local.repo}" fetch origin ${var.branch} ${var.base}
 
-      git -C "${local.repo}" diff origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff.patch
-      git -C "${local.repo}" diff --stat origin/${var.base}...origin/${var.branch} > ${workspace.root}/diff-stat.txt
-      git -C "${local.repo}" log --oneline origin/${var.base}...origin/${var.branch} > ${workspace.root}/commits.txt
+      git -C "${local.repo}" diff origin/${var.base}...origin/${var.branch} > ${source.root}/diff.patch
+      git -C "${local.repo}" diff --stat origin/${var.base}...origin/${var.branch} > ${source.root}/diff-stat.txt
+      git -C "${local.repo}" log --oneline origin/${var.base}...origin/${var.branch} > ${source.root}/commits.txt
 
       CONVOY_ID=$(bd create -t convoy \
         --title "Code Review: ${var.branch}" \
         --labels "review,branch:${var.branch}" \
         --json 2>/dev/null | jq -r '.id' 2>/dev/null || echo "review-convoy")
-      echo "$CONVOY_ID" > ${workspace.root}/convoy-id
+      echo "$CONVOY_ID" > ${source.root}/convoy-id
 
-      mkdir -p ${workspace.root}/findings
+      mkdir -p ${source.root}/findings
     SHELL
     on_done = { step = "correctness" }
   }
@@ -137,9 +137,9 @@ job "code-review" {
   # Record review results in beads
   step "record" {
     run = <<-SHELL
-      CONVOY_ID="$(cat ${workspace.root}/convoy-id 2>/dev/null || echo unknown)"
+      CONVOY_ID="$(cat ${source.root}/convoy-id 2>/dev/null || echo unknown)"
 
-      if test -f ${workspace.root}/findings/synthesis.md; then
+      if test -f ${source.root}/findings/synthesis.md; then
         bd close "$CONVOY_ID" --reason "Review complete" 2>/dev/null || true
       fi
     SHELL

@@ -87,12 +87,7 @@ fn rotate_shifts_existing_rotations() {
     assert!(dir.path().join("daemon.log.3").exists());
 
     // Verify content shifted correctly: old .2 (200 bytes) → .3
-    assert_eq!(
-        std::fs::metadata(dir.path().join("daemon.log.3"))
-            .unwrap()
-            .len(),
-        200
-    );
+    assert_eq!(std::fs::metadata(dir.path().join("daemon.log.3")).unwrap().len(), 200);
 }
 
 #[test]
@@ -114,12 +109,7 @@ fn rotate_drops_oldest_when_full() {
     assert!(dir.path().join("daemon.log.3").exists());
 
     // .3 should now be the old .2 (200 bytes), not the old .3 (300 bytes)
-    assert_eq!(
-        std::fs::metadata(dir.path().join("daemon.log.3"))
-            .unwrap()
-            .len(),
-        200
-    );
+    assert_eq!(std::fs::metadata(dir.path().join("daemon.log.3")).unwrap().len(), 200);
 }
 
 #[test]

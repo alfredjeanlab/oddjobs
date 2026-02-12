@@ -7,15 +7,17 @@ use super::WorkerStatus;
 use crate::error::RuntimeError;
 use crate::runtime::handlers::CreateJobParams;
 use crate::runtime::Runtime;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, UuidIdGen};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
+use oj_core::{
+    scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, OwnerId, UuidIdGen,
+};
 use oj_runbook::QueueType;
 use oj_storage::{QueueItemStatus, QueuePollMeta};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -25,7 +27,7 @@ where
         worker_name: &str,
         items: &[serde_json::Value],
     ) -> Result<Vec<Event>, RuntimeError> {
-        // worker_name is a scoped key (from transient WorkerPollComplete event)
+        // worker_name is a scoped key (from transient WorkerPolled event)
         let worker_key = worker_name;
         let (_, bare_name) = split_scoped_name(worker_key);
         let mut result_events = Vec::new();
@@ -42,13 +44,11 @@ where
                 _ => return Ok(result_events),
             };
 
-            let active = state.active_jobs.len() as u32 + state.pending_takes;
+            let active = state.active.len() as u32 + state.pending_takes;
             let available = state.concurrency.saturating_sub(active);
             if available == 0 || items.is_empty() {
-                self.worker_logger.append(
-                    worker_key,
-                    &format!("idle (active={}/{})", active, state.concurrency),
-                );
+                self.worker_logger
+                    .append(worker_key, &format!("idle (active={}/{})", active, state.concurrency));
                 state.status = WorkerStatus::Running;
                 return Ok(result_events);
             }
@@ -65,10 +65,10 @@ where
             (
                 queue_type,
                 queue_def.take.clone(),
-                state.project_root.clone(),
+                state.project_path.clone(),
                 available as usize,
                 state.queue_name.clone(),
-                state.namespace.clone(),
+                state.project.clone(),
             )
         };
 
@@ -79,7 +79,7 @@ where
                 scoped_key,
                 QueuePollMeta {
                     last_item_count: items.len(),
-                    last_polled_at_ms: self.clock().epoch_ms(),
+                    last_polled_at_ms: self.executor.clock().epoch_ms(),
                 },
             )
         });
@@ -100,7 +100,7 @@ where
                         let workers = self.worker_states.lock();
                         if let Some(state) = workers.get(worker_key) {
                             if state.inflight_items.contains(&item_id)
-                                || state.item_job_map.values().any(|id| id == &item_id)
+                                || state.items.values().any(|id| id == &item_id)
                             {
                                 continue;
                             }
@@ -140,7 +140,8 @@ where
                     // succeeds.
                     self.executor
                         .execute(Effect::TakeQueueItem {
-                            worker_name: worker_key.to_string(),
+                            worker_name: bare_name.to_string(),
+                            project: worker_namespace.clone(),
                             take_command,
                             cwd: cwd.clone(),
                             item_id,
@@ -150,7 +151,7 @@ where
                     dispatched_count += 1;
                 }
                 QueueType::Persisted => {
-                    // Guard against stale WorkerPollComplete events: if multiple
+                    // Guard against stale WorkerPolled events: if multiple
                     // polls run before any dispatches are processed, their payloads
                     // overlap. Skip items that are no longer Pending to avoid
                     // creating duplicate jobs for the same queue item.
@@ -172,10 +173,10 @@ where
                         self.executor
                             .execute_all(vec![Effect::Emit {
                                 event: Event::QueueTaken {
-                                    queue_name: queue_name.clone(),
+                                    queue: queue_name.clone(),
                                     item_id: item_id.clone(),
-                                    worker_name: bare_name.to_string(),
-                                    namespace: worker_namespace.clone(),
+                                    worker: bare_name.to_string(),
+                                    project: worker_namespace.clone(),
                                 },
                             }])
                             .await?,
@@ -203,7 +204,7 @@ where
         exit_code: i32,
         stderr: Option<&str>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // worker_name is a scoped key (from transient WorkerTakeComplete event)
+        // worker_name is a scoped key (from transient WorkerTook event)
         let worker_key = worker_name;
 
         // Release the pending-take slot reserved by handle_worker_poll_complete
@@ -232,10 +233,7 @@ where
             }
             self.worker_logger.append(
                 worker_key,
-                &format!(
-                    "error: take command failed for item {}: {}",
-                    item_id, err_msg
-                ),
+                &format!("error: take command failed for item {}: {}", item_id, err_msg),
             );
             return Ok(vec![]);
         }
@@ -275,7 +273,7 @@ where
 
             // Defense in depth: if a job is already active for this item_id,
             // skip dispatch to prevent duplicate jobs.
-            if state.item_job_map.values().any(|id| id == &item_id) {
+            if state.items.values().any(|id| id == &item_id) {
                 tracing::warn!(
                     worker = worker_key,
                     item_id = item_id.as_str(),
@@ -291,8 +289,8 @@ where
             (
                 state.job_kind.clone(),
                 state.runbook_hash.clone(),
-                state.project_root.clone(),
-                state.namespace.clone(),
+                state.project_path.clone(),
+                state.project.clone(),
             )
         };
 
@@ -307,18 +305,15 @@ where
             .ok_or_else(|| RuntimeError::JobDefNotFound(job_kind.clone()))?;
 
         // Build input from item fields
-        // Map fields into the namespace of the job's first declared var
+        // Map fields into the project of the job's first declared var
         // e.g. if vars = ["bug"], fields become "bug.title", "bug.id", etc.
         // which namespace_vars() later promotes to "var.bug.title", etc.
         let mut input = HashMap::new();
         input.insert("invoke.dir".to_string(), cwd.display().to_string());
         if let Some(obj) = item.as_object() {
             for (key, value) in obj {
-                let v = if let Some(s) = value.as_str() {
-                    s.to_string()
-                } else {
-                    value.to_string()
-                };
+                let v =
+                    if let Some(s) = value.as_str() { s.to_string() } else { value.to_string() };
                 if let Some(first_input) = job_def.vars.first() {
                     input.insert(format!("{}.{}", first_input, key), v);
                 }
@@ -337,43 +332,35 @@ where
                 runbook_hash: runbook_hash.clone(),
                 runbook_json: None,
                 runbook,
-                namespace: worker_namespace.clone(),
+                project: worker_namespace.clone(),
                 cron_name: None,
             })
             .await?,
         );
 
         // Track job in worker state and item-job mapping
+        let owner: OwnerId = job_id.clone().into();
         {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_key) {
-                state.active_jobs.insert(job_id.clone());
-                state.item_job_map.insert(job_id.clone(), item_id.clone());
+                state.active.insert(owner.clone());
+                state.items.insert(owner.clone(), item_id.clone());
             }
         }
 
-        // Emit WorkerItemDispatched (persisted — use bare name)
-        let dispatch_event = Event::WorkerItemDispatched {
-            worker_name: bare_name.to_string(),
+        // Emit WorkerDispatched (persisted — use bare name)
+        let dispatch_event = Event::WorkerDispatched {
+            worker: bare_name.to_string(),
             item_id: item_id.clone(),
-            job_id: job_id.clone(),
-            namespace: worker_namespace.clone(),
+            owner: owner.clone(),
+            project: worker_namespace.clone(),
         };
-        result_events.extend(
-            self.executor
-                .execute_all(vec![Effect::Emit {
-                    event: dispatch_event,
-                }])
-                .await?,
-        );
+        result_events
+            .extend(self.executor.execute_all(vec![Effect::Emit { event: dispatch_event }]).await?);
 
         self.worker_logger.append(
             worker_key,
-            &format!(
-                "dispatched item {} \u{2192} job {}",
-                item_id,
-                job_id.as_str()
-            ),
+            &format!("dispatched item {} \u{2192} job {}", item_id, job_id.as_str()),
         );
 
         Ok(result_events)
@@ -392,13 +379,8 @@ fn json_item_id(item: &serde_json::Value) -> String {
             None => {}
         }
     }
-    use std::hash::{Hash, Hasher};
     let canonical = serde_json::to_string(item).unwrap_or_default();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     canonical.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
-
-#[cfg(test)]
-#[path = "dispatch_tests.rs"]
-mod tests;

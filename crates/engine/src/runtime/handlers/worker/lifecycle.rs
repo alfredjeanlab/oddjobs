@@ -6,17 +6,16 @@
 use super::{WorkerState, WorkerStatus};
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, JobId, TimerId};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
+use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, JobId, OwnerId, TimerId};
 use oj_runbook::QueueType;
 use oj_storage::QueueItemStatus;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -24,11 +23,11 @@ where
     pub(crate) async fn handle_worker_started(
         &self,
         worker_name: &str,
-        project_root: &Path,
+        project_path: &Path,
         runbook_hash: &str,
-        namespace: &str,
+        project: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let worker_key = scoped_name(namespace, worker_name);
+        let worker_key = scoped_name(project, worker_name);
         let mut result_events = Vec::new();
 
         // Defense in depth: if this worker is already Running in memory, a second
@@ -37,9 +36,7 @@ where
         // so in-flight tracking is preserved.
         let already_running = {
             let workers = self.worker_states.lock();
-            workers
-                .get(&worker_key)
-                .is_some_and(|s| s.status == WorkerStatus::Running)
+            workers.get(&worker_key).is_some_and(|s| s.status == WorkerStatus::Running)
         };
         if already_running {
             tracing::warn!(
@@ -62,7 +59,7 @@ where
                     "cached runbook lookup failed, loading from disk"
                 );
                 let (rb, hash, loaded_event) =
-                    self.load_runbook_from_disk(project_root, worker_name)?;
+                    self.load_runbook_from_disk(project_path, worker_name)?;
                 result_events.push(loaded_event);
                 (rb, hash)
             }
@@ -82,19 +79,19 @@ where
 
         // Restore active jobs from persisted state (survives daemon restart)
         let (persisted_active, persisted_item_map, persisted_inflight) = self.lock_state(|state| {
-            let scoped = scoped_name(namespace, worker_name);
+            let scoped = scoped_name(project, worker_name);
             let record = state.workers.get(&scoped);
 
-            let active: HashSet<JobId> = record
-                .map(|w| w.active_job_ids.iter().map(JobId::new).collect())
+            let active: HashSet<OwnerId> = record
+                .map(|w| w.active.iter().map(|s| OwnerId::parse(s)).collect())
                 .unwrap_or_default();
 
-            // Restore job→item map from persisted WorkerRecord
-            let item_map: HashMap<JobId, String> = record
+            // Restore owner→item map from persisted WorkerRecord
+            let item_map: HashMap<OwnerId, String> = record
                 .map(|w| {
-                    w.item_job_map
+                    w.owners
                         .iter()
-                        .map(|(job_id, item_id)| (JobId::new(job_id), item_id.clone()))
+                        .map(|(owner_str, item_id)| (OwnerId::parse(owner_str), item_id.clone()))
                         .collect()
                 })
                 .unwrap_or_default();
@@ -113,16 +110,16 @@ where
         // Store worker state
         let poll_interval = queue_def.poll.clone();
         let state = WorkerState {
-            project_root: project_root.to_path_buf(),
+            project_path: project_path.to_path_buf(),
             runbook_hash: runbook_hash.to_string(),
             queue_name: worker_def.source.queue.clone(),
-            job_kind: worker_def.handler.job.clone(),
+            job_kind: worker_def.run.job.clone(),
             concurrency: worker_def.concurrency,
-            active_jobs: persisted_active,
+            active: persisted_active,
             status: WorkerStatus::Running,
             queue_type,
-            item_job_map: persisted_item_map,
-            namespace: namespace.to_string(),
+            items: persisted_item_map,
+            project: project.to_string(),
             poll_interval: poll_interval.clone(),
             pending_takes: 0,
             inflight_items: persisted_inflight,
@@ -148,8 +145,7 @@ where
 
         // Reconcile persisted queue items: track untracked jobs and fail orphaned items.
         if queue_type == QueueType::Persisted {
-            self.reconcile_queue_items(&worker_key, namespace, &runbook)
-                .await?;
+            self.reconcile_queue_items(&worker_key, project, &runbook).await?;
         }
 
         // Trigger initial poll
@@ -159,9 +155,10 @@ where
                 result_events.extend(
                     self.executor
                         .execute_all(vec![Effect::PollQueue {
-                            worker_name: worker_key.clone(),
+                            worker_name: worker_name.to_string(),
+                            project: project.to_string(),
                             list_command,
-                            cwd: project_root.to_path_buf(),
+                            cwd: project_path.to_path_buf(),
                         }])
                         .await?,
                 );
@@ -174,13 +171,8 @@ where
                             poll, e
                         ))
                     })?;
-                    let timer_id = TimerId::queue_poll(worker_name, namespace);
-                    self.executor
-                        .execute(Effect::SetTimer {
-                            id: timer_id,
-                            duration,
-                        })
-                        .await?;
+                    let timer_id = TimerId::queue_poll(worker_name, project);
+                    self.executor.execute(Effect::SetTimer { id: timer_id, duration }).await?;
                 }
 
                 Ok(result_events)
@@ -189,7 +181,7 @@ where
                 result_events.extend(self.poll_persisted_queue(
                     &worker_key,
                     &worker_def.source.queue,
-                    namespace,
+                    project,
                 )?);
                 Ok(result_events)
             }
@@ -200,7 +192,7 @@ where
         &self,
         worker_key: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let (bare_name, namespace) = {
+        let (bare_name, project) = {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_key) {
                 self.worker_logger.append(worker_key, "stopped");
@@ -208,7 +200,7 @@ where
                 state.pending_takes = 0;
                 state.inflight_items.clear();
                 let (_, bare) = split_scoped_name(worker_key);
-                (bare.to_string(), state.namespace.clone())
+                (bare.to_string(), state.project.clone())
             } else {
                 let (_, bare) = split_scoped_name(worker_key);
                 (bare.to_string(), String::new())
@@ -216,10 +208,8 @@ where
         };
 
         // Cancel poll timer if it was set (no-op if timer doesn't exist)
-        let timer_id = TimerId::queue_poll(&bare_name, &namespace);
-        self.executor
-            .execute(Effect::CancelTimer { id: timer_id })
-            .await?;
+        let timer_id = TimerId::queue_poll(&bare_name, &project);
+        self.executor.execute(Effect::CancelTimer { id: timer_id }).await?;
 
         Ok(vec![])
     }
@@ -228,9 +218,9 @@ where
         &self,
         worker_name: &str,
         new_concurrency: u32,
-        namespace: &str,
+        project: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let worker_key = scoped_name(namespace, worker_name);
+        let worker_key = scoped_name(project, worker_name);
         let (old_concurrency, should_poll) = {
             let mut workers = self.worker_states.lock();
             match workers.get_mut(&worker_key) {
@@ -239,7 +229,7 @@ where
                     state.concurrency = new_concurrency;
 
                     // Check if we now have more slots available
-                    let active = state.active_jobs.len() as u32 + state.pending_takes;
+                    let active = state.active.len() as u32 + state.pending_takes;
                     let had_capacity = old > active;
                     let has_capacity = new_concurrency > active;
                     let should_poll = !had_capacity && has_capacity;
@@ -253,10 +243,7 @@ where
         // Log the resize
         self.worker_logger.append(
             &worker_key,
-            &format!(
-                "resized concurrency {} → {}",
-                old_concurrency, new_concurrency
-            ),
+            &format!("resized concurrency {} → {}", old_concurrency, new_concurrency),
         );
 
         // If we went from full to having capacity, trigger re-poll
@@ -275,15 +262,20 @@ where
     ///
     /// Runs for ALL queue types (external and persisted).
     async fn reconcile_active_jobs(&self, worker_key: &str) -> Result<Vec<Event>, RuntimeError> {
-        let active_pids: Vec<JobId> = {
+        let active_owners: Vec<OwnerId> = {
             let workers = self.worker_states.lock();
-            workers
-                .get(worker_key)
-                .map(|s| s.active_jobs.iter().cloned().collect())
-                .unwrap_or_default()
+            workers.get(worker_key).map(|s| s.active.iter().cloned().collect()).unwrap_or_default()
         };
+        // For now, workers only dispatch jobs. Extract JobIds for reconciliation.
+        let active_job_ids: Vec<JobId> = active_owners
+            .into_iter()
+            .filter_map(|o| match o {
+                OwnerId::Job(id) => Some(id),
+                _ => None,
+            })
+            .collect();
         let terminal_jobs: Vec<(JobId, String)> = self.lock_state(|state| {
-            active_pids
+            active_job_ids
                 .iter()
                 .filter_map(|pid| {
                     state
@@ -329,66 +321,60 @@ where
     async fn reconcile_queue_items(
         &self,
         worker_key: &str,
-        namespace: &str,
+        project: &str,
         runbook: &oj_runbook::Runbook,
     ) -> Result<(), RuntimeError> {
         let (_, bare_name) = split_scoped_name(worker_key);
         // 1. Find and track active queue items with running jobs not in worker's active list
         let queue_name = {
             let workers = self.worker_states.lock();
-            workers
-                .get(worker_key)
-                .map(|s| s.queue_name.clone())
-                .unwrap_or_default()
+            workers.get(worker_key).map(|s| s.queue_name.clone()).unwrap_or_default()
         };
-        let scoped_queue = scoped_name(namespace, &queue_name);
+        let scoped_queue = scoped_name(project, &queue_name);
         let mapped_item_ids: HashSet<String> = {
             let workers = self.worker_states.lock();
-            workers
-                .get(worker_key)
-                .map(|s| s.item_job_map.values().cloned().collect())
-                .unwrap_or_default()
+            workers.get(worker_key).map(|s| s.items.values().cloned().collect()).unwrap_or_default()
         };
 
         // Recover item→job mappings from the materialized WorkerRecord.
-        // This handles cases where the runtime item_job_map was lost (e.g.,
-        // daemon restart) but WorkerItemDispatched events exist in the WAL.
-        let untracked_items: Vec<(String, JobId)> = self.lock_state(|state| {
-            let scoped = scoped_name(namespace, worker_key);
+        // This handles cases where the runtime item_owners was lost (e.g.,
+        // daemon restart) but WorkerDispatched events exist in the WAL.
+        let untracked_items: Vec<(String, OwnerId)> = self.lock_state(|state| {
+            let scoped = scoped_name(project, worker_key);
             state
                 .workers
                 .get(&scoped)
                 .map(|record| {
                     record
-                        .item_job_map
+                        .owners
                         .iter()
-                        .filter(|(job_id, item_id)| {
+                        .filter(|(owner_str, item_id)| {
                             !mapped_item_ids.contains(item_id.as_str())
                                 && state
                                     .jobs
-                                    .get(job_id.as_str())
+                                    .get(owner_str.strip_prefix("job:").unwrap_or(owner_str))
                                     .is_some_and(|j| !j.is_terminal())
                         })
-                        .map(|(job_id, item_id)| (item_id.clone(), JobId::new(job_id)))
+                        .map(|(owner_str, item_id)| (item_id.clone(), OwnerId::parse(owner_str)))
                         .collect()
                 })
                 .unwrap_or_default()
         });
 
-        // Add untracked jobs to worker's active list
-        for (item_id, job_id) in untracked_items {
+        // Add untracked items to worker's active list
+        for (item_id, owner) in untracked_items {
             tracing::info!(
                 worker = worker_key,
                 item_id = item_id.as_str(),
-                job_id = job_id.as_str(),
-                "reconciling untracked job for active queue item"
+                owner = %owner,
+                "reconciling untracked dispatched item"
             );
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_key) {
-                if !state.active_jobs.contains(&job_id) {
-                    state.active_jobs.insert(job_id.clone());
+                if !state.active.contains(&owner) {
+                    state.active.insert(owner.clone());
                 }
-                state.item_job_map.insert(job_id, item_id);
+                state.items.insert(owner, item_id);
             }
         }
 
@@ -396,10 +382,7 @@ where
         // Re-fetch mapped_item_ids after adding untracked jobs
         let mapped_item_ids: HashSet<String> = {
             let workers = self.worker_states.lock();
-            workers
-                .get(worker_key)
-                .map(|s| s.item_job_map.values().cloned().collect())
-                .unwrap_or_default()
+            workers.get(worker_key).map(|s| s.items.values().cloned().collect()).unwrap_or_default()
         };
 
         let orphaned_items: Vec<String> = self.lock_state(|state| {
@@ -411,7 +394,7 @@ where
                         .iter()
                         .filter(|i| {
                             i.status == QueueItemStatus::Active
-                                && i.worker_name.as_deref() == Some(bare_name)
+                                && i.worker.as_deref() == Some(bare_name)
                                 && !mapped_item_ids.contains(&i.id)
                         })
                         .map(|i| i.id.clone())
@@ -430,47 +413,40 @@ where
             self.executor
                 .execute_all(vec![Effect::Emit {
                     event: Event::QueueFailed {
-                        queue_name: queue_name.clone(),
+                        queue: queue_name.clone(),
                         item_id: item_id.clone(),
                         error: "job lost during daemon recovery".to_string(),
-                        namespace: namespace.to_string(),
+                        project: project.to_string(),
                     },
                 }])
                 .await?;
 
             // Apply retry-or-dead logic
-            let failure_count = self.lock_state(|state| {
+            let failures = self.lock_state(|state| {
                 state
                     .queue_items
                     .get(&scoped_queue)
                     .and_then(|items| items.iter().find(|i| i.id == item_id))
-                    .map(|i| i.failure_count)
+                    .map(|i| i.failures)
                     .unwrap_or(0)
             });
 
-            let retry_config = runbook
-                .get_queue(&queue_name)
-                .and_then(|q| q.retry.as_ref());
+            let retry_config = runbook.get_queue(&queue_name).and_then(|q| q.retry.as_ref());
             let max_attempts = retry_config.map(|r| r.attempts).unwrap_or(0);
 
-            if max_attempts > 0 && failure_count < max_attempts {
+            if max_attempts > 0 && failures < max_attempts {
                 let cooldown_str = retry_config.map(|r| r.cooldown.as_str()).unwrap_or("0s");
                 let duration =
                     crate::monitor::parse_duration(cooldown_str).unwrap_or(Duration::ZERO);
                 let timer_id = TimerId::queue_retry(&scoped_queue, &item_id);
-                self.executor
-                    .execute(Effect::SetTimer {
-                        id: timer_id,
-                        duration,
-                    })
-                    .await?;
+                self.executor.execute(Effect::SetTimer { id: timer_id, duration }).await?;
             } else {
                 self.executor
                     .execute_all(vec![Effect::Emit {
-                        event: Event::QueueItemDead {
-                            queue_name: queue_name.clone(),
+                        event: Event::QueueDead {
+                            queue: queue_name.clone(),
                             item_id,
-                            namespace: namespace.to_string(),
+                            project: project.to_string(),
                         },
                     }])
                     .await?;
@@ -480,10 +456,6 @@ where
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "lifecycle_tests.rs"]
-mod tests;
 
 #[cfg(test)]
 #[path = "reconcile_tests.rs"]

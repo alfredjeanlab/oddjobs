@@ -2,8 +2,10 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use super::*;
+use crate::test_support::strategies::*;
 use crate::workspace::WorkspaceId;
 use crate::FakeClock;
+use proptest::prelude::*;
 
 #[test]
 fn job_id_display() {
@@ -48,7 +50,7 @@ fn test_config(id: &str) -> JobConfig {
 #[test]
 fn job_creation() {
     let clock = FakeClock::new();
-    let config = JobConfig::builder("pipe-1", "build", "init")
+    let config = JobConfig::builder("job-1", "build", "init")
         .name("test-feature")
         .runbook_hash("testhash")
         .cwd("/test/project")
@@ -59,7 +61,6 @@ fn job_creation() {
     assert_eq!(job.step_status, StepStatus::Pending);
     assert!(job.workspace_id.is_none());
     assert!(job.workspace_path.is_none());
-    assert!(job.session_id.is_none());
 }
 
 #[test]
@@ -67,7 +68,7 @@ fn job_is_terminal() {
     let clock = FakeClock::new();
 
     // Not terminal - initial step
-    let job = Job::new(test_config("pipe-1"), &clock);
+    let job = Job::new(test_config("job-1"), &clock);
     assert!(!job.is_terminal());
 
     // Terminal - done
@@ -76,7 +77,7 @@ fn job_is_terminal() {
     assert!(job.is_terminal());
 
     // Terminal - failed
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
     job.step = "failed".to_string();
     assert!(job.is_terminal());
 
@@ -88,7 +89,7 @@ fn job_is_terminal() {
 #[test]
 fn job_with_workspace() {
     let clock = FakeClock::new();
-    let job = Job::new(test_config("pipe-1"), &clock)
+    let job = Job::new(test_config("job-1"), &clock)
         .with_workspace(WorkspaceId::new("ws-1"), PathBuf::from("/work/space"));
 
     assert_eq!(job.workspace_id, Some(WorkspaceId::new("ws-1")));
@@ -96,109 +97,100 @@ fn job_with_workspace() {
 }
 
 #[test]
-fn job_with_session() {
+fn job_attempts_starts_empty() {
     let clock = FakeClock::new();
-    let job = Job::new(test_config("pipe-1"), &clock).with_session("sess-1".to_string());
-
-    assert_eq!(job.session_id, Some("sess-1".to_string()));
-    assert_eq!(job.step_status, StepStatus::Running);
+    let job = Job::new(test_config("job-1"), &clock);
+    assert!(job.actions.attempts.is_empty());
 }
 
 #[test]
-fn job_action_attempts_starts_empty() {
+fn job_increment_attempt() {
     let clock = FakeClock::new();
-    let job = Job::new(test_config("pipe-1"), &clock);
-    assert!(job.action_tracker.action_attempts.is_empty());
-}
-
-#[test]
-fn job_increment_action_attempt() {
-    let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // First increment returns 1
-    assert_eq!(job.increment_action_attempt("idle", 0), 1);
+    assert_eq!(job.increment_attempt("idle", 0), 1);
     // Second increment returns 2
-    assert_eq!(job.increment_action_attempt("idle", 0), 2);
+    assert_eq!(job.increment_attempt("idle", 0), 2);
     // Third increment returns 3
-    assert_eq!(job.increment_action_attempt("idle", 0), 3);
+    assert_eq!(job.increment_attempt("idle", 0), 3);
 }
 
 #[test]
 fn job_get_action_attempt() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // Unknown key returns 0
-    assert_eq!(job.get_action_attempt("unknown", 0), 0);
+    assert_eq!(job.actions.get_action_attempt("unknown", 0), 0);
 
     // After increment, get returns the count
-    job.increment_action_attempt("idle", 0);
-    assert_eq!(job.get_action_attempt("idle", 0), 1);
+    job.increment_attempt("idle", 0);
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 1);
 
-    job.increment_action_attempt("idle", 0);
-    assert_eq!(job.get_action_attempt("idle", 0), 2);
+    job.increment_attempt("idle", 0);
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 2);
 }
 
 #[test]
-fn job_action_attempts_different_triggers() {
+fn job_attempts_different_triggers() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // Different triggers are tracked separately
-    assert_eq!(job.increment_action_attempt("idle", 0), 1);
-    assert_eq!(job.increment_action_attempt("exit", 0), 1);
-    assert_eq!(job.increment_action_attempt("idle", 0), 2);
-    assert_eq!(job.increment_action_attempt("exit", 0), 2);
+    assert_eq!(job.increment_attempt("idle", 0), 1);
+    assert_eq!(job.increment_attempt("exit", 0), 1);
+    assert_eq!(job.increment_attempt("idle", 0), 2);
+    assert_eq!(job.increment_attempt("exit", 0), 2);
 
-    assert_eq!(job.get_action_attempt("idle", 0), 2);
-    assert_eq!(job.get_action_attempt("exit", 0), 2);
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 2);
+    assert_eq!(job.actions.get_action_attempt("exit", 0), 2);
 }
 
 #[test]
-fn job_action_attempts_different_chain_positions() {
+fn job_attempts_different_chain_positions() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // Different chain positions are tracked separately
-    assert_eq!(job.increment_action_attempt("idle", 0), 1);
-    assert_eq!(job.increment_action_attempt("idle", 1), 1);
-    assert_eq!(job.increment_action_attempt("idle", 0), 2);
+    assert_eq!(job.increment_attempt("idle", 0), 1);
+    assert_eq!(job.increment_attempt("idle", 1), 1);
+    assert_eq!(job.increment_attempt("idle", 0), 2);
 
-    assert_eq!(job.get_action_attempt("idle", 0), 2);
-    assert_eq!(job.get_action_attempt("idle", 1), 1);
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 2);
+    assert_eq!(job.actions.get_action_attempt("idle", 1), 1);
 }
 
 #[test]
-fn job_reset_action_attempts() {
+fn job_reset_attempts() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // Increment some attempts
-    job.increment_action_attempt("idle", 0);
-    job.increment_action_attempt("idle", 0);
-    job.increment_action_attempt("exit", 0);
+    job.increment_attempt("idle", 0);
+    job.increment_attempt("idle", 0);
+    job.increment_attempt("exit", 0);
 
-    assert_eq!(job.get_action_attempt("idle", 0), 2);
-    assert_eq!(job.get_action_attempt("exit", 0), 1);
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 2);
+    assert_eq!(job.actions.get_action_attempt("exit", 0), 1);
 
     // Reset clears all attempts
-    job.reset_action_attempts();
+    job.actions.reset_attempts();
 
-    assert_eq!(job.get_action_attempt("idle", 0), 0);
-    assert_eq!(job.get_action_attempt("exit", 0), 0);
-    assert!(job.action_tracker.action_attempts.is_empty());
+    assert_eq!(job.actions.get_action_attempt("idle", 0), 0);
+    assert_eq!(job.actions.get_action_attempt("exit", 0), 0);
+    assert!(job.actions.attempts.is_empty());
 }
 
 #[test]
-fn job_serde_round_trip_with_action_attempts() {
+fn job_serde_round_trip_with_attempts() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
-    // Populate action_attempts
-    job.increment_action_attempt("on_idle", 0);
-    job.increment_action_attempt("on_idle", 0);
-    job.increment_action_attempt("on_fail", 1);
+    // Populate attempts
+    job.increment_attempt("on_idle", 0);
+    job.increment_attempt("on_idle", 0);
+    job.increment_attempt("on_fail", 1);
 
     // Serialize to JSON (this previously failed with tuple keys)
     let json = serde_json::to_string(&job).expect("serialize job");
@@ -206,67 +198,67 @@ fn job_serde_round_trip_with_action_attempts() {
     // Deserialize back
     let restored: Job = serde_json::from_str(&json).expect("deserialize job");
 
-    assert_eq!(restored.get_action_attempt("on_idle", 0), 2);
-    assert_eq!(restored.get_action_attempt("on_fail", 1), 1);
-    assert_eq!(restored.get_action_attempt("unknown", 0), 0);
+    assert_eq!(restored.actions.get_action_attempt("on_idle", 0), 2);
+    assert_eq!(restored.actions.get_action_attempt("on_fail", 1), 1);
+    assert_eq!(restored.actions.get_action_attempt("unknown", 0), 0);
 }
 
 #[test]
 fn job_total_retries_starts_zero() {
     let clock = FakeClock::new();
-    let job = Job::new(test_config("pipe-1"), &clock);
+    let job = Job::new(test_config("job-1"), &clock);
     assert_eq!(job.total_retries, 0);
 }
 
 #[test]
 fn job_total_retries_increments_on_retry() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // First attempt for each trigger does not count as a retry
-    job.increment_action_attempt("idle", 0);
+    job.increment_attempt("idle", 0);
     assert_eq!(job.total_retries, 0);
 
-    job.increment_action_attempt("exit", 0);
+    job.increment_attempt("exit", 0);
     assert_eq!(job.total_retries, 0);
 
     // Second attempt counts as a retry
-    job.increment_action_attempt("idle", 0);
+    job.increment_attempt("idle", 0);
     assert_eq!(job.total_retries, 1);
 
     // Third attempt counts as another retry
-    job.increment_action_attempt("idle", 0);
+    job.increment_attempt("idle", 0);
     assert_eq!(job.total_retries, 2);
 }
 
 #[test]
 fn job_total_retries_persists_across_step_reset() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     // Accumulate some retries
-    job.increment_action_attempt("idle", 0);
-    job.increment_action_attempt("idle", 0); // retry
-    job.increment_action_attempt("idle", 0); // retry
+    job.increment_attempt("idle", 0);
+    job.increment_attempt("idle", 0); // retry
+    job.increment_attempt("idle", 0); // retry
     assert_eq!(job.total_retries, 2);
 
-    // Reset action_attempts (as happens on step transition)
-    job.reset_action_attempts();
-    assert!(job.action_tracker.action_attempts.is_empty());
+    // Reset attempts (as happens on step transition)
+    job.actions.reset_attempts();
+    assert!(job.actions.attempts.is_empty());
 
     // total_retries is preserved
     assert_eq!(job.total_retries, 2);
 
     // New step retries continue to accumulate
-    job.increment_action_attempt("idle", 0);
-    job.increment_action_attempt("idle", 0); // retry
+    job.increment_attempt("idle", 0);
+    job.increment_attempt("idle", 0); // retry
     assert_eq!(job.total_retries, 3);
 }
 
 #[test]
 fn job_step_visits_starts_empty() {
     let clock = FakeClock::new();
-    let job = Job::new(test_config("pipe-1"), &clock);
+    let job = Job::new(test_config("job-1"), &clock);
     assert!(job.step_visits.is_empty());
     assert_eq!(job.get_step_visits("init"), 0);
 }
@@ -274,7 +266,7 @@ fn job_step_visits_starts_empty() {
 #[test]
 fn job_record_step_visit() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     assert_eq!(job.record_step_visit("merge"), 1);
     assert_eq!(job.record_step_visit("merge"), 2);
@@ -289,7 +281,7 @@ fn job_record_step_visit() {
 #[test]
 fn job_step_visits_serde_round_trip() {
     let clock = FakeClock::new();
-    let mut job = Job::new(test_config("pipe-1"), &clock);
+    let mut job = Job::new(test_config("job-1"), &clock);
 
     job.record_step_visit("merge");
     job.record_step_visit("merge");
@@ -306,70 +298,40 @@ fn job_step_visits_serde_round_trip() {
 #[test]
 fn max_step_visits_is_reasonable() {
     // Sanity check that the constant is a reasonable value
-    assert!(
-        MAX_STEP_VISITS >= 3 && MAX_STEP_VISITS <= 20,
-        "MAX_STEP_VISITS should be between 3 and 20, got {}",
-        MAX_STEP_VISITS
-    );
+    let max = MAX_STEP_VISITS;
+    assert!((3..=20).contains(&max), "MAX_STEP_VISITS should be between 3 and 20, got {}", max);
 }
 
-#[test]
-fn step_status_waiting_is_waiting() {
-    assert!(StepStatus::Waiting(None).is_waiting());
-    assert!(StepStatus::Waiting(Some("dec-1".to_string())).is_waiting());
-    assert!(!StepStatus::Pending.is_waiting());
-    assert!(!StepStatus::Running.is_waiting());
-    assert!(!StepStatus::Completed.is_waiting());
-    assert!(!StepStatus::Failed.is_waiting());
-    assert!(!StepStatus::Suspended.is_waiting());
+#[yare::parameterized(
+    pending     = { StepStatus::Pending,                      false },
+    running     = { StepStatus::Running,                      false },
+    waiting     = { StepStatus::Waiting(None),                true },
+    waiting_id  = { StepStatus::Waiting(Some("d-1".into())),  true },
+    completed   = { StepStatus::Completed,                    false },
+    failed      = { StepStatus::Failed,                       false },
+    suspended   = { StepStatus::Suspended,                    false },
+)]
+fn waiting_iff_waiting_variant(status: StepStatus, expected: bool) {
+    assert_eq!(status.is_waiting(), expected);
 }
 
-#[test]
-fn step_status_suspended_is_suspended() {
-    assert!(StepStatus::Suspended.is_suspended());
-    assert!(!StepStatus::Pending.is_suspended());
-    assert!(!StepStatus::Running.is_suspended());
-    assert!(!StepStatus::Completed.is_suspended());
-    assert!(!StepStatus::Failed.is_suspended());
-    assert!(!StepStatus::Waiting(None).is_suspended());
+#[yare::parameterized(
+    pending     = { StepStatus::Pending,                      false },
+    running     = { StepStatus::Running,                      false },
+    waiting     = { StepStatus::Waiting(None),                false },
+    completed   = { StepStatus::Completed,                    false },
+    failed      = { StepStatus::Failed,                       false },
+    suspended   = { StepStatus::Suspended,                    true },
+)]
+fn suspended_iff_suspended_variant(status: StepStatus, expected: bool) {
+    assert_eq!(status.is_suspended(), expected);
 }
 
-#[test]
-fn step_status_serde_roundtrip() {
-    // Waiting with None
-    let json = r#"{"Waiting":null}"#;
-    let parsed: StepStatus = serde_json::from_str(json).unwrap();
-    assert_eq!(parsed, StepStatus::Waiting(None));
-
-    // Waiting with decision_id
-    let json_id = r#"{"Waiting":"dec-abc123"}"#;
-    let parsed: StepStatus = serde_json::from_str(json_id).unwrap();
-    assert_eq!(parsed, StepStatus::Waiting(Some("dec-abc123".to_string())));
-
-    // Roundtrip serialization
-    let serialized = serde_json::to_string(&StepStatus::Waiting(None)).unwrap();
-    let reparsed: StepStatus = serde_json::from_str(&serialized).unwrap();
-    assert_eq!(reparsed, StepStatus::Waiting(None));
-
-    // Unit variants
-    assert_eq!(
-        serde_json::to_string(&StepStatus::Pending).unwrap(),
-        r#""Pending""#
-    );
-    assert_eq!(
-        serde_json::to_string(&StepStatus::Running).unwrap(),
-        r#""Running""#
-    );
-    assert_eq!(
-        serde_json::to_string(&StepStatus::Completed).unwrap(),
-        r#""Completed""#
-    );
-    assert_eq!(
-        serde_json::to_string(&StepStatus::Failed).unwrap(),
-        r#""Failed""#
-    );
-    assert_eq!(
-        serde_json::to_string(&StepStatus::Suspended).unwrap(),
-        r#""Suspended""#
-    );
+proptest! {
+    #[test]
+    fn step_status_serde_roundtrip(status in arb_step_status()) {
+        let json = serde_json::to_string(&status).unwrap();
+        let parsed: StepStatus = serde_json::from_str(&json).unwrap();
+        prop_assert_eq!(status, parsed);
+    }
 }

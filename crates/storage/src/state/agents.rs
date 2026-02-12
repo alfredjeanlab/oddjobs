@@ -3,18 +3,16 @@
 
 //! Agent lifecycle event handlers.
 
-use oj_core::{job::AgentSignal, AgentRecordStatus, AgentSignalKind, Event, OwnerId, StepStatus};
+use oj_core::{AgentRecordStatus, Event, OwnerId, StepStatus};
 
 use super::helpers;
 use super::MaterializedState;
 
 pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
     match event {
-        Event::AgentWorking {
-            agent_id, owner, ..
-        } => {
+        Event::AgentWorking { id: agent_id, owner, .. } => {
             // Route by owner; standalone agent status is
-            // handled via AgentRunStatusChanged events.
+            // handled via CrewUpdated events.
             if let OwnerId::Job(job_id) = owner {
                 if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
                     job.step_status = StepStatus::Running;
@@ -27,19 +25,14 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
-        Event::AgentWaiting { agent_id, .. } => {
+        Event::AgentWaiting { id: agent_id, .. } => {
             if let Some(rec) = state.agents.get_mut(agent_id.as_str()) {
                 rec.status = AgentRecordStatus::Idle;
                 rec.updated_at_ms = helpers::epoch_ms_now();
             }
         }
 
-        Event::AgentExited {
-            agent_id,
-            exit_code,
-            owner,
-            ..
-        } => {
+        Event::AgentExited { id: agent_id, exit_code, owner, .. } => {
             if let OwnerId::Job(job_id) = owner {
                 helpers::apply_if_not_terminal(&mut state.jobs, job_id.as_str(), |job| {
                     if *exit_code == Some(0) {
@@ -56,12 +49,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
-        Event::AgentFailed {
-            agent_id,
-            error,
-            owner,
-            ..
-        } => {
+        Event::AgentFailed { id: agent_id, error, owner, .. } => {
             if let OwnerId::Job(job_id) = owner {
                 helpers::apply_if_not_terminal(&mut state.jobs, job_id.as_str(), |job| {
                     job.step_status = StepStatus::Failed;
@@ -74,9 +62,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
-        Event::AgentGone {
-            agent_id, owner, ..
-        } => {
+        Event::AgentGone { id: agent_id, owner, .. } => {
             if let OwnerId::Job(job_id) = owner {
                 helpers::apply_if_not_terminal(&mut state.jobs, job_id.as_str(), |job| {
                     job.step_status = StepStatus::Failed;
@@ -86,43 +72,6 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             if let Some(rec) = state.agents.get_mut(agent_id.as_str()) {
                 rec.status = AgentRecordStatus::Gone;
                 rec.updated_at_ms = helpers::epoch_ms_now();
-            }
-        }
-
-        Event::AgentSignal {
-            agent_id,
-            kind,
-            message,
-        } => {
-            // Continue is a no-op acknowledgement — don't store it so that
-            // query_agent_signal still returns signaled=false (keeping the
-            // stop hook blocking and the agent alive).
-            if *kind == AgentSignalKind::Continue {
-                return;
-            }
-
-            // Check standalone agent runs first
-            let found_agent_run = state
-                .agent_runs
-                .values_mut()
-                .find(|r| r.agent_id.as_deref() == Some(agent_id.as_str()));
-            if let Some(run) = found_agent_run {
-                run.action_tracker.agent_signal = Some(AgentSignal {
-                    kind: kind.clone(),
-                    message: message.clone(),
-                });
-            } else {
-                // Find job by agent_id in current step
-                let found_job = state.jobs.values_mut().find(|p| {
-                    p.step_history.last().and_then(|r| r.agent_id.as_deref())
-                        == Some(agent_id.as_str())
-                });
-                if let Some(job) = found_job {
-                    job.action_tracker.agent_signal = Some(AgentSignal {
-                        kind: kind.clone(),
-                        message: message.clone(),
-                    });
-                }
             }
         }
 

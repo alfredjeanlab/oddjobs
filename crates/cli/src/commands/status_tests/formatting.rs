@@ -1,9 +1,9 @@
 use serial_test::serial;
 
-use super::super::{format_duration, format_text, friendly_name_label, truncate_reason};
+use super::super::{format_text, friendly_name_label, truncate_reason};
 use super::{empty_ns, job_entry, setup_no_color};
 
-// ── format_duration ─────────────────────────────────────────────────
+// ── format_elapsed (delegates to oj_core) ──────────────────────────
 
 #[yare::parameterized(
     zero_seconds = { 0, "0s" },
@@ -14,18 +14,15 @@ use super::{empty_ns, job_entry, setup_no_color};
     hour_and_minutes = { 3660, "1h1m" },
     one_day = { 86400, "1d" },
 )]
-fn format_duration_values(secs: u64, expected: &str) {
-    assert_eq!(format_duration(secs), expected);
+fn format_elapsed_values(secs: u64, expected: &str) {
+    assert_eq!(oj_core::format_elapsed(secs), expected);
 }
 
 // ── truncate_reason ─────────────────────────────────────────────────
 
 #[test]
 fn truncate_reason_short_unchanged() {
-    assert_eq!(
-        truncate_reason("gate check failed", 72),
-        "gate check failed"
-    );
+    assert_eq!(truncate_reason("gate check failed", 72), "gate check failed");
 }
 
 #[test]
@@ -107,10 +104,7 @@ fn header_with_active_jobs_and_watch() {
 
     let out = format_text(60, &[ns], Some("2s"), None);
     let first_line = out.lines().next().unwrap();
-    assert_eq!(
-        first_line,
-        "oj daemon: running 1m | every 2s | 1 active job"
-    );
+    assert_eq!(first_line, "oj daemon: running 1m | every 2s | 1 active job");
 }
 
 #[test]
@@ -181,7 +175,7 @@ fn header_hides_decisions_when_zero() {
     );
 }
 
-// ── namespace visibility ────────────────────────────────────────────
+// ── project visibility ────────────────────────────────────────────
 
 #[test]
 #[serial]
@@ -199,7 +193,7 @@ fn namespace_with_only_empty_queues_is_hidden() {
     let output = format_text(60, &[ns], None, None);
     assert!(
         !output.contains("empty-project"),
-        "namespace with only empty queues should be hidden:\n{output}"
+        "project with only empty queues should be hidden:\n{output}"
     );
     assert_eq!(output, "oj daemon: running 1m\n");
 }
@@ -220,10 +214,7 @@ fn namespace_with_non_empty_queue_is_shown() {
     let output = format_text(60, &[ns], None, None);
     assert!(
         output.contains("active-project"),
-        "namespace with non-empty queue should be shown:\n{output}"
+        "project with non-empty queue should be shown:\n{output}"
     );
-    assert!(
-        output.contains("tasks"),
-        "queue should be displayed:\n{output}"
-    );
+    assert!(output.contains("tasks"), "queue should be displayed:\n{output}");
 }

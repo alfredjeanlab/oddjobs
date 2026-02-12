@@ -7,10 +7,9 @@
 //! appropriate actions (nudge, resume, escalate, etc.).
 
 use crate::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
+use crate::lifecycle::RunLifecycle;
 use crate::RuntimeError;
-use oj_core::{
-    AgentError, AgentState, Effect, Event, Job, JobId, PromptType, QuestionData, SessionId, TimerId,
-};
+use oj_core::{AgentError, AgentId, AgentState, Effect, Job, PromptType, QuestionData};
 use oj_runbook::{ActionConfig, AgentAction, AgentDef, ErrorType, RunDirective, Runbook};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -21,8 +20,8 @@ pub(crate) struct ActionContext<'a> {
     pub action_config: &'a ActionConfig,
     pub trigger: &'a str,
     pub chain_pos: usize,
-    pub question_data: Option<&'a QuestionData>,
-    pub assistant_context: Option<&'a str>,
+    pub questions: Option<&'a QuestionData>,
+    pub last_message: Option<&'a str>,
 }
 
 /// Parse a duration string like "30s", "5m", "1h" into a Duration
@@ -39,9 +38,7 @@ pub fn parse_duration(s: &str) -> Result<Duration, String> {
         .map(|(i, _)| (&s[..i], &s[i..]))
         .unwrap_or((s, ""));
 
-    let num: u64 = num_str
-        .parse()
-        .map_err(|_| format!("invalid number in duration: {}", s))?;
+    let num: u64 = num_str.parse().map_err(|_| format!("invalid number in duration: {}", s))?;
 
     let multiplier = match suffix.trim() {
         "ms" | "millis" | "millisecond" | "milliseconds" => {
@@ -71,14 +68,11 @@ pub enum MonitorState {
     /// Agent is showing a prompt (permission, plan approval, etc.)
     Prompting {
         prompt_type: PromptType,
-        question_data: Option<QuestionData>,
-        assistant_context: Option<String>,
+        questions: Option<QuestionData>,
+        last_message: Option<String>,
     },
     /// Agent encountered an error
-    Failed {
-        message: String,
-        error_type: Option<ErrorType>,
-    },
+    Failed { message: String, error_type: Option<ErrorType> },
     /// Agent process exited
     Exited { exit_code: Option<i32> },
     /// Session terminated unexpectedly
@@ -95,9 +89,7 @@ impl MonitorState {
                 message: failure.to_string(),
                 error_type: agent_failure_to_error_type(failure),
             },
-            AgentState::Exited { exit_code } => MonitorState::Exited {
-                exit_code: *exit_code,
-            },
+            AgentState::Exited { exit_code } => MonitorState::Exited { exit_code: *exit_code },
             AgentState::SessionGone => MonitorState::Gone,
         }
     }
@@ -124,9 +116,8 @@ pub fn agent_failure_to_error_type(failure: &AgentError) -> Option<ErrorType> {
 
 /// Get the current agent definition for a job step
 pub fn get_agent_def<'a>(runbook: &'a Runbook, job: &Job) -> Result<&'a AgentDef, RuntimeError> {
-    let job_def = runbook
-        .get_job(&job.kind)
-        .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
+    let job_def =
+        runbook.get_job(&job.kind).ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
     let step_def = job_def
         .get_step(&job.step)
@@ -143,23 +134,21 @@ pub fn get_agent_def<'a>(runbook: &'a Runbook, job: &Job) -> Result<&'a AgentDef
         }
     };
 
-    runbook
-        .get_agent(agent_name)
-        .ok_or_else(|| RuntimeError::AgentNotFound(agent_name.clone()))
+    runbook.get_agent(agent_name).ok_or_else(|| RuntimeError::AgentNotFound(agent_name.clone()))
 }
 
 /// Build effects for an agent action (nudge, recover, escalate, etc.)
-pub fn build_action_effects(
+///
+/// Unified across Job and Crew via the `RunLifecycle` trait.
+pub fn build_action_effects_for(
     ctx: &ActionContext<'_>,
-    job: &Job,
+    run: &dyn RunLifecycle,
 ) -> Result<ActionEffects, RuntimeError> {
     let action = ctx.action_config.action();
     let message = ctx.action_config.message();
-    let input = &job.vars;
-    let job_id = JobId::new(&job.id);
 
     tracing::info!(
-        job_id = %job.id,
+        run_id = %run.log_id(),
         trigger = ctx.trigger,
         action = ?action,
         "building agent action effects"
@@ -167,446 +156,166 @@ pub fn build_action_effects(
 
     match action {
         AgentAction::Nudge => {
-            let session_id = job
-                .session_id
-                .as_ref()
-                .ok_or_else(|| RuntimeError::JobNotFound("no session".into()))?;
+            let agent_id = run
+                .agent_id()
+                .ok_or_else(|| RuntimeError::InvalidRequest("no agent for nudge".into()))?;
 
             let nudge_message = message.unwrap_or("Please continue with the task.");
             Ok(ActionEffects::Nudge {
-                effects: vec![Effect::SendToSession {
-                    session_id: SessionId::new(session_id),
+                effects: vec![Effect::SendToAgent {
+                    agent_id: AgentId::new(agent_id),
                     input: format!("{}\n", nudge_message),
                 }],
             })
         }
 
-        AgentAction::Done => Ok(ActionEffects::AdvanceJob),
+        AgentAction::Done => Ok(ActionEffects::Advance),
 
-        AgentAction::Fail => Ok(ActionEffects::FailJob {
-            error: ctx.trigger.to_string(),
-        }),
+        AgentAction::Fail => Ok(ActionEffects::Fail { error: ctx.trigger.to_string() }),
 
         AgentAction::Resume => {
-            // Build modified input for re-spawn
-            let mut new_inputs = input.clone();
-            // Determine whether to use --resume: yes when no message or append mode
+            let mut new_inputs = run.vars().clone();
             let use_resume = message.is_none() || ctx.action_config.append();
 
             if let Some(msg) = message {
                 if ctx.action_config.append() && use_resume {
-                    // Message will be passed as argument to --resume
                     new_inputs.insert("resume_message".to_string(), msg.to_string());
                 } else {
-                    // Replace mode: full prompt replacement, no --resume
                     new_inputs.insert("prompt".to_string(), msg.to_string());
                 }
             }
 
-            // Look up previous Claude session ID from step history
-            let resume_session_id = job
-                .step_history
-                .iter()
-                .rfind(|r| r.name == job.step)
-                .and_then(|r| r.agent_id.clone());
+            // Resume when there was a previous agent (a session to resume)
+            let resume = use_resume && run.agent_id().is_some();
 
             Ok(ActionEffects::Resume {
-                kill_session: job.session_id.clone(),
+                kill_agent: run.agent_id().map(|s| s.to_string()),
                 agent_name: ctx.agent_def.name.clone(),
                 input: new_inputs,
-                resume_session_id: if use_resume { resume_session_id } else { None },
+                resume,
             })
         }
 
         AgentAction::Escalate => {
             tracing::warn!(
-                job_id = %job.id,
+                run_id = %run.log_id(),
                 trigger = ctx.trigger,
                 message = ?message,
                 "escalating to human — creating decision"
             );
 
-            let ac = ctx.assistant_context.map(|s| s.to_string());
-            // Determine escalation trigger type from the trigger string
-            let escalation_trigger = match ctx.trigger {
-                "idle" | "on_idle" => EscalationTrigger::Idle {
-                    assistant_context: ac,
-                },
-                "dead" | "on_dead" | "exit" | "exited" => EscalationTrigger::Dead {
-                    exit_code: None,
-                    assistant_context: ac,
-                },
-                "error" | "on_error" => EscalationTrigger::Error {
-                    error_type: "unknown".to_string(),
-                    message: message.unwrap_or("").to_string(),
-                    assistant_context: ac,
-                },
-                "prompt:question" => EscalationTrigger::Question {
-                    question_data: ctx.question_data.cloned(),
-                    assistant_context: ac,
-                },
-                "prompt:plan" => EscalationTrigger::Plan {
-                    assistant_context: ac,
-                },
-                "prompt" | "on_prompt" => EscalationTrigger::Prompt {
-                    prompt_type: "permission".to_string(),
-                    assistant_context: ac,
-                },
-                t if t.ends_with(":exhausted") => {
-                    // Handle "idle:exhausted", "error:exhausted" etc.
-                    // (Prompt triggers bypass attempt tracking so never
-                    // generate *:exhausted variants.)
-                    let base = t.trim_end_matches(":exhausted");
-                    match base {
-                        "idle" => EscalationTrigger::Idle {
-                            assistant_context: ac,
-                        },
-                        "error" => EscalationTrigger::Error {
-                            error_type: "exhausted".to_string(),
-                            message: message.unwrap_or("").to_string(),
-                            assistant_context: ac,
-                        },
-                        _ => EscalationTrigger::Dead {
-                            exit_code: None,
-                            assistant_context: ac,
-                        },
-                    }
-                }
-                _ => EscalationTrigger::Idle {
-                    assistant_context: ac,
-                }, // fallback
-            };
+            let ac = ctx.last_message.map(|s| s.to_string());
+            let escalation_trigger = build_escalation_trigger(ctx.trigger, message, ac, ctx);
 
-            let (_decision_id, decision_event) = EscalationDecisionBuilder::for_job(
-                job_id.clone(),
-                job.name.clone(),
+            let (decision_id, decision_event) = EscalationDecisionBuilder::new(
+                run.owner_id(),
+                run.display_name().to_string(),
+                run.decision_agent_ref(),
                 escalation_trigger,
             )
-            .agent_id(job.session_id.clone().unwrap_or_default())
-            .namespace(job.namespace.clone())
+            .project(run.project())
             .build();
 
-            let effects = vec![
-                // Emit DecisionCreated (this also sets job to Waiting)
-                Effect::Emit {
-                    event: decision_event,
-                },
-                // Desktop notification on decision created
+            let mut effects = vec![
+                Effect::Emit { event: decision_event },
                 Effect::Notify {
-                    title: format!("Decision needed: {}", job.name),
-                    message: format!("Job requires attention ({})", ctx.trigger),
-                },
-                // Cancel exit-deferred timer (agent may still be alive)
-                Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&job_id),
+                    title: format!("Decision needed: {}", run.display_name()),
+                    message: format!("Requires attention ({})", ctx.trigger),
                 },
             ];
+
+            effects.extend(run.escalation_status_effects(ctx.trigger, Some(decision_id.as_str())));
 
             Ok(ActionEffects::Escalate { effects })
         }
 
-        AgentAction::Ask => {
-            let session_id = job
-                .session_id
-                .as_ref()
-                .ok_or_else(|| RuntimeError::JobNotFound("no session".into()))?;
-
-            let topic = message.unwrap_or("What should I do next?");
-            let nudge_message = format!(
-                "Use the AskUserQuestion tool to ask the user: '{}'\n\n\
-                 Do not proceed without asking this question first.",
-                topic
-            );
-            Ok(ActionEffects::Nudge {
-                effects: vec![Effect::SendToSession {
-                    session_id: SessionId::new(session_id),
-                    input: format!("{}\n", nudge_message),
-                }],
-            })
-        }
-
         AgentAction::Gate => {
             let command = ctx
                 .action_config
                 .run()
                 .ok_or_else(|| RuntimeError::InvalidRunDirective {
-                    context: format!("job {}", job.id),
+                    context: run.log_id().to_string(),
                     directive: "gate action requires a 'run' field".to_string(),
                 })?
                 .to_string();
 
             Ok(ActionEffects::Gate { command })
         }
+
+        AgentAction::Auto => {
+            // Auto mode delegates to coop's self-determination UI.
+            // The engine does not intervene.
+            Ok(ActionEffects::Advance)
+        }
     }
 }
 
-/// Build effects for an agent action on a standalone agent run.
-pub fn build_action_effects_for_agent_run(
+/// Map a trigger string to an EscalationTrigger.
+fn build_escalation_trigger(
+    trigger: &str,
+    message: Option<&str>,
+    ac: Option<String>,
     ctx: &ActionContext<'_>,
-    agent_run: &oj_core::AgentRun,
-) -> Result<ActionEffects, RuntimeError> {
-    let action = ctx.action_config.action();
-    let message = ctx.action_config.message();
-    let input = &agent_run.vars;
-    let agent_run_id = oj_core::AgentRunId::new(&agent_run.id);
-
-    tracing::info!(
-        agent_run_id = %agent_run.id,
-        trigger = ctx.trigger,
-        action = ?action,
-        "building agent run action effects"
-    );
-
-    match action {
-        AgentAction::Nudge => {
-            let session_id = agent_run
-                .session_id
-                .as_ref()
-                .ok_or_else(|| RuntimeError::InvalidRequest("no session for nudge".into()))?;
-
-            let nudge_message = message.unwrap_or("Please continue with the task.");
-            Ok(ActionEffects::Nudge {
-                effects: vec![Effect::SendToSession {
-                    session_id: SessionId::new(session_id),
-                    input: format!("{}\n", nudge_message),
-                }],
-            })
+) -> EscalationTrigger {
+    match trigger {
+        "idle" | "on_idle" => EscalationTrigger::Idle { last_message: ac },
+        "dead" | "on_dead" | "exit" | "exited" => {
+            EscalationTrigger::Dead { exit_code: None, last_message: ac }
         }
-
-        AgentAction::Done => Ok(ActionEffects::CompleteAgentRun),
-
-        AgentAction::Fail => Ok(ActionEffects::FailAgentRun {
-            error: ctx.trigger.to_string(),
-        }),
-
-        AgentAction::Resume => {
-            let mut new_inputs = input.clone();
-            let use_resume = message.is_none() || ctx.action_config.append();
-
-            if let Some(msg) = message {
-                if ctx.action_config.append() && use_resume {
-                    new_inputs.insert("resume_message".to_string(), msg.to_string());
-                } else {
-                    new_inputs.insert("prompt".to_string(), msg.to_string());
-                }
-            }
-
-            // Look up previous Claude session ID from agent run
-            let resume_session_id = agent_run.agent_id.clone();
-
-            Ok(ActionEffects::Resume {
-                kill_session: agent_run.session_id.clone(),
-                agent_name: ctx.agent_def.name.clone(),
-                input: new_inputs,
-                resume_session_id: if use_resume { resume_session_id } else { None },
-            })
+        "error" | "on_error" => EscalationTrigger::Error {
+            error_type: "unknown".to_string(),
+            message: message.unwrap_or("").to_string(),
+            last_message: ac,
+        },
+        "prompt:question" => {
+            EscalationTrigger::Question { questions: ctx.questions.cloned(), last_message: ac }
         }
-
-        AgentAction::Escalate => {
-            tracing::warn!(
-                agent_run_id = %agent_run.id,
-                trigger = ctx.trigger,
-                message = ?message,
-                "escalating standalone agent to human — creating decision"
-            );
-
-            let ac = ctx.assistant_context.map(|s| s.to_string());
-            // Determine escalation trigger type from the trigger string
-            let escalation_trigger = match ctx.trigger {
-                "idle" | "on_idle" => EscalationTrigger::Idle {
-                    assistant_context: ac,
-                },
-                "dead" | "on_dead" | "exit" | "exited" => EscalationTrigger::Dead {
-                    exit_code: None,
-                    assistant_context: ac,
-                },
-                "error" | "on_error" => EscalationTrigger::Error {
-                    error_type: "unknown".to_string(),
+        "prompt:plan" => EscalationTrigger::Plan { last_message: ac },
+        "prompt" | "on_prompt" => {
+            EscalationTrigger::Prompt { prompt_type: "permission".to_string(), last_message: ac }
+        }
+        t if t.ends_with(":exhausted") => {
+            let base = t.trim_end_matches(":exhausted");
+            match base {
+                "idle" => EscalationTrigger::Idle { last_message: ac },
+                "error" => EscalationTrigger::Error {
+                    error_type: "exhausted".to_string(),
                     message: message.unwrap_or("").to_string(),
-                    assistant_context: ac,
+                    last_message: ac,
                 },
-                "prompt:question" => EscalationTrigger::Question {
-                    question_data: ctx.question_data.cloned(),
-                    assistant_context: ac,
-                },
-                "prompt:plan" => EscalationTrigger::Plan {
-                    assistant_context: ac,
-                },
-                "prompt" | "on_prompt" => EscalationTrigger::Prompt {
-                    prompt_type: "permission".to_string(),
-                    assistant_context: ac,
-                },
-                t if t.ends_with(":exhausted") => {
-                    // Handle "idle:exhausted", "error:exhausted" etc.
-                    // (Prompt triggers bypass attempt tracking so never
-                    // generate *:exhausted variants.)
-                    let base = t.trim_end_matches(":exhausted");
-                    match base {
-                        "idle" => EscalationTrigger::Idle {
-                            assistant_context: ac,
-                        },
-                        "error" => EscalationTrigger::Error {
-                            error_type: "exhausted".to_string(),
-                            message: message.unwrap_or("").to_string(),
-                            assistant_context: ac,
-                        },
-                        _ => EscalationTrigger::Dead {
-                            exit_code: None,
-                            assistant_context: ac,
-                        },
-                    }
-                }
-                _ => EscalationTrigger::Idle {
-                    assistant_context: ac,
-                }, // fallback
-            };
-
-            let (_decision_id, decision_event) = EscalationDecisionBuilder::for_agent_run(
-                agent_run_id.clone(),
-                agent_run.command_name.clone(),
-                escalation_trigger,
-            )
-            .agent_id(agent_run.agent_id.clone().unwrap_or_default())
-            .namespace(agent_run.namespace.clone())
-            .build();
-
-            let effects = vec![
-                // Emit DecisionCreated
-                Effect::Emit {
-                    event: decision_event,
-                },
-                // Desktop notification on decision created
-                Effect::Notify {
-                    title: format!("Decision needed: {}", agent_run.command_name),
-                    message: format!("Agent requires attention ({})", ctx.trigger),
-                },
-                // Emit AgentRunStatusChanged to Escalated
-                Effect::Emit {
-                    event: Event::AgentRunStatusChanged {
-                        id: agent_run_id.clone(),
-                        status: oj_core::AgentRunStatus::Escalated,
-                        reason: Some(ctx.trigger.to_string()),
-                    },
-                },
-                // Cancel exit-deferred timer (agent is still alive; liveness continues)
-                Effect::CancelTimer {
-                    id: TimerId::exit_deferred_agent_run(&agent_run_id),
-                },
-            ];
-
-            Ok(ActionEffects::EscalateAgentRun { effects })
+                _ => EscalationTrigger::Dead { exit_code: None, last_message: ac },
+            }
         }
-
-        AgentAction::Ask => {
-            let session_id = agent_run
-                .session_id
-                .as_ref()
-                .ok_or_else(|| RuntimeError::InvalidRequest("no session for ask".into()))?;
-
-            let topic = message.unwrap_or("What should I do next?");
-            let nudge_message = format!(
-                "Use the AskUserQuestion tool to ask the user: '{}'\n\n\
-                 Do not proceed without asking this question first.",
-                topic
-            );
-            Ok(ActionEffects::Nudge {
-                effects: vec![Effect::SendToSession {
-                    session_id: SessionId::new(session_id),
-                    input: format!("{}\n", nudge_message),
-                }],
-            })
-        }
-
-        AgentAction::Gate => {
-            let command = ctx
-                .action_config
-                .run()
-                .ok_or_else(|| RuntimeError::InvalidRunDirective {
-                    context: format!("agent_run {}", agent_run.id),
-                    directive: "gate action requires a 'run' field".to_string(),
-                })?
-                .to_string();
-
-            Ok(ActionEffects::Gate { command })
-        }
+        _ => EscalationTrigger::Idle { last_message: ac }, // fallback
     }
 }
 
-/// Build an agent notification effect for a standalone agent run.
-pub fn build_agent_run_notify_effect(
-    agent_run: &oj_core::AgentRun,
-    agent_def: &AgentDef,
-    message_template: Option<&String>,
-) -> Option<Effect> {
-    let template = message_template?;
-    let mut vars = crate::vars::namespace_vars(&agent_run.vars);
-    vars.insert("agent_run_id".to_string(), agent_run.id.clone());
-    vars.insert("name".to_string(), agent_run.command_name.clone());
-    vars.insert("agent".to_string(), agent_def.name.clone());
-    if let Some(err) = &agent_run.error {
-        vars.insert("error".to_string(), err.clone());
-    }
-
-    let message = oj_runbook::NotifyConfig::render(template, &vars);
-    Some(Effect::Notify {
-        title: agent_def.name.clone(),
-        message,
-    })
-}
-
-/// Build an agent notification effect if a message template is configured.
-pub fn build_agent_notify_effect(
-    job: &Job,
-    agent_def: &AgentDef,
-    message_template: Option<&String>,
-) -> Option<Effect> {
-    let template = message_template?;
-    let mut vars = crate::vars::namespace_vars(&job.vars);
-    vars.insert("job_id".to_string(), job.id.clone());
-    vars.insert("name".to_string(), job.name.clone());
-    vars.insert("agent".to_string(), agent_def.name.clone());
-    vars.insert("step".to_string(), job.step.clone());
-    if let Some(err) = &job.error {
-        vars.insert("error".to_string(), err.clone());
-    }
-
-    let message = oj_runbook::NotifyConfig::render(template, &vars);
-    Some(Effect::Notify {
-        title: agent_def.name.clone(),
-        message,
-    })
-}
-
-/// Results from building action effects
+/// Results from building action effects.
+///
+/// Unified across job and crew actions. The caller dispatches
+/// `Advance`, `Fail`, and `Escalate` to the appropriate entity handler.
 #[derive(Debug)]
 pub enum ActionEffects {
     /// Send nudge message to session
     Nudge { effects: Vec<Effect> },
-    /// Advance to next job step
-    AdvanceJob,
-    /// Fail the job with an error
-    FailJob { error: String },
+    /// Advance to next step (job) or complete (crew)
+    Advance,
+    /// Fail with an error
+    Fail { error: String },
     /// Resume by re-spawning agent with --resume (keeps workspace, preserves conversation)
     Resume {
-        kill_session: Option<String>,
+        kill_agent: Option<String>,
         agent_name: String,
         input: HashMap<String, String>,
-        /// Claude --session-id from the previous run (for --resume).
-        /// `None` when the prompt is being fully replaced (no `--resume`).
-        resume_session_id: Option<String>,
+        /// Whether to resume the previous session (coop handles discovery).
+        resume: bool,
     },
-    /// Escalate to human
+    /// Escalate to human (effects include DecisionCreated, notifications, etc.)
     Escalate { effects: Vec<Effect> },
     /// Run a shell gate command; advance if it passes, escalate if it fails
     Gate { command: String },
-    /// Complete a standalone agent run
-    CompleteAgentRun,
-    /// Fail a standalone agent run
-    FailAgentRun { error: String },
-    /// Escalate a standalone agent run to human
-    EscalateAgentRun { effects: Vec<Effect> },
 }
 
 #[cfg(test)]
-#[path = "monitor_tests/mod.rs"]
+#[path = "monitor_tests.rs"]
 mod tests;

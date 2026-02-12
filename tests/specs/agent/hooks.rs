@@ -1,55 +1,30 @@
-//! Agent hook tests for socket propagation.
+//! Agent hook tests for stop hook behavior.
 //!
-//! Verifies that hooks running inside an agent's tmux session can communicate
-//! with the daemon via the OJ_STATE_DIR socket path.
+//! Verifies that the stop hook mechanism works: when coop blocks an agent's
+//! exit attempt, the daemon receives `agent:stop:blocked` and dispatches
+//! the on_idle action (e.g., done for job agents, escalate for standalone).
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
-/// Agent emits a signal via `oj emit agent:signal` in a Bash tool call,
-/// then creates a marker file to prove the emit succeeded.
-fn scenario_emit_signal() -> &'static str {
+/// Claudeless scenario: agent works then idles (triggering on_idle = done).
+fn scenario_work_then_idle() -> &'static str {
     r#"
-name = "emit-signal"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Work complete."
 
-[responses.response]
-text = "Signaling completion to daemon."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
-input = { command = "oj emit agent:signal --agent $AGENT_ID complete && touch emit-ok" }
-
-[tool_execution]
+[tools]
 mode = "live"
-
-[tool_execution.tools.Bash]
-auto_approve = true
 "#
 }
 
-// =============================================================================
-// Runbooks
-// =============================================================================
-
-/// Runbook that passes AGENT_ID to the agent and gates on the emit marker file.
+/// Runbook that uses on_idle = done to auto-complete.
 ///
-/// If socket propagation works:
-///   1. `oj emit agent:signal` connects to daemon via OJ_STATE_DIR → succeeds
-///   2. `touch emit-ok` runs (due to &&) → file created
-///   3. Gate `test -f emit-ok` passes → job completes
-///
-/// If socket propagation is broken:
-///   1. `oj emit agent:signal` fails (wrong/missing socket) → non-zero exit
-///   2. `touch emit-ok` skipped (due to &&) → no file
-///   3. Gate `test -f emit-ok` fails → job escalates to waiting
-fn runbook_stop_hook_socket(scenario_path: &std::path::Path) -> String {
+/// Lifecycle: agent spawns → works → idles → on_idle fires → job advances.
+fn runbook_on_idle_done(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
@@ -62,59 +37,44 @@ vars  = ["name"]
 [[job.build.step]]
 name = "work"
 run = {{ agent = "worker" }}
+on_done = {{ step = "finish" }}
+
+[[job.build.step]]
+name = "finish"
+run = "echo done"
 
 [agent.worker]
-run = "claudeless --scenario {} -p"
-prompt = "Signal completion."
-on_dead = {{ action = "gate", run = "test -f emit-ok" }}
-env = {{ AGENT_ID = "${{agent_id}}" }}
+run = "claudeless --scenario {}"
+prompt = "Do the work."
+on_idle = "done"
 "#,
         scenario_path.display()
     )
 }
 
-// =============================================================================
-// Tests
-// =============================================================================
-
-/// Tests that OJ_STATE_DIR propagates through tmux session so agent hooks
-/// can reach the daemon socket.
+/// Tests that an agent completing via on_idle = done properly advances the job.
 ///
-/// Lifecycle: agent spawns in tmux → Bash tool runs `oj emit agent:signal`
-/// (which connects to daemon via OJ_STATE_DIR) → emit succeeds → marker file
-/// created → agent exits (-p mode) → on_dead gate checks marker → job
-/// completes.
-///
-/// This proves the full socket propagation chain:
-///   daemon (OJ_STATE_DIR) → spawn.rs env list → tmux -e → agent env →
-///   `oj emit` → daemon_socket() → daemon.sock
+/// This exercises the core agent lifecycle path that replaces the old
+/// `oj emit agent:signal complete` mechanism.
 #[test]
-fn agent_stop_hook_socket_propagation() {
+fn agent_on_idle_done_advances_job() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(".oj/scenarios/emit-signal.toml", scenario_emit_signal());
+    temp.file(".oj/scenarios/work.toml", scenario_work_then_idle());
 
-    let scenario_path = temp.path().join(".oj/scenarios/emit-signal.toml");
-    let runbook = runbook_stop_hook_socket(&scenario_path);
+    let scenario_path = temp.path().join(".oj/scenarios/work.toml");
+    let runbook = runbook_on_idle_done(&scenario_path);
     temp.file(".oj/runbooks/build.toml", &runbook);
 
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj().args(&["run", "build", "socket-test"]).passes();
+    temp.oj().args(&["run", "build", "idle-test"]).passes();
 
-    // Wait for job to complete. If socket propagation works, the agent
-    // successfully calls `oj emit` and the gate passes. If broken, the gate
-    // fails and the job escalates to "waiting" instead of "completed".
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
-        "job should complete via gate after successful oj emit \
-         (proves OJ_STATE_DIR socket propagation)\njob list:\n{}\ndaemon log:\n{}",
+        "job should complete via on_idle=done\njob list:\n{}\ndaemon log:\n{}",
         temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );

@@ -15,17 +15,13 @@ fn word_strategy() -> impl Strategy<Value = String> {
 
 /// Strategy for generating simple commands.
 fn simple_command_strategy() -> impl Strategy<Value = String> {
-    (
-        word_strategy(),
-        prop::collection::vec(word_strategy(), 0..5),
-    )
-        .prop_map(|(name, args)| {
-            if args.is_empty() {
-                name
-            } else {
-                format!("{} {}", name, args.join(" "))
-            }
-        })
+    (word_strategy(), prop::collection::vec(word_strategy(), 0..5)).prop_map(|(name, args)| {
+        if args.is_empty() {
+            name
+        } else {
+            format!("{} {}", name, args.join(" "))
+        }
+    })
 }
 
 /// Strategy for generating command lists.
@@ -77,10 +73,6 @@ proptest! {
         prop_assert_eq!(result.commands.len(), cmds.len());
     }
 }
-
-// =============================================================================
-// Span Invariant Tests
-// =============================================================================
 
 /// Verify that child spans are contained within parent spans.
 fn verify_span_containment(parent: Span, child: Span, context: &str) {
@@ -147,10 +139,6 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Nesting Depth Tests
-// =============================================================================
-
 #[test]
 fn test_deep_subshell_nesting() {
     // Generate 20 levels of subshell nesting
@@ -177,11 +165,7 @@ fn test_deep_brace_group_nesting() {
     }
 
     let result = Parser::parse(&input);
-    assert!(
-        result.is_ok(),
-        "Failed to parse {}-level brace nesting",
-        depth
-    );
+    assert!(result.is_ok(), "Failed to parse {}-level brace nesting", depth);
 }
 
 #[test]
@@ -208,10 +192,6 @@ fn test_alternating_deep_nesting() {
     let result = Parser::parse(&input);
     assert!(result.is_ok(), "Failed to parse alternating nesting");
 }
-
-// =============================================================================
-// Job Property Tests
-// =============================================================================
 
 proptest! {
     /// Invariant: N piped commands produce a job with N commands.
@@ -256,10 +236,6 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Mixed Separator Property Tests
-// =============================================================================
-
 proptest! {
     /// Invariant: Different separator styles produce same command structure.
     #[test]
@@ -301,10 +277,6 @@ proptest! {
         prop_assert_eq!(result.commands.len(), 1);
     }
 }
-
-// =============================================================================
-// Subshell Property Tests
-// =============================================================================
 
 proptest! {
     /// Invariant: N-level nested subshells produce N-level AST nesting.
@@ -360,10 +332,6 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Error Recovery Property Tests
-// =============================================================================
-
 proptest! {
     /// Invariant: Recovery mode finds valid commands even with errors.
     #[test]
@@ -401,10 +369,6 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Variable Expansion Property Tests
-// =============================================================================
-
 proptest! {
     /// Invariant: Variable names in words produce Variable WordParts.
     #[test]
@@ -428,10 +392,6 @@ proptest! {
         prop_assert!(has_variable, "Should have variable part for ${}", name);
     }
 }
-
-// =============================================================================
-// Robustness Tests - Parser/Lexer Never Panics
-// =============================================================================
 
 use crate::lexer::Lexer;
 use crate::token::context_snippet;
@@ -503,10 +463,6 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Unicode Robustness Tests
-// =============================================================================
-
 proptest! {
     /// Invariant: Lexer handles mixed ASCII and Unicode without panicking.
     #[test]
@@ -520,10 +476,6 @@ proptest! {
         let _ = Parser::parse(&input);
     }
 }
-
-// =============================================================================
-// Recovery Property Tests
-// =============================================================================
 
 proptest! {
     /// Invariant: Recovery mode never panics and collects errors properly.

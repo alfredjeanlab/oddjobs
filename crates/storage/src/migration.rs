@@ -35,9 +35,7 @@ pub(crate) struct MigrationRegistry {
 impl MigrationRegistry {
     /// Create a new registry with all known migrations.
     pub fn new() -> Self {
-        Self {
-            migrations: Vec::new(),
-        }
+        Self { migrations: Vec::new() }
     }
 
     /// Migrate a snapshot to the target version.

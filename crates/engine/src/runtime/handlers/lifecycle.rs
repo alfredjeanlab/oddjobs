@@ -5,16 +5,15 @@
 
 use super::super::Runtime;
 use crate::error::RuntimeError;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
 use oj_core::{
-    AgentId, AgentRunStatus, Clock, Effect, Event, JobId, OwnerId, SessionId, StepOutcome,
-    StepStatus, TimerId, WorkspaceId,
+    AgentId, Clock, CrewStatus, Effect, Event, JobId, OwnerId, StepOutcome, StepStatus, TimerId,
+    WorkspaceId,
 };
 use std::collections::HashMap;
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -58,11 +57,7 @@ where
 
         // Resolve message for agent steps BEFORE emitting any events.
         let resolved_message = if step_def.is_agent() {
-            Some(
-                message
-                    .unwrap_or("Please continue with the task.")
-                    .to_string(),
-            )
+            Some(message.unwrap_or("Please continue with the task.").to_string())
         } else {
             None
         };
@@ -82,10 +77,7 @@ where
             let events = self
                 .executor
                 .execute(Effect::Emit {
-                    event: Event::JobAdvanced {
-                        id: job_id.clone(),
-                        step: resume_step.clone(),
-                    },
+                    event: Event::JobAdvanced { id: job_id.clone(), step: resume_step.clone() },
                 })
                 .await?;
             result_events.extend(events);
@@ -95,21 +87,14 @@ where
         if !vars.is_empty() {
             self.executor
                 .execute(Effect::Emit {
-                    event: Event::JobUpdated {
-                        id: JobId::new(&job.id),
-                        vars: vars.clone(),
-                    },
+                    event: Event::JobUpdated { id: JobId::new(&job.id), vars: vars.clone() },
                 })
                 .await?;
         }
 
         // Merge vars for this resume operation
-        let merged_inputs: HashMap<String, String> = job
-            .vars
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .chain(vars.clone())
-            .collect();
+        let merged_inputs: HashMap<String, String> =
+            job.vars.iter().map(|(k, v)| (k.clone(), v.clone())).chain(vars.clone()).collect();
 
         if let Some(msg) = resolved_message {
             let agent_name = step_def
@@ -123,19 +108,14 @@ where
         } else if step_def.is_shell() {
             // Shell step: re-run command
             if message.is_some() {
-                tracing::warn!(
-                    job_id = %job.id,
-                    "resume --message ignored for shell steps"
-                );
+                tracing::warn!(job_id = %job.id, "resume --message ignored for shell steps");
             }
 
             let command = step_def
                 .shell_command()
                 .ok_or_else(|| RuntimeError::InvalidRequest("no shell command in step".into()))?;
 
-            let events = self
-                .handle_shell_resume(&job, &resume_step, command)
-                .await?;
+            let events = self.handle_shell_resume(&job, &resume_step, command).await?;
             result_events.extend(events);
         } else {
             return Err(RuntimeError::InvalidRequest(format!(
@@ -173,9 +153,7 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         // Delete workspace via the standard effect (handles directory removal + state update)
         self.executor
-            .execute(Effect::DeleteWorkspace {
-                workspace_id: workspace_id.clone(),
-            })
+            .execute(Effect::DeleteWorkspace { workspace_id: workspace_id.clone() })
             .await?;
 
         tracing::info!(workspace_id = %workspace_id, "deleted workspace");
@@ -189,22 +167,18 @@ where
         step: &str,
         _command: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Kill existing session if any
-        if let Some(session_id) = &job.session_id {
-            let _ = self
-                .executor
-                .execute(Effect::KillSession {
-                    session_id: SessionId::new(session_id),
-                })
-                .await;
+        // Kill existing agent if any (defensive - shouldn't happen for shell steps)
+        if let Some(agent_id) =
+            job.step_history.iter().rfind(|r| r.name == step).and_then(|r| r.agent_id.as_ref())
+        {
+            let _ =
+                self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(agent_id) }).await;
         }
 
         // Re-run the shell command
-        let execution_dir = self.execution_dir(job);
+        let execution_dir = job.execution_dir().to_path_buf();
         let job_id = JobId::new(&job.id);
-        let result = self
-            .start_step(&job_id, step, &job.vars, &execution_dir)
-            .await?;
+        let result = self.start_step(&job_id, step, &job.vars, &execution_dir).await?;
 
         tracing::info!(job_id = %job.id, "re-running shell step");
         Ok(result)
@@ -233,12 +207,10 @@ where
 
         // Write captured output before the status line
         if let Some(out) = stdout {
-            self.logger
-                .append_fenced(job_id.as_str(), step, "stdout", out);
+            self.logger.append_fenced(job_id.as_str(), step, "stdout", out);
         }
         if let Some(err) = stderr {
-            self.logger
-                .append_fenced(job_id.as_str(), step, "stderr", err);
+            self.logger.append_fenced(job_id.as_str(), step, "stderr", err);
         }
 
         if exit_code == 0 {
@@ -254,8 +226,7 @@ where
                 step,
                 &format!("shell failed (exit {})", exit_code),
             );
-            self.fail_job(&job, &format!("shell exit code: {}", exit_code))
-                .await
+            self.fail_job(&job, &format!("shell exit code: {}", exit_code)).await
         }
     }
 
@@ -272,37 +243,24 @@ where
         job_id: &JobId,
     ) -> Result<Vec<Event>, RuntimeError> {
         let Some(job) = self.get_job(job_id.as_str()) else {
-            tracing::debug!(job_id = %job_id, "job_created: job not found");
             return Ok(vec![]);
         };
 
         // Idempotency guard: skip if step already started (e.g. WAL replay)
         if job.step_status != StepStatus::Pending {
-            tracing::debug!(
-                job_id = %job_id,
-                step_status = %job.step_status,
-                "job_created: step already started, skipping"
-            );
             return Ok(vec![]);
         }
 
         // Check if this job has a workspace to create
-        if let Some(ws_id) = job.vars.get("workspace.id") {
-            let workspace_type = job.vars.get("workspace.type").cloned();
+        if let Some(ws_id) = job.vars.get("source.id") {
+            let workspace_type = job.vars.get("source.type").cloned();
             let is_worktree = workspace_type.as_deref() == Some("worktree");
 
             let (repo_root, branch, start_point) = if is_worktree {
                 (
-                    job.vars
-                        .get("workspace.repo_root")
-                        .map(std::path::PathBuf::from),
-                    job.vars.get("workspace.branch").cloned(),
-                    Some(
-                        job.vars
-                            .get("workspace.ref")
-                            .cloned()
-                            .unwrap_or_else(|| "HEAD".to_string()),
-                    ),
+                    job.vars.get("source.repo_root").map(std::path::PathBuf::from),
+                    job.vars.get("source.branch").cloned(),
+                    Some(job.vars.get("source.ref").cloned().unwrap_or_else(|| "HEAD".to_string())),
                 )
             } else {
                 (None, None, None)
@@ -313,7 +271,7 @@ where
                 .execute_all(vec![Effect::CreateWorkspace {
                     workspace_id: WorkspaceId::new(ws_id),
                     path: job.cwd.clone(),
-                    owner: Some(OwnerId::Job(job_id.clone())),
+                    owner: OwnerId::Job(job_id.clone()),
                     workspace_type,
                     repo_root,
                     branch,
@@ -340,38 +298,17 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         // Find the owning job via workspace record
         let owner_job_id = self.lock_state(|s| {
-            s.workspaces
-                .get(workspace_id.as_str())
-                .and_then(|ws| ws.owner.as_ref())
-                .and_then(|owner| match owner {
-                    OwnerId::Job(id) => Some(id.clone()),
-                    _ => None,
-                })
+            s.workspaces.get(workspace_id.as_str()).and_then(|ws| ws.owner.as_job().cloned())
         });
-
         let Some(job_id) = owner_job_id else {
-            tracing::debug!(
-                workspace_id = %workspace_id,
-                "workspace_ready: no owning job found"
-            );
             return Ok(vec![]);
         };
-
         let Some(job) = self.get_job(job_id.as_str()) else {
-            tracing::debug!(
-                job_id = %job_id,
-                "workspace_ready: job not found"
-            );
             return Ok(vec![]);
         };
 
         // Guard: only start the step if it's still pending (idempotent)
         if job.step_status != StepStatus::Pending {
-            tracing::debug!(
-                job_id = %job_id,
-                step_status = %job.step_status,
-                "workspace_ready: step already started, skipping"
-            );
             return Ok(vec![]);
         }
 
@@ -392,11 +329,9 @@ where
             .get_job(&job.kind)
             .ok_or_else(|| RuntimeError::JobDefNotFound(job.kind.clone()))?;
 
-        let execution_dir = self.execution_dir(job);
-
+        let execution_dir = job.execution_dir().to_path_buf();
         if let Some(step) = job_def.first_step() {
-            self.start_step(job_id, &step.name, &job.vars, &execution_dir)
-                .await
+            self.start_step(job_id, &step.name, &job.vars, &execution_dir).await
         } else {
             Ok(vec![])
         }
@@ -413,131 +348,66 @@ where
     ) -> Result<Vec<Event>, RuntimeError> {
         // Find the owning job via workspace record
         let owner_job_id = self.lock_state(|s| {
-            s.workspaces
-                .get(workspace_id.as_str())
-                .and_then(|ws| ws.owner.as_ref())
-                .and_then(|owner| match owner {
-                    OwnerId::Job(id) => Some(id.clone()),
-                    _ => None,
-                })
+            s.workspaces.get(workspace_id.as_str()).and_then(|ws| ws.owner.as_job().cloned())
         });
-
         let Some(job_id) = owner_job_id else {
-            tracing::debug!(
-                workspace_id = %workspace_id,
-                "workspace_failed: no owning job found"
-            );
             return Ok(vec![]);
         };
-
         let Some(job) = self.get_active_job(job_id.as_str()) else {
-            tracing::debug!(
-                job_id = %job_id,
-                "workspace_failed: job not found or already terminal"
-            );
             return Ok(vec![]);
         };
-
         self.fail_job(&job, reason).await
     }
 
-    /// Handle SessionCreated: agent spawn completed successfully.
+    /// Handle AgentSpawned: agent spawn completed successfully.
     ///
     /// Sets up the liveness timer and emits on_start notifications.
     /// This handler fires asynchronously after the background SpawnAgent task
-    /// completes. Idempotent: no-op if the job/agent_run is already terminal.
-    pub(crate) async fn handle_session_created(
+    /// completes. Idempotent: no-op if the job/crew is already terminal.
+    pub(crate) async fn handle_agent_spawned(
         &self,
-        session_id: &SessionId,
         owner: &OwnerId,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let mut result_events = Vec::new();
-
-        match owner {
-            OwnerId::Job(job_id) => {
-                let Some(job) = self.get_active_job(job_id.as_str()) else {
-                    // Job is terminal (e.g. cancelled during spawn) — kill the new session
-                    tracing::info!(
-                        job_id = %job_id,
-                        session_id = %session_id,
-                        "session_created: job terminal, killing orphan session"
-                    );
-                    let _ = self
-                        .executor
-                        .execute(Effect::KillSession {
-                            session_id: session_id.clone(),
-                        })
-                        .await;
-                    return Ok(vec![]);
-                };
-
-                // Set liveness timer
-                self.executor
-                    .execute(Effect::SetTimer {
-                        id: TimerId::liveness(job_id),
-                        duration: crate::spawn::LIVENESS_INTERVAL,
-                    })
-                    .await?;
-
-                // Emit on_start notification if configured
-                let runbook = self.cached_runbook(&job.runbook_hash)?;
-                if let Some(agent_name) = job
-                    .step_history
-                    .iter()
-                    .rfind(|r| r.name == job.step)
-                    .and_then(|r| r.agent_name.as_deref())
-                {
-                    if let Some(agent_def) = runbook.get_agent(agent_name) {
-                        if let Some(effect) = crate::monitor::build_agent_notify_effect(
-                            &job,
-                            agent_def,
-                            agent_def.notify.on_start.as_ref(),
-                        ) {
-                            if let Some(ev) = self.executor.execute(effect).await? {
-                                result_events.push(ev);
-                            }
-                        }
+        let Some(run) = self.get_active_run(owner) else {
+            // For jobs: terminal (e.g. cancelled during spawn) — kill the orphan agent
+            if let OwnerId::Job(job_id) = owner {
+                if let Some(job) = self.get_job(job_id.as_str()) {
+                    if let Some(agent_id) = job
+                        .step_history
+                        .iter()
+                        .rfind(|r| r.name == job.step)
+                        .and_then(|r| r.agent_id.as_ref())
+                    {
+                        tracing::info!(
+                            job_id = %job_id,
+                            agent_id = %agent_id,
+                            "agent_spawned: job terminal, killing orphan agent"
+                        );
+                        let _ = self
+                            .executor
+                            .execute(Effect::KillAgent { agent_id: AgentId::new(agent_id) })
+                            .await;
                     }
                 }
             }
-            OwnerId::AgentRun(agent_run_id) => {
-                let agent_run =
-                    self.lock_state(|s| s.agent_runs.get(agent_run_id.as_str()).cloned());
+            return Ok(vec![]);
+        };
 
-                let Some(agent_run) = agent_run else {
-                    tracing::debug!(
-                        agent_run_id = %agent_run_id,
-                        "session_created: agent_run not found"
-                    );
-                    return Ok(vec![]);
-                };
+        // Set liveness timer
+        self.executor
+            .execute(Effect::SetTimer {
+                id: TimerId::liveness(owner),
+                duration: crate::spawn::LIVENESS_INTERVAL,
+            })
+            .await?;
 
-                // Set liveness timer
-                self.executor
-                    .execute(Effect::SetTimer {
-                        id: TimerId::liveness_agent_run(agent_run_id),
-                        duration: crate::spawn::LIVENESS_INTERVAL,
-                    })
-                    .await?;
-
-                // Emit on_start notification if configured
-                if let Ok(runbook) = self.cached_runbook(&agent_run.runbook_hash) {
-                    if let Some(agent_def) = runbook.get_agent(&agent_run.agent_name) {
-                        if let Some(effect) = agent_def.notify.on_start.as_ref().map(|template| {
-                            let mut vars = crate::vars::namespace_vars(&agent_run.vars);
-                            vars.insert("agent_run_id".to_string(), agent_run_id.to_string());
-                            vars.insert("name".to_string(), agent_run.command_name.clone());
-                            vars.insert("agent".to_string(), agent_def.name.clone());
-                            let message = oj_runbook::NotifyConfig::render(template, &vars);
-                            Effect::Notify {
-                                title: agent_def.name.clone(),
-                                message,
-                            }
-                        }) {
-                            if let Some(ev) = self.executor.execute(effect).await? {
-                                result_events.push(ev);
-                            }
-                        }
+        // Emit on_start notification if configured
+        let mut result_events = Vec::new();
+        if let Ok(runbook) = self.cached_runbook(run.runbook_hash()) {
+            if let Ok(agent_def) = run.resolve_agent_def(&runbook) {
+                if let Some(effect) = crate::lifecycle::notify_on_start(run.as_ref(), &agent_def) {
+                    if let Some(ev) = self.executor.execute(effect).await? {
+                        result_events.push(ev);
                     }
                 }
             }
@@ -549,7 +419,7 @@ where
     /// Handle AgentSpawnFailed: background agent spawn task failed.
     ///
     /// For job-owned agents: deregisters the agent mapping and fails the job.
-    /// For standalone agent runs: emits AgentRunStatusChanged::Failed.
+    /// For crew: emits CrewUpdated::Failed.
     pub(crate) async fn handle_agent_spawn_failed(
         &self,
         agent_id: &AgentId,
@@ -557,7 +427,7 @@ where
         reason: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Deregister agent mapping (was registered before spawn was dispatched)
-        self.deregister_agent(agent_id);
+        self.agent_owners.lock().remove(agent_id);
 
         // Write error to agent log
         self.logger.append_agent_error(agent_id.as_str(), reason);
@@ -565,10 +435,6 @@ where
         match owner {
             OwnerId::Job(job_id) => {
                 let Some(job) = self.get_active_job(job_id.as_str()) else {
-                    tracing::debug!(
-                        job_id = %job_id,
-                        "agent_spawn_failed: job not found or already terminal"
-                    );
                     return Ok(vec![]);
                 };
 
@@ -579,22 +445,15 @@ where
                 );
                 self.fail_job(&job, reason).await
             }
-            OwnerId::AgentRun(agent_run_id) => {
-                tracing::error!(
-                    agent_run_id = %agent_run_id,
-                    error = %reason,
-                    "standalone agent spawn failed"
-                );
+            OwnerId::Crew(crew_id) => {
+                tracing::error!(crew_id = %crew_id, error = %reason, "standalone agent spawn failed");
 
-                let fail_event = Event::AgentRunStatusChanged {
-                    id: agent_run_id.clone(),
-                    status: AgentRunStatus::Failed,
+                let fail_event = Event::CrewUpdated {
+                    id: crew_id.clone(),
+                    status: CrewStatus::Failed,
                     reason: Some(reason.to_string()),
                 };
-                let result = self
-                    .executor
-                    .execute(Effect::Emit { event: fail_event })
-                    .await?;
+                let result = self.executor.execute(Effect::Emit { event: fail_event }).await?;
                 Ok(result.into_iter().collect())
             }
         }
@@ -634,78 +493,32 @@ where
 
         // The following cleanup depends on having job info
         let Some(job) = job else {
-            tracing::debug!(job_id = %job_id, "job_deleted: job not found (already deleted or never existed)");
             return Ok(vec![]);
         };
 
         // 2. Collect agent IDs from step history to deregister
-        let agent_ids: Vec<AgentId> = job
-            .step_history
-            .iter()
-            .filter_map(|r| r.agent_id.as_ref().map(AgentId::new))
-            .collect();
+        let agent_ids: Vec<AgentId> =
+            job.step_history.iter().filter_map(|r| r.agent_id.as_ref().map(AgentId::new)).collect();
 
         // 3. Deregister agent→job mappings (prevents stale watcher events)
         for agent_id in &agent_ids {
-            self.deregister_agent(agent_id);
+            self.agent_owners.lock().remove(agent_id);
         }
 
         // 4. Kill agents (this also stops their watchers)
         for agent_id in &agent_ids {
-            if let Err(e) = self
-                .executor
-                .execute(Effect::KillAgent {
-                    agent_id: agent_id.clone(),
-                })
-                .await
-            {
-                tracing::debug!(
-                    job_id = %job_id,
-                    agent_id = %agent_id,
-                    error = %e,
-                    "job_deleted: failed to kill agent (may already be dead)"
-                );
-            }
+            let _ = self.executor.execute(Effect::KillAgent { agent_id: agent_id.clone() }).await;
         }
 
         // 5. Capture terminal + session log before killing session
         self.capture_before_kill_job(&job).await;
 
-        // 6. Kill session as fallback (in case agent kill didn't cover it)
-        if let Some(session_id) = &job.session_id {
-            let sid = SessionId::new(session_id);
-            if let Err(e) = self
-                .executor
-                .execute(Effect::KillSession {
-                    session_id: sid.clone(),
-                })
-                .await
-            {
-                tracing::debug!(
-                    job_id = %job_id,
-                    session_id = %session_id,
-                    error = %e,
-                    "job_deleted: failed to kill session (may already be dead)"
-                );
-            }
-            // Emit SessionDeleted event so state is consistent
-            let _ = self
-                .executor
-                .execute(Effect::Emit {
-                    event: Event::SessionDeleted { id: sid },
-                })
-                .await;
-        }
-
-        // 7. Delete workspace if one exists
+        // 6. Delete workspace if one exists
         let ws_id = job.workspace_id.clone().or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
-                    .find(|ws| {
-                        ws.owner.as_ref()
-                            == Some(&oj_core::OwnerId::Job(oj_core::JobId::new(&job.id)))
-                    })
+                    .find(|ws| ws.owner == oj_core::OwnerId::Job(oj_core::JobId::new(&job.id)))
                     .map(|ws| oj_core::WorkspaceId::new(&ws.id))
             })
         });
@@ -713,20 +526,10 @@ where
         if let Some(ws_id) = ws_id {
             let exists = self.lock_state(|s| s.workspaces.contains_key(ws_id.as_str()));
             if exists {
-                if let Err(e) = self
+                let _ = self
                     .executor
-                    .execute(Effect::DeleteWorkspace {
-                        workspace_id: ws_id.clone(),
-                    })
-                    .await
-                {
-                    tracing::debug!(
-                        job_id = %job_id,
-                        workspace_id = %ws_id,
-                        error = %e,
-                        "job_deleted: failed to delete workspace"
-                    );
-                }
+                    .execute(Effect::DeleteWorkspace { workspace_id: ws_id.clone() })
+                    .await;
             }
         }
 
@@ -734,7 +537,3 @@ where
         Ok(vec![])
     }
 }
-
-#[cfg(test)]
-#[path = "lifecycle_tests.rs"]
-mod tests;

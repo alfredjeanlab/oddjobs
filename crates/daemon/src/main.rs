@@ -14,6 +14,9 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(test, allow(clippy::expect_used))]
 
+use std::io::Write;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
 mod env;
 mod event_bus;
 mod lifecycle;
@@ -42,17 +45,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(arg) = std::env::args().nth(1) {
         match arg.as_str() {
             "--version" | "-V" | "-v" => {
-                println!(
-                    "ojd {}",
-                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"))
-                );
+                println!("ojd {}", concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH")));
                 return Ok(());
             }
             "--help" | "-h" | "help" => {
-                println!(
-                    "ojd {}",
-                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"))
-                );
+                println!("ojd {}", concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH")));
                 println!("Odd Jobs Daemon - background process that owns the event loop and dispatches work");
                 println!();
                 println!("USAGE:");
@@ -78,13 +75,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Load configuration (user-level daemon, no project root)
     let config = Config::load()?;
 
-    // Isolate tmux sessions to a daemon-specific server so that
-    // `tmux kill-server` from tests or other processes cannot destroy
-    // production sessions.
-    let tmux_dir = config.state_dir.join("tmux");
-    std::fs::create_dir_all(&tmux_dir)?;
-    std::env::set_var("TMUX_TMPDIR", &tmux_dir);
-
     // Rotate log file if it has grown too large
     rotate_log_if_needed(&config.log_path);
 
@@ -97,70 +87,80 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Starting user-level daemon");
 
     // Start daemon
-    let StartupResult {
-        mut daemon,
-        listener: unix_listener,
-        mut event_reader,
-        reconcile_ctx,
-    } = match lifecycle::startup(&config).await {
-        Ok(r) => r,
-        Err(LifecycleError::LockFailed(_)) => {
-            // Another daemon is already running — print a human-readable message
-            // instead of a raw debug error.
-            let pid = std::fs::read_to_string(&config.lock_path)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            let version = std::fs::read_to_string(&config.version_path)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
+    let StartupResult { mut daemon, listener: unix_listener, mut event_reader, reconcile_ctx } =
+        match lifecycle::startup(&config).await {
+            Ok(r) => r,
+            Err(LifecycleError::LockFailed(_)) => {
+                // Another daemon is already running — print a human-readable message
+                // instead of a raw debug error.
+                let pid = std::fs::read_to_string(&config.lock_path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
+                let version = std::fs::read_to_string(&config.version_path)
+                    .unwrap_or_default()
+                    .trim()
+                    .to_string();
 
-            eprintln!("ojd is already running");
-            if !pid.is_empty() {
-                eprintln!("  pid: {pid}");
-            }
-            if !version.is_empty() {
-                let current_version =
-                    concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"));
-                if version == current_version {
-                    eprintln!("  version: {version}");
-                } else {
-                    eprintln!("  version: {version} (outdated — current: {current_version})");
+                eprintln!("ojd is already running");
+                if !pid.is_empty() {
+                    eprintln!("  pid: {pid}");
                 }
+                if !version.is_empty() {
+                    let current_version =
+                        concat!(env!("CARGO_PKG_VERSION"), "+", env!("BUILD_GIT_HASH"));
+                    if version == current_version {
+                        eprintln!("  version: {version}");
+                    } else {
+                        eprintln!("  version: {version} (outdated — current: {current_version})");
+                    }
+                }
+                std::process::exit(1);
             }
-            std::process::exit(1);
-        }
-        Err(e) => {
-            // Write error synchronously (tracing is non-blocking and may not flush in time)
-            write_startup_error(&config, &e);
-            error!("Failed to start daemon: {}", e);
-            drop(log_guard);
-            return Err(e.into());
-        }
-    };
+            Err(e) => {
+                // Write error synchronously (tracing is non-blocking and may not flush in time)
+                write_startup_error(&config, &e);
+                error!("Failed to start daemon: {}", e);
+                drop(log_guard);
+                return Err(e.into());
+            }
+        };
 
     // Shutdown signal: non-durable channel so shutdown requests are not
     // persisted to the WAL and accidentally replayed on next startup.
     let shutdown_notify = Arc::new(Notify::new());
 
     // Spawn listener task
+    let agent_adapter = daemon.runtime.executor.agents().clone();
     let ctx = Arc::new(listener::ListenCtx {
         event_bus: daemon.event_bus.clone(),
         state: Arc::clone(&daemon.state),
         orphans: Arc::clone(&daemon.orphans),
         metrics_health: Arc::clone(&daemon.metrics_health),
+        state_dir: daemon.config.state_dir.clone(),
         logs_path: daemon.config.logs_path.clone(),
         start_time: daemon.start_time,
         shutdown: Arc::clone(&shutdown_notify),
+        auth_token: crate::env::auth_token(),
+        agent_adapter: Some(agent_adapter),
     });
-    let listener = Listener::new(unix_listener, ctx);
+    let listener = if let Some(port) = crate::env::tcp_port() {
+        let tcp_listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.map_err(|e| {
+            let msg = format!("Failed to bind TCP port {}: {}", port, e);
+            error!("{}", msg);
+            Box::<dyn std::error::Error>::from(msg)
+        })?;
+        info!("TCP listener bound on port {}", port);
+        Listener::with_tcp(unix_listener, tcp_listener, ctx)
+    } else {
+        Listener::new(unix_listener, ctx)
+    };
     tokio::spawn(listener.run());
 
     // Spawn checkpoint task for periodic snapshots
     spawn_checkpoint(
         Arc::clone(&daemon.state),
-        event_reader.wal(),
+        Arc::clone(&event_reader.wal),
         daemon.config.snapshot_path.clone(),
     );
 
@@ -171,10 +171,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sigterm = signal(SignalKind::terminate())?;
     let mut sigint = signal(SignalKind::interrupt())?;
 
-    info!(
-        "Daemon ready, listening on {}",
-        config.socket_path.display()
-    );
+    if let Some(port) = crate::env::tcp_port() {
+        info!(
+            "Daemon ready, listening on {} and tcp://0.0.0.0:{}",
+            config.socket_path.display(),
+            port
+        );
+    } else {
+        info!("Daemon ready, listening on {}", config.socket_path.display());
+    }
 
     // Signal ready for parent process (e.g., systemd, CLI waiting for startup)
     println!("READY");
@@ -183,14 +188,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if reconcile_ctx.job_count > 0
         || reconcile_ctx.worker_count > 0
         || reconcile_ctx.cron_count > 0
-        || reconcile_ctx.agent_run_count > 0
+        || reconcile_ctx.crew_count > 0
     {
         info!(
-            "spawning background reconciliation for {} jobs, {} workers, {} crons, {} agent_runs",
+            "spawning background reconciliation for {} jobs, {} workers, {} crons, {} crew",
             reconcile_ctx.job_count,
             reconcile_ctx.worker_count,
             reconcile_ctx.cron_count,
-            reconcile_ctx.agent_run_count
+            reconcile_ctx.crew_count
         );
         tokio::spawn(async move {
             lifecycle::reconcile_state(&reconcile_ctx).await;
@@ -218,7 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             Event::Shutdown => {
                                 // Skip shutdown events from WAL - they are
                                 // control signals that must not be replayed on restart.
-                                event_reader.mark_processed(seq);
+                                event_reader.wal.lock().mark_processed(seq);
                             }
                             event => {
                                 let job_id = event.job_id().map(|p| p.to_string());
@@ -228,13 +233,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                                 let is_resume = matches!(&event, Event::JobResume { .. });
                                 match daemon.process_event(event).await {
-                                    Ok(()) => event_reader.mark_processed(seq),
+                                    Ok(()) => event_reader.wal.lock().mark_processed(seq),
                                     Err(e) => {
                                         // Mark processed - unprocessable events must not
                                         // block the event loop. If an event can't be
                                         // processed now, it won't be processable later.
                                         error!("Error processing event (seq={}): {}", seq, e);
-                                        event_reader.mark_processed(seq);
+                                        event_reader.wal.lock().mark_processed(seq);
 
                                         // Best-effort: fail the associated job so it
                                         // doesn't get stuck. Skip if already a failure
@@ -284,9 +289,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Fire timers periodically (1-second resolution)
             _ = timer_check.tick() => {
-                let now = daemon.runtime.clock().now();
+                let now = daemon.runtime.executor.clock().now();
                 let timer_events = {
-                    let scheduler = daemon.runtime.scheduler();
+                    let scheduler = daemon.runtime.executor.scheduler();
                     let mut sched = scheduler.lock();
                     sched.fired_timers(now)
                 };
@@ -321,8 +326,8 @@ fn spawn_flush_task(event_bus: EventBus) {
         loop {
             interval.tick().await;
 
-            if event_bus.needs_flush() {
-                if let Err(e) = event_bus.flush() {
+            if event_bus.wal.lock().needs_flush() {
+                if let Err(e) = event_bus.wal.lock().flush() {
                     tracing::error!("Failed to flush event bus: {}", e);
                 }
             }
@@ -383,33 +388,18 @@ fn spawn_checkpoint(
             let result = tokio::task::spawn_blocking(move || handle.wait()).await;
 
             match result {
-                Ok(Ok(checkpoint_result)) => {
-                    tracing::debug!(
-                        seq = checkpoint_result.seq,
-                        size_bytes = checkpoint_result.size_bytes,
-                        "checkpoint complete"
-                    );
-
+                Ok(Ok(_)) => {
                     // NOW safe to truncate WAL (snapshot is durable)
                     let mut wal = event_wal.lock();
                     if let Err(e) = wal.truncate_before(processed_seq) {
-                        tracing::warn!(
-                            error = %e,
-                            "failed to truncate WAL after checkpoint"
-                        );
+                        tracing::warn!(error = %e, "failed to truncate WAL after checkpoint");
                     }
                 }
                 Ok(Err(e)) => {
-                    tracing::warn!(
-                        error = %e,
-                        "checkpoint failed, WAL not truncated"
-                    );
+                    tracing::warn!(error = %e, "checkpoint failed, WAL not truncated");
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "checkpoint task panicked"
-                    );
+                    tracing::warn!(error = %e, "checkpoint task panicked");
                 }
             }
         }
@@ -457,8 +447,6 @@ const STARTUP_MARKER_PREFIX: &str = "--- ojd: starting (pid: ";
 
 /// Write startup marker to log file (appends to existing log)
 fn write_startup_marker(config: &Config) -> Result<(), LifecycleError> {
-    use std::io::Write;
-
     // Create log directory if needed
     if let Some(parent) = config.log_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -467,16 +455,8 @@ fn write_startup_marker(config: &Config) -> Result<(), LifecycleError> {
     // Append marker to log file with PID, followed by a blank line so the
     // marker and any subsequent ERROR line appear on non-consecutive lines
     // for legibility when scanning the log.
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&config.log_path)?;
-    writeln!(
-        file,
-        "{}{}) ---\n",
-        STARTUP_MARKER_PREFIX,
-        std::process::id()
-    )?;
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&config.log_path)?;
+    writeln!(file, "{}{}) ---\n", STARTUP_MARKER_PREFIX, std::process::id())?;
 
     Ok(())
 }
@@ -484,12 +464,7 @@ fn write_startup_marker(config: &Config) -> Result<(), LifecycleError> {
 /// Write startup error synchronously to log file.
 /// This ensures the error is visible to the CLI even if the process exits quickly.
 fn write_startup_error(config: &Config, error: &LifecycleError) {
-    use std::io::Write;
-
-    let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&config.log_path)
+    let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&config.log_path)
     else {
         return;
     };
@@ -503,8 +478,6 @@ mod tests;
 fn setup_logging(
     config: &Config,
 ) -> Result<tracing_appender::non_blocking::WorkerGuard, LifecycleError> {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
-
     // Create log directory if needed
     if let Some(parent) = config.log_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -513,20 +486,14 @@ fn setup_logging(
     // Set up file appender (rotation happens at startup via rotate_log_if_needed)
     let file_appender = tracing_appender::rolling::never(
         config.log_path.parent().ok_or(LifecycleError::NoStateDir)?,
-        config
-            .log_path
-            .file_name()
-            .ok_or(LifecycleError::NoStateDir)?,
+        config.log_path.file_name().ok_or(LifecycleError::NoStateDir)?,
     );
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     // Set up subscriber with env filter
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    tracing_subscriber::registry()
-        .with(filter)
-        .with(fmt::layer().with_writer(non_blocking))
-        .init();
+    tracing_subscriber::registry().with(filter).with(fmt::layer().with_writer(non_blocking)).init();
 
     Ok(guard)
 }

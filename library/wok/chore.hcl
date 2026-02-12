@@ -32,7 +32,7 @@ queue "chores" {
 
 worker "chore" {
   source      = { queue = "chores" }
-  handler     = { job = "chore" }
+  run = { job = "chore" }
   concurrency = 3
 }
 
@@ -42,9 +42,9 @@ job "chore" {
   on_cancel = { step = "cancel" }
   on_fail   = { step = "reopen" }
 
-  workspace {
-    git    = "worktree"
-    branch = "chore/${var.task.id}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "chore/${var.task.id}-${source.nonce}"
   }
 
   locals {
@@ -68,7 +68,7 @@ job "chore" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        branch="${workspace.branch}" title="${local.title}"
+        branch="${source.branch}" title="${local.title}"
         git push origin "$branch"
         wok done ${var.task.id}
         %{ if const.submit != "" }
@@ -109,15 +109,6 @@ agent "chores" {
       Keep working. Complete the task, write tests, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Chore: ${var.task.id}"
-    status {
-      left  = "${var.task.id}: ${var.task.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

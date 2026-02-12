@@ -7,83 +7,65 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
 /// Scenario that produces multiple tool calls (rapid state transitions).
 ///
 /// Agent does: think → tool → respond, creating multiple state transitions.
 fn scenario_multi_turn() -> &'static str {
     r#"
-name = "multi-turn"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Let me do several things."
 
-[responses.response]
-text = "Let me do several things."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "echo step1" }
 
 [[responses]]
-pattern = { type = "contains", text = "step1" }
+on = { contains = "step1" }
+say = "First step done. Now second."
 
-[responses.response]
-text = "First step done. Now second."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "echo step2" }
 
 [[responses]]
-pattern = { type = "contains", text = "step2" }
+on = { contains = "step2" }
+say = "All done!"
 
-[responses.response]
-text = "All done!"
-
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#
 }
 
 /// Scenario that exits immediately (print mode).
 fn scenario_quick_exit() -> &'static str {
     r#"
-name = "quick-exit"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
-
-[responses.response]
-text = "Done."
+on = "*"
+say = "Done."
 "#
 }
 
 /// Scenario that produces an idle state (interactive mode, text only).
 fn scenario_simple_idle() -> &'static str {
     r#"
-name = "simple-idle"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
-
-[responses.response]
-text = "I've completed the analysis. Here's my response."
+on = "*"
+say = "I've completed the analysis. Here's my response."
 "#
 }
-
-// =============================================================================
-// Runbooks
-// =============================================================================
 
 fn runbook_multi_turn(scenario_path: &std::path::Path) -> String {
     format!(
@@ -133,10 +115,6 @@ env = {{ OJ_STEP = "work" }}
     )
 }
 
-// =============================================================================
-// Rapid State Transition Tests
-// =============================================================================
-
 /// Tests that rapid state transitions (working → idle → working → idle) are
 /// detected correctly during multi-turn agent interactions.
 ///
@@ -164,11 +142,7 @@ fn rapid_state_transitions_detected_correctly() {
     // With multi-turn responses, the agent goes through multiple state transitions.
     // The on_idle = done should fire after the final text-only response.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
@@ -177,10 +151,6 @@ fn rapid_state_transitions_detected_correctly() {
         temp.daemon_log()
     );
 }
-
-// =============================================================================
-// Process Death Handling Tests
-// =============================================================================
 
 /// Tests that agent process death during log write is handled gracefully.
 ///
@@ -208,11 +178,7 @@ fn agent_death_during_log_write_handled_gracefully() {
     // The agent exits immediately after one response.
     // The watcher should detect process death and fire on_dead = done.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
@@ -222,10 +188,7 @@ fn agent_death_during_log_write_handled_gracefully() {
     );
 
     // Verify daemon is still running (didn't crash on partial log)
-    temp.oj()
-        .args(&["daemon", "status"])
-        .passes()
-        .stdout_has("running");
+    temp.oj().args(&["daemon", "status"]).passes().stdout_has("running");
 }
 
 /// Tests multiple rapid agent spawns and deaths in sequence.
@@ -253,12 +216,12 @@ vars  = ["name"]
 [[job.build.step]]
 name = "step1"
 run = {{ agent = "worker1" }}
-on_done = "step2"
+on_done = {{ step = "step2" }}
 
 [[job.build.step]]
 name = "step2"
 run = {{ agent = "worker2" }}
-on_done = "step3"
+on_done = {{ step = "step3" }}
 
 [[job.build.step]]
 name = "step3"
@@ -290,11 +253,7 @@ on_dead = "done"
 
     // Wait for all three sequential agent steps to complete
     let done = wait_for(SPEC_WAIT_MAX_MS * 10, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
@@ -304,15 +263,8 @@ on_dead = "done"
     );
 
     // Daemon should still be healthy
-    temp.oj()
-        .args(&["daemon", "status"])
-        .passes()
-        .stdout_has("running");
+    temp.oj().args(&["daemon", "status"]).passes().stdout_has("running");
 }
-
-// =============================================================================
-// Edge Case Tests
-// =============================================================================
 
 /// Tests that a simple idle detection works (baseline for edge cases).
 ///
@@ -350,11 +302,7 @@ on_idle = "done"
     temp.oj().args(&["run", "build", "baseline-test"]).passes();
 
     let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,

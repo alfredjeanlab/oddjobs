@@ -11,20 +11,13 @@ use super::{emit, PruneFlags};
 /// Handle a status request.
 pub(crate) fn handle_status(ctx: &ListenCtx) -> Response {
     let uptime_secs = ctx.start_time.elapsed().as_secs();
-    let (jobs_active, sessions_active) = {
+    let jobs_active = {
         let state = ctx.state.lock();
-        let active = state.jobs.values().filter(|p| !p.is_terminal()).count();
-        let sessions = state.sessions.len();
-        (active, sessions)
+        state.jobs.values().filter(|p| !p.is_terminal()).count()
     };
     let orphan_count = ctx.orphans.lock().len();
 
-    Response::Status {
-        uptime_secs,
-        jobs_active,
-        sessions_active,
-        orphan_count,
-    }
+    Response::Status { uptime_secs, jobs_active, orphan_count }
 }
 
 /// Handle a job resume request.
@@ -49,31 +42,18 @@ pub(crate) fn handle_job_resume(
         // Auto-dismiss any pending decisions for this job
         auto_dismiss_decisions_for_job(ctx, &job_id)?;
 
-        emit(
-            &ctx.event_bus,
-            Event::JobResume {
-                id: JobId::new(job_id),
-                message,
-                vars,
-                kill,
-            },
-        )?;
+        emit(&ctx.event_bus, Event::JobResume { id: JobId::new(job_id), message, vars, kill })?;
         return Ok(Response::Ok);
     }
 
     // Not in state — check orphan registry
     let orphan = {
         let orphans_guard = ctx.orphans.lock();
-        orphans_guard
-            .iter()
-            .find(|bc| bc.job_id == id || bc.job_id.starts_with(&id))
-            .cloned()
+        orphans_guard.iter().find(|bc| bc.job_id == id || bc.job_id.starts_with(&id)).cloned()
     };
 
     let Some(orphan) = orphan else {
-        return Ok(Response::Error {
-            message: format!("job not found: {}", id),
-        });
+        return Ok(Response::Error { message: format!("job not found: {}", id) });
     };
 
     // Orphan found — check if the runbook is available for reconstruction
@@ -123,29 +103,15 @@ pub(crate) fn handle_job_resume(
             cwd,
             vars: orphan.vars,
             initial_step: orphan.current_step,
-            created_at_epoch_ms: 0,
-            namespace: orphan.project,
-            cron_name: None,
+            created_at_ms: 0,
+            project: orphan.project,
+            cron: None,
         },
     )?;
 
-    emit(
-        &ctx.event_bus,
-        Event::JobAdvanced {
-            id: job_id.clone(),
-            step: "failed".to_string(),
-        },
-    )?;
+    emit(&ctx.event_bus, Event::JobAdvanced { id: job_id.clone(), step: "failed".to_string() })?;
 
-    emit(
-        &ctx.event_bus,
-        Event::JobResume {
-            id: job_id,
-            message,
-            vars,
-            kill,
-        },
-    )?;
+    emit(&ctx.event_bus, Event::JobResume { id: job_id, message, vars, kill })?;
 
     // Remove from orphan registry
     {
@@ -177,22 +143,12 @@ pub(crate) fn handle_job_resume_all(
                 continue;
             }
 
-            if !kill {
-                // Without --kill, only resume jobs in a resumable state
-                if !job.step_status.is_waiting()
-                    && !matches!(
-                        job.step_status,
-                        oj_core::StepStatus::Failed
-                            | oj_core::StepStatus::Pending
-                            | oj_core::StepStatus::Suspended
-                    )
-                {
-                    skipped.push((
-                        job.id.clone(),
-                        format!("job is {:?} (use --kill to force)", job.step_status),
-                    ));
-                    continue;
-                }
+            if !kill && !super::is_resumable_status(&job.step_status) {
+                skipped.push((
+                    job.id.clone(),
+                    format!("job is {:?} (use --kill to force)", job.step_status),
+                ));
+                continue;
             }
 
             targets.push(job.id.clone());
@@ -226,40 +182,8 @@ pub(crate) fn handle_job_cancel(
     ctx: &ListenCtx,
     ids: Vec<String>,
 ) -> Result<Response, ConnectionError> {
-    let mut cancelled = Vec::new();
-    let mut already_terminal = Vec::new();
-    let mut not_found = Vec::new();
-
-    for id in ids {
-        let is_valid = {
-            let state_guard = ctx.state.lock();
-            state_guard.get_job(&id).map(|p| !p.is_terminal())
-        };
-
-        match is_valid {
-            Some(true) => {
-                emit(
-                    &ctx.event_bus,
-                    Event::JobCancel {
-                        id: JobId::new(id.clone()),
-                    },
-                )?;
-                cancelled.push(id);
-            }
-            Some(false) => {
-                already_terminal.push(id);
-            }
-            None => {
-                not_found.push(id);
-            }
-        }
-    }
-
-    Ok(Response::JobsCancelled {
-        cancelled,
-        already_terminal,
-        not_found,
-    })
+    let (acted, already_terminal, not_found) = job_action(ctx, ids, |id| Event::JobCancel { id })?;
+    Ok(Response::JobsCancelled { cancelled: acted, already_terminal, not_found })
 }
 
 /// Handle a job suspend request.
@@ -267,40 +191,33 @@ pub(crate) fn handle_job_suspend(
     ctx: &ListenCtx,
     ids: Vec<String>,
 ) -> Result<Response, ConnectionError> {
-    let mut suspended = Vec::new();
+    let (acted, already_terminal, not_found) = job_action(ctx, ids, |id| Event::JobSuspend { id })?;
+    Ok(Response::JobsSuspended { suspended: acted, already_terminal, not_found })
+}
+
+/// (acted, already_terminal, not_found)
+type JobActionResult = (Vec<String>, Vec<String>, Vec<String>);
+
+/// Shared logic for cancel/suspend: iterate IDs, check terminal, emit event.
+fn job_action(
+    ctx: &ListenCtx,
+    ids: Vec<String>,
+    make_event: impl Fn(JobId) -> Event,
+) -> Result<JobActionResult, ConnectionError> {
+    let mut acted = Vec::new();
     let mut already_terminal = Vec::new();
     let mut not_found = Vec::new();
-
     for id in ids {
-        let is_valid = {
-            let state_guard = ctx.state.lock();
-            state_guard.get_job(&id).map(|p| !p.is_terminal())
-        };
-
-        match is_valid {
+        match ctx.state.lock().get_job(&id).map(|p| !p.is_terminal()) {
             Some(true) => {
-                emit(
-                    &ctx.event_bus,
-                    Event::JobSuspend {
-                        id: JobId::new(id.clone()),
-                    },
-                )?;
-                suspended.push(id);
+                emit(&ctx.event_bus, make_event(JobId::new(id.clone())))?;
+                acted.push(id);
             }
-            Some(false) => {
-                already_terminal.push(id);
-            }
-            None => {
-                not_found.push(id);
-            }
+            Some(false) => already_terminal.push(id),
+            None => not_found.push(id),
         }
     }
-
-    Ok(Response::JobsSuspended {
-        suspended,
-        already_terminal,
-        not_found,
-    })
+    Ok((acted, already_terminal, not_found))
 }
 
 /// Handle job prune requests.
@@ -314,11 +231,8 @@ pub(crate) fn handle_job_prune(
     failed: bool,
     orphans: bool,
 ) -> Result<Response, ConnectionError> {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let age_threshold_ms = 12 * 60 * 60 * 1000; // 12 hours in ms
+    let now_ms = super::prune_helpers::now_millis();
+    let age_ms = 12 * 60 * 60 * 1000; // 12 hours
 
     let mut to_prune = Vec::new();
     let mut skipped = 0usize;
@@ -330,65 +244,36 @@ pub(crate) fn handle_job_prune(
     if prune_terminal {
         let state_guard = ctx.state.lock();
         for job in state_guard.jobs.values() {
-            // Filter by namespace when --project is specified
-            if let Some(ns) = flags.namespace {
-                if job.namespace != ns {
-                    continue;
-                }
+            if flags.project.is_some_and(|ns| job.project != ns) {
+                continue;
             }
-
-            if !job.is_terminal() {
+            if !job.is_terminal() || job.is_suspended() {
                 skipped += 1;
                 continue;
             }
-
-            // Never prune suspended jobs — they are preserved for later resume
-            if job.is_suspended() {
-                skipped += 1;
-                continue;
-            }
-
-            // --failed flag: only prune failed jobs (skip done/cancelled)
             if failed && job.step != "failed" {
                 skipped += 1;
                 continue;
             }
 
-            // Determine if this job skips the age check:
-            // - --all: everything skips age check
-            // - --failed: failed jobs skip age check
-            // - cancelled jobs always skip age check (default behavior)
-            let skip_age_check =
-                flags.all || (failed && job.step == "failed") || job.step == "cancelled";
+            // Skip age check for --all, --failed on failed jobs, or cancelled jobs
+            let skip_age = flags.all || (failed && job.step == "failed") || job.step == "cancelled";
 
-            if !skip_age_check {
-                let created_at_ms = job
-                    .step_history
-                    .first()
-                    .map(|r| r.started_at_ms)
-                    .unwrap_or(0);
-                if created_at_ms > 0 && now_ms.saturating_sub(created_at_ms) < age_threshold_ms {
+            if !skip_age {
+                let created = job.step_history.first().map(|r| r.started_at_ms).unwrap_or(0);
+                if super::prune_helpers::within_age_threshold(false, now_ms, created, age_ms) {
                     skipped += 1;
                     continue;
                 }
             }
 
-            to_prune.push(JobEntry {
-                id: job.id.clone(),
-                name: job.name.clone(),
-                step: job.step.clone(),
-            });
+            to_prune.push(JobEntry::from(job));
         }
     }
 
     if !flags.dry_run {
         for entry in &to_prune {
-            emit(
-                &ctx.event_bus,
-                Event::JobDeleted {
-                    id: JobId::new(entry.id.clone()),
-                },
-            )?;
+            emit(&ctx.event_bus, Event::JobDeleted { id: JobId::new(entry.id.clone()) })?;
             super::prune_helpers::cleanup_job_files(&ctx.logs_path, &entry.id);
         }
     }
@@ -411,10 +296,7 @@ pub(crate) fn handle_job_prune(
         }
     }
 
-    Ok(Response::JobsPruned {
-        pruned: to_prune,
-        skipped,
-    })
+    Ok(Response::JobsPruned { pruned: to_prune, skipped })
 }
 
 /// Auto-dismiss unresolved decisions for a job owner.
@@ -423,14 +305,14 @@ pub(crate) fn handle_job_prune(
 /// are no longer relevant. Emits `DecisionResolved` with `chosen: None`
 /// for each unresolved decision.
 fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), ConnectionError> {
-    let owner = OwnerId::Job(JobId::new(job_id));
+    let owner: OwnerId = JobId::new(job_id).into();
     let unresolved: Vec<(String, String)> = {
         let state_guard = ctx.state.lock();
         state_guard
             .decisions
             .values()
             .filter(|d| d.owner == owner && !d.is_resolved())
-            .map(|d| (d.id.as_str().to_string(), d.namespace.clone()))
+            .map(|d| (d.id.as_str().to_string(), d.project.clone()))
             .collect()
     };
 
@@ -439,16 +321,15 @@ fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), C
         .unwrap_or_default()
         .as_millis() as u64;
 
-    for (dec_id, namespace) in unresolved {
+    for (dec_id, project) in unresolved {
         emit(
             &ctx.event_bus,
             Event::DecisionResolved {
-                id: dec_id,
-                chosen: None,
+                id: oj_core::DecisionId::new(dec_id),
                 choices: vec![],
                 message: Some("auto-dismissed by job resume".to_string()),
                 resolved_at_ms,
-                namespace,
+                project,
             },
         )?;
     }

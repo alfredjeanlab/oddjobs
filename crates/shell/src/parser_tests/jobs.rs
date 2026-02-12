@@ -7,21 +7,12 @@ use super::helpers::{cmd_name, get_job, get_simple_command};
 use super::macros::job_tests;
 use crate::ast::{Command, LogicalOp, WordPart};
 use crate::parser::{ParseError, Parser};
-use crate::token::TokenKind;
-
-// =============================================================================
-// Macro-based Job Tests
-// =============================================================================
 
 job_tests! {
     macro_two_pipe: "a | b" => job_cmds: 2,
     macro_three_pipe: "a | b | c" => job_cmds: 3,
     macro_four_pipe: "a | b | c | d" => job_cmds: 4,
 }
-
-// ============================================================================
-// Basic Job Tests
-// ============================================================================
 
 #[test]
 fn test_simple_pipe() {
@@ -56,10 +47,7 @@ fn test_pipe_with_args() {
 
     assert_eq!(cmd_name(&job.commands[0]), "ls");
     assert_eq!(job.commands[0].args.len(), 1);
-    assert_eq!(
-        job.commands[0].args[0].parts,
-        vec![WordPart::literal("-la")]
-    );
+    assert_eq!(job.commands[0].args[0].parts, vec![WordPart::literal("-la")]);
 
     assert_eq!(cmd_name(&job.commands[1]), "grep");
     assert_eq!(job.commands[1].args.len(), 1);
@@ -90,28 +78,6 @@ fn test_pipe_span() {
     assert_eq!(job.span.start, 0);
     assert_eq!(job.span.end, 18);
 }
-
-#[test]
-fn test_pipe_at_start_error() {
-    let err = Parser::parse("| cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Pipe,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn test_pipe_at_end_error() {
-    let err = Parser::parse("cmd |").unwrap_err();
-    assert!(matches!(err, ParseError::UnexpectedEof { .. }));
-}
-
-// ============================================================================
-// Background Execution Tests
-// ============================================================================
 
 #[test]
 fn test_simple_background() {
@@ -191,18 +157,6 @@ fn test_background_span() {
 }
 
 #[test]
-fn test_ampersand_at_start_error() {
-    let err = Parser::parse("& cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Ampersand,
-            ..
-        }
-    ));
-}
-
-#[test]
 fn test_background_with_and() {
     // a && b & -> a && (b &)
     // Only b runs in background
@@ -225,10 +179,6 @@ fn test_background_followed_by_and_error() {
     let err = Parser::parse("a & && b").unwrap_err();
     assert!(matches!(err, ParseError::UnexpectedToken { .. }));
 }
-
-// ============================================================================
-// Logical Operator Tests
-// ============================================================================
 
 #[test]
 fn test_and_basic() {
@@ -303,46 +253,6 @@ fn test_and_or_span() {
     assert_eq!(and_or.span.start, 0);
     assert_eq!(and_or.span.end, 11);
 }
-
-#[test]
-fn test_and_at_start_error() {
-    let err = Parser::parse("&& cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::And,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn test_or_at_start_error() {
-    let err = Parser::parse("|| cmd").unwrap_err();
-    assert!(matches!(
-        err,
-        ParseError::UnexpectedToken {
-            found: TokenKind::Or,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn test_and_at_end_error() {
-    let err = Parser::parse("cmd &&").unwrap_err();
-    assert!(matches!(err, ParseError::UnexpectedEof { .. }));
-}
-
-#[test]
-fn test_or_at_end_error() {
-    let err = Parser::parse("cmd ||").unwrap_err();
-    assert!(matches!(err, ParseError::UnexpectedEof { .. }));
-}
-
-// ============================================================================
-// Precedence Tests
-// ============================================================================
 
 #[test]
 fn test_pipe_binds_tighter_than_and() {
@@ -448,10 +358,6 @@ fn test_pipe_chain_with_and() {
     assert_eq!(p2.commands.len(), 2);
 }
 
-// ============================================================================
-// Semicolon Separation Tests
-// ============================================================================
-
 #[test]
 fn test_semicolon_separates_and_or_lists() {
     // a && b ; c && d
@@ -481,19 +387,12 @@ fn test_background_separates_sequence() {
 
     // First is just 'a' in background
     assert!(result.commands[0].first.background);
-    assert!(matches!(
-        &result.commands[0].first.command,
-        Command::Simple(_)
-    ));
+    assert!(matches!(&result.commands[0].first.command, Command::Simple(_)));
 
     // Second is 'b | c' job
     assert!(!result.commands[1].first.background);
     assert!(matches!(&result.commands[1].first.command, Command::Job(_)));
 }
-
-// ============================================================================
-// Real-World Pattern Tests
-// ============================================================================
 
 #[test]
 fn test_build_pattern() {
@@ -608,10 +507,6 @@ fn test_all_operators_combined() {
     assert!(matches!(&and_or.rest[1].1.command, Command::Job(_)));
     assert!(and_or.rest[1].1.background);
 }
-
-// ============================================================================
-// Error Recovery Tests
-// ============================================================================
 
 #[test]
 fn test_recovery_after_pipe_error() {

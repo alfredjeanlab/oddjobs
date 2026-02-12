@@ -28,10 +28,6 @@ mod references;
 #[path = "parsing/template_refs.rs"]
 mod template_refs;
 
-// ---------------------------------------------------------------------------
-// Shared test helpers
-// ---------------------------------------------------------------------------
-
 pub(crate) fn parse_hcl(input: &str) -> Runbook {
     parse_runbook_with_format(input, Format::Hcl).unwrap()
 }
@@ -52,8 +48,5 @@ pub(crate) fn assert_toml_err(input: &str, fragments: &[&str]) {
 }
 
 pub(crate) fn assert_hcl_err(input: &str, fragments: &[&str]) {
-    assert_err_contains(
-        &parse_runbook_with_format(input, Format::Hcl).unwrap_err(),
-        fragments,
-    );
+    assert_err_contains(&parse_runbook_with_format(input, Format::Hcl).unwrap_err(), fragments);
 }

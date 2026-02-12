@@ -17,142 +17,60 @@
 //! scripts rarely exceed 3-5 levels, and pathological input is rare in practice.
 
 use crate::lexer::{Lexer, LexerError};
-use crate::token::{Span, TokenKind};
+use crate::token::TokenKind;
 
-// =============================================================================
-// Nested $(...) verification tests
-// =============================================================================
-
-#[test]
-fn test_nested_subst_depth_1() {
-    // Single level nesting
-    let tokens = Lexer::tokenize("$(cat $(file))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+lex_tests! {
+    nested_subst_depth_1: "$(cat $(file))" => [
         TokenKind::CommandSubstitution {
             content: "cat $(file)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_nested_subst_depth_2() {
-    // Two levels of nesting
-    let tokens = Lexer::tokenize("$(a $(b $(c)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    nested_subst_depth_2: "$(a $(b $(c)))" => [
         TokenKind::CommandSubstitution {
             content: "a $(b $(c))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_nested_subst_depth_3() {
-    // Three levels of nesting
-    let tokens = Lexer::tokenize("$(a $(b $(c $(d))))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    nested_subst_depth_3: "$(a $(b $(c $(d))))" => [
         TokenKind::CommandSubstitution {
             content: "a $(b $(c $(d)))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_nested_subst_depth_5() {
-    // Five levels of nesting - stress test
-    let tokens = Lexer::tokenize("$(a $(b $(c $(d $(e)))))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    nested_subst_depth_5: "$(a $(b $(c $(d $(e)))))" => [
         TokenKind::CommandSubstitution {
             content: "a $(b $(c $(d $(e))))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_nested_subst_sibling() {
-    // Multiple nested substitutions at same level
-    let tokens = Lexer::tokenize("$($(a) $(b))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    nested_subst_sibling: "$($(a) $(b))" => [
         TokenKind::CommandSubstitution {
             content: "$(a) $(b)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_nested_subst_complex_tree() {
-    // Complex nesting pattern: $(a $(b) $(c $(d)))
-    let tokens = Lexer::tokenize("$(a $(b) $(c $(d)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    nested_subst_complex_tree: "$(a $(b) $(c $(d)))" => [
         TokenKind::CommandSubstitution {
             content: "a $(b) $(c $(d))".into(),
             backtick: false,
-        }
-    );
+        },
+    ],
 }
 
-// =============================================================================
-// Backtick/dollar-paren equivalence tests
-// =============================================================================
-
-#[test]
-fn test_equivalence_simple() {
-    let dollar = Lexer::tokenize("$(date)").unwrap();
-    let backtick = Lexer::tokenize("`date`").unwrap();
-
+#[yare::parameterized(
+    simple    = { "$(date)", "`date`" },
+    with_args = { "$(echo hello world)", "`echo hello world`" },
+)]
+fn backtick_dollar_equivalence(dollar_input: &str, backtick_input: &str) {
+    let dollar = Lexer::tokenize(dollar_input).unwrap();
+    let backtick = Lexer::tokenize(backtick_input).unwrap();
     assert_eq!(dollar.len(), 1);
     assert_eq!(backtick.len(), 1);
-
-    // Both have same content
-    if let (
-        TokenKind::CommandSubstitution {
-            content: c1,
-            backtick: false,
-        },
-        TokenKind::CommandSubstitution {
-            content: c2,
-            backtick: true,
-        },
-    ) = (&dollar[0].kind, &backtick[0].kind)
-    {
-        assert_eq!(c1, c2);
-        assert_eq!(c1, "date");
-    } else {
-        panic!("Expected CommandSubstitution tokens");
-    }
-}
-
-#[test]
-fn test_equivalence_with_args() {
-    let dollar = Lexer::tokenize("$(echo hello world)").unwrap();
-    let backtick = Lexer::tokenize("`echo hello world`").unwrap();
-
     match (&dollar[0].kind, &backtick[0].kind) {
         (
-            TokenKind::CommandSubstitution {
-                content: c1,
-                backtick: false,
-            },
-            TokenKind::CommandSubstitution {
-                content: c2,
-                backtick: true,
-            },
+            TokenKind::CommandSubstitution { content: c1, backtick: false },
+            TokenKind::CommandSubstitution { content: c2, backtick: true },
         ) => assert_eq!(c1, c2),
         _ => panic!("Expected CommandSubstitution tokens"),
     }
@@ -165,12 +83,9 @@ fn test_equivalence_adjacent_text() {
 
     assert_eq!(dollar.len(), 3);
     assert_eq!(backtick.len(), 3);
-
-    // First and last tokens should match
     assert_eq!(dollar[0].kind, backtick[0].kind);
     assert_eq!(dollar[2].kind, backtick[2].kind);
 
-    // Middle tokens should have same content
     match (&dollar[1].kind, &backtick[1].kind) {
         (
             TokenKind::CommandSubstitution { content: c1, .. },
@@ -187,339 +102,169 @@ fn test_equivalence_with_operators() {
 
     assert_eq!(dollar.len(), 3);
     assert_eq!(backtick.len(), 3);
-
-    // Operator should be same
     assert_eq!(dollar[1].kind, TokenKind::And);
     assert_eq!(backtick[1].kind, TokenKind::And);
 }
 
-#[test]
-fn test_backtick_no_nesting() {
-    // Backticks don't support nesting - inner backtick closes outer
-    // `a `b` c` should parse as: subst("a ") + Word("b") + subst(" c")
-    // This verifies the documented limitation
-    let tokens = Lexer::tokenize("`a `b` c`").unwrap();
-    // First backtick pair: `a ` -> content "a "
-    // Then: b -> Word
-    // Then: ` c` -> content " c"
-    assert_eq!(tokens.len(), 3);
-}
-
-#[test]
-fn test_mixed_styles_sequence() {
-    let tokens = Lexer::tokenize("$(a) `b` $(c)").unwrap();
-    assert_eq!(tokens.len(), 3);
-
-    assert_eq!(
-        tokens[0].kind,
+lex_tests! {
+    backtick_no_nesting: "`a `b` c`" => [
+        TokenKind::CommandSubstitution {
+            content: "a ".into(),
+            backtick: true,
+        },
+        TokenKind::Word("b".into()),
+        TokenKind::CommandSubstitution {
+            content: " c".into(),
+            backtick: true,
+        },
+    ],
+    mixed_styles_sequence: "$(a) `b` $(c)" => [
         TokenKind::CommandSubstitution {
             content: "a".into(),
             backtick: false,
-        }
-    );
-    assert_eq!(
-        tokens[1].kind,
+        },
         TokenKind::CommandSubstitution {
             content: "b".into(),
             backtick: true,
-        }
-    );
-    assert_eq!(
-        tokens[2].kind,
+        },
         TokenKind::CommandSubstitution {
             content: "c".into(),
             backtick: false,
-        }
-    );
+        },
+    ],
 }
 
-// =============================================================================
-// Depth tracking edge case tests
-// =============================================================================
-
-#[test]
-fn test_depth_parentheses_in_content() {
-    // Regular parens (not $(...)) should be counted for balance
-    let tokens = Lexer::tokenize("$(echo (a))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+lex_tests! {
+    depth_parentheses_in_content: "$(echo (a))" => [
         TokenKind::CommandSubstitution {
             content: "echo (a)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_depth_multiple_parens() {
-    // Multiple paren pairs inside
-    let tokens = Lexer::tokenize("$(test (a) (b) (c))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    depth_multiple_parens: "$(test (a) (b) (c))" => [
         TokenKind::CommandSubstitution {
             content: "test (a) (b) (c)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_depth_nested_parens_no_dollar() {
-    // Nested parens without $ prefix
-    let tokens = Lexer::tokenize("$(echo ((nested)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    depth_nested_parens_no_dollar: "$(echo ((nested)))" => [
         TokenKind::CommandSubstitution {
             content: "echo ((nested))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_depth_arithmetic_expansion() {
-    // $((...)) for arithmetic - outer $() contains (...)
-    let tokens = Lexer::tokenize("$((1+2))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    depth_arithmetic_expansion: "$((1+2))" => [
         TokenKind::CommandSubstitution {
             content: "(1+2)".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_empty_substitution() {
-    let tokens = Lexer::tokenize("$()").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    empty_substitution: "$()" => [
         TokenKind::CommandSubstitution {
             content: "".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_whitespace_only_substitution() {
-    let tokens = Lexer::tokenize("$(   )").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    whitespace_only_substitution: "$(   )" => [
         TokenKind::CommandSubstitution {
             content: "   ".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_unicode_in_substitution() {
-    let tokens = Lexer::tokenize("$(echo 你好)").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    unicode_in_substitution: "$(echo 你好)" => [
         TokenKind::CommandSubstitution {
             content: "echo 你好".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_emoji_in_substitution() {
-    let tokens = Lexer::tokenize("$(echo 🦦)").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    emoji_in_substitution: "$(echo 🦦)" => [
         TokenKind::CommandSubstitution {
             content: "echo 🦦".into(),
             backtick: false,
-        }
-    );
+        },
+    ],
+    consecutive_substitutions_no_space: "$(a)$(b)$(c)" => [
+        TokenKind::CommandSubstitution {
+            content: "a".into(),
+            backtick: false,
+        },
+        TokenKind::CommandSubstitution {
+            content: "b".into(),
+            backtick: false,
+        },
+        TokenKind::CommandSubstitution {
+            content: "c".into(),
+            backtick: false,
+        },
+    ],
 }
 
-#[test]
-fn test_consecutive_substitutions_no_space() {
-    let tokens = Lexer::tokenize("$(a)$(b)$(c)").unwrap();
-    assert_eq!(tokens.len(), 3);
-    for (i, expected) in ["a", "b", "c"].iter().enumerate() {
-        assert_eq!(
-            tokens[i].kind,
-            TokenKind::CommandSubstitution {
-                content: (*expected).into(),
-                backtick: false,
-            }
-        );
-    }
+span_tests! {
+    substitution_span_accuracy: "$(cmd)" => [(0, 6)],
+    backtick_span_accuracy: "`cmd`" => [(0, 5)],
+    nested_span_accuracy: "$(a $(b))" => [(0, 9)],
 }
-
-#[test]
-fn test_substitution_span_accuracy() {
-    let tokens = Lexer::tokenize("$(cmd)").unwrap();
-    assert_eq!(tokens[0].span, Span::new(0, 6)); // $ ( c m d )
-}
-
-#[test]
-fn test_backtick_span_accuracy() {
-    let tokens = Lexer::tokenize("`cmd`").unwrap();
-    assert_eq!(tokens[0].span, Span::new(0, 5)); // ` c m d `
-}
-
-#[test]
-fn test_nested_span_accuracy() {
-    let tokens = Lexer::tokenize("$(a $(b))").unwrap();
-    assert_eq!(tokens[0].span, Span::new(0, 9)); // Full outer substitution
-}
-
-// =============================================================================
-// Deep nesting stress tests
-// =============================================================================
 
 #[test]
 fn test_deep_nesting_10_levels() {
-    // Generate: $(a $(a $(a $(a $(a $(a $(a $(a $(a $(a))))))))))
     let input = "$(a ".repeat(10) + &")".repeat(10);
     let tokens = Lexer::tokenize(&input).unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::CommandSubstitution {
-            backtick: false,
-            ..
-        }
-    ));
+    assert!(matches!(tokens[0].kind, TokenKind::CommandSubstitution { backtick: false, .. }));
 }
 
-#[test]
-fn test_deep_nesting_content_preserved() {
-    // Verify content at each level is preserved
-    let tokens = Lexer::tokenize("$(outer $(middle $(inner)))").unwrap();
-    assert_eq!(
-        tokens[0].kind,
+lex_tests! {
+    deep_nesting_content_preserved: "$(outer $(middle $(inner)))" => [
         TokenKind::CommandSubstitution {
             content: "outer $(middle $(inner))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_deep_nesting_with_operators() {
-    // Deep nesting with shell operators inside
-    let tokens = Lexer::tokenize("$(a && $(b || $(c | d)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    deep_nesting_with_operators: "$(a && $(b || $(c | d)))" => [
         TokenKind::CommandSubstitution {
             content: "a && $(b || $(c | d))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_deep_nesting_mixed_parens() {
-    // Mix of $() and regular () at depth
-    let tokens = Lexer::tokenize("$(a (b $(c (d))))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    deep_nesting_mixed_parens: "$(a (b $(c (d))))" => [
         TokenKind::CommandSubstitution {
             content: "a (b $(c (d)))".into(),
             backtick: false,
-        }
-    );
-}
-
-#[test]
-fn test_wide_nesting_many_siblings() {
-    // Many substitutions at same level
-    let tokens = Lexer::tokenize("$($(a)$(b)$(c)$(d)$(e))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    assert_eq!(
-        tokens[0].kind,
+        },
+    ],
+    wide_nesting_many_siblings: "$($(a)$(b)$(c)$(d)$(e))" => [
         TokenKind::CommandSubstitution {
             content: "$(a)$(b)$(c)$(d)$(e)".into(),
             backtick: false,
-        }
-    );
+        },
+    ],
 }
 
-#[test]
-fn test_unterminated_at_depth() {
-    // Missing closing paren at various depths
-    let result = Lexer::tokenize("$(a $(b $(c)");
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedSubstitution { .. })
-    ));
+lex_error_tests! {
+    unterminated_at_depth: "$(a $(b $(c)" => LexerError::UnterminatedSubstitution { .. },
+    unterminated_inner_only: "$(a $(b)" => LexerError::UnterminatedSubstitution { .. },
+    deeply_unterminated: "$(a $(b $(c $(d $(e" => LexerError::UnterminatedSubstitution { .. },
 }
-
-#[test]
-fn test_unterminated_inner_only() {
-    // Inner substitution unterminated
-    let result = Lexer::tokenize("$(a $(b)");
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedSubstitution { .. })
-    ));
-}
-
-#[test]
-fn test_deeply_unterminated() {
-    // Very deep unterminated
-    let input = "$(a $(b $(c $(d $(e";
-    let result = Lexer::tokenize(input);
-    assert!(matches!(
-        result,
-        Err(LexerError::UnterminatedSubstitution { .. })
-    ));
-}
-
-// =============================================================================
-// Extreme nesting stress tests (Step 2)
-// =============================================================================
 
 #[test]
 fn test_nesting_depth_50() {
-    // 50 levels of command substitution nesting
     let input = "$(a ".repeat(50) + &")".repeat(50);
     let tokens = Lexer::tokenize(&input).unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::CommandSubstitution {
-            backtick: false,
-            ..
-        }
-    ));
+    assert!(matches!(tokens[0].kind, TokenKind::CommandSubstitution { backtick: false, .. }));
 }
 
 #[test]
 fn test_nesting_depth_100() {
-    // 100 levels of command substitution nesting
     let input = "$(a ".repeat(100) + &")".repeat(100);
     let tokens = Lexer::tokenize(&input).unwrap();
     assert_eq!(tokens.len(), 1);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::CommandSubstitution {
-            backtick: false,
-            ..
-        }
-    ));
+    assert!(matches!(tokens[0].kind, TokenKind::CommandSubstitution { backtick: false, .. }));
 }
 
 #[test]
 fn test_deeply_nested_mixed_constructs() {
-    // Alternating $(...) and ${..:-...} nesting: $( ${ $( ${ ... } ) } )
+    // Alternating $(...) and ${..:-...} nesting
     let mut input = String::new();
     for i in 0..25 {
         if i % 2 == 0 {
@@ -539,55 +284,27 @@ fn test_deeply_nested_mixed_constructs() {
     assert!(result.is_ok(), "Expected success, got: {:?}", result);
 }
 
-// =============================================================================
-// AST content preservation tests (Step 4)
-// =============================================================================
-
-#[test]
-fn test_ast_preserves_nested_content_verbatim() {
-    // Verify nested $() content is stored as raw string, not recursively parsed
-    let tokens = Lexer::tokenize("$(echo $(inner))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    if let TokenKind::CommandSubstitution { content, backtick } = &tokens[0].kind {
-        assert_eq!(content, "echo $(inner)");
-        assert!(!backtick);
-        // The inner $() is NOT parsed - it's just a string
-    } else {
-        panic!("Expected CommandSubstitution token");
-    }
+lex_tests! {
+    ast_preserves_nested_content_verbatim: "$(echo $(inner))" => [
+        TokenKind::CommandSubstitution {
+            content: "echo $(inner)".into(),
+            backtick: false,
+        },
+    ],
+    ast_preserves_deeply_nested_content: "$(a $(b $(c)))" => [
+        TokenKind::CommandSubstitution {
+            content: "a $(b $(c))".into(),
+            backtick: false,
+        },
+    ],
 }
 
-#[test]
-fn test_ast_preserves_deeply_nested_content() {
-    // Three levels of nesting - verify outer content contains inner as raw string
-    let tokens = Lexer::tokenize("$(a $(b $(c)))").unwrap();
-    assert_eq!(tokens.len(), 1);
-    if let TokenKind::CommandSubstitution { content, .. } = &tokens[0].kind {
-        assert_eq!(content, "a $(b $(c))");
-        // Content contains literal "$(b $(c))" - NOT parsed to AST
-    } else {
-        panic!("Expected CommandSubstitution token");
-    }
-}
-
-// =============================================================================
-// Unbalanced grouping error handling tests (Step 5)
-// =============================================================================
-
-#[test]
-fn test_error_unbalanced_extra_open() {
-    // Double open paren but single close - arithmetic pattern with missing close
-    let result = Lexer::tokenize("$((a)");
-    assert!(
-        matches!(result, Err(LexerError::UnterminatedSubstitution { .. })),
-        "Expected UnterminatedSubstitution, got: {:?}",
-        result
-    );
+lex_error_tests! {
+    error_unbalanced_extra_open: "$((a)" => LexerError::UnterminatedSubstitution { .. },
 }
 
 #[test]
 fn test_error_span_points_to_outermost() {
-    // Verify span starts at the outermost $( that's unterminated
     let result = Lexer::tokenize("$(a $(b $(c");
     if let Err(LexerError::UnterminatedSubstitution { span }) = result {
         assert_eq!(span.start, 0, "Span should point to outermost $(");
@@ -596,17 +313,8 @@ fn test_error_span_points_to_outermost() {
     }
 }
 
-#[test]
-fn test_error_mixed_nesting_unterminated() {
-    // $(cmd ${VAR:-   <- missing }} )
-    // The lexer processes $( first and treats content as raw string.
-    // When EOF is reached, the outer $( is what's unterminated.
-    let result = Lexer::tokenize("$(cmd ${VAR:-");
-    assert!(
-        matches!(result, Err(LexerError::UnterminatedSubstitution { .. })),
-        "Expected UnterminatedSubstitution, got: {:?}",
-        result
-    );
+lex_error_tests! {
+    error_mixed_nesting_unterminated: "$(cmd ${VAR:-" => LexerError::UnterminatedSubstitution { .. },
 }
 
 #[test]

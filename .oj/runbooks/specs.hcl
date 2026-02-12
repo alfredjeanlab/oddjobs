@@ -9,15 +9,15 @@ cron "specs" {
 }
 
 job "specs" {
-  name      = "specs-${workspace.nonce}"
+  name      = "specs-${source.nonce}"
 
-  workspace {
-    git    = "worktree"
-    branch = "fix/specs-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "fix/specs-${source.nonce}"
   }
 
   notify {
-    on_done = "Specs fixed: ${workspace.branch}"
+    on_done = "Specs fixed: ${source.branch}"
     on_fail = "Specs fix failed"
   }
 
@@ -41,8 +41,8 @@ job "specs" {
       git add -A
       git diff --cached --quiet || git commit -m "fix: repair failing specs"
       test "$(git rev-list --count HEAD ^origin/main)" -gt 0 || { echo "No changes to submit" >&2; exit 1; }
-      git push origin "${workspace.branch}"
-      oj queue push merges --var branch="${workspace.branch}" --var title="fix: repair failing specs"
+      git push origin "${source.branch}"
+      oj queue push merges --var branch="${source.branch}" --var title="fix: repair failing specs"
     SHELL
   }
 }
@@ -58,15 +58,15 @@ cron "deflake" {
 }
 
 job "deflake" {
-  name      = "deflake-${workspace.nonce}"
+  name      = "deflake-${source.nonce}"
 
-  workspace {
-    git    = "worktree"
-    branch = "fix/deflake-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "fix/deflake-${source.nonce}"
   }
 
   notify {
-    on_done = "Flaky tests fixed: ${workspace.branch}"
+    on_done = "Flaky tests fixed: ${source.branch}"
     on_fail = "Deflake failed"
   }
 
@@ -98,8 +98,8 @@ job "deflake" {
       git add -A
       git diff --cached --quiet || git commit -m "fix: reduce test flakiness"
       test "$(git rev-list --count HEAD ^origin/main)" -gt 0 || { echo "No changes to submit" >&2; exit 1; }
-      git push origin "${workspace.branch}"
-      oj queue push merges --var branch="${workspace.branch}" --var title="fix: reduce test flakiness"
+      git push origin "${source.branch}"
+      oj queue push merges --var branch="${source.branch}" --var title="fix: reduce test flakiness"
     SHELL
   }
 }

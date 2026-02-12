@@ -1,37 +1,20 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+
+use crate::client::{StartResult, StopResult};
 use clap::ValueEnum;
+use notify::{Event as NotifyEvent, EventKind, RecursiveMode, Watcher};
 use serde::Serialize;
 
 #[cfg(test)]
 #[path = "output_tests.rs"]
 mod tests;
 
-/// Determine if color output should be enabled.
-///
-/// Delegates to [`crate::color::should_colorize`] — the single source of truth
-/// for color detection across the CLI.
-pub fn should_use_color() -> bool {
-    crate::color::should_colorize()
-}
-
-/// Print a peek frame with box-drawing characters around session output.
-pub fn print_peek_frame(session_id: &str, output: &str) {
-    println!(
-        "╭────── {} ──────",
-        crate::color::header(&format!("peek: {}", session_id))
-    );
-    print!("{}", output);
-    println!("╰────── {} ──────", crate::color::header("end peek"));
-}
-
 /// Print a saved terminal capture with distinct framing from live peek.
 pub fn print_capture_frame(label: &str, output: &str) {
-    println!(
-        "╭── {} ──",
-        crate::color::header(&format!("last capture: {}", label))
-    );
+    println!("╭── {} ──", crate::color::header(&format!("last capture: {}", label)));
     print!("{}", output);
     println!("╰── {} ──", crate::color::header("end capture"));
 }
@@ -87,14 +70,7 @@ pub fn print_prune_results<T: Serialize>(
             }
 
             let verb = if dry_run { "would be pruned" } else { "pruned" };
-            println!(
-                "\n{} {}(s) {}, {} {}",
-                pruned.len(),
-                entity,
-                verb,
-                skipped,
-                skipped_label
-            );
+            println!("\n{} {}(s) {}, {} {}", pruned.len(), entity, verb, skipped, skipped_label);
         }
         OutputFormat::Json => {
             let obj = serde_json::json!({
@@ -119,16 +95,15 @@ pub fn print_start_results(
     result: &crate::client::StartResult,
     label: &str,
     plural: &str,
-    namespace: &str,
+    project: &str,
 ) {
-    use crate::client::StartResult;
     match result {
         StartResult::Single { name } => {
             println!(
                 "{} '{}' started ({})",
                 label,
                 crate::color::header(name),
-                crate::color::muted(namespace)
+                crate::color::muted(project)
             );
         }
         StartResult::Multiple { started, skipped } => {
@@ -137,7 +112,7 @@ pub fn print_start_results(
                     "{} '{}' started ({})",
                     label,
                     crate::color::header(name),
-                    crate::color::muted(namespace)
+                    crate::color::muted(project)
                 );
             }
             for (name, reason) in skipped {
@@ -165,16 +140,15 @@ pub fn print_stop_results(
     result: &crate::client::StopResult,
     label: &str,
     plural: &str,
-    namespace: &str,
+    project: &str,
 ) {
-    use crate::client::StopResult;
     match result {
         StopResult::Single { name } => {
             println!(
                 "{} '{}' stopped ({})",
                 label,
                 crate::color::header(name),
-                crate::color::muted(namespace)
+                crate::color::muted(project)
             );
         }
         StopResult::Multiple { stopped, skipped } => {
@@ -183,7 +157,7 @@ pub fn print_stop_results(
                     "{} '{}' stopped ({})",
                     label,
                     crate::color::header(name),
-                    crate::color::muted(namespace)
+                    crate::color::muted(project)
                 );
             }
             for (name, reason) in skipped {
@@ -202,14 +176,19 @@ pub fn print_stop_results(
 }
 
 /// Display log content with optional follow mode, handling text/json output.
+///
+/// Returns the byte offset for polling if follow mode is needed but the log
+/// file is not locally accessible. Callers should use [`poll_log_follow`] with
+/// a query-specific callback when this returns `Some(offset)`.
 pub async fn display_log(
     log_path: &std::path::Path,
     content: &str,
     follow: bool,
+    offset: u64,
     format: OutputFormat,
     label: &str,
     id: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<u64>> {
     match format {
         OutputFormat::Text => {
             if !content.is_empty() {
@@ -220,12 +199,18 @@ pub async fn display_log(
             } else {
                 eprintln!("No log entries found for {} {}", label, id);
                 if !follow {
-                    return Ok(());
+                    return Ok(None);
                 }
             }
 
             if follow {
-                tail_file(log_path).await?;
+                if log_path.exists() {
+                    // Local file tailing (event-driven, fast)
+                    tail_file(log_path).await?;
+                } else {
+                    // File not locally accessible — caller should poll
+                    return Ok(Some(offset));
+                }
             }
         }
         OutputFormat::Json => {
@@ -239,14 +224,172 @@ pub async fn display_log(
             }
         }
     }
+    Ok(None)
+}
+
+/// Poll daemon for log updates in a loop until Ctrl-C.
+///
+/// `poll_fn` takes a byte offset and returns `(new_content, new_offset)`.
+/// Called by command handlers when `display_log` returns `Some(offset)`.
+pub async fn poll_log_follow<F, Fut>(mut offset: u64, poll_fn: F) -> anyhow::Result<()>
+where
+    F: Fn(u64) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<(String, u64)>>,
+{
+    let poll_ms: u64 =
+        std::env::var("OJ_LOG_POLL_MS").ok().and_then(|v| v.parse().ok()).unwrap_or(1000);
+
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(poll_ms)) => {
+                match poll_fn(offset).await {
+                    Ok((content, new_offset)) => {
+                        if !content.is_empty() {
+                            print!("{}", content);
+                            let _ = std::io::stdout().flush();
+                        }
+                        offset = new_offset;
+                    }
+                    Err(_) => {
+                        // Connection lost — retry on next poll
+                    }
+                }
+            }
+            _ = &mut ctrl_c => break,
+        }
+    }
+    Ok(())
+}
+
+/// Print results from a bulk cancel/suspend operation.
+///
+/// `action_past` — e.g. "Cancelled" or "Suspended".
+/// Exits with code 1 if any IDs were not found.
+pub fn print_batch_action_results(
+    actioned: &[String],
+    action_past: &str,
+    already_terminal: &[String],
+    not_found: &[String],
+) {
+    for id in actioned {
+        println!("{} job {}", action_past, id);
+    }
+    for id in already_terminal {
+        println!("Job {} was already terminal", id);
+    }
+    for id in not_found {
+        eprintln!("Job not found: {}", id);
+    }
+    if !not_found.is_empty() {
+        std::process::exit(1);
+    }
+}
+
+/// Validate that a name is provided (or --all was passed).
+pub fn require_name_or_all(
+    name: Option<String>,
+    all: bool,
+    entity: &str,
+) -> anyhow::Result<String> {
+    if !all && name.is_none() {
+        anyhow::bail!("{} name required (or use --all)", entity);
+    }
+    Ok(name.unwrap_or_default())
+}
+
+/// Filter items by project project.
+pub fn filter_by_project<T>(
+    items: &mut Vec<T>,
+    project: Option<&str>,
+    get_namespace: impl Fn(&T) -> &str,
+) {
+    if let Some(proj) = project {
+        items.retain(|item| get_namespace(item) == proj);
+    }
+}
+
+/// Info about items that were truncated by [`apply_limit`].
+pub struct Truncation {
+    pub remaining: usize,
+}
+
+/// Apply limit/no_limit to a vec, return truncation info if items were removed.
+pub fn apply_limit<T>(items: &mut Vec<T>, limit: usize, no_limit: bool) -> Option<Truncation> {
+    let total = items.len();
+    let effective = if no_limit { total } else { limit };
+    if total > effective {
+        items.truncate(effective);
+        Some(Truncation { remaining: total - effective })
+    } else {
+        None
+    }
+}
+
+/// Render a list as text table or JSON. Handles empty check + format branch.
+pub fn handle_list<T: Serialize>(
+    format: OutputFormat,
+    items: &[T],
+    empty_msg: &str,
+    render_text: impl FnOnce(&[T], &mut dyn Write),
+) -> anyhow::Result<()> {
+    handle_list_with_limit(format, items, empty_msg, None, render_text)
+}
+
+/// Like [`handle_list`] but prints a truncation message when items were limited.
+pub fn handle_list_with_limit<T: Serialize>(
+    format: OutputFormat,
+    items: &[T],
+    empty_msg: &str,
+    truncation: Option<Truncation>,
+    render_text: impl FnOnce(&[T], &mut dyn Write),
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(items)?);
+        }
+        OutputFormat::Text => {
+            if items.is_empty() {
+                println!("{}", empty_msg);
+            } else {
+                render_text(items, &mut std::io::stdout());
+            }
+            if let Some(trunc) = truncation {
+                if trunc.remaining > 0 {
+                    println!(
+                        "\n... {} more not shown. Use --no-limit or -n N to see more.",
+                        trunc.remaining
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Format-branch helper for non-list commands (show, resume, etc.).
+///
+/// Renders as JSON when `format` is `Json`, otherwise calls `text_fn`.
+pub fn format_or_json<T: Serialize>(
+    format: OutputFormat,
+    data: &T,
+    text_fn: impl FnOnce(),
+) -> anyhow::Result<()> {
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(data)?);
+        }
+        OutputFormat::Text => {
+            text_fn();
+        }
+    }
     Ok(())
 }
 
 /// Tail a file, printing new lines as they appear.
 pub async fn tail_file(path: &std::path::Path) -> anyhow::Result<()> {
-    use notify::{Event, EventKind, RecursiveMode, Watcher};
-    use std::io::{BufRead, BufReader, Seek, SeekFrom};
-
     let mut file = std::fs::File::open(path)
         .map_err(|_| anyhow::anyhow!("Log file not found: {}", path.display()))?;
     // Seek to end — we already printed the tail above
@@ -257,7 +400,7 @@ pub async fn tail_file(path: &std::path::Path) -> anyhow::Result<()> {
     let path_buf = path.to_path_buf();
 
     // Watch for file modifications
-    let mut watcher = notify::recommended_watcher(move |res: Result<Event, _>| {
+    let mut watcher = notify::recommended_watcher(move |res: Result<NotifyEvent, _>| {
         if let Ok(event) = res {
             if matches!(event.kind, EventKind::Modify(_)) {
                 let _ = tx.blocking_send(());

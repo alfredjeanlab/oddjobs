@@ -15,9 +15,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Instant;
 
-use oj_adapters::{
-    ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
-};
+use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
 use oj_core::{Event, SystemClock};
 use oj_engine::breadcrumb::Breadcrumb;
 use oj_engine::{MetricsHealth, Runtime};
@@ -29,13 +27,8 @@ use tracing::{info, warn};
 
 use crate::event_bus::{EventBus, EventReader};
 
-/// Daemon runtime with concrete adapter types (wrapped with tracing)
-pub type DaemonRuntime = Runtime<
-    TracedSession<TmuxAdapter>,
-    TracedAgent<ClaudeAgentAdapter<TracedSession<TmuxAdapter>>>,
-    DesktopNotifyAdapter,
-    SystemClock,
->;
+/// Daemon runtime with concrete adapter types
+pub type DaemonRuntime = Runtime<RuntimeRouter, DesktopNotifyAdapter, SystemClock>;
 
 /// Daemon configuration
 #[derive(Debug, Clone)]
@@ -126,18 +119,18 @@ pub struct ReconcileCtx {
     pub runtime: Arc<DaemonRuntime>,
     /// Snapshot of state at startup (avoids holding mutex during reconciliation)
     pub state_snapshot: MaterializedState,
-    /// Session adapter for checking tmux liveness
-    pub session_adapter: TracedSession<TmuxAdapter>,
     /// Channel for emitting events discovered during reconciliation
     pub event_tx: mpsc::Sender<Event>,
+    /// Root state directory for coop socket discovery
+    pub state_dir: PathBuf,
     /// Number of non-terminal jobs to reconcile
     pub job_count: usize,
     /// Number of workers with status "running" to reconcile
     pub worker_count: usize,
     /// Number of crons with status "running" to reconcile
     pub cron_count: usize,
-    /// Number of non-terminal standalone agent runs to reconcile
-    pub agent_run_count: usize,
+    /// Number of non-terminal crew to reconcile
+    pub crew_count: usize,
 }
 
 impl DaemonState {
@@ -147,11 +140,11 @@ impl DaemonState {
     /// engine loop on the next iteration. We deliberately do NOT process them
     /// locally to avoid double-delivery: the engine loop already reads every
     /// WAL entry exactly once, so processing here as well would cause handlers
-    /// to fire twice (e.g. duplicate job creation from WorkerPollComplete).
+    /// to fire twice (e.g. duplicate job creation from WorkerPolled).
     pub async fn process_event(&mut self, event: Event) -> Result<(), LifecycleError> {
         // For deletion events, run the handler BEFORE state mutation so
         // cleanup code can read the data that's about to be removed.
-        // handle_job_deleted needs job.session_id, step_history, workspace_id.
+        // handle_job_deleted needs job step_history, workspace_id.
         let pre_delete_events = if matches!(&event, Event::JobDeleted { .. }) {
             self.runtime
                 .handle_event(event.clone())
@@ -193,23 +186,23 @@ impl DaemonState {
 
     /// Shutdown the daemon gracefully.
     ///
-    /// Sessions (tmux) are intentionally preserved across daemon restarts so that
+    /// Agent processes are intentionally preserved across daemon restarts so that
     /// long-running agents continue processing. On next startup, `reconcile_state`
-    /// reconnects to surviving sessions. Use `Request::Shutdown { kill: true }` to
-    /// terminate all sessions before stopping (handled in the listener before
-    /// the shutdown signal is sent, so that kills complete before the CLI starts
-    /// its exit timer).
+    /// reconnects to surviving agents. Use `Request::Shutdown { kill: true }` to
+    /// terminate all agent sessions before stopping (handled in the listener
+    /// before the shutdown signal is sent, so that kills complete before the
+    /// CLI starts its exit timer).
     pub fn shutdown(&mut self) -> Result<(), LifecycleError> {
         info!("Shutting down daemon...");
 
         // 0. Flush buffered WAL events to disk before tearing down
-        if let Err(e) = self.event_bus.flush() {
+        if let Err(e) = self.event_bus.wal.lock().flush() {
             warn!("Failed to flush WAL on shutdown: {}", e);
         }
 
         // 0b. Save final snapshot so next startup doesn't need to replay WAL
         // Uses synchronous checkpoint with compression for fast subsequent startup
-        let processed_seq = self.event_bus.processed_seq();
+        let processed_seq = self.event_bus.wal.lock().processed_seq();
         if processed_seq > 0 {
             let state_clone = self.state.lock().clone();
             let checkpointer = Checkpointer::new(self.config.snapshot_path.clone());

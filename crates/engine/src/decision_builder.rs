@@ -6,46 +6,29 @@
 //! Creates DecisionCreated events with system-generated options
 //! when escalation paths are triggered.
 
-use oj_core::{AgentRunId, DecisionOption, DecisionSource, Event, JobId, OwnerId, QuestionData};
+use oj_core::{
+    AgentId, DecisionId, DecisionOption, DecisionSource, Event, IdGen, OwnerId, QuestionData,
+    UuidIdGen,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
 
 /// Trigger that caused the escalation.
 #[derive(Debug, Clone)]
 pub enum EscalationTrigger {
     /// Agent was idle for too long (on_idle)
-    Idle { assistant_context: Option<String> },
+    Idle { last_message: Option<String> },
     /// Agent process died unexpectedly (on_dead)
-    Dead {
-        exit_code: Option<i32>,
-        assistant_context: Option<String>,
-    },
+    Dead { exit_code: Option<i32>, last_message: Option<String> },
     /// Agent encountered an API/runtime error (on_error)
-    Error {
-        error_type: String,
-        message: String,
-        assistant_context: Option<String>,
-    },
+    Error { error_type: String, message: String, last_message: Option<String> },
     /// Gate command failed (gate action)
-    GateFailed {
-        command: String,
-        exit_code: i32,
-        stderr: String,
-    },
+    GateFailed { command: String, exit_code: i32, stderr: String },
     /// Agent showed a permission prompt we couldn't handle (on_prompt)
-    Prompt {
-        prompt_type: String,
-        assistant_context: Option<String>,
-    },
+    Prompt { prompt_type: String, last_message: Option<String> },
     /// Agent called AskUserQuestion — carries the parsed question data
-    Question {
-        question_data: Option<QuestionData>,
-        assistant_context: Option<String>,
-    },
+    Question { questions: Option<QuestionData>, last_message: Option<String> },
     /// Agent called ExitPlanMode — carries the plan content
-    Plan { assistant_context: Option<String> },
-    /// Agent explicitly signaled escalation via agent:signal
-    Signal { message: String },
+    Plan { last_message: Option<String> },
 }
 
 impl EscalationTrigger {
@@ -58,55 +41,39 @@ impl EscalationTrigger {
             EscalationTrigger::Prompt { .. } => DecisionSource::Approval,
             EscalationTrigger::Question { .. } => DecisionSource::Question,
             EscalationTrigger::Plan { .. } => DecisionSource::Plan,
-            EscalationTrigger::Signal { .. } => DecisionSource::Signal,
         }
     }
 }
 
 /// Build a DecisionCreated event for an escalation.
 pub struct EscalationDecisionBuilder {
-    /// Owner of the decision (job or agent_run)
+    /// Owner of the decision (job or crew)
     owner: OwnerId,
     /// Display name for context messages (job name or command name)
     display_name: String,
-    agent_id: Option<String>,
+    /// Agent spawn UUID for the agent that triggered this decision.
+    agent_id: String,
     trigger: EscalationTrigger,
     agent_log_tail: Option<String>,
-    namespace: String,
+    project: String,
 }
 
 impl EscalationDecisionBuilder {
-    /// Create a decision builder for a job.
-    pub fn for_job(job_id: JobId, job_name: String, trigger: EscalationTrigger) -> Self {
-        Self {
-            owner: OwnerId::Job(job_id),
-            display_name: job_name,
-            agent_id: None,
-            trigger,
-            agent_log_tail: None,
-            namespace: String::new(),
-        }
-    }
-
-    /// Create a decision builder for a standalone agent run.
-    pub fn for_agent_run(
-        agent_run_id: AgentRunId,
-        command_name: String,
+    /// Create a decision builder for a job or crew.
+    pub fn new(
+        owner: OwnerId,
+        display_name: String,
+        agent_id: String,
         trigger: EscalationTrigger,
     ) -> Self {
         Self {
-            owner: OwnerId::AgentRun(agent_run_id),
-            display_name: command_name,
-            agent_id: None,
+            owner,
+            display_name,
+            agent_id,
             trigger,
             agent_log_tail: None,
-            namespace: String::new(),
+            project: String::new(),
         }
-    }
-
-    pub fn agent_id(mut self, id: impl Into<String>) -> Self {
-        self.agent_id = Some(id.into());
-        self
     }
 
     #[cfg(test)]
@@ -115,44 +82,35 @@ impl EscalationDecisionBuilder {
         self
     }
 
-    pub fn namespace(mut self, ns: impl Into<String>) -> Self {
-        self.namespace = ns.into();
+    pub fn project(mut self, ns: impl Into<String>) -> Self {
+        self.project = ns.into();
         self
     }
 
     /// Build the DecisionCreated event and generated decision ID.
-    pub fn build(self) -> (String, Event) {
-        let decision_id = Uuid::new_v4().to_string();
+    pub fn build(self) -> (DecisionId, Event) {
+        let decision_id = DecisionId::new(UuidIdGen.next());
         let context = self.build_context();
         let options = self.build_options();
-        let created_at_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let created_at_ms =
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 
-        // Extract job_id from owner (empty for agent runs)
-        let job_id = match &self.owner {
-            OwnerId::Job(id) => id.clone(),
-            OwnerId::AgentRun(_) => JobId::default(),
-        };
-
-        // Extract question_data from Question triggers
-        let question_data = match &self.trigger {
-            EscalationTrigger::Question { question_data, .. } => question_data.clone(),
+        // Extract questions from Question triggers
+        let questions = match &self.trigger {
+            EscalationTrigger::Question { questions, .. } => questions.clone(),
             _ => None,
         };
 
         let event = Event::DecisionCreated {
             id: decision_id.clone(),
-            job_id,
-            agent_id: self.agent_id,
+            agent_id: AgentId::new(self.agent_id),
             owner: self.owner,
             source: self.trigger.to_source(),
             context,
             options,
-            question_data,
+            questions,
             created_at_ms,
-            namespace: self.namespace,
+            project: self.project,
         };
 
         (decision_id, event)
@@ -161,50 +119,32 @@ impl EscalationDecisionBuilder {
     fn build_context(&self) -> String {
         let mut parts = Vec::new();
 
-        // Trigger-specific header and extract assistant_context
-        let assistant_context = match &self.trigger {
-            EscalationTrigger::Idle {
-                assistant_context, ..
-            } => {
+        // Trigger-specific header and extract last_message
+        let last_message = match &self.trigger {
+            EscalationTrigger::Idle { last_message, .. } => {
                 parts.push(format!(
                     "Agent in job \"{}\" is idle and waiting for input.",
                     self.display_name
                 ));
-                assistant_context.as_deref()
+                last_message.as_deref()
             }
-            EscalationTrigger::Dead {
-                exit_code,
-                assistant_context,
-            } => {
-                let code_str = exit_code
-                    .map(|c| format!(" (exit code {})", c))
-                    .unwrap_or_default();
+            EscalationTrigger::Dead { exit_code, last_message } => {
+                let code_str = exit_code.map(|c| format!(" (exit code {})", c)).unwrap_or_default();
                 parts.push(format!(
                     "Agent in job \"{}\" exited unexpectedly{}.",
                     self.display_name, code_str
                 ));
-                assistant_context.as_deref()
+                last_message.as_deref()
             }
-            EscalationTrigger::Error {
-                error_type,
-                message,
-                assistant_context,
-            } => {
+            EscalationTrigger::Error { error_type, message, last_message } => {
                 parts.push(format!(
                     "Agent in job \"{}\" encountered an error: {} - {}",
                     self.display_name, error_type, message
                 ));
-                assistant_context.as_deref()
+                last_message.as_deref()
             }
-            EscalationTrigger::GateFailed {
-                command,
-                exit_code,
-                stderr,
-            } => {
-                parts.push(format!(
-                    "Gate command failed in job \"{}\".",
-                    self.display_name
-                ));
+            EscalationTrigger::GateFailed { command, exit_code, stderr } => {
+                parts.push(format!("Gate command failed in job \"{}\".", self.display_name));
                 parts.push(format!("Command: {}", command));
                 parts.push(format!("Exit code: {}", exit_code));
                 if !stderr.is_empty() {
@@ -212,21 +152,15 @@ impl EscalationDecisionBuilder {
                 }
                 None
             }
-            EscalationTrigger::Prompt {
-                prompt_type,
-                assistant_context,
-            } => {
+            EscalationTrigger::Prompt { prompt_type, last_message } => {
                 parts.push(format!(
                     "Agent in job \"{}\" is showing a {} prompt.",
                     self.display_name, prompt_type
                 ));
-                assistant_context.as_deref()
+                last_message.as_deref()
             }
-            EscalationTrigger::Question {
-                ref question_data,
-                assistant_context,
-            } => {
-                if let Some(qd) = question_data {
+            EscalationTrigger::Question { ref questions, last_message } => {
+                if let Some(qd) = questions {
                     if let Some(entry) = qd.questions.first() {
                         let header = entry.header.as_deref().unwrap_or("Question");
                         parts.push(format!(
@@ -252,26 +186,19 @@ impl EscalationDecisionBuilder {
                         self.display_name
                     ));
                 }
-                assistant_context.as_deref()
+                last_message.as_deref()
             }
-            EscalationTrigger::Plan { assistant_context } => {
+            EscalationTrigger::Plan { last_message } => {
                 parts.push(format!(
                     "Agent in job \"{}\" is requesting plan approval.",
                     self.display_name
                 ));
-                assistant_context.as_deref()
-            }
-            EscalationTrigger::Signal { message } => {
-                parts.push(format!(
-                    "Agent in job \"{}\" requested escalation: {}",
-                    self.display_name, message
-                ));
-                None
+                last_message.as_deref()
             }
         };
 
         // Assistant context from session transcript
-        if let Some(ctx) = assistant_context {
+        if let Some(ctx) = last_message {
             if !ctx.is_empty() {
                 // Truncate to ~2000 chars
                 let truncated = if ctx.len() > 2000 { &ctx[..2000] } else { ctx };
@@ -317,9 +244,7 @@ impl EscalationDecisionBuilder {
                     .description("Dismiss this notification without taking action"),
             ],
             EscalationTrigger::GateFailed { .. } => vec![
-                DecisionOption::new("Retry")
-                    .description("Re-run the gate command")
-                    .recommended(),
+                DecisionOption::new("Retry").description("Re-run the gate command").recommended(),
                 DecisionOption::new("Skip").description("Skip the gate and continue"),
                 DecisionOption::new("Cancel").description("Cancel and fail"),
             ],
@@ -330,12 +255,10 @@ impl EscalationDecisionBuilder {
                 DecisionOption::new("Dismiss")
                     .description("Dismiss this notification without taking action"),
             ],
-            EscalationTrigger::Question {
-                ref question_data, ..
-            } => {
+            EscalationTrigger::Question { ref questions, .. } => {
                 let mut options = Vec::new();
 
-                if let Some(qd) = question_data {
+                if let Some(qd) = questions {
                     for entry in &qd.questions {
                         for opt in &entry.options {
                             let mut o = DecisionOption::new(opt.label.clone());
@@ -357,15 +280,6 @@ impl EscalationDecisionBuilder {
 
                 options
             }
-            EscalationTrigger::Signal { .. } => vec![
-                DecisionOption::new("Nudge")
-                    .description("Send a message prompting the agent to continue")
-                    .recommended(),
-                DecisionOption::new("Done").description("Mark as complete"),
-                DecisionOption::new("Cancel").description("Cancel and fail"),
-                DecisionOption::new("Dismiss")
-                    .description("Dismiss this notification without taking action"),
-            ],
             EscalationTrigger::Plan { .. } => vec![
                 DecisionOption::new("Accept (clear context)")
                     .description("Approve and auto-accept edits, clearing context")

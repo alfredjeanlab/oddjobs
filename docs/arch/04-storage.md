@@ -37,82 +37,15 @@ A single `fsync` covers the entire batch for performance.
 
 ## State Mutation Events
 
-State mutations use typed `Event` variants emitted via `Effect::Emit`. These events are written to WAL and applied by `MaterializedState::apply_event()`:
+State mutations use typed `Event` variants emitted via `Effect::Emit`. These events are written to WAL and applied by `MaterializedState::apply_event()`. See [Events](../interface/EVENTS.md) for the complete list of event types and their categories.
 
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `job:created` | JobCreated | id, kind, name, vars, runbook_hash, cwd, initial_step, created_at_epoch_ms, namespace, cron_name? | Insert job |
-| `job:advanced` | JobAdvanced | id, step | Finalize current step, advance job |
-| `job:cancelling` | JobCancelling | id | Set job.cancelling = true |
-| `job:deleted` | JobDeleted | id | Remove job |
-| `job:updated` | JobUpdated | id, vars | Merge new vars into job |
-| `step:started` | StepStarted | job_id, step, agent_id?, agent_name? | Mark step running, set agent_id |
-| `step:waiting` | StepWaiting | job_id, step, reason?, decision_id? | Mark step waiting for intervention |
-| `step:completed` | StepCompleted | job_id, step | Mark step completed |
-| `step:failed` | StepFailed | job_id, step, error | Mark step failed with error |
-| `runbook:loaded` | RunbookLoaded | hash, version, runbook | Cache runbook by content hash (dedup) |
-| `session:created` | SessionCreated | id, owner | Insert session, link to owner (job or agent_run) |
-| `session:deleted` | SessionDeleted | id | Remove session |
-| `workspace:created` | WorkspaceCreated | id, path, branch, owner?, workspace_type? | Insert workspace (status=Creating) |
-| `workspace:ready` | WorkspaceReady | id | Set workspace status to Ready |
-| `workspace:failed` | WorkspaceFailed | id, reason | Set workspace status to Failed |
-| `workspace:deleted` | WorkspaceDeleted | id | Remove workspace |
+Events fall into three categories:
 
-Agent signal and lifecycle events also update job/agent_run status during replay. All agent lifecycle events include an optional `owner` field (job or agent_run) for routing:
+- **State mutations**: Applied by `apply_event()` to update materialized state (e.g., `job:created`, `agent:spawned`, `step:completed`, `worker:started`, `queue:pushed`, `decision:created`, `crew:created`)
+- **Signals**: Handled by the runtime but do not mutate state (e.g., `command:run`, `timer:start`, `agent:idle`, `agent:prompt`)
+- **Actions**: Emitted externally to trigger runtime operations (e.g., `job:resume`, `job:cancel`, `agent:signal`, `agent:input`)
 
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `agent:working` | AgentWorking | agent_id, owner? | Set step_status to Running |
-| `agent:waiting` | AgentWaiting | agent_id, owner? | No state change (agent idle but alive) |
-| `agent:exited` | AgentExited | agent_id, exit_code, owner? | Set Completed (exit 0) or Failed |
-| `agent:failed` | AgentFailed | agent_id, error, owner? | Set step_status to Failed |
-| `agent:gone` | AgentGone | agent_id, owner? | Set Failed (session terminated) |
-| `agent:signal` | AgentSignal | agent_id, kind, message? | Set agent_signal |
-| `shell:exited` | ShellExited | job_id, step, exit_code, stdout?, stderr? | Finalize step as Completed (0) or Failed |
-
-### Worker and queue lifecycle
-
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `worker:started` | WorkerStarted | worker_name, project_root, runbook_hash, queue_name, concurrency, namespace | Insert or update worker record |
-| `worker:item_dispatched` | WorkerItemDispatched | worker_name, item_id, job_id, namespace | Track dispatched item on worker |
-| `worker:resized` | WorkerResized | worker_name, concurrency, namespace | Update worker concurrency |
-| `worker:stopped` | WorkerStopped | worker_name, namespace | Remove worker record |
-| `worker:deleted` | WorkerDeleted | worker_name, namespace | Remove worker record |
-| `queue:pushed` | QueuePushed | queue_name, item_id, data, pushed_at_epoch_ms, namespace | Insert queue item (status=Pending) |
-| `queue:taken` | QueueTaken | queue_name, item_id, worker_name, namespace | Set queue item status to Taken |
-| `queue:completed` | QueueCompleted | queue_name, item_id, namespace | Remove queue item |
-| `queue:dropped` | QueueDropped | queue_name, item_id, namespace | Remove queue item |
-| `queue:failed` | QueueFailed | queue_name, item_id, error, namespace | Set queue item status to Failed, increment failure_count |
-| `queue:item_retry` | QueueItemRetry | queue_name, item_id, namespace | Reset item to Pending, clear failure_count |
-| `queue:item_dead` | QueueItemDead | queue_name, item_id, namespace | Set queue item status to Dead (terminal) |
-
-### Cron lifecycle
-
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `cron:started` | CronStarted | cron_name, project_root, runbook_hash, interval, run_target, namespace | Insert or update cron record |
-| `cron:stopped` | CronStopped | cron_name, namespace | Set cron status to stopped |
-| `cron:fired` | CronFired | cron_name, namespace, job_id, agent_run_id? | Update last_fired_at_ms |
-| `cron:deleted` | CronDeleted | cron_name, namespace | Remove cron record |
-
-### Decision lifecycle
-
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `decision:created` | DecisionCreated | id, job_id, agent_id?, owner, source, context, options, created_at_ms, namespace | Insert decision, set job to Waiting |
-| `decision:resolved` | DecisionResolved | id, chosen?, message?, resolved_at_ms, namespace | Update decision resolution |
-
-### Standalone agent runs
-
-| Type Tag | Variant | Fields | Effect |
-|---|---|---|---|
-| `agent_run:created` | AgentRunCreated | id, agent_name, command_name, namespace, cwd, runbook_hash, vars, created_at_epoch_ms | Insert agent run |
-| `agent_run:started` | AgentRunStarted | id, agent_id | Set status to Running, link agent_id |
-| `agent_run:status_changed` | AgentRunStatusChanged | id, status, reason? | Update status |
-| `agent_run:deleted` | AgentRunDeleted | id | Remove agent run |
-
-`CommandRun` persists the namespace → project_root mapping but is otherwise a signal event. Action/signal events (`TimerStart`, `SessionInput`, `AgentInput`, `JobResume`, `JobCancel`, `AgentRunResume`, `WorkspaceDrop`, `Shutdown`, `Custom`) do not affect persisted state. `WorkerWake`, `WorkerPollComplete`, `WorkerTakeComplete`, `CronOnce`, `AgentIdle`, `AgentStop`, and `AgentPrompt` are also signals that do not mutate state.
+All events (including signals and actions) are persisted to WAL. `CommandRun` persists the project → project_path mapping but is otherwise a signal.
 
 ## Materialized State
 
@@ -121,22 +54,21 @@ State is rebuilt by replaying events:
 ```rust
 pub struct MaterializedState {
     pub jobs: HashMap<String, Job>,
-    pub sessions: HashMap<String, Session>,
     pub workspaces: HashMap<String, Workspace>,
     pub runbooks: HashMap<String, StoredRunbook>,
     pub workers: HashMap<String, WorkerRecord>,
     pub queue_items: HashMap<String, Vec<QueueItem>>,
     pub crons: HashMap<String, CronRecord>,
     pub decisions: HashMap<String, Decision>,
-    pub agent_runs: HashMap<String, AgentRun>,
+    pub crew: HashMap<String, Crew>,
     pub agents: HashMap<String, AgentRecord>,      // Unified agent index (agent_id → record)
-    pub project_roots: HashMap<String, PathBuf>,   // Namespace → project root mapping
+    pub project_paths: HashMap<String, PathBuf>,   // Namespace → project path mapping
 }
 ```
 
 Each event type has logic in `apply_event()` that updates state deterministically.
 
-Workers and queues use namespace-scoped composite keys (`namespace/name`) so that multiple projects can define identically-named resources without collision. When the namespace is empty (single-project setups), the bare name is used for backward compatibility.
+Workers and queues use project-scoped composite keys (`project/name`) so that multiple projects can define identically-named resources without collision.
 
 ## Snapshots
 
@@ -177,48 +109,15 @@ truncate WAL (safe now)
 
 ### Compression
 
-Snapshots use zstd compression (level 3) for ~70-80% size reduction:
-
-| State size | JSON | zstd |
-|------------|------|------|
-| 100 jobs | ~1MB | ~200KB |
-| 1000 jobs | ~10MB | ~2MB |
-
-Snapshots are always zstd-compressed; the loader expects compressed format.
+Snapshots use zstd compression (level 3) for ~70-80% size reduction. Snapshots are always zstd-compressed; the loader expects compressed format.
 
 ### Testability
 
-The `CheckpointWriter` trait abstracts all I/O:
-
-```rust
-pub trait CheckpointWriter: Send + Sync + 'static {
-    fn write_tmp(&self, path: &Path, data: &[u8]) -> Result<(), CheckpointError>;
-    fn fsync_file(&self, path: &Path) -> Result<(), CheckpointError>;
-    fn rename(&self, from: &Path, to: &Path) -> Result<(), CheckpointError>;
-    fn fsync_dir(&self, path: &Path) -> Result<(), CheckpointError>;
-    fn file_size(&self, path: &Path) -> Result<u64, CheckpointError>;
-}
-```
-
-Tests use `FakeCheckpointWriter` to:
-- Verify I/O ordering (fsync before rename, dir fsync before WAL truncation)
-- Inject failures at any step
-- Test crash recovery scenarios without touching the filesystem
+The `CheckpointWriter` trait abstracts all I/O, enabling tests to verify ordering (fsync before rename, dir fsync before WAL truncation), inject failures at any step, and test crash recovery without touching the filesystem.
 
 ### Versioning and Migrations
 
-Snapshots include a schema version (`v` field in JSON). On load:
-
-1. Parse JSON into `serde_json::Value`
-2. Check version field
-3. Apply migrations sequentially until current version
-4. Deserialize to typed `Snapshot` struct
-
-```
-v1 → v2 → ... → current
-```
-
-Migrations transform JSON in place, allowing schema evolution without maintaining legacy Rust types. Each migration is a function `fn(&mut Value) -> Result<(), MigrationError>`.
+Snapshots include a schema version. On load, migrations are applied sequentially until the current version. Migrations transform JSON in place via `fn(&mut Value) -> Result<(), MigrationError>`, allowing schema evolution without maintaining legacy Rust types.
 
 **Why migrations are required**: WAL is truncated after checkpoint, so "discard snapshot and replay WAL" would lose all state before the snapshot. Migrations must succeed or the daemon fails to start.
 

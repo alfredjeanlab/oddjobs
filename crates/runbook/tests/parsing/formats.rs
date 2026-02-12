@@ -28,10 +28,6 @@ fn assert_sample_build_runbook(runbook: &Runbook) {
     assert!(agent.env.contains_key("OJ_STEP"));
 }
 
-// ============================================================================
-// TOML
-// ============================================================================
-
 #[test]
 fn toml_sample_runbook() {
     let runbook = parse_runbook(include_str!("../fixtures/sample_build.toml")).unwrap();
@@ -62,24 +58,14 @@ tag = "latest"
     assert_eq!(cmd.run.shell_command(), Some("deploy.sh"));
 }
 
-// ============================================================================
-// JSON
-// ============================================================================
-
 #[test]
 fn json_sample_runbook() {
     let runbook = super::parse_json(include_str!("../fixtures/sample_build.json"));
     assert_sample_build_runbook(&runbook);
 
     let job = &runbook.jobs["build"];
-    assert_eq!(
-        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
-        Some("done")
-    );
-    assert_eq!(
-        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
-        Some("failed")
-    );
+    assert_eq!(job.steps[2].on_done.as_ref().map(|t| t.step_name()), Some("done"));
+    assert_eq!(job.steps[2].on_fail.as_ref().map(|t| t.step_name()), Some("failed"));
 }
 
 #[test]
@@ -89,24 +75,14 @@ fn json_empty() {
     assert!(runbook.jobs.is_empty());
 }
 
-// ============================================================================
-// HCL
-// ============================================================================
-
 #[test]
 fn hcl_sample_runbook() {
     let runbook = super::parse_hcl(include_str!("../fixtures/sample_build.hcl"));
     assert_sample_build_runbook(&runbook);
 
     let job = &runbook.jobs["build"];
-    assert_eq!(
-        job.steps[2].on_done.as_ref().map(|t| t.step_name()),
-        Some("done")
-    );
-    assert_eq!(
-        job.steps[2].on_fail.as_ref().map(|t| t.step_name()),
-        Some("failed")
-    );
+    assert_eq!(job.steps[2].on_done.as_ref().map(|t| t.step_name()), Some("done"));
+    assert_eq!(job.steps[2].on_fail.as_ref().map(|t| t.step_name()), Some("failed"));
 }
 
 #[test]
@@ -124,12 +100,12 @@ job "deploy" {
 
   step "build" {
     run     = "make build"
-    on_done = "test"
+    on_done = { step = "test" }
   }
 
   step "test" {
     run     = "make test"
-    on_done = "deploy"
+    on_done = { step = "deploy" }
   }
 
   step "deploy" {
@@ -141,9 +117,6 @@ job "deploy" {
     assert_eq!(job.steps.len(), 3);
     assert_eq!(job.steps[0].name, "build");
     assert_eq!(job.steps[1].name, "test");
-    assert_eq!(
-        job.steps[1].on_done.as_ref().map(|t| t.step_name()),
-        Some("deploy")
-    );
+    assert_eq!(job.steps[1].on_done.as_ref().map(|t| t.step_name()), Some("deploy"));
     assert_eq!(job.steps[2].name, "deploy");
 }

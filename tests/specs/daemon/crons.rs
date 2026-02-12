@@ -34,17 +34,10 @@ fn cron_start_fires_and_creates_job() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Start the cron
-    temp.oj()
-        .args(&["cron", "start", "ticker"])
-        .passes()
-        .stdout_has("Cron 'ticker' started");
+    temp.oj().args(&["cron", "start", "ticker"]).passes().stdout_has("Cron 'ticker' started");
 
     // Verify cron appears in list as running
-    temp.oj()
-        .args(&["cron", "list"])
-        .passes()
-        .stdout_has("ticker")
-        .stdout_has("running");
+    temp.oj().args(&["cron", "list"]).passes().stdout_has("ticker").stdout_has("running");
 
     // Wait for the cron to fire and create a job (interval is 2s)
     let fired = wait_for(SPEC_WAIT_MAX_MS * 5, || {
@@ -55,22 +48,13 @@ fn cron_start_fires_and_creates_job() {
     if !fired {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        fired,
-        "cron should fire and create a job within the wait period"
-    );
+    assert!(fired, "cron should fire and create a job within the wait period");
 
     // Stop the cron
-    temp.oj()
-        .args(&["cron", "stop", "ticker"])
-        .passes()
-        .stdout_has("Cron 'ticker' stopped");
+    temp.oj().args(&["cron", "stop", "ticker"]).passes().stdout_has("Cron 'ticker' stopped");
 
     // Verify cron is now stopped
-    temp.oj()
-        .args(&["cron", "list"])
-        .passes()
-        .stdout_has("stopped");
+    temp.oj().args(&["cron", "list"]).passes().stdout_has("stopped");
 }
 
 /// Verifies that `oj cron once` runs the job immediately without waiting
@@ -84,11 +68,7 @@ fn cron_once_runs_immediately() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Run the cron's job once
-    temp.oj()
-        .args(&["cron", "once", "ticker"])
-        .passes()
-        .stdout_has("Job")
-        .stdout_has("started");
+    temp.oj().args(&["cron", "once", "ticker"]).passes().stdout_has("Job").stdout_has("started");
 
     // Job should appear quickly (no 2s interval wait)
     let created = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -113,9 +93,9 @@ run = "printf '%s' '${invoke.dir}' > invoke_dir.txt"
 "#;
 
 /// Verifies that cron-triggered jobs receive invoke.dir set to the
-/// project root, not the daemon's working directory.
+/// project path, not the daemon's working directory.
 #[test]
-fn cron_once_sets_invoke_dir_to_project_root() {
+fn cron_once_sets_invoke_dir_to_project_path() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/runbooks/cron.toml", INVOKE_DIR_CRON_RUNBOOK);
@@ -123,20 +103,14 @@ fn cron_once_sets_invoke_dir_to_project_root() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Run the cron's job once
-    temp.oj()
-        .args(&["cron", "once", "writer"])
-        .passes()
-        .stdout_has("Job")
-        .stdout_has("started");
+    temp.oj().args(&["cron", "once", "writer"]).passes().stdout_has("Job").stdout_has("started");
 
     // Wait for the job to complete and write the marker file.
     // Check for non-empty content, not just file existence — the shell
     // redirection `> file` creates/truncates the file before printf writes.
     let marker = temp.path().join("invoke_dir.txt");
     let written = wait_for(SPEC_WAIT_MAX_MS, || {
-        std::fs::read_to_string(&marker)
-            .map(|s| !s.is_empty())
-            .unwrap_or(false)
+        std::fs::read_to_string(&marker).map(|s| !s.is_empty()).unwrap_or(false)
     });
 
     if !written {
@@ -145,25 +119,21 @@ fn cron_once_sets_invoke_dir_to_project_root() {
     assert!(written, "job should write invoke_dir.txt");
 
     let invoke_dir = std::fs::read_to_string(&marker).unwrap();
-    let project_root = temp.path().to_string_lossy().to_string();
+    let project_path = temp.path().to_string_lossy().to_string();
 
     // Canonicalize both paths for comparison (handles /private/var vs /var on macOS)
     let invoke_dir_canon = std::fs::canonicalize(&invoke_dir)
         .unwrap_or_else(|_| std::path::PathBuf::from(&invoke_dir));
-    let project_root_canon =
+    let project_path_canon =
         std::fs::canonicalize(temp.path()).unwrap_or_else(|_| temp.path().to_path_buf());
 
     assert_eq!(
-        invoke_dir_canon, project_root_canon,
-        "invoke.dir should be the project root, not the daemon cwd\n\
-         invoke.dir={}\nproject_root={}",
-        invoke_dir, project_root
+        invoke_dir_canon, project_path_canon,
+        "invoke.dir should be the project path, not the daemon cwd\n\
+         invoke.dir={}\nproject_path={}",
+        invoke_dir, project_path
     );
 }
-
-// =============================================================================
-// Shell Shorthand Tests
-// =============================================================================
 
 /// Runbook with a cron that uses shell shorthand: `run = "echo ..."` instead
 /// of `run = { job = "..." }`. No separate job definition needed.
@@ -187,17 +157,10 @@ fn cron_shell_shorthand_start_fires_and_completes_job() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Start the cron
-    temp.oj()
-        .args(&["cron", "start", "cleanup"])
-        .passes()
-        .stdout_has("Cron 'cleanup' started");
+    temp.oj().args(&["cron", "start", "cleanup"]).passes().stdout_has("Cron 'cleanup' started");
 
     // Verify cron appears in list as running
-    temp.oj()
-        .args(&["cron", "list"])
-        .passes()
-        .stdout_has("cleanup")
-        .stdout_has("running");
+    temp.oj().args(&["cron", "list"]).passes().stdout_has("cleanup").stdout_has("running");
 
     // Wait for the cron to fire and create a completed job
     let fired = wait_for(SPEC_WAIT_MAX_MS * 5, || {
@@ -212,10 +175,7 @@ fn cron_shell_shorthand_start_fires_and_completes_job() {
             temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
-    assert!(
-        fired,
-        "cron shell shorthand should create and complete a job"
-    );
+    assert!(fired, "cron shell shorthand should create and complete a job");
 }
 
 /// Verifies that `oj cron once` works with shell shorthand, creating and
@@ -229,11 +189,7 @@ fn cron_once_shell_shorthand_runs_immediately() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Run the cron's job once
-    temp.oj()
-        .args(&["cron", "once", "cleanup"])
-        .passes()
-        .stdout_has("Job")
-        .stdout_has("started");
+    temp.oj().args(&["cron", "once", "cleanup"]).passes().stdout_has("Job").stdout_has("started");
 
     // Job should appear and complete quickly (no interval wait)
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {

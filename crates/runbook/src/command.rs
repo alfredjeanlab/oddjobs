@@ -3,6 +3,7 @@
 
 //! Command definitions
 
+use serde::de;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -134,10 +135,8 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                     if result.variadic.is_some() {
                         return Err(ArgSpecError::VariadicNotLast(var_name.to_string()));
                     }
-                    result.variadic = Some(VariadicDef {
-                        name: var_name.to_string(),
-                        required: true,
-                    });
+                    result.variadic =
+                        Some(VariadicDef { name: var_name.to_string(), required: true });
                 } else {
                     // Required positional
                     if result.variadic.is_some() {
@@ -147,10 +146,7 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                         return Err(ArgSpecError::OptionalBeforeRequired(name.to_string()));
                     }
                     check_name(name)?;
-                    result.positional.push(ArgDef {
-                        name: name.to_string(),
-                        required: true,
-                    });
+                    result.positional.push(ArgDef { name: name.to_string(), required: true });
                 }
             }
             '[' => {
@@ -191,10 +187,8 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                     if result.variadic.is_some() {
                         return Err(ArgSpecError::VariadicNotLast(var_name.to_string()));
                     }
-                    result.variadic = Some(VariadicDef {
-                        name: var_name.to_string(),
-                        required: false,
-                    });
+                    result.variadic =
+                        Some(VariadicDef { name: var_name.to_string(), required: false });
                 } else {
                     // Optional positional
                     if result.variadic.is_some() {
@@ -202,10 +196,7 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                     }
                     check_name(content)?;
                     seen_optional_positional = true;
-                    result.positional.push(ArgDef {
-                        name: content.to_string(),
-                        required: false,
-                    });
+                    result.positional.push(ArgDef { name: content.to_string(), required: false });
                 }
             }
             '-' => {
@@ -246,10 +237,7 @@ pub fn parse_arg_spec(spec: &str) -> Result<ArgSpec, ArgSpecError> {
                 continue;
             }
             _ => {
-                return Err(ArgSpecError::InvalidSyntax(format!(
-                    "unexpected character: {}",
-                    c
-                )));
+                return Err(ArgSpecError::InvalidSyntax(format!("unexpected character: {}", c)));
             }
         }
     }
@@ -300,11 +288,7 @@ where
         let flag_part = content[..val_start].trim();
         let (short, name) = parse_flag_names(flag_part)?;
         check_name(&name)?;
-        result.options.push(OptionDef {
-            name,
-            short,
-            required,
-        });
+        result.options.push(OptionDef { name, short, required });
     } else {
         // Boolean flag
         let (short, name) = parse_flag_names(content)?;
@@ -322,10 +306,7 @@ fn parse_flag_names(flag_part: &str) -> Result<(Option<char>, String), ArgSpecEr
     if flag_part.contains('/') {
         let parts: Vec<&str> = flag_part.split('/').collect();
         if parts.len() != 2 {
-            return Err(ArgSpecError::InvalidSyntax(format!(
-                "invalid flag syntax: {}",
-                flag_part
-            )));
+            return Err(ArgSpecError::InvalidSyntax(format!("invalid flag syntax: {}", flag_part)));
         }
         let short_part = parts[0].trim();
         let long_part = parts[1].trim();
@@ -333,19 +314,13 @@ fn parse_flag_names(flag_part: &str) -> Result<(Option<char>, String), ArgSpecEr
         let short = if short_part.starts_with('-') && !short_part.starts_with("--") {
             short_part.chars().nth(1)
         } else {
-            return Err(ArgSpecError::InvalidSyntax(format!(
-                "invalid short flag: {}",
-                short_part
-            )));
+            return Err(ArgSpecError::InvalidSyntax(format!("invalid short flag: {}", short_part)));
         };
 
         let name = if let Some(stripped) = long_part.strip_prefix("--") {
             stripped.to_string()
         } else {
-            return Err(ArgSpecError::InvalidSyntax(format!(
-                "invalid long flag: {}",
-                long_part
-            )));
+            return Err(ArgSpecError::InvalidSyntax(format!("invalid long flag: {}", long_part)));
         };
 
         Ok((short, name))
@@ -360,10 +335,7 @@ fn parse_flag_names(flag_part: &str) -> Result<(Option<char>, String), ArgSpecEr
             .ok_or_else(|| ArgSpecError::InvalidSyntax("empty flag".to_string()))?;
         Ok((Some(c), c.to_string()))
     } else {
-        Err(ArgSpecError::InvalidSyntax(format!(
-            "flag must start with -: {}",
-            flag_part
-        )))
+        Err(ArgSpecError::InvalidSyntax(format!("flag must start with -: {}", flag_part)))
     }
 }
 
@@ -479,8 +451,6 @@ impl<'de> Deserialize<'de> for ArgSpec {
     where
         D: Deserializer<'de>,
     {
-        use serde::de;
-
         struct ArgSpecVisitor;
 
         impl<'de> de::Visitor<'de> for ArgSpecVisitor {
@@ -552,6 +522,16 @@ pub enum RunDirective {
         #[serde(default)]
         attach: Option<bool>,
     },
+}
+
+impl From<&RunDirective> for oj_core::RunTarget {
+    fn from(d: &RunDirective) -> Self {
+        match d {
+            RunDirective::Shell(cmd) => oj_core::RunTarget::Shell(cmd.clone()),
+            RunDirective::Job { job } => oj_core::RunTarget::Job(job.clone()),
+            RunDirective::Agent { agent, .. } => oj_core::RunTarget::Agent(agent.clone()),
+        }
+    }
 }
 
 impl RunDirective {

@@ -5,9 +5,7 @@
 
 use crate::{scheduler::Scheduler, RuntimeDeps};
 use oj_adapters::subprocess::{run_with_timeout, QUEUE_COMMAND_TIMEOUT, SHELL_COMMAND_TIMEOUT};
-use oj_adapters::{
-    AgentAdapter, AgentReconnectConfig, AgentSpawnConfig, NotifyAdapter, SessionAdapter,
-};
+use oj_adapters::{AgentAdapter, AgentConfig, AgentReconnectConfig, NotifyAdapter};
 use oj_core::{Clock, Effect, Event};
 use oj_storage::MaterializedState;
 use std::sync::Arc;
@@ -19,8 +17,6 @@ use tokio::sync::mpsc;
 /// Errors that can occur during effect execution
 #[derive(Debug, Error)]
 pub enum ExecuteError {
-    #[error("session error: {0}")]
-    Session(#[from] oj_adapters::session::SessionError),
     #[error("agent error: {0}")]
     Agent(#[from] oj_adapters::AgentAdapterError),
     #[error("storage error: {0}")]
@@ -32,9 +28,8 @@ pub enum ExecuteError {
 }
 
 /// Executes effects using the configured adapters
-pub struct Executor<S, A, N, C: Clock> {
-    sessions: S,
-    agents: A,
+pub struct Executor<A, N, C: Clock> {
+    pub(crate) agents: A,
     notifier: N,
     state: Arc<Mutex<MaterializedState>>,
     scheduler: Arc<Mutex<Scheduler>>,
@@ -43,22 +38,20 @@ pub struct Executor<S, A, N, C: Clock> {
     event_tx: mpsc::Sender<Event>,
 }
 
-impl<S, A, N, C> Executor<S, A, N, C>
+impl<A, N, C> Executor<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
 {
     /// Create a new executor
     pub fn new(
-        deps: RuntimeDeps<S, A, N>,
+        deps: RuntimeDeps<A, N>,
         scheduler: Arc<Mutex<Scheduler>>,
         clock: C,
         event_tx: mpsc::Sender<Event>,
     ) -> Self {
         Self {
-            sessions: deps.sessions,
             agents: deps.agents,
             notifier: deps.notifier,
             state: deps.state,
@@ -73,16 +66,17 @@ where
         &self.clock
     }
 
+    /// Get a reference to the agent adapter.
+    pub fn agents(&self) -> &A {
+        &self.agents
+    }
+
     /// Execute a single effect with tracing
     ///
     /// Returns an optional event that should be fed back into the event loop.
     pub async fn execute(&self, effect: Effect) -> Result<Option<Event>, ExecuteError> {
-        let info: String = effect
-            .fields()
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect::<Vec<_>>()
-            .join(" ");
+        let info: String =
+            effect.fields().iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
         let op = effect.name();
         let verbose = effect.verbose();
         if verbose {
@@ -100,21 +94,13 @@ where
         result
     }
 
-    /// Inner execution logic for a single effect
+    /// Inner execution logic — dispatches each effect to its handler method.
     async fn execute_inner(&self, effect: Effect) -> Result<Option<Event>, ExecuteError> {
         match effect {
-            // === Event emission ===
             Effect::Emit { event } => {
-                // Apply state change immediately (for effects that depend on it)
-                {
-                    let mut state = self.state.lock();
-                    state.apply_event(&event);
-                }
-                // Return the event so it can be written to WAL for durability
+                self.state.lock().apply_event(&event);
                 Ok(Some(event))
             }
-
-            // === Agent-level effects ===
             Effect::SpawnAgent {
                 agent_id,
                 agent_name,
@@ -125,50 +111,41 @@ where
                 env,
                 unset_env,
                 cwd,
-                session_config,
+                resume,
+                container,
             } => {
-                // Extract job_id for backwards compatibility with AgentSpawnConfig
                 let job_id_str = match &owner {
                     oj_core::OwnerId::Job(id) => id.to_string(),
-                    oj_core::OwnerId::AgentRun(_) => String::new(),
+                    oj_core::OwnerId::Crew(_) => String::new(),
                 };
 
-                // Build agent configuration from effect fields
                 let mut config =
-                    AgentSpawnConfig::new(agent_id.clone(), command, workspace_path, owner.clone())
+                    AgentConfig::new(agent_id.clone(), command, workspace_path, owner.clone())
                         .agent_name(agent_name)
                         .env(env)
                         .unset_env(unset_env)
                         .prompt(input.get("prompt").cloned().unwrap_or_default())
-                        .job_name(
-                            input
-                                .get("name")
-                                .cloned()
-                                .unwrap_or_else(|| job_id_str.clone()),
-                        )
-                        .job_id(job_id_str)
-                        .session_config(session_config);
+                        .job_name(input.get("name").cloned().unwrap_or_else(|| job_id_str.clone()))
+                        .job_id(job_id_str);
+                config.resume = resume;
+                config.container = container;
                 if let Some(cwd) = cwd {
                     config = config.cwd(cwd);
                 }
 
-                // Spawn agent in background task (follows CreateWorkspace pattern)
                 let agents = self.agents.clone();
                 let event_tx = self.event_tx.clone();
                 tokio::spawn(async move {
                     match agents.spawn(config, event_tx.clone()).await {
                         Ok(handle) => {
-                            let event = Event::SessionCreated {
-                                id: oj_core::SessionId::new(handle.session_id),
-                                owner,
-                            };
+                            let event = Event::AgentSpawned { id: handle.agent_id, owner };
                             if let Err(e) = event_tx.send(event).await {
-                                tracing::error!("failed to send SessionCreated: {}", e);
+                                tracing::error!("failed to send AgentSpawned: {}", e);
                             }
                         }
                         Err(e) => {
                             let event = Event::AgentSpawnFailed {
-                                agent_id,
+                                id: agent_id,
                                 owner,
                                 reason: e.to_string(),
                             };
@@ -178,52 +155,35 @@ where
                         }
                     }
                 });
-
                 Ok(None)
             }
-
             Effect::SendToAgent { agent_id, input } => {
                 let agents = self.agents.clone();
                 tokio::spawn(async move {
                     if let Err(e) = agents.send(&agent_id, &input).await {
-                        tracing::warn!(%agent_id, error = %e, "SendToAgent failed (fire-and-forget)");
+                        tracing::warn!(%agent_id, error = %e, "SendToAgent failed");
                     }
                 });
                 Ok(None)
             }
-
+            Effect::RespondToAgent { agent_id, response } => {
+                let agents = self.agents.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = agents.respond(&agent_id, &response).await {
+                        tracing::warn!(%agent_id, error = %e, "RespondToAgent failed");
+                    }
+                });
+                Ok(None)
+            }
             Effect::KillAgent { agent_id } => {
                 let agents = self.agents.clone();
                 tokio::spawn(async move {
                     if let Err(e) = agents.kill(&agent_id).await {
-                        tracing::warn!(%agent_id, error = %e, "KillAgent failed (fire-and-forget)");
+                        tracing::warn!(%agent_id, error = %e, "KillAgent failed");
                     }
                 });
                 Ok(None)
             }
-
-            // === Session-level effects ===
-            Effect::SendToSession { session_id, input } => {
-                let sessions = self.sessions.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = sessions.send(session_id.as_str(), &input).await {
-                        tracing::warn!(%session_id, error = %e, "SendToSession failed (fire-and-forget)");
-                    }
-                });
-                Ok(None)
-            }
-
-            Effect::KillSession { session_id } => {
-                let sessions = self.sessions.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = sessions.kill(session_id.as_str()).await {
-                        tracing::warn!(%session_id, error = %e, "KillSession failed (fire-and-forget)");
-                    }
-                });
-                Ok(None)
-            }
-
-            // === Workspace effects ===
             Effect::CreateWorkspace {
                 workspace_id,
                 path,
@@ -246,260 +206,37 @@ where
                 )
                 .await
             }
-
             Effect::DeleteWorkspace { workspace_id } => {
                 crate::workspace::delete(&self.state, &self.event_tx, workspace_id).await
             }
-
-            // === Timer effects ===
             Effect::SetTimer { id, duration } => {
                 let now = oj_core::Clock::now(&self.clock);
-                self.scheduler
-                    .lock()
-                    .set_timer(id.to_string(), duration, now);
+                self.scheduler.lock().set_timer(id.to_string(), duration, now);
                 Ok(None)
             }
-
             Effect::CancelTimer { id } => {
                 self.scheduler.lock().cancel_timer(id.as_str());
                 Ok(None)
             }
-
-            // === Shell effects ===
-            Effect::Shell {
-                owner,
-                step,
-                command,
-                cwd,
-                env,
-            } => {
-                let event_tx = self.event_tx.clone();
-
-                // Extract job_id from owner for ShellExited event (required for backwards compat)
-                let job_id = match &owner {
-                    Some(oj_core::OwnerId::Job(id)) => id.clone(),
-                    _ => oj_core::JobId::new(""),
-                };
-
-                tokio::spawn(async move {
-                    let owner_str = match &owner {
-                        Some(oj_core::OwnerId::Job(id)) => format!("job:{}", id),
-                        Some(oj_core::OwnerId::AgentRun(id)) => format!("agent_run:{}", id),
-                        None => "none".to_string(),
-                    };
-                    tracing::info!(
-                        owner = %owner_str,
-                        step,
-                        %command,
-                        cwd = %cwd.display(),
-                        "running shell command"
-                    );
-
-                    let wrapped = format!("set -euo pipefail\n{command}");
-                    let mut cmd = tokio::process::Command::new("bash");
-                    cmd.arg("-c").arg(&wrapped).current_dir(&cwd).envs(&env);
-                    let result =
-                        run_with_timeout(cmd, SHELL_COMMAND_TIMEOUT, "shell command").await;
-
-                    let (exit_code, stdout, stderr) = match result {
-                        Ok(output) => {
-                            let stdout_str = if output.stdout.is_empty() {
-                                None
-                            } else {
-                                let s = String::from_utf8_lossy(&output.stdout).into_owned();
-                                tracing::info!(
-                                    owner = %owner_str,
-                                    step,
-                                    cwd = %cwd.display(),
-                                    stdout = %s,
-                                    "shell stdout"
-                                );
-                                Some(s)
-                            };
-                            let stderr_str = if output.stderr.is_empty() {
-                                None
-                            } else {
-                                let s = String::from_utf8_lossy(&output.stderr).into_owned();
-                                tracing::warn!(
-                                    owner = %owner_str,
-                                    step,
-                                    cwd = %cwd.display(),
-                                    stderr = %s,
-                                    "shell stderr"
-                                );
-                                Some(s)
-                            };
-                            (output.status.code().unwrap_or(-1), stdout_str, stderr_str)
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                owner = %owner_str,
-                                step,
-                                cwd = %cwd.display(),
-                                error = %e,
-                                "shell execution failed"
-                            );
-                            (-1, None, None)
-                        }
-                    };
-
-                    let event = Event::ShellExited {
-                        job_id,
-                        step,
-                        exit_code,
-                        stdout,
-                        stderr,
-                    };
-
-                    if let Err(e) = event_tx.send(event).await {
-                        tracing::error!("failed to send ShellExited: {}", e);
-                    }
-                });
-
+            Effect::Shell { owner, step, command, cwd, env, container: _container } => {
+                self.execute_shell(owner, step, command, cwd, env);
                 Ok(None)
             }
-
-            // === Worker effects ===
-            Effect::PollQueue {
-                worker_name,
-                list_command,
-                cwd,
-            } => {
-                let event_tx = self.event_tx.clone();
-
-                tokio::spawn(async move {
-                    tracing::info!(
-                        %worker_name,
-                        %list_command,
-                        cwd = %cwd.display(),
-                        "polling queue"
-                    );
-
-                    let wrapped = format!("set -euo pipefail\n{list_command}");
-                    let mut cmd = tokio::process::Command::new("bash");
-                    cmd.arg("-c").arg(&wrapped).current_dir(&cwd);
-                    let result = run_with_timeout(cmd, QUEUE_COMMAND_TIMEOUT, "queue list").await;
-
-                    let items = match result {
-                        Ok(output) if output.status.success() => {
-                            let stdout = String::from_utf8_lossy(&output.stdout);
-                            match serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
-                                Ok(items) => items,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        %worker_name,
-                                        error = %e,
-                                        stdout = %stdout,
-                                        "failed to parse queue list output as JSON array"
-                                    );
-                                    vec![]
-                                }
-                            }
-                        }
-                        Ok(output) => {
-                            if !output.stderr.is_empty() {
-                                tracing::warn!(
-                                    %worker_name,
-                                    stderr = %String::from_utf8_lossy(&output.stderr),
-                                    "queue list command failed"
-                                );
-                            }
-                            vec![]
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                %worker_name,
-                                error = %e,
-                                "queue list command execution failed"
-                            );
-                            vec![]
-                        }
-                    };
-
-                    let event = Event::WorkerPollComplete { worker_name, items };
-
-                    if let Err(e) = event_tx.send(event).await {
-                        tracing::error!("failed to send WorkerPollComplete: {}", e);
-                    }
-                });
-
+            Effect::PollQueue { worker_name, project, list_command, cwd } => {
+                self.execute_poll_queue(worker_name, project, list_command, cwd);
                 Ok(None)
             }
-
-            Effect::TakeQueueItem {
-                worker_name,
-                take_command,
-                cwd,
-                item_id,
-                item,
-            } => {
-                let event_tx = self.event_tx.clone();
-
-                tokio::spawn(async move {
-                    tracing::info!(
-                        %worker_name,
-                        %take_command,
-                        cwd = %cwd.display(),
-                        "taking queue item"
-                    );
-
-                    let wrapped = format!("set -euo pipefail\n{take_command}");
-                    let mut cmd = tokio::process::Command::new("bash");
-                    cmd.arg("-c").arg(&wrapped).current_dir(&cwd);
-                    let result = run_with_timeout(cmd, QUEUE_COMMAND_TIMEOUT, "queue take").await;
-
-                    let (exit_code, stderr) = match result {
-                        Ok(output) => {
-                            if output.status.success() && !output.stdout.is_empty() {
-                                tracing::info!(
-                                    %worker_name,
-                                    stdout = %String::from_utf8_lossy(&output.stdout),
-                                    "take command stdout"
-                                );
-                            }
-                            let stderr_str = if output.stderr.is_empty() {
-                                None
-                            } else {
-                                let s = String::from_utf8_lossy(&output.stderr).into_owned();
-                                if !output.status.success() {
-                                    tracing::warn!(
-                                        %worker_name,
-                                        exit_code = output.status.code().unwrap_or(-1),
-                                        stderr = %s,
-                                        "take command failed"
-                                    );
-                                }
-                                Some(s)
-                            };
-                            (output.status.code().unwrap_or(-1), stderr_str)
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                %worker_name,
-                                error = %e,
-                                "take command execution failed"
-                            );
-                            (-1, None)
-                        }
-                    };
-
-                    let event = Event::WorkerTakeComplete {
-                        worker_name,
-                        item_id,
-                        item,
-                        exit_code,
-                        stderr,
-                    };
-
-                    if let Err(e) = event_tx.send(event).await {
-                        tracing::error!("failed to send WorkerTakeComplete: {}", e);
-                    }
-                });
-
+            Effect::TakeQueueItem { worker_name, project, take_command, cwd, item_id, item } => {
+                self.execute_take_queue_item(
+                    worker_name,
+                    project,
+                    take_command,
+                    cwd,
+                    item_id,
+                    item,
+                );
                 Ok(None)
             }
-
-            // === Notification effects ===
             Effect::Notify { title, message } => {
                 if let Err(e) = self.notifier.notify(&title, &message).await {
                     tracing::warn!(%title, error = %e, "notification send failed");
@@ -507,6 +244,202 @@ where
                 Ok(None)
             }
         }
+    }
+
+    fn execute_shell(
+        &self,
+        owner: Option<oj_core::OwnerId>,
+        step: String,
+        command: String,
+        cwd: std::path::PathBuf,
+        env: std::collections::HashMap<String, String>,
+    ) {
+        let event_tx = self.event_tx.clone();
+        let job_id = match &owner {
+            Some(oj_core::OwnerId::Job(id)) => id.clone(),
+            _ => oj_core::JobId::new(""),
+        };
+
+        tokio::spawn(async move {
+            let owner_str =
+                owner.as_ref().map(|o| o.to_string()).unwrap_or_else(|| "none".to_string());
+            tracing::info!(
+                owner = %owner_str,
+                step,
+                %command,
+                cwd = %cwd.display(),
+                "running shell command"
+            );
+
+            let wrapped = format!("set -euo pipefail\n{command}");
+            let mut cmd = tokio::process::Command::new("bash");
+            cmd.arg("-c").arg(&wrapped).current_dir(&cwd).envs(&env);
+            let result = run_with_timeout(cmd, SHELL_COMMAND_TIMEOUT, "shell command").await;
+
+            let (exit_code, stdout, stderr) = match result {
+                Ok(output) => {
+                    let stdout_str = if output.stdout.is_empty() {
+                        None
+                    } else {
+                        let s = String::from_utf8_lossy(&output.stdout).into_owned();
+                        tracing::info!(
+                            owner = %owner_str,
+                            step,
+                            cwd = %cwd.display(),
+                            stdout = %s,
+                            "shell stdout"
+                        );
+                        Some(s)
+                    };
+                    let stderr_str = if output.stderr.is_empty() {
+                        None
+                    } else {
+                        let s = String::from_utf8_lossy(&output.stderr).into_owned();
+                        tracing::warn!(
+                            owner = %owner_str,
+                            step,
+                            cwd = %cwd.display(),
+                            stderr = %s,
+                            "shell stderr"
+                        );
+                        Some(s)
+                    };
+                    (output.status.code().unwrap_or(-1), stdout_str, stderr_str)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        owner = %owner_str,
+                        step,
+                        cwd = %cwd.display(),
+                        error = %e,
+                        "shell execution failed"
+                    );
+                    (-1, None, None)
+                }
+            };
+
+            let event = Event::ShellExited { job_id, step, exit_code, stdout, stderr };
+            if let Err(e) = event_tx.send(event).await {
+                tracing::error!("failed to send ShellExited: {}", e);
+            }
+        });
+    }
+
+    fn execute_poll_queue(
+        &self,
+        worker: String,
+        project: String,
+        list_command: String,
+        cwd: std::path::PathBuf,
+    ) {
+        let event_tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            tracing::info!(%worker, %list_command, cwd = %cwd.display(), "polling queue");
+
+            let wrapped = format!("set -euo pipefail\n{list_command}");
+            let mut cmd = tokio::process::Command::new("bash");
+            cmd.arg("-c").arg(&wrapped).current_dir(&cwd);
+            let result = run_with_timeout(cmd, QUEUE_COMMAND_TIMEOUT, "queue list").await;
+
+            let items = match result {
+                Ok(output) if output.status.success() => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    match serde_json::from_str::<Vec<serde_json::Value>>(&stdout) {
+                        Ok(items) => items,
+                        Err(e) => {
+                            tracing::warn!(
+                                %worker,
+                                error = %e,
+                                stdout = %stdout,
+                                "failed to parse queue list output as JSON array"
+                            );
+                            vec![]
+                        }
+                    }
+                }
+                Ok(output) => {
+                    if !output.stderr.is_empty() {
+                        tracing::warn!(
+                            %worker,
+                            stderr = %String::from_utf8_lossy(&output.stderr),
+                            "queue list command failed"
+                        );
+                    }
+                    vec![]
+                }
+                Err(e) => {
+                    tracing::error!(%worker, error = %e, "queue list command execution failed");
+                    vec![]
+                }
+            };
+
+            let event = Event::WorkerPolled { worker, project, items };
+            if let Err(e) = event_tx.send(event).await {
+                tracing::error!("failed to send WorkerPolled: {}", e);
+            }
+        });
+    }
+
+    fn execute_take_queue_item(
+        &self,
+        worker: String,
+        project: String,
+        take_command: String,
+        cwd: std::path::PathBuf,
+        item_id: String,
+        item: serde_json::Value,
+    ) {
+        let event_tx = self.event_tx.clone();
+
+        tokio::spawn(async move {
+            tracing::info!(%worker, %take_command, cwd = %cwd.display(), "taking queue item");
+
+            let wrapped = format!("set -euo pipefail\n{take_command}");
+            let mut cmd = tokio::process::Command::new("bash");
+            cmd.arg("-c").arg(&wrapped).current_dir(&cwd);
+            let result = run_with_timeout(cmd, QUEUE_COMMAND_TIMEOUT, "queue take").await;
+
+            let (exit_code, stderr) = match result {
+                Ok(output) => {
+                    if output.status.success() && !output.stdout.is_empty() {
+                        tracing::info!(
+                            %worker,
+                            stdout = %String::from_utf8_lossy(&output.stdout),
+                            "take command stdout"
+                        );
+                    }
+                    let stderr_str = if output.stderr.is_empty() {
+                        None
+                    } else {
+                        let s = String::from_utf8_lossy(&output.stderr).into_owned();
+                        if !output.status.success() {
+                            tracing::warn!(
+                                %worker,
+                                exit_code = output.status.code().unwrap_or(-1),
+                                stderr = %s,
+                                "take command failed"
+                            );
+                        }
+                        Some(s)
+                    };
+                    (output.status.code().unwrap_or(-1), stderr_str)
+                }
+                Err(e) => {
+                    tracing::error!(
+                        %worker,
+                        error = %e,
+                        "take command execution failed"
+                    );
+                    (-1, None)
+                }
+            };
+
+            let event = Event::WorkerTook { worker, project, item_id, item, exit_code, stderr };
+            if let Err(e) = event_tx.send(event).await {
+                tracing::error!("failed to send WorkerTook: {}", e);
+            }
+        });
     }
 
     /// Reconnect monitoring for an already-running agent session.
@@ -541,47 +474,29 @@ where
         Arc::clone(&self.scheduler)
     }
 
-    /// Capture recent output from a tmux session (plain text, no ANSI escapes).
-    pub async fn capture_session_output(
-        &self,
-        session_id: &str,
-        lines: u32,
-    ) -> Result<String, ExecuteError> {
-        Ok(self.sessions.capture_output(session_id, lines).await?)
-    }
-
-    /// Check if a tmux session is still alive
-    pub async fn check_session_alive(&self, session_id: &str) -> bool {
-        self.sessions.is_alive(session_id).await.unwrap_or(false)
-    }
-
-    /// Check if a named process is running inside a tmux session
-    pub async fn check_process_running(&self, session_id: &str, process_name: &str) -> bool {
-        self.sessions
-            .is_process_running(session_id, process_name)
-            .await
-            .unwrap_or(false)
-    }
-
     /// Get the current state of an agent
     pub async fn get_agent_state(
         &self,
         agent_id: &oj_core::AgentId,
     ) -> Result<oj_core::AgentState, ExecuteError> {
-        self.agents
-            .get_state(agent_id)
-            .await
-            .map_err(ExecuteError::Agent)
+        self.agents.get_state(agent_id).await.map_err(ExecuteError::Agent)
     }
 
-    /// Get the current size of an agent's session log file in bytes.
-    pub async fn get_session_log_size(&self, agent_id: &oj_core::AgentId) -> Option<u64> {
-        self.agents.session_log_size(agent_id).await
+    /// Capture recent terminal output from an agent.
+    pub async fn capture_agent_output(
+        &self,
+        agent_id: &oj_core::AgentId,
+        lines: u32,
+    ) -> Result<String, ExecuteError> {
+        self.agents.capture_output(agent_id, lines).await.map_err(ExecuteError::Agent)
     }
 
-    /// Extract the last assistant text message from the agent's session log.
-    pub async fn get_last_assistant_message(&self, agent_id: &oj_core::AgentId) -> Option<String> {
-        self.agents.last_assistant_message(agent_id).await
+    /// Fetch the full session transcript from an agent's coop sidecar.
+    pub async fn fetch_transcript(
+        &self,
+        agent_id: &oj_core::AgentId,
+    ) -> Result<String, ExecuteError> {
+        self.agents.fetch_transcript(agent_id).await.map_err(ExecuteError::Agent)
     }
 }
 

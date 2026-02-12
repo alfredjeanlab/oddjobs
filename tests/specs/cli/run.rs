@@ -16,10 +16,7 @@ run = "echo hello-from-runbook"
     );
 
     // Run without starting the daemon — should succeed for shell commands
-    temp.oj()
-        .args(&["run", "hello"])
-        .passes()
-        .stdout_has("hello-from-runbook");
+    temp.oj().args(&["run", "hello"]).passes().stdout_has("hello-from-runbook");
 }
 
 /// Shell commands with arguments execute inline without a daemon.
@@ -36,10 +33,7 @@ run = "echo hello-${args.name}"
 "#,
     );
 
-    temp.oj()
-        .args(&["run", "greet", "world"])
-        .passes()
-        .stdout_has("hello-world");
+    temp.oj().args(&["run", "greet", "world"]).passes().stdout_has("hello-world");
 }
 
 /// Shell commands don't start the daemon.
@@ -58,10 +52,7 @@ run = "echo hello"
     temp.oj().args(&["run", "hello"]).passes();
 
     // Daemon should not have been started
-    temp.oj()
-        .args(&["daemon", "status"])
-        .passes()
-        .stdout_has("not running");
+    temp.oj().args(&["daemon", "status"]).passes().stdout_has("not running");
 }
 
 /// Aliased import commands resolve correctly via `oj run alias:command`.
@@ -84,10 +75,7 @@ fn aliased_import_command_resolves() {
 "#,
     );
 
-    temp.oj()
-        .args(&["run", "x:greet"])
-        .passes()
-        .stdout_has("hello-from-lib");
+    temp.oj().args(&["run", "x:greet"]).passes().stdout_has("hello-from-lib");
 }
 
 /// Local entity with same base name as aliased import doesn't trigger
@@ -118,8 +106,5 @@ fn local_command_with_same_name_as_aliased_import() {
     );
 
     // Should resolve to local "greet" without duplicate definition error
-    temp.oj()
-        .args(&["run", "greet"])
-        .passes()
-        .stdout_has("hello-from-local");
+    temp.oj().args(&["run", "greet"]).passes().stdout_has("hello-from-local");
 }

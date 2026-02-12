@@ -24,9 +24,7 @@ pub(super) fn edit_distance(a: &str, b: &str) -> usize {
     for i in 1..=a.len() {
         for j in 1..=b.len() {
             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-            dp[i][j] = (dp[i - 1][j] + 1)
-                .min(dp[i][j - 1] + 1)
-                .min(dp[i - 1][j - 1] + cost);
+            dp[i][j] = (dp[i - 1][j] + 1).min(dp[i][j - 1] + 1).min(dp[i - 1][j - 1] + cost);
         }
     }
     dp[a.len()][b.len()]
@@ -63,7 +61,7 @@ pub(super) fn format_suggestion(similar: &[String]) -> String {
     }
 }
 
-/// Resource type for cross-namespace lookups.
+/// Resource type for cross-project lookups.
 pub(super) enum ResourceType {
     Queue,
     Worker,
@@ -71,8 +69,8 @@ pub(super) enum ResourceType {
     Command,
 }
 
-/// Check if a resource name exists in another namespace's active state.
-/// Returns the namespace name if found.
+/// Check if a resource name exists in another project's active state.
+/// Returns the project name if found.
 pub(super) fn find_in_other_namespaces(
     resource_type: ResourceType,
     name: &str,
@@ -95,14 +93,14 @@ pub(super) fn find_in_other_namespaces(
         ResourceType::Worker => state
             .workers
             .values()
-            .find(|w| w.name == name && w.namespace != current_namespace)
-            .map(|w| w.namespace.clone()),
+            .find(|w| w.name == name && w.project != current_namespace)
+            .map(|w| w.project.clone()),
         ResourceType::Cron => state
             .crons
             .values()
-            .find(|c| c.name == name && c.namespace != current_namespace)
-            .map(|c| c.namespace.clone()),
-        // Commands are stateless definitions; no cross-namespace tracking.
+            .find(|c| c.name == name && c.project != current_namespace)
+            .map(|c| c.project.clone()),
+        // Commands are stateless definitions; no cross-project tracking.
         ResourceType::Command => None,
     }
 }
@@ -112,27 +110,24 @@ pub(super) fn find_in_other_namespaces(
 pub(super) fn format_cross_project_suggestion(
     command_prefix: &str,
     name: &str,
-    namespace: &str,
+    project: &str,
 ) -> String {
-    format!(
-        "\n\n  did you mean: {} {} --project {}?",
-        command_prefix, name, namespace
-    )
+    format!("\n\n  did you mean: {} {} --project {}?", command_prefix, name, project)
 }
 
 /// Generate a "did you mean" suggestion for a resource name.
 ///
 /// Three-phase lookup:
 /// 1. Fuzzy-match against names from runbooks on disk.
-/// 2. Fuzzy-match against names from daemon state (current namespace).
-/// 3. Cross-namespace exact match (suggests `--project`).
+/// 2. Fuzzy-match against names from daemon state (current project).
+/// 3. Cross-project exact match (suggests `--project`).
 ///
 /// The two closures let callers specify how to collect candidate names:
 /// - `collect_runbook_names()` → names from `.oj/runbooks/` (caller captures project root)
 /// - `collect_state_names(state)` → names from materialized state
 pub(super) fn suggest_for_resource(
     name: &str,
-    namespace: &str,
+    project: &str,
     command_prefix: &str,
     state: &Arc<Mutex<MaterializedState>>,
     resource_type: ResourceType,
@@ -160,9 +155,9 @@ pub(super) fn suggest_for_resource(
         }
     }
 
-    // 3. Check for wrong project (cross-namespace)
+    // 3. Check for wrong project (cross-project)
     let state = state.lock();
-    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, namespace, &state) {
+    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, project, &state) {
         return format_cross_project_suggestion(command_prefix, name, &other_ns);
     }
 
@@ -174,7 +169,7 @@ pub(super) fn suggest_for_resource(
 /// Use this variant when the state lock is already held (e.g., in query handlers).
 pub(super) fn suggest_from_candidates(
     name: &str,
-    namespace: &str,
+    project: &str,
     command_prefix: &str,
     state: &MaterializedState,
     resource_type: ResourceType,
@@ -188,7 +183,7 @@ pub(super) fn suggest_from_candidates(
         return hint;
     }
 
-    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, namespace, state) {
+    if let Some(other_ns) = find_in_other_namespaces(resource_type, name, project, state) {
         return format_cross_project_suggestion(command_prefix, name, &other_ns);
     }
 

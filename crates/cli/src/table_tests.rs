@@ -115,11 +115,7 @@ fn last_column_no_trailing_padding() {
 
 #[test]
 fn double_space_column_separator() {
-    let mut table = Table::plain(vec![
-        Column::left("A"),
-        Column::left("B"),
-        Column::left("C"),
-    ]);
+    let mut table = Table::plain(vec![Column::left("A"), Column::left("B"), Column::left("C")]);
     table.row(vec!["1".into(), "2".into(), "3".into()]);
     let out = render_to_string(&table);
     let lines: Vec<&str> = out.lines().collect();
@@ -135,11 +131,7 @@ fn muted_style_applies_ansi_when_color_enabled() {
     let out = render_to_string(&table);
 
     // Should contain ANSI escape for muted (code 240)
-    assert!(
-        out.contains("\x1b[38;5;240m"),
-        "should have muted ANSI code in: {:?}",
-        out
-    );
+    assert!(out.contains("\x1b[38;5;240m"), "should have muted ANSI code in: {:?}", out);
     assert!(out.contains("\x1b[0m"), "should have reset code");
 }
 
@@ -150,11 +142,7 @@ fn status_style_applies_ansi_when_color_enabled() {
     let out = render_to_string(&table);
 
     // "Running" → green
-    assert!(
-        out.contains("\x1b[32m"),
-        "should have green ANSI code in: {:?}",
-        out
-    );
+    assert!(out.contains("\x1b[32m"), "should have green ANSI code in: {:?}", out);
 }
 
 #[test]
@@ -163,20 +151,13 @@ fn no_ansi_when_no_color() {
     table.row(vec!["abc".into(), "Running".into()]);
     let out = render_to_string(&table);
 
-    assert!(
-        !out.contains("\x1b["),
-        "should have no ANSI codes in: {:?}",
-        out
-    );
+    assert!(!out.contains("\x1b["), "should have no ANSI codes in: {:?}", out);
 }
 
 #[test]
 fn right_aligned_non_last_column() {
-    let mut table = Table::plain(vec![
-        Column::left("NAME"),
-        Column::right("COUNT"),
-        Column::left("STATUS"),
-    ]);
+    let mut table =
+        Table::plain(vec![Column::left("NAME"), Column::right("COUNT"), Column::left("STATUS")]);
     table.row(vec!["alpha".into(), "5".into(), "ok".into()]);
     table.row(vec!["beta".into(), "123".into(), "err".into()]);
     let out = render_to_string(&table);
@@ -186,43 +167,4 @@ fn right_aligned_non_last_column() {
     assert_eq!(lines[0], "NAME   COUNT  STATUS");
     assert_eq!(lines[1], "alpha      5  ok");
     assert_eq!(lines[2], "beta     123  err");
-}
-
-#[test]
-fn should_show_project_multiple_namespaces() {
-    assert!(super::should_show_project(
-        ["alpha", "beta"].iter().copied()
-    ));
-}
-
-#[test]
-fn should_show_project_single_non_empty() {
-    assert!(super::should_show_project(["myproject"].iter().copied()));
-}
-
-#[test]
-fn should_show_project_all_empty() {
-    assert!(!super::should_show_project(["", ""].iter().copied()));
-}
-
-#[test]
-fn should_show_project_empty_iterator() {
-    assert!(!super::should_show_project(std::iter::empty()));
-}
-
-#[test]
-fn should_show_project_mixed_empty_and_non_empty() {
-    assert!(super::should_show_project(
-        ["", "myproject"].iter().copied()
-    ));
-}
-
-#[test]
-fn project_cell_non_empty() {
-    assert_eq!(super::project_cell("myproject"), "myproject");
-}
-
-#[test]
-fn project_cell_empty() {
-    assert_eq!(super::project_cell(""), "(no project)");
 }

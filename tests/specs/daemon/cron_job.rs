@@ -5,10 +5,6 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Runbook definitions
-// =============================================================================
-
 /// Multi-step job triggered by cron. Steps: prep → work → done.
 const MULTI_STEP_CRON_RUNBOOK: &str = r#"
 [cron.builder]
@@ -20,12 +16,12 @@ run = { job = "build" }
 [[job.build.step]]
 name = "prep"
 run = "echo preparing"
-on_done = "work"
+on_done = { step = "work" }
 
 [[job.build.step]]
 name = "work"
 run = "echo building"
-on_done = "done"
+on_done = { step = "done" }
 
 [[job.build.step]]
 name = "done"
@@ -71,10 +67,6 @@ name = "blocking"
 run = "sleep 30"
 "#;
 
-// =============================================================================
-// Test 1: Cron-triggered job completes all steps
-// =============================================================================
-
 /// Verifies that a multi-step job triggered by `oj cron once` runs all
 /// steps to completion (prep → work → done), not just job creation.
 #[test]
@@ -86,41 +78,22 @@ fn cron_triggered_job_completes_all_steps() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Use `cron once` to trigger immediately (no interval wait)
-    temp.oj()
-        .args(&["cron", "once", "builder"])
-        .passes()
-        .stdout_has("Job")
-        .stdout_has("started");
+    temp.oj().args(&["cron", "once", "builder"]).passes().stdout_has("Job").stdout_has("started");
 
     // Wait for the job to complete all 3 steps
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !completed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        completed,
-        "cron-triggered multi-step job should complete all steps"
-    );
+    assert!(completed, "cron-triggered multi-step job should complete all steps");
 
     // Verify job did not fail
     let list = temp.oj().args(&["job", "list"]).passes().stdout();
-    assert!(
-        !list.contains("failed"),
-        "job should not have failed, got: {}",
-        list
-    );
+    assert!(!list.contains("failed"), "job should not have failed, got: {}", list);
 }
-
-// =============================================================================
-// Test 2: Failed job doesn't stop cron from firing again
-// =============================================================================
 
 /// When a cron-triggered job fails, the cron timer should continue
 /// firing and create new jobs on subsequent ticks.
@@ -143,23 +116,13 @@ fn cron_keeps_firing_after_job_failure() {
     if !multiple_fires {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        multiple_fires,
-        "cron should keep firing after job failure, creating multiple jobs"
-    );
+    assert!(multiple_fires, "cron should keep firing after job failure, creating multiple jobs");
 
     // Cron should still be running
-    temp.oj()
-        .args(&["cron", "list"])
-        .passes()
-        .stdout_has("running");
+    temp.oj().args(&["cron", "list"]).passes().stdout_has("running");
 
     temp.oj().args(&["cron", "stop", "breaker"]).passes();
 }
-
-// =============================================================================
-// Test 3: Multiple cron-once invocations create independent jobs
-// =============================================================================
 
 /// Each `oj cron once` invocation should create a distinct job with
 /// its own lifecycle, and both should complete independently.
@@ -184,15 +147,8 @@ fn cron_creates_independent_jobs() {
     if !both_completed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        both_completed,
-        "both cron-triggered jobs should complete independently"
-    );
+    assert!(both_completed, "both cron-triggered jobs should complete independently");
 }
-
-// =============================================================================
-// Test 4: Stopping cron doesn't kill running job
-// =============================================================================
 
 /// When a cron is stopped while one of its triggered jobs is still
 /// running, the job should continue unaffected.
@@ -227,10 +183,6 @@ fn cron_stop_does_not_kill_running_job() {
     );
 }
 
-// =============================================================================
-// Test 5: Cron restart picks up runbook changes
-// =============================================================================
-
 /// After modifying the runbook and restarting the cron, `oj cron once` should
 /// use the updated job definition.
 #[test]
@@ -257,30 +209,20 @@ run = "echo updated"
     temp.file(".oj/runbooks/cron.toml", updated_runbook);
 
     // Restart to pick up the change
-    temp.oj()
-        .args(&["cron", "restart", "ticker"])
-        .passes()
-        .stdout_has("restarted");
+    temp.oj().args(&["cron", "restart", "ticker"]).passes().stdout_has("restarted");
 
     // Trigger job with the new definition
     temp.oj().args(&["cron", "once", "ticker"]).passes();
 
     // Wait for job to complete
     let completed = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !completed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        completed,
-        "job with updated runbook should complete after cron restart"
-    );
+    assert!(completed, "job with updated runbook should complete after cron restart");
 
     // Stop the cron timer
     temp.oj().args(&["cron", "stop", "ticker"]).passes();

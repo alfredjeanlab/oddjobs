@@ -6,18 +6,10 @@
 use crate::lexer::Lexer;
 use crate::token::TokenKind;
 
-// =============================================================================
-// Empty and Whitespace
-// =============================================================================
-
 lex_tests! {
     empty_input: "" => [],
     whitespace_only: "   \t  " => [],
 }
-
-// =============================================================================
-// Words
-// =============================================================================
 
 lex_tests! {
     single_word: "echo" => [TokenKind::Word("echo".into())],
@@ -49,10 +41,6 @@ span_tests! {
     single_word_span: "echo" => [(0, 4)],
     simple_words_span: "echo hello world" => [(0, 4), (5, 10), (11, 16)],
 }
-
-// =============================================================================
-// Operators
-// =============================================================================
 
 lex_tests! {
     and_operator: "cmd1 && cmd2" => [
@@ -118,10 +106,6 @@ span_tests! {
     background_operator_span: "sleep &" => [(0, 5), (6, 7)],
 }
 
-// =============================================================================
-// Newlines
-// =============================================================================
-
 lex_tests! {
     newline_separator: "cmd1\ncmd2" => [
         TokenKind::Word("cmd1".into()),
@@ -164,10 +148,6 @@ span_tests! {
     crlf_span_accuracy: "a\r\nb" => [(0, 1), (1, 3), (3, 4)],
     bare_cr_span_accuracy: "cmd1\rcmd2" => [(0, 4), (4, 5), (5, 9)],
 }
-
-// =============================================================================
-// Line Continuation (backslash-newline)
-// =============================================================================
 
 lex_tests! {
     // Between tokens: backslash-newline joins lines
@@ -291,10 +271,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Unicode
-// =============================================================================
-
 lex_tests! {
     unicode_in_words: "echo 你好" => [
         TokenKind::Word("echo".into()),
@@ -316,9 +292,6 @@ span_tests! {
     chinese_span: "你好|世界" => [(0, 6), (6, 7), (7, 13)],  // 2 chars * 3 bytes each
 }
 
-// =============================================================================
-// Comments
-// =============================================================================
 //
 // The lexer does NOT strip comments. The `#` character is not a word boundary,
 // so it becomes part of words. Comment handling is deferred to execution time
@@ -355,9 +328,6 @@ lex_tests! {
     hash_word: "#tag" => [TokenKind::Word("#tag".into())],
 }
 
-// =============================================================================
-// Tilde Expansion
-// =============================================================================
 //
 // The lexer does NOT handle tilde expansion specially. The `~` character is
 // treated as part of words. Tilde expansion is handled at execution time.
@@ -394,9 +364,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Glob Patterns
-// =============================================================================
 //
 // Glob metacharacters (*, ?, []) are NOT expanded by the lexer. They are part
 // of words. Glob expansion happens at execution time by the shell.
@@ -456,10 +423,6 @@ lex_tests! {
     double_backslash_asterisk: "\\\\*" => [TokenKind::Word("\\*".into())],
 }
 
-// =============================================================================
-// Edge Cases
-// =============================================================================
-
 lex_tests! {
     triple_ampersand: "&&&" => [TokenKind::And, TokenKind::Ampersand],
     quadruple_pipe: "||||" => [TokenKind::Or, TokenKind::Or],
@@ -470,10 +433,6 @@ span_tests! {
     triple_ampersand_span: "&&&" => [(0, 2), (2, 3)],
     quadruple_pipe_span: "||||" => [(0, 2), (2, 4)],
 }
-
-// =============================================================================
-// Mixed Input
-// =============================================================================
 
 lex_tests! {
     mixed_input: "echo hello && ls | grep foo" => [
@@ -492,14 +451,6 @@ span_tests! {
         (0, 4), (5, 10), (11, 13), (14, 16), (17, 18), (19, 23), (24, 27)
     ],
 }
-
-// =============================================================================
-// Single Character Tests
-// =============================================================================
-
-// =============================================================================
-// Grouping Tokens
-// =============================================================================
 
 lex_tests! {
     lparen: "(" => [TokenKind::LParen],

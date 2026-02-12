@@ -186,12 +186,12 @@ pub fn slugify(input: &str, max_len: usize) -> String {
 
 /// Build a job name from a template result and nonce.
 ///
-/// Slugifies the input, truncates to 28 chars, strips the namespace prefix
+/// Slugifies the input, truncates to 28 chars, strips the project prefix
 /// (if present), and appends `-{nonce}`.
-pub fn job_display_name(raw: &str, nonce: &str, namespace: &str) -> String {
+pub fn job_display_name(raw: &str, nonce: &str, project: &str) -> String {
     let slug = slugify(raw, 28);
-    let slug = if !namespace.is_empty() {
-        let prefix = format!("{}-", namespace);
+    let slug = if !project.is_empty() {
+        let prefix = format!("{}-", project);
         slug.strip_prefix(&prefix).unwrap_or(&slug)
     } else {
         &slug

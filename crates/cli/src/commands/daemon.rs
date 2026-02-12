@@ -5,10 +5,11 @@
 
 use crate::client::DaemonClient;
 use crate::client_lifecycle::daemon_stop;
-use crate::output::{display_log, OutputFormat};
+use crate::output::{display_log, format_or_json, handle_list, OutputFormat};
+use crate::table::{Column, Table};
 use anyhow::{anyhow, Result};
 use clap::{Args, Subcommand};
-use oj_core::ShortId;
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -74,11 +75,9 @@ pub async fn daemon(args: DaemonArgs, format: OutputFormat) -> Result<()> {
         Some(DaemonCommand::Stop { kill }) => stop(kill).await,
         Some(DaemonCommand::Restart { kill }) => restart(kill).await,
         Some(DaemonCommand::Status) => status(format).await,
-        Some(DaemonCommand::Logs {
-            limit,
-            no_limit,
-            follow,
-        }) => logs(limit, no_limit, follow, format).await,
+        Some(DaemonCommand::Logs { limit, no_limit, follow }) => {
+            logs(limit, no_limit, follow, format).await
+        }
         Some(DaemonCommand::Orphans { dismiss: Some(id) }) => dismiss_orphan(id, format).await,
         Some(DaemonCommand::Orphans { dismiss: None }) => orphans(format).await,
         None => {
@@ -91,45 +90,19 @@ pub async fn daemon(args: DaemonArgs, format: OutputFormat) -> Result<()> {
 }
 
 async fn version(format: OutputFormat) -> Result<()> {
-    let not_running = || match format {
-        OutputFormat::Text => {
-            println!("Daemon not running");
-            Ok(())
-        }
-        OutputFormat::Json => {
-            println!(r#"{{ "status": "not_running" }}"#);
-            Ok(())
-        }
-    };
-
     let client = match DaemonClient::connect() {
         Ok(c) => c,
-        Err(_) => return not_running(),
+        Err(_) => return print_not_running(format),
     };
 
     let version = match client.hello().await {
         Ok(v) => v,
-        Err(crate::client::ClientError::DaemonNotRunning) => return not_running(),
-        Err(crate::client::ClientError::Io(ref e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            return not_running();
-        }
+        Err(e) if e.is_not_running() => return print_not_running(format),
         Err(_) => "unknown".to_string(),
     };
 
-    match format {
-        OutputFormat::Text => println!("ojd {}", version),
-        OutputFormat::Json => {
-            let obj = serde_json::json!({ "version": version });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
-        }
-    }
-
-    Ok(())
+    let obj = serde_json::json!({ "version": version });
+    format_or_json(format, &obj, || println!("ojd {}", version))
 }
 
 async fn start(foreground: bool) -> Result<()> {
@@ -145,7 +118,7 @@ async fn start(foreground: bool) -> Result<()> {
 
     // Check if already running
     if let Ok(client) = DaemonClient::connect() {
-        if let Ok((uptime, _, _, _)) = client.status().await {
+        if let Ok((uptime, _, _)) = client.status().await {
             println!("Daemon already running (uptime: {}s)", uptime);
             return Ok(());
         }
@@ -177,9 +150,8 @@ async fn stop(kill: bool) -> Result<()> {
 
 async fn restart(kill: bool) -> Result<()> {
     // Stop the daemon if running (ignore "not running" case)
-    let was_running = daemon_stop(kill)
-        .await
-        .map_err(|e| anyhow!("Failed to stop daemon: {}", e))?;
+    let was_running =
+        daemon_stop(kill).await.map_err(|e| anyhow!("Failed to stop daemon: {}", e))?;
 
     if was_running {
         // Brief wait for the process to fully exit and release the socket.
@@ -199,90 +171,56 @@ async fn restart(kill: bool) -> Result<()> {
 }
 
 async fn status(format: OutputFormat) -> Result<()> {
-    let not_running = || match format {
-        OutputFormat::Text => {
-            println!("Daemon not running");
-            Ok(())
-        }
-        OutputFormat::Json => {
-            println!(r#"{{ "status": "not_running" }}"#);
-            Ok(())
-        }
-    };
-
     let client = match DaemonClient::connect() {
         Ok(c) => c,
-        Err(_) => return not_running(),
+        Err(_) => return print_not_running(format),
     };
 
     // Handle connection errors (socket exists but daemon not running)
-    let (uptime, jobs, sessions, orphan_count) = match client.status().await {
+    let (uptime, jobs, orphan_count) = match client.status().await {
         Ok(result) => result,
-        Err(crate::client::ClientError::DaemonNotRunning) => return not_running(),
-        Err(crate::client::ClientError::Io(ref e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            return not_running();
-        }
+        Err(e) if e.is_not_running() => return print_not_running(format),
         Err(e) => return Err(anyhow!("{}", e)),
     };
-    let version = client
-        .hello()
-        .await
-        .unwrap_or_else(|_| "unknown".to_string());
+    let version = client.hello().await.unwrap_or_else(|_| "unknown".to_string());
 
-    match format {
-        OutputFormat::Text => {
-            let uptime_str = format_uptime(uptime);
-            println!("Status: running");
-            println!("Version: {}", version);
-            println!("Uptime: {}", uptime_str);
-            println!("Jobs: {} active", jobs);
-            println!("Sessions: {} active", sessions);
-            if orphan_count > 0 {
-                println!();
-                println!(
-                    "\u{26a0} {} orphaned job(s) detected (missing from WAL/snapshot)",
-                    orphan_count
-                );
-                println!("  Run `oj daemon orphans` for details");
-            }
+    let obj = serde_json::json!({
+        "status": "running",
+        "version": version,
+        "uptime_secs": uptime,
+        "uptime": format_uptime(uptime),
+        "jobs_active": jobs,
+        "orphan_count": orphan_count,
+    });
+    format_or_json(format, &obj, || {
+        let uptime_str = format_uptime(uptime);
+        println!("Status: running");
+        println!("Version: {}", version);
+        println!("Uptime: {}", uptime_str);
+        println!("Jobs: {} active", jobs);
+        if orphan_count > 0 {
+            println!();
+            println!(
+                "\u{26a0} {} orphaned job(s) detected (missing from WAL/snapshot)",
+                orphan_count
+            );
+            println!("  Run `oj daemon orphans` for details");
         }
-        OutputFormat::Json => {
-            let obj = serde_json::json!({
-                "status": "running",
-                "version": version,
-                "uptime_secs": uptime,
-                "uptime": format_uptime(uptime),
-                "jobs_active": jobs,
-                "sessions_active": sessions,
-                "orphan_count": orphan_count,
-            });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
-        }
-    }
-
-    Ok(())
+    })
 }
 
 async fn logs(limit: usize, no_limit: bool, follow: bool, format: OutputFormat) -> Result<()> {
     let log_path = get_log_path()?;
 
     if !log_path.exists() {
-        match format {
-            OutputFormat::Text => println!("No log file found at {}", log_path.display()),
-            OutputFormat::Json => {
-                let obj = serde_json::json!({
-                    "log_path": log_path.to_string_lossy(),
-                    "lines": [],
-                });
-                println!("{}", serde_json::to_string_pretty(&obj)?);
-            }
-        }
-        return Ok(());
+        let empty: Vec<String> = vec![];
+        let obj = serde_json::json!({
+            "log_path": log_path.to_string_lossy().into_owned(),
+            "lines": empty,
+        });
+        return format_or_json(format, &obj, || {
+            println!("No log file found at {}", log_path.display())
+        });
     }
 
     // Read the last N lines (or all lines with --no-limit)
@@ -291,88 +229,63 @@ async fn logs(limit: usize, no_limit: bool, follow: bool, format: OutputFormat) 
     } else {
         read_last_lines(&log_path, limit)?
     };
-    display_log(&log_path, &content, follow, format, "daemon", "log").await
+    display_log(&log_path, &content, follow, 0, format, "daemon", "log").await?;
+    Ok(())
 }
 
 async fn orphans(format: OutputFormat) -> Result<()> {
     let client = DaemonClient::connect().map_err(|e| anyhow!("{}", e))?;
     let orphans = client.list_orphans().await.map_err(|e| anyhow!("{}", e))?;
 
-    match format {
-        OutputFormat::Text => {
-            if orphans.is_empty() {
-                println!("No orphaned jobs detected.");
-                return Ok(());
-            }
-
-            println!("Orphaned Jobs (not in recovered state):\n");
-            println!(
-                "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} LAST UPDATED",
-                "ID", "PROJECT", "KIND", "NAME", "STEP", "STATUS"
-            );
-
-            for o in &orphans {
-                let short_id = o.job_id.short(8);
-                println!(
-                    "{:<10} {:<12} {:<10} {:<20} {:<12} {:<10} {}",
-                    short_id,
-                    truncate(&o.project, 12),
-                    truncate(&o.kind, 10),
-                    truncate(&o.name, 20),
-                    truncate(&o.current_step, 12),
-                    truncate(&o.step_status.to_string(), 10),
-                    o.updated_at,
-                );
-            }
-
-            println!("\nCommands (replace <id> with an orphan ID above):");
-            println!("  oj job peek <id>              # View last tmux output");
-            println!("  oj job attach <id>            # Attach to tmux session");
-            println!("  oj job logs <id>              # View job log");
-            println!("  oj daemon orphans --dismiss <id>   # Dismiss after investigation");
-            println!("  oj job prune --orphans        # Dismiss all orphans");
+    handle_list(format, &orphans, "No orphaned jobs detected.", |items, out| {
+        let _ = writeln!(out, "Orphaned Jobs (not in recovered state):\n");
+        let mut table = Table::new(vec![
+            Column::muted("ID"),
+            Column::left("PROJECT").with_max(12),
+            Column::left("KIND").with_max(10),
+            Column::left("NAME").with_max(20),
+            Column::left("STEP").with_max(12),
+            Column::status("STATUS"),
+            Column::left("LAST UPDATED"),
+        ]);
+        for o in items {
+            table.row(vec![
+                oj_core::short(&o.job_id, 8).to_string(),
+                o.project.clone(),
+                o.kind.clone(),
+                o.name.clone(),
+                o.current_step.clone(),
+                o.step_status.to_string(),
+                o.updated_at.clone(),
+            ]);
         }
-        OutputFormat::Json => {
-            let obj = serde_json::json!({ "orphans": orphans });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
-        }
-    }
+        table.render(out);
 
-    Ok(())
+        let _ = writeln!(out, "\nCommands (replace <id> with an orphan ID above):");
+        let _ = writeln!(out, "  oj job peek <id>              # View agent output");
+        let _ = writeln!(out, "  oj job attach <id>            # Attach to agent session");
+        let _ = writeln!(out, "  oj job logs <id>              # View job log");
+        let _ = writeln!(out, "  oj daemon orphans --dismiss <id>   # Dismiss after investigation");
+        let _ = writeln!(out, "  oj job prune --orphans        # Dismiss all orphans");
+    })
 }
 
 async fn dismiss_orphan(id: String, format: OutputFormat) -> Result<()> {
     let client = DaemonClient::connect().map_err(|e| anyhow!("{}", e))?;
-    client
-        .dismiss_orphan(&id)
-        .await
-        .map_err(|e| anyhow!("{}", e))?;
+    client.dismiss_orphan(&id).await.map_err(|e| anyhow!("{}", e))?;
 
-    match format {
-        OutputFormat::Text => println!("Orphan dismissed: {}", id),
-        OutputFormat::Json => {
-            let obj = serde_json::json!({ "dismissed": id });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
-        }
-    }
-
-    Ok(())
+    let obj = serde_json::json!({ "dismissed": &id });
+    format_or_json(format, &obj, || println!("Orphan dismissed: {}", id))
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}...", &s[..max.saturating_sub(3)])
-    } else {
-        s.to_string()
-    }
+fn print_not_running(format: OutputFormat) -> Result<()> {
+    let obj = serde_json::json!({ "status": "not_running" });
+    format_or_json(format, &obj, || println!("Daemon not running"))
 }
 
 fn read_last_lines(path: &std::path::Path, n: usize) -> Result<String> {
-    use std::io::{BufRead, BufReader};
     let file = std::fs::File::open(path)?;
-    let lines: Vec<String> = BufReader::new(file)
-        .lines()
-        .collect::<std::io::Result<_>>()?;
+    let lines: Vec<String> = BufReader::new(file).lines().collect::<std::io::Result<_>>()?;
     let start = lines.len().saturating_sub(n);
     Ok(lines[start..].join("\n"))
 }
@@ -395,7 +308,7 @@ fn find_ojd_binary() -> Result<PathBuf> {
     let current_exe = std::env::current_exe().ok();
 
     // Only use CARGO_MANIFEST_DIR if the CLI itself is a debug build.
-    // This prevents version mismatches when agents run in tmux sessions that
+    // This prevents version mismatches when agents run in coop sessions that
     // inherit CARGO_MANIFEST_DIR from a dev environment but use release builds.
     let is_debug_build = current_exe
         .as_ref()

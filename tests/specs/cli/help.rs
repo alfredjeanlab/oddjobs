@@ -31,16 +31,12 @@ fn oj_daemon_help_shows_subcommands() {
 
 #[test]
 fn oj_job_help_shows_subcommands() {
-    cli()
-        .args(&["job", "--help"])
-        .passes()
-        .stdout_has("list")
-        .stdout_has("show");
+    cli().args(&["job", "--help"]).passes().stdout_has("list").stdout_has("show");
 }
 
 #[test]
 fn oj_version_shows_version() {
-    cli().args(&["--version"]).passes().stdout_has("0.1");
+    cli().args(&["--version"]).passes().stdout_has("0.2");
 }
 
 /// `oj runbook info` handles library files with const directives without crashing.
@@ -96,9 +92,5 @@ import "doclib" {}
     );
 
     // The listing should show the library's description for the imported command
-    temp.oj()
-        .args(&["run"])
-        .passes()
-        .stdout_has("test")
-        .stdout_has("Run automated tests");
+    temp.oj().args(&["run"]).passes().stdout_has("test").stdout_has("Run automated tests");
 }

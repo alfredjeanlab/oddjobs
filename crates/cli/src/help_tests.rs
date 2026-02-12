@@ -9,10 +9,6 @@ use super::*;
 use crate::color::codes::{CONTEXT_START, HEADER_START, LITERAL_START, RESET};
 use crate::Commands;
 
-// ============================================================================
-// Exhaustiveness Tests
-// ============================================================================
-
 /// Every subcommand registered in clap must appear in the help sections.
 /// If a new subcommand is added to `Commands` but not to `help::commands()`,
 /// this test fails with a clear message.
@@ -49,7 +45,6 @@ fn all_commands_assigned_to_section() {
             Commands::Attach { .. } => "Actions",
             Commands::Job(_) => "Resources",
             Commands::Agent(_) => "Resources",
-            Commands::Session(_) => "Resources",
             Commands::Workspace(_) => "Resources",
             Commands::Queue(_) => "Resources",
             Commands::Worker(_) => "Resources",
@@ -57,127 +52,65 @@ fn all_commands_assigned_to_section() {
             Commands::Decision(_) => "Resources",
             Commands::Project(_) => "Resources",
             Commands::Runbook(_) => "Resources",
-            Commands::Env(_) => "System",
             Commands::Logs { .. } => "System",
-            Commands::Emit(_) => "System",
             Commands::Suspend { .. } => "Actions",
             Commands::Daemon(_) => "System",
         }
     }
 }
 
-// ============================================================================
-// Plain Text Tests
-// ============================================================================
-
 #[test]
 fn commands_returns_plain_text() {
     let result = commands();
-    assert!(
-        !result.contains("\x1b["),
-        "commands() should not contain ANSI codes"
-    );
+    assert!(!result.contains("\x1b["), "commands() should not contain ANSI codes");
 }
 
 #[test]
 fn template_returns_plain_text() {
     let result = template();
-    assert!(
-        !result.contains("\x1b["),
-        "template() should not contain ANSI codes"
-    );
+    assert!(!result.contains("\x1b["), "template() should not contain ANSI codes");
 }
 
 #[test]
 fn after_help_returns_plain_text() {
     let result = after_help();
-    assert!(
-        !result.contains("\x1b["),
-        "after_help() should not contain ANSI codes"
-    );
+    assert!(!result.contains("\x1b["), "after_help() should not contain ANSI codes");
 }
-
-// ============================================================================
-// Section Content Tests
-// ============================================================================
 
 #[test]
 fn commands_has_actions_section() {
     let result = commands();
     assert!(result.contains("Actions:"), "Should have Actions section");
     assert!(result.contains("  run "), "Actions should contain run");
-    assert!(
-        result.contains("  cancel "),
-        "Actions should contain cancel"
-    );
-    assert!(
-        result.contains("  resume "),
-        "Actions should contain resume"
-    );
-    assert!(
-        result.contains("  status "),
-        "Actions should contain status"
-    );
+    assert!(result.contains("  cancel "), "Actions should contain cancel");
+    assert!(result.contains("  resume "), "Actions should contain resume");
+    assert!(result.contains("  status "), "Actions should contain status");
     assert!(result.contains("  show "), "Actions should contain show");
     assert!(result.contains("  peek "), "Actions should contain peek");
-    assert!(
-        result.contains("  attach "),
-        "Actions should contain attach"
-    );
+    assert!(result.contains("  attach "), "Actions should contain attach");
 }
 
 #[test]
 fn commands_has_resources_section() {
     let result = commands();
-    assert!(
-        result.contains("Resources:"),
-        "Should have Resources section"
-    );
+    assert!(result.contains("Resources:"), "Should have Resources section");
     assert!(result.contains("  job "), "Resources should contain job");
-    assert!(
-        result.contains("  agent "),
-        "Resources should contain agent"
-    );
-    assert!(
-        result.contains("  session "),
-        "Resources should contain session"
-    );
-    assert!(
-        result.contains("  workspace "),
-        "Resources should contain workspace"
-    );
-    assert!(
-        result.contains("  queue "),
-        "Resources should contain queue"
-    );
-    assert!(
-        result.contains("  worker "),
-        "Resources should contain worker"
-    );
+    assert!(result.contains("  agent "), "Resources should contain agent");
+    assert!(result.contains("  workspace "), "Resources should contain workspace");
+    assert!(result.contains("  queue "), "Resources should contain queue");
+    assert!(result.contains("  worker "), "Resources should contain worker");
     assert!(result.contains("  cron "), "Resources should contain cron");
-    assert!(
-        result.contains("  decision "),
-        "Resources should contain decision"
-    );
-    assert!(
-        result.contains("  project "),
-        "Resources should contain project"
-    );
+    assert!(result.contains("  decision "), "Resources should contain decision");
+    assert!(result.contains("  project "), "Resources should contain project");
 }
 
 #[test]
 fn commands_has_system_section() {
     let result = commands();
     assert!(result.contains("System:"), "Should have System section");
-    assert!(result.contains("  env "), "System should contain env");
     assert!(result.contains("  logs "), "System should contain logs");
-    assert!(result.contains("  emit "), "System should contain emit");
     assert!(result.contains("  daemon "), "System should contain daemon");
 }
-
-// ============================================================================
-// Colorization Tests
-// ============================================================================
 
 #[test]
 fn colorize_help_applies_header_color() {
@@ -245,10 +178,7 @@ fn colorize_help_applies_context_to_defaults() {
         result
     );
     assert!(
-        result.contains(&format!(
-            "{}[possible values: text, json]{}",
-            CONTEXT_START, RESET
-        )),
+        result.contains(&format!("{}[possible values: text, json]{}", CONTEXT_START, RESET)),
         "[possible values: ...] should be CONTEXT colored in:\n{}",
         result
     );
@@ -290,10 +220,6 @@ Options:
         "--output flag should be colored"
     );
 }
-
-// ============================================================================
-// Runbook Help Colorization Tests
-// ============================================================================
 
 /// Runbook-style help text (produced by `CommandDef::format_help`) should be
 /// colorized the same way as clap-based help when passed through `colorize_help`.
@@ -357,10 +283,6 @@ Options:
     );
 }
 
-// ============================================================================
-// Format Help Tests
-// ============================================================================
-
 #[test]
 fn format_help_produces_output() {
     let help = format_help(crate::cli_command());
@@ -376,10 +298,6 @@ fn format_help_ends_with_newline() {
     let help = format_help(crate::cli_command());
     assert!(help.ends_with('\n'), "Help should end with newline");
 }
-
-// ============================================================================
-// Subcommand Help Tests
-// ============================================================================
 
 /// Subcommand help must go through format_help (which forces Styles::plain()
 /// before write_help, then applies colorize_help) rather than using clap's
@@ -409,10 +327,7 @@ fn subcommand_help_contains_expected_content() {
     let cmd = crate::cli_command();
     let cron = crate::find_subcommand(cmd, &["cron"]);
     let help = format_help(cron);
-    assert!(
-        help.contains("Usage:"),
-        "cron help should contain Usage line, got:\n{help}"
-    );
+    assert!(help.contains("Usage:"), "cron help should contain Usage line, got:\n{help}");
     // Cron has subcommands (list, start, stop, etc.)
     assert!(
         help.contains("list") || help.contains("List"),

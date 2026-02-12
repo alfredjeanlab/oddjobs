@@ -28,34 +28,27 @@ fn find_workers_for_queue<'a>(runbook: &'a oj_runbook::Runbook, queue_name: &str
 /// Wake a running worker by emitting a WorkerWake event.
 fn wake_running_worker(
     ctx: &ListenCtx,
-    namespace: &str,
-    worker_name: &str,
-    queue_name: &str,
+    project: &str,
+    worker: &str,
+    queue: &str,
 ) -> Result<(), ConnectionError> {
-    tracing::info!(
-        queue = queue_name,
-        worker = worker_name,
-        "waking running worker on queue push"
-    );
+    tracing::info!(queue = queue, worker = worker, "waking running worker on queue push");
     emit(
         &ctx.event_bus,
-        Event::WorkerWake {
-            worker_name: worker_name.to_string(),
-            namespace: namespace.to_string(),
-        },
+        Event::WorkerWake { worker: worker.to_string(), project: project.to_string() },
     )
 }
 
 /// Auto-start a stopped worker by emitting RunbookLoaded + WorkerStarted.
 fn auto_start_worker(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     runbook: &oj_runbook::Runbook,
-    worker_name: &str,
-    queue_name: &str,
+    worker: &str,
+    queue: &str,
 ) -> Result<(), ConnectionError> {
-    let Some(worker_def) = runbook.get_worker(worker_name) else {
+    let Some(worker_def) = runbook.get_worker(worker) else {
         return Ok(());
     };
     let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, runbook)?;
@@ -63,20 +56,16 @@ fn auto_start_worker(
     emit(
         &ctx.event_bus,
         Event::WorkerStarted {
-            worker_name: worker_name.to_string(),
-            project_root: project_root.to_path_buf(),
+            worker: worker.to_string(),
+            project_path: project_path.to_path_buf(),
             runbook_hash,
-            queue_name: worker_def.source.queue.clone(),
+            queue: worker_def.source.queue.clone(),
             concurrency: worker_def.concurrency,
-            namespace: namespace.to_string(),
+            project: project.to_string(),
         },
     )?;
 
-    tracing::info!(
-        queue = queue_name,
-        worker = worker_name,
-        "auto-started worker on queue push"
-    );
+    tracing::info!(queue = queue, worker = worker, "auto-started worker on queue push");
     Ok(())
 }
 
@@ -88,28 +77,24 @@ fn auto_start_worker(
 /// the worker on queue push.
 pub(super) fn wake_attached_workers(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     queue_name: &str,
     runbook: &oj_runbook::Runbook,
 ) -> Result<(), ConnectionError> {
     let worker_names = find_workers_for_queue(runbook, queue_name);
 
     for name in &worker_names {
-        let scoped = scoped_name(namespace, name);
+        let scoped = scoped_name(project, name);
         let is_running = {
             let state = ctx.state.lock();
-            state
-                .workers
-                .get(&scoped)
-                .map(|r| r.status == "running")
-                .unwrap_or(false)
+            state.workers.get(&scoped).map(|r| r.status == "running").unwrap_or(false)
         };
 
         if is_running {
-            wake_running_worker(ctx, namespace, name, queue_name)?;
+            wake_running_worker(ctx, project, name, queue_name)?;
         } else {
-            auto_start_worker(ctx, project_root, namespace, runbook, name, queue_name)?;
+            auto_start_worker(ctx, project_path, project, runbook, name, queue_name)?;
         }
     }
 
@@ -126,12 +111,12 @@ pub(super) fn wake_attached_workers(
 /// Emit an event and then wake attached workers.
 pub(super) fn emit_and_wake_workers(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     queue_name: &str,
     runbook: &oj_runbook::Runbook,
     event: Event,
 ) -> Result<(), ConnectionError> {
     emit(&ctx.event_bus, event)?;
-    wake_attached_workers(ctx, project_root, namespace, queue_name, runbook)
+    wake_attached_workers(ctx, project_path, project, queue_name, runbook)
 }

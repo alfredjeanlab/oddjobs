@@ -17,7 +17,8 @@ use crate::daemon_process::{
 use oj_daemon::protocol::{self, ProtocolError};
 use oj_daemon::{Request, Response};
 use thiserror::Error;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::{TcpStream, UnixStream};
 
 #[path = "client_queries.rs"]
 mod queries;
@@ -25,15 +26,13 @@ pub use queries::{QueuePushResult, QueueRetryResult, RunCommandResult, StartResu
 
 /// Client semantics for CLI command dispatch.
 ///
-/// Each command variant knows whether it is an action (mutates state),
-/// a query (reads state), or a signal (agent-initiated, context-dependent).
+/// Each command variant knows whether it is an action (mutates state)
+/// or a query (reads state).
 pub enum ClientKind {
     /// User-initiated mutations: auto-start daemon, max 1 restart.
     Action,
     /// Read-only queries: connect only, no restart.
     Query,
-    /// Agent-initiated signals: connect only, no restart.
-    Signal,
 }
 
 // Timeout configuration (env vars in milliseconds, via crate::env)
@@ -96,6 +95,20 @@ pub enum ClientError {
     NoStateDir,
 }
 
+impl ClientError {
+    /// Returns true when the error indicates the daemon is not reachable.
+    pub fn is_not_running(&self) -> bool {
+        match self {
+            Self::DaemonNotRunning => true,
+            Self::Io(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+            ),
+            _ => false,
+        }
+    }
+}
+
 /// Result of a bulk cancel operation
 pub struct CancelResult {
     pub cancelled: Vec<String>,
@@ -110,9 +123,25 @@ pub struct SuspendResult {
     pub not_found: Vec<String>,
 }
 
+/// Result of an attach request — either local direct or remote proxy.
+pub enum AttachResult {
+    /// Agent is local — attach directly via socket path.
+    Local { socket_path: String },
+    /// Agent is remote — daemon is proxying bytes through these streams.
+    Remote { reader: Box<dyn AsyncRead + Unpin + Send>, writer: Box<dyn AsyncWrite + Unpin + Send> },
+}
+
+/// Transport configuration for the daemon client.
+enum Transport {
+    /// Local Unix socket (default).
+    Unix(PathBuf),
+    /// Remote TCP connection (when `OJ_DAEMON_URL` is set).
+    Tcp(String),
+}
+
 /// Daemon client
 pub struct DaemonClient {
-    socket_path: PathBuf,
+    transport: Transport,
 }
 
 impl DaemonClient {
@@ -121,6 +150,10 @@ impl DaemonClient {
     /// Action commands mutate state and are user-initiated (run, resume, cancel, etc.).
     /// They should auto-start the daemon but limit restarts to prevent infinite loops.
     pub fn for_action() -> Result<Self, ClientError> {
+        // Remote daemon: no auto-start, just connect
+        if let Some(url) = crate::env::daemon_url() {
+            return Self::connect_tcp(&url);
+        }
         Self::connect_or_start_once()
     }
 
@@ -132,21 +165,11 @@ impl DaemonClient {
         Self::connect()
     }
 
-    /// For signal commands - connect only, no restart
-    ///
-    /// Signal commands are operational, often agent-initiated (emit agent:signal).
-    /// Restarting the daemon would lose the agent context, causing failures.
-    /// This is a semantic alias for `for_query()` to document intent.
-    pub fn for_signal() -> Result<Self, ClientError> {
-        Self::connect()
-    }
-
     /// Create a client with the specified semantics.
     pub fn for_kind(kind: ClientKind) -> Result<Self, ClientError> {
         match kind {
             ClientKind::Action => Self::for_action(),
             ClientKind::Query => Self::for_query(),
-            ClientKind::Signal => Self::for_signal(),
         }
     }
 
@@ -180,12 +203,15 @@ impl DaemonClient {
         // Now connect or start
         match Self::connect() {
             Ok(client) => {
-                if probe_socket(&client.socket_path) {
-                    Ok(client)
-                } else {
+                if let Transport::Unix(ref path) = client.transport {
+                    if probe_socket(path) {
+                        return Ok(client);
+                    }
                     cleanup_stale_socket()?;
                     let child = start_daemon_background()?;
                     Self::connect_with_retry(timeout_connect(), child)
+                } else {
+                    Ok(client)
                 }
             }
             Err(ClientError::DaemonNotRunning) => {
@@ -198,6 +224,11 @@ impl DaemonClient {
 
     /// Connect to daemon, auto-starting if not running
     pub fn connect_or_start() -> Result<Self, ClientError> {
+        // Remote daemon: no auto-start
+        if let Some(url) = crate::env::daemon_url() {
+            return Self::connect_tcp(&url);
+        }
+
         // Check version file before connecting - restart daemon if version mismatch
         let daemon_dir = daemon_dir()?;
         let version_path = daemon_dir.join("daemon.version");
@@ -220,13 +251,16 @@ impl DaemonClient {
             Ok(client) => {
                 // Verify the socket is actually accepting connections
                 // (daemon may have crashed, leaving a stale socket file)
-                if probe_socket(&client.socket_path) {
-                    Ok(client)
-                } else {
+                if let Transport::Unix(ref path) = client.transport {
+                    if probe_socket(path) {
+                        return Ok(client);
+                    }
                     // Stale socket - clean up and start fresh
                     cleanup_stale_socket()?;
                     let child = start_daemon_background()?;
                     Self::connect_with_retry(timeout_connect(), child)
+                } else {
+                    Ok(client)
                 }
             }
             Err(ClientError::DaemonNotRunning) => {
@@ -241,6 +275,11 @@ impl DaemonClient {
 
     /// Connect to existing daemon (no auto-start)
     pub fn connect() -> Result<Self, ClientError> {
+        // Check for remote daemon URL first
+        if let Some(url) = crate::env::daemon_url() {
+            return Self::connect_tcp(&url);
+        }
+
         let socket_path = daemon_socket()?;
 
         if !socket_path.exists() {
@@ -249,7 +288,18 @@ impl DaemonClient {
             return Err(err);
         }
 
-        Ok(Self { socket_path })
+        Ok(Self { transport: Transport::Unix(socket_path) })
+    }
+
+    /// Connect to a remote daemon via TCP.
+    fn connect_tcp(url: &str) -> Result<Self, ClientError> {
+        // Parse tcp://host:port format
+        let addr = url.strip_prefix("tcp://").ok_or_else(|| {
+            ClientError::Rejected(format!(
+                "invalid OJ_DAEMON_URL: {url} (expected tcp://host:port)"
+            ))
+        })?;
+        Ok(Self { transport: Transport::Tcp(addr.to_string()) })
     }
 
     fn connect_with_retry(
@@ -271,10 +321,7 @@ impl DaemonClient {
                         std::thread::sleep(poll_interval());
                     }
                     // No error found in log, return generic failure
-                    return Err(ClientError::DaemonStartFailed(format!(
-                        "exited with {}",
-                        status
-                    )));
+                    return Err(ClientError::DaemonStartFailed(format!("exited with {}", status)));
                 }
                 Ok(None) => {
                     // Still running, try to connect
@@ -304,52 +351,28 @@ impl DaemonClient {
         read_timeout: Duration,
         write_timeout: Duration,
     ) -> Result<Response, ClientError> {
-        let stream = UnixStream::connect(&self.socket_path).await?;
-        let (mut reader, mut writer) = stream.into_split();
-
-        // Encode and send request with write timeout
-        let data = protocol::encode(request)?;
-        tokio::time::timeout(write_timeout, protocol::write_message(&mut writer, &data))
-            .await
-            .map_err(|_| ProtocolError::Timeout)??;
-
-        // Read response with read timeout
-        let response_bytes =
-            tokio::time::timeout(read_timeout, protocol::read_message(&mut reader))
-                .await
-                .map_err(|_| ProtocolError::Timeout)??;
-
-        let response: Response = protocol::decode(&response_bytes)?;
-        Ok(response)
+        match &self.transport {
+            Transport::Unix(path) => {
+                let stream = UnixStream::connect(path).await?;
+                let (mut reader, mut writer) = stream.into_split();
+                send_on_stream(&mut reader, &mut writer, request, read_timeout, write_timeout).await
+            }
+            Transport::Tcp(addr) => {
+                let stream = TcpStream::connect(addr).await?;
+                let (mut reader, mut writer) = stream.into_split();
+                send_on_stream(&mut reader, &mut writer, request, read_timeout, write_timeout).await
+            }
+        }
     }
 
     /// Send a request and receive a response
     pub async fn send(&self, request: &Request) -> Result<Response, ClientError> {
-        match self
-            .send_with_timeout(request, timeout_ipc(), timeout_ipc())
-            .await
-        {
+        match self.send_with_timeout(request, timeout_ipc(), timeout_ipc()).await {
             Ok(response) => Ok(response),
             Err(e) => {
                 log_connection_error(&e);
                 Err(e)
             }
-        }
-    }
-
-    /// Emit an event to the daemon. If the connection fails (e.g., daemon
-    /// socket is stale), reconnects and retries once with signal semantics
-    /// (no daemon restart, as that would lose agent context).
-    pub async fn emit_event(&self, event: oj_core::Event) -> Result<(), ClientError> {
-        let request = Request::Event { event };
-        match self.send_simple(&request).await {
-            Ok(()) => Ok(()),
-            Err(ClientError::Io(_)) | Err(ClientError::Protocol(_)) => {
-                // Connection failed - try to reconnect with signal semantics (no restart)
-                let new_client = DaemonClient::for_signal()?;
-                new_client.send_simple(&request).await
-            }
-            Err(e) => Err(e),
         }
     }
 
@@ -368,11 +391,103 @@ impl DaemonClient {
             _ => Err(ClientError::UnexpectedResponse),
         }
     }
+
+    /// Open an attach connection to an agent via the daemon.
+    ///
+    /// Sends `AgentAttach` and reads the daemon's response:
+    /// - `AgentAttachLocal` → returns `AttachResult::Local` with socket path
+    /// - `AgentAttachReady` → returns `AttachResult::Remote` with raw proxy streams
+    pub async fn open_attach(&self, agent_id: &str) -> Result<AttachResult, ClientError> {
+        let request = Request::AgentAttach {
+            id: agent_id.to_string(),
+            token: std::env::var("OJ_AUTH_TOKEN").ok(),
+        };
+
+        match &self.transport {
+            Transport::Unix(path) => {
+                let stream = UnixStream::connect(path).await?;
+                let (mut reader, mut writer) = stream.into_split();
+                let response = Self::attach_handshake(&request, &mut reader, &mut writer).await?;
+                Self::interpret_attach(response, reader, writer)
+            }
+            Transport::Tcp(addr) => {
+                let stream = TcpStream::connect(addr).await?;
+                let (mut reader, mut writer) = stream.into_split();
+                let response = Self::attach_handshake(&request, &mut reader, &mut writer).await?;
+                Self::interpret_attach(response, reader, writer)
+            }
+        }
+    }
+
+    /// Send attach handshake and return the raw response.
+    async fn attach_handshake<R, W>(
+        request: &Request,
+        reader: &mut R,
+        writer: &mut W,
+    ) -> Result<Response, ClientError>
+    where
+        R: tokio::io::AsyncReadExt + Unpin,
+        W: tokio::io::AsyncWriteExt + Unpin,
+    {
+        let data = protocol::encode(request)?;
+        tokio::time::timeout(timeout_ipc(), protocol::write_message(writer, &data))
+            .await
+            .map_err(|_| ProtocolError::Timeout)??;
+
+        let response_bytes = tokio::time::timeout(timeout_ipc(), protocol::read_message(reader))
+            .await
+            .map_err(|_| ProtocolError::Timeout)??;
+        Ok(protocol::decode(&response_bytes)?)
+    }
+
+    /// Interpret attach response and wrap streams if needed.
+    fn interpret_attach<R, W>(
+        response: Response,
+        reader: R,
+        writer: W,
+    ) -> Result<AttachResult, ClientError>
+    where
+        R: AsyncRead + Unpin + Send + 'static,
+        W: AsyncWrite + Unpin + Send + 'static,
+    {
+        match response {
+            Response::AgentAttachLocal { socket_path, .. } => {
+                Ok(AttachResult::Local { socket_path })
+            }
+            Response::AgentAttachReady { .. } => {
+                Ok(AttachResult::Remote { reader: Box::new(reader), writer: Box::new(writer) })
+            }
+            Response::Error { message } => Err(ClientError::Rejected(message)),
+            _ => Err(ClientError::UnexpectedResponse),
+        }
+    }
 }
 
-/// Response from agent signal query
-pub struct AgentSignalResponse {
-    pub signaled: bool,
+/// Send a request and read a response on a generic stream.
+async fn send_on_stream<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    request: &Request,
+    read_timeout: Duration,
+    write_timeout: Duration,
+) -> Result<Response, ClientError>
+where
+    R: tokio::io::AsyncReadExt + Unpin,
+    W: tokio::io::AsyncWriteExt + Unpin,
+{
+    // Encode and send request with write timeout
+    let data = protocol::encode(request)?;
+    tokio::time::timeout(write_timeout, protocol::write_message(writer, &data))
+        .await
+        .map_err(|_| ProtocolError::Timeout)??;
+
+    // Read response with read timeout
+    let response_bytes = tokio::time::timeout(read_timeout, protocol::read_message(reader))
+        .await
+        .map_err(|_| ProtocolError::Timeout)??;
+
+    let response: Response = protocol::decode(&response_bytes)?;
+    Ok(response)
 }
 
 #[cfg(test)]

@@ -37,31 +37,20 @@ fn parse_key_value_missing_equals() {
 fn build_data_map_vars_only() {
     let result = build_data_map(
         None,
-        vec![
-            ("branch".into(), "fix-123".into()),
-            ("title".into(), "fix: something".into()),
-        ],
+        vec![("branch".into(), "fix-123".into()), ("title".into(), "fix: something".into())],
     )
     .unwrap();
 
-    assert_eq!(
-        result,
-        json!({"branch": "fix-123", "title": "fix: something"})
-    );
+    assert_eq!(result, json!({"branch": "fix-123", "title": "fix: something"}));
 }
 
 #[test]
 fn build_data_map_json_only() {
-    let result = build_data_map(
-        Some(r#"{"branch": "fix-123", "title": "fix: something"}"#.into()),
-        vec![],
-    )
-    .unwrap();
+    let result =
+        build_data_map(Some(r#"{"branch": "fix-123", "title": "fix: something"}"#.into()), vec![])
+            .unwrap();
 
-    assert_eq!(
-        result,
-        json!({"branch": "fix-123", "title": "fix: something"})
-    );
+    assert_eq!(result, json!({"branch": "fix-123", "title": "fix: something"}));
 }
 
 #[test]

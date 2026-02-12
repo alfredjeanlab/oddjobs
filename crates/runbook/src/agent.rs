@@ -3,58 +3,12 @@
 
 //! Agent definitions
 
+use crate::container::ContainerConfig;
+use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
-
-/// Valid tmux status bar colors
-pub const VALID_SESSION_COLORS: &[&str] =
-    &["red", "green", "blue", "cyan", "magenta", "yellow", "white"];
-
-/// Status bar text configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct SessionStatusConfig {
-    pub left: Option<String>,
-    pub right: Option<String>,
-}
-
-/// Tmux-specific session configuration
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct TmuxSessionConfig {
-    /// Status bar background color (red, green, blue, cyan, magenta, yellow, white)
-    #[serde(default)]
-    pub color: Option<String>,
-    /// Window title string
-    #[serde(default)]
-    pub title: Option<String>,
-    /// Status bar left/right text
-    #[serde(default)]
-    pub status: Option<SessionStatusConfig>,
-}
-
-impl TmuxSessionConfig {
-    /// Interpolate all string fields with the provided variables
-    pub fn interpolate(&self, vars: &HashMap<String, String>) -> Self {
-        Self {
-            color: self.color.clone(), // Color is validated at parse-time, no interpolation needed
-            title: self
-                .title
-                .as_ref()
-                .map(|t| crate::template::interpolate(t, vars)),
-            status: self.status.as_ref().map(|s| SessionStatusConfig {
-                left: s
-                    .left
-                    .as_ref()
-                    .map(|l| crate::template::interpolate(l, vars)),
-                right: s
-                    .right
-                    .as_ref()
-                    .map(|r| crate::template::interpolate(r, vars)),
-            }),
-        }
-    }
-}
 
 /// Valid SessionStart source values for matcher filtering.
 pub const VALID_PRIME_SOURCES: &[&str] = &["startup", "resume", "clear", "compact"];
@@ -128,10 +82,9 @@ impl PrimeDef {
     /// For `Script`/`Commands`, returns a single-entry map with empty string key (all sources).
     pub fn render_per_source(&self, vars: &HashMap<String, String>) -> HashMap<String, String> {
         match self {
-            PrimeDef::PerSource(map) => map
-                .iter()
-                .map(|(source, def)| (source.clone(), def.render(vars)))
-                .collect(),
+            PrimeDef::PerSource(map) => {
+                map.iter().map(|(source, def)| (source.clone(), def.render(vars))).collect()
+            }
             other => {
                 let mut m = HashMap::new();
                 m.insert(String::new(), other.render(vars));
@@ -170,8 +123,6 @@ impl<'de> Deserialize<'de> for Attempts {
     where
         D: Deserializer<'de>,
     {
-        use serde::de::Error;
-
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum AttemptsHelper {
@@ -207,6 +158,10 @@ pub struct AgentDef {
     /// Agent name (set from table key, not from TOML content)
     #[serde(default)]
     pub name: String,
+    /// Container configuration for running this agent in a container.
+    /// Short form: `container = "image"`, block form: `container { image = "..." }`.
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
     /// Command to run (e.g., "claude --print")
     pub run: String,
     /// Prompt template for the agent
@@ -225,9 +180,10 @@ pub struct AgentDef {
     #[serde(default)]
     pub prime: Option<PrimeDef>,
 
-    /// What to do when Claude is waiting for inpu
+    /// What to do when Claude is waiting for input.
+    /// None = context-dependent default (done for job agents, escalate for standalone).
     #[serde(default)]
-    pub on_idle: ActionConfig,
+    pub on_idle: Option<ActionConfig>,
 
     /// What to do when agent process dies
     #[serde(default = "default_on_dead")]
@@ -241,11 +197,6 @@ pub struct AgentDef {
     #[serde(default = "default_on_error")]
     pub on_error: ErrorActionConfig,
 
-    /// What to do when agent tries to exit (Stop hook).
-    /// None = context-dependent default (job: signal, standalone: escalate)
-    #[serde(default)]
-    pub on_stop: Option<StopActionConfig>,
-
     /// Maximum concurrent instances of this agent. None = unlimited.
     #[serde(default)]
     pub max_concurrency: Option<u32>,
@@ -253,11 +204,6 @@ pub struct AgentDef {
     /// Notification messages for agent lifecycle events
     #[serde(default)]
     pub notify: crate::job::NotifyConfig,
-
-    /// Adapter-specific session configuration (e.g., session "tmux" { ... })
-    /// Keyed by provider name. Unknown providers are ignored.
-    #[serde(default)]
-    pub session: HashMap<String, TmuxSessionConfig>,
 }
 
 /// Action configuration - simple or with options
@@ -382,7 +328,7 @@ pub enum AgentAction {
     #[default]
     Escalate, // Notify human
     Gate,   // Run a shell command; advance if it passes, escalate if it fails
-    Ask,    // Nudge agent to use AskUserQuestion with a specific topic
+    Auto,   // Delegate to coop's auto mode (self-determination UI)
 }
 
 impl AgentAction {
@@ -395,7 +341,7 @@ impl AgentAction {
             AgentAction::Resume => "resume",
             AgentAction::Escalate => "escalate",
             AgentAction::Gate => "gate",
-            AgentAction::Ask => "ask",
+            AgentAction::Auto => "auto",
         }
     }
 
@@ -410,7 +356,7 @@ impl AgentAction {
                     | AgentAction::Escalate
                     | AgentAction::Fail
                     | AgentAction::Gate
-                    | AgentAction::Ask
+                    | AgentAction::Auto
             ),
             // on_dead: agent exited, can't nudge a dead process
             ActionTrigger::OnDead => matches!(
@@ -440,17 +386,17 @@ impl AgentAction {
             (AgentAction::Resume, ActionTrigger::OnIdle) => {
                 "resume is for re-spawning after exit; agent is still running"
             }
-            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnDead) => {
-                "ask/nudge sends a message to a running agent; agent has exited"
+            (AgentAction::Nudge, ActionTrigger::OnDead) => {
+                "nudge sends a message to a running agent; agent has exited"
             }
-            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnError) => {
-                "ask/nudge sends a message to a running agent; use escalate instead"
+            (AgentAction::Nudge, ActionTrigger::OnError) => {
+                "nudge sends a message to a running agent; use escalate instead"
             }
             (AgentAction::Done, ActionTrigger::OnError) => {
                 "done marks success; API errors are not success states"
             }
-            (AgentAction::Nudge | AgentAction::Ask, ActionTrigger::OnPrompt) => {
-                "ask/nudge sends a message; agent is at a prompt, not idle"
+            (AgentAction::Nudge, ActionTrigger::OnPrompt) => {
+                "nudge sends a message; agent is at a prompt, not idle"
             }
             (AgentAction::Resume, ActionTrigger::OnPrompt) => {
                 "resume is for re-spawning after exit; agent is still running"
@@ -538,66 +484,23 @@ fn default_on_error() -> ErrorActionConfig {
     ErrorActionConfig::default()
 }
 
-/// What to do when the agent's Stop hook fires (agent tries to exit)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum StopAction {
-    /// Block exit until agent calls `oj emit agent:signal` (job default)
-    Signal,
-    /// Treat stop as idle — fire on_idle handler
-    Idle,
-    /// Block exit and escalate to human (standalone default)
-    Escalate,
-    /// Block exit and ask agent to use AskUserQuestion with a specific topic
-    Ask,
-}
-
-/// Configuration for the on_stop lifecycle handler
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(untagged)]
-pub enum StopActionConfig {
-    Simple(StopAction),
-    WithOptions {
-        action: StopAction,
-        #[serde(default)]
-        message: Option<String>,
-    },
-}
-
-impl StopActionConfig {
-    pub fn action(&self) -> &StopAction {
-        match self {
-            StopActionConfig::Simple(a) => a,
-            StopActionConfig::WithOptions { action, .. } => action,
-        }
-    }
-
-    pub fn message(&self) -> Option<&str> {
-        match self {
-            StopActionConfig::Simple(_) => None,
-            StopActionConfig::WithOptions { message, .. } => message.as_deref(),
-        }
-    }
-}
-
 impl Default for AgentDef {
     fn default() -> Self {
         Self {
             name: String::new(),
+            container: None,
             run: String::new(),
             prompt: None,
             prompt_file: None,
             env: HashMap::new(),
             cwd: None,
             prime: None,
-            on_idle: ActionConfig::default(),
+            on_idle: None,
             on_dead: default_on_dead(),
             on_prompt: default_on_prompt(),
             on_error: default_on_error(),
-            on_stop: None,
             max_concurrency: None,
             notify: Default::default(),
-            session: HashMap::new(),
         }
     }
 }
@@ -610,10 +513,7 @@ impl AgentDef {
 
     /// Build the environment variables with interpolated values
     pub fn build_env(&self, vars: &HashMap<String, String>) -> Vec<(String, String)> {
-        self.env
-            .iter()
-            .map(|(k, v)| (k.clone(), crate::template::interpolate(v, vars)))
-            .collect()
+        self.env.iter().map(|(k, v)| (k.clone(), crate::template::interpolate(v, vars))).collect()
     }
 
     /// Get the prompt text with variables interpolated
@@ -633,5 +533,5 @@ impl AgentDef {
 }
 
 #[cfg(test)]
-#[path = "agent_tests/mod.rs"]
+#[path = "agent_tests.rs"]
 mod tests;

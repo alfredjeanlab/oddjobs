@@ -14,9 +14,7 @@ async fn timer_event_for_non_session_monitor_ignored() {
     // Timer with unknown prefix should be ignored
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::new("other:timer"),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::new("other:timer") })
         .await
         .unwrap();
 
@@ -40,9 +38,7 @@ async fn liveness_timer_for_nonexistent_job_is_noop() {
     // Liveness timer for a nonexistent job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::new("liveness:nonexistent"),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::new("liveness:nonexistent") })
         .await
         .unwrap();
 
@@ -56,9 +52,7 @@ async fn exit_deferred_timer_for_nonexistent_job_is_noop() {
     // Deferred exit timer for a nonexistent job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::new("exit-deferred:nonexistent"),
-        })
+        .handle_event(Event::TimerStart { id: TimerId::new("exit-deferred:nonexistent") })
         .await
         .unwrap();
 
@@ -82,7 +76,7 @@ async fn get_job_returns_job_by_prefix() {
     let p1 = ctx.runtime.get_job(&job_id);
     assert!(p1.is_some());
 
-    // Get by prefix (pipe-1 -> pipe)
+    // Get by prefix (job-1 -> pipe)
     let prefix = &job_id[..4];
     let p2 = ctx.runtime.get_job(prefix);
     assert!(p2.is_some());

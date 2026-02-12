@@ -6,14 +6,13 @@
 use super::WorkerStatus;
 use crate::error::RuntimeError;
 use crate::runtime::Runtime;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, TimerId};
 use oj_runbook::QueueType;
 use oj_storage::{QueueItemStatus, QueuePollMeta};
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -40,7 +39,7 @@ where
 
         let (_, bare_name) = split_scoped_name(worker_key);
 
-        let (queue_type, queue_name, runbook_hash, project_root, worker_namespace, poll_interval) = {
+        let (queue_type, queue_name, runbook_hash, project_path, worker_namespace, poll_interval) = {
             let workers = self.worker_states.lock();
             let state = match workers.get(worker_key) {
                 Some(s) if s.status != WorkerStatus::Stopped => s,
@@ -53,8 +52,8 @@ where
                 state.queue_type,
                 state.queue_name.clone(),
                 state.runbook_hash.clone(),
-                state.project_root.clone(),
-                state.namespace.clone(),
+                state.project_path.clone(),
+                state.project.clone(),
                 state.poll_interval.clone(),
             )
         };
@@ -73,12 +72,7 @@ where
                         ))
                     })?;
                     let timer_id = TimerId::queue_poll(bare_name, &worker_namespace);
-                    self.executor
-                        .execute(Effect::SetTimer {
-                            id: timer_id,
-                            duration,
-                        })
-                        .await?;
+                    self.executor.execute(Effect::SetTimer { id: timer_id, duration }).await?;
                 }
 
                 let runbook = self.cached_runbook(&runbook_hash)?;
@@ -87,9 +81,10 @@ where
                 })?;
 
                 let poll_effect = Effect::PollQueue {
-                    worker_name: worker_key.to_string(),
+                    worker_name: bare_name.to_string(),
+                    project: worker_namespace.clone(),
                     list_command: queue_def.list.clone().unwrap_or_default(),
-                    cwd: project_root,
+                    cwd: project_path,
                 };
                 result_events.extend(self.executor.execute_all(vec![poll_effect]).await?);
             }
@@ -105,14 +100,14 @@ where
         Ok(result_events)
     }
 
-    /// Read pending items from MaterializedState and synthesize a WorkerPollComplete event.
+    /// Read pending items from MaterializedState and synthesize a WorkerPolled event.
     pub(super) fn poll_persisted_queue(
         &self,
         worker_key: &str,
         queue_name: &str,
-        namespace: &str,
+        project: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let key = scoped_name(namespace, queue_name);
+        let key = scoped_name(project, queue_name);
         let (total, items): (usize, Vec<serde_json::Value>) = self.lock_state(|state| match state
             .queue_items
             .get(&key)
@@ -149,14 +144,16 @@ where
                 key.clone(),
                 QueuePollMeta {
                     last_item_count: total,
-                    last_polled_at_ms: self.clock().epoch_ms(),
+                    last_polled_at_ms: self.executor.clock().epoch_ms(),
                 },
             )
         });
 
-        // Synthesize a WorkerPollComplete event with scoped key to reuse the existing dispatch flow
-        Ok(vec![Event::WorkerPollComplete {
-            worker_name: worker_key.to_string(),
+        let (_, bare_name) = split_scoped_name(worker_key);
+        // Synthesize a WorkerPolled event to reuse the existing dispatch flow
+        Ok(vec![Event::WorkerPolled {
+            worker: bare_name.to_string(),
+            project: project.to_string(),
             items,
         }])
     }
@@ -166,15 +163,7 @@ where
         &self,
         rest: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
-        // Timer ID rest is "worker_name" or "namespace/worker_name" —
-        // this is already a scoped key matching the worker_states HashMap key.
-        tracing::debug!(worker = rest, "queue poll timer fired");
-
         // Wake handles polling and rescheduling the timer
         self.handle_worker_wake(rest).await
     }
 }
-
-#[cfg(test)]
-#[path = "polling_tests.rs"]
-mod tests;

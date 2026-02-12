@@ -22,7 +22,3 @@ curl -sSL https://raw.githubusercontent.com/alfredjean/claudeless/main/install.s
 cargo build
 make check   # Run all CI checks (fmt, clippy, test, build, audit, deny)
 ```
-
-## Context
-
-See `docs/` and `plans/` for architecture and implementation details.

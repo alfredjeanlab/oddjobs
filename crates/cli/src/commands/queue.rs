@@ -7,12 +7,13 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 use std::path::Path;
 
-use oj_core::ShortId;
-
 use crate::client::{ClientKind, DaemonClient, QueuePushResult, QueueRetryResult};
 use crate::color;
-use crate::output::{display_log, format_time_ago, print_prune_results, OutputFormat};
-use crate::table::{project_cell, should_show_project, Column, Table};
+use crate::output::{
+    display_log, format_or_json, format_time_ago, handle_list, poll_log_follow,
+    print_prune_results, OutputFormat,
+};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct QueueArgs {
@@ -116,11 +117,7 @@ impl QueueCommand {
 fn format_item_data(data: &std::collections::HashMap<String, String>) -> String {
     let mut pairs: Vec<_> = data.iter().collect();
     pairs.sort_by_key(|(k, _)| k.as_str());
-    pairs
-        .into_iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join(" ")
+    pairs.into_iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" ")
 }
 
 /// Build a JSON object from optional JSON string and --var key=value pairs.
@@ -153,8 +150,8 @@ fn build_data_map(data: Option<String>, var: Vec<(String, String)>) -> Result<se
 pub async fn handle(
     command: QueueCommand,
     client: &DaemonClient,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
@@ -166,15 +163,9 @@ pub async fn handle(
                 build_data_map(data, var)?
             };
 
-            match client
-                .queue_push(project_root, namespace, &queue, json_data)
-                .await?
-            {
-                QueuePushResult::Pushed {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!("Pushed item '{}' to queue '{}'", item_id, queue_name);
+            match client.queue_push(project_path, project, &queue, json_data).await? {
+                QueuePushResult::Pushed { queue, item_id } => {
+                    println!("Pushed item '{}' to queue '{}'", item_id, queue);
                 }
                 QueuePushResult::Refreshed => {
                     println!("Refreshed external queue '{}'", queue);
@@ -182,21 +173,11 @@ pub async fn handle(
             }
         }
         QueueCommand::Drop { queue, item_id } => {
-            let (queue_name, item_id) = client
-                .queue_drop(project_root, namespace, &queue, &item_id)
-                .await?;
-            println!(
-                "Dropped item {} from queue {}",
-                item_id.short(8),
-                queue_name
-            );
+            let (queue, item_id) =
+                client.queue_drop(project_path, project, &queue, &item_id).await?;
+            println!("Dropped item {} from queue {}", oj_core::short(&item_id, 8), queue);
         }
-        QueueCommand::Retry {
-            queue,
-            item_ids,
-            all_dead,
-            status,
-        } => {
+        QueueCommand::Retry { queue, item_ids, all_dead, status } => {
             // Validate --status if provided
             if let Some(ref s) = status {
                 let s_lower = s.to_lowercase();
@@ -205,169 +186,125 @@ pub async fn handle(
                 }
             }
 
-            match client
-                .queue_retry(project_root, namespace, &queue, item_ids, all_dead, status)
-                .await?
-            {
-                QueueRetryResult::Single {
-                    queue_name,
-                    item_id,
-                } => {
-                    println!("Retrying item {} in queue {}", item_id.short(8), queue_name);
+            let result = client
+                .queue_retry(project_path, project, &queue, item_ids, all_dead, status)
+                .await?;
+            let QueueRetryResult { queue, item_ids: retried_ids, already_retried, not_found } =
+                result;
+            if !retried_ids.is_empty() {
+                println!(
+                    "Retried {} item{} in queue '{}'",
+                    retried_ids.len(),
+                    if retried_ids.len() == 1 { "" } else { "s" },
+                    queue
+                );
+                for id in &retried_ids {
+                    println!("  {}", oj_core::short(id, 8));
                 }
-                QueueRetryResult::Bulk {
-                    queue_name,
-                    item_ids: retried_ids,
-                    already_retried,
-                    not_found,
-                } => {
-                    if !retried_ids.is_empty() {
-                        println!(
-                            "Retried {} item{} in queue '{}'",
-                            retried_ids.len(),
-                            if retried_ids.len() == 1 { "" } else { "s" },
-                            queue_name
-                        );
-                        for id in &retried_ids {
-                            println!("  {}", id.short(8));
-                        }
-                    }
-                    if !already_retried.is_empty() {
-                        println!(
-                            "Skipped {} item{} (not dead/failed):",
-                            already_retried.len(),
-                            if already_retried.len() == 1 { "" } else { "s" }
-                        );
-                        for id in &already_retried {
-                            println!("  {}", id.short(8));
-                        }
-                    }
-                    if !not_found.is_empty() {
-                        println!("Not found: {}", not_found.join(", "));
-                    }
-                    if retried_ids.is_empty() && already_retried.is_empty() && not_found.is_empty()
-                    {
-                        println!("No items to retry in queue '{}'", queue_name);
-                    }
+            }
+            if !already_retried.is_empty() {
+                println!(
+                    "Skipped {} item{} (not dead/failed):",
+                    already_retried.len(),
+                    if already_retried.len() == 1 { "" } else { "s" }
+                );
+                for id in &already_retried {
+                    println!("  {}", oj_core::short(id, 8));
                 }
+            }
+            if !not_found.is_empty() {
+                println!("Not found: {}", not_found.join(", "));
+            }
+            if retried_ids.is_empty() && already_retried.is_empty() && not_found.is_empty() {
+                println!("No items to retry in queue '{}'", queue);
             }
         }
         QueueCommand::Fail { queue, item_id } => {
-            let (queue_name, item_id) = client
-                .queue_fail(project_root, namespace, &queue, &item_id)
-                .await?;
-            println!("Failed item {} in queue {}", item_id.short(8), queue_name);
+            let (queue, item_id) =
+                client.queue_fail(project_path, project, &queue, &item_id).await?;
+            println!("Failed item {} in queue {}", oj_core::short(&item_id, 8), queue);
         }
         QueueCommand::Done { queue, item_id } => {
-            let (queue_name, item_id) = client
-                .queue_done(project_root, namespace, &queue, &item_id)
-                .await?;
-            println!(
-                "Completed item {} in queue {}",
-                item_id.short(8),
-                queue_name
-            );
+            let (queue, item_id) =
+                client.queue_done(project_path, project, &queue, &item_id).await?;
+            println!("Completed item {} in queue {}", oj_core::short(&item_id, 8), queue);
         }
         QueueCommand::Drain { queue } => {
-            let (queue_name, items) = client.queue_drain(project_root, namespace, &queue).await?;
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&items)?);
-                }
-                _ => {
-                    if items.is_empty() {
-                        println!("No pending items in queue '{}'", queue_name);
-                    } else {
-                        println!(
-                            "Drained {} item{} from queue '{}'",
-                            items.len(),
-                            if items.len() == 1 { "" } else { "s" },
-                            queue_name
-                        );
-                        for item in &items {
-                            let data_str = format_item_data(&item.data);
-                            println!("  {} {}", color::muted(item.id.short(8)), data_str,);
-                        }
+            let (queue, items) = client.queue_drain(project_path, project, &queue).await?;
+            format_or_json(format, &items, || {
+                if items.is_empty() {
+                    println!("No pending items in queue '{}'", queue);
+                } else {
+                    println!(
+                        "Drained {} item{} from queue '{}'",
+                        items.len(),
+                        if items.len() == 1 { "" } else { "s" },
+                        queue
+                    );
+                    for item in &items {
+                        let data_str = format_item_data(&item.data);
+                        println!("  {} {}", color::muted(oj_core::short(&item.id, 8)), data_str,);
                     }
                 }
-            }
+            })?;
         }
-        QueueCommand::Logs {
-            queue,
-            follow,
-            limit,
-        } => {
-            let (log_path, content) = client.get_queue_logs(&queue, namespace, limit).await?;
-            display_log(&log_path, &content, follow, format, "queue", &queue).await?;
+        QueueCommand::Logs { queue, follow, limit } => {
+            let (log_path, content, offset) =
+                client.get_queue_logs(&queue, project, limit, 0).await?;
+            if let Some(off) =
+                display_log(&log_path, &content, follow, offset, format, "queue", &queue).await?
+            {
+                let queue = queue.clone();
+                let ns = project.to_string();
+                poll_log_follow(off, |o| {
+                    let queue = queue.clone();
+                    let ns = ns.clone();
+                    async move {
+                        let (_, c, new_off) = client.get_queue_logs(&queue, &ns, 0, o).await?;
+                        Ok((c, new_off))
+                    }
+                })
+                .await?;
+            }
         }
         QueueCommand::List {} => {
-            let queues = client.list_queues(project_root, namespace).await?;
-            if queues.is_empty() {
-                println!("No queues found");
-                return Ok(());
-            }
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&queues)?);
+            let queues = client.list_queues(project_path, project).await?;
+            handle_list(format, &queues, "No queues found", |items, out| {
+                let cols = vec![
+                    Column::left("PROJECT"),
+                    Column::left("NAME"),
+                    Column::left("TYPE"),
+                    Column::right("ITEMS"),
+                    Column::right("POLL"),
+                    Column::muted("POLLED"),
+                    Column::left("WORKERS"),
+                ];
+                let mut table = Table::new(cols);
+                for q in items {
+                    let ns = if q.project.is_empty() { "-" } else { &q.project };
+                    let workers_str =
+                        if q.workers.is_empty() { "-".to_string() } else { q.workers.join(", ") };
+                    let poll_count =
+                        q.last_poll_count.map(|c| c.to_string()).unwrap_or_else(|| "-".to_string());
+                    let polled_at =
+                        q.last_polled_at_ms.map(format_time_ago).unwrap_or_else(|| "-".to_string());
+                    let cells = vec![
+                        ns.to_string(),
+                        q.name.clone(),
+                        q.queue_type.clone(),
+                        q.item_count.to_string(),
+                        poll_count,
+                        polled_at,
+                        workers_str,
+                    ];
+                    table.row(cells);
                 }
-                _ => {
-                    let show_project =
-                        should_show_project(queues.iter().map(|q| q.namespace.as_str()));
-
-                    let mut cols = Vec::new();
-                    if show_project {
-                        cols.push(Column::left("PROJECT"));
-                    }
-                    cols.extend([
-                        Column::left("NAME"),
-                        Column::left("TYPE"),
-                        Column::right("ITEMS"),
-                        Column::right("POLL"),
-                        Column::muted("POLLED"),
-                        Column::left("WORKERS"),
-                    ]);
-                    let mut table = Table::new(cols);
-
-                    for q in &queues {
-                        let workers_str = if q.workers.is_empty() {
-                            "-".to_string()
-                        } else {
-                            q.workers.join(", ")
-                        };
-                        let poll_count = q
-                            .last_poll_count
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| "-".to_string());
-                        let polled_at = q
-                            .last_polled_at_ms
-                            .map(format_time_ago)
-                            .unwrap_or_else(|| "-".to_string());
-                        let mut cells = Vec::new();
-                        if show_project {
-                            cells.push(project_cell(&q.namespace));
-                        }
-                        cells.extend([
-                            q.name.clone(),
-                            q.queue_type.clone(),
-                            q.item_count.to_string(),
-                            poll_count,
-                            polled_at,
-                            workers_str,
-                        ]);
-                        table.row(cells);
-                    }
-                    table.render(&mut std::io::stdout());
-                }
-            }
+                table.render(out);
+            })?;
         }
-        QueueCommand::Prune {
-            queue,
-            all,
-            dry_run,
-        } => {
-            let (pruned, skipped) = client
-                .queue_prune(project_root, namespace, &queue, all, dry_run)
-                .await?;
+        QueueCommand::Prune { queue, all, dry_run } => {
+            let (pruned, skipped) =
+                client.queue_prune(project_path, project, &queue, all, dry_run).await?;
 
             print_prune_results(
                 &pruned,
@@ -381,25 +318,19 @@ pub async fn handle(
                         "item {} ({}) from queue '{}'",
                         &entry.item_id[..8.min(entry.item_id.len())],
                         entry.status,
-                        entry.queue_name,
+                        entry.queue,
                     )
                 },
             )?;
         }
         QueueCommand::Show { queue } => {
-            let mut items = client
-                .list_queue_items(&queue, namespace, Some(project_root))
-                .await?;
-            items.sort_by(|a, b| b.pushed_at_epoch_ms.cmp(&a.pushed_at_epoch_ms));
-            if items.is_empty() {
-                println!("No items in queue '{}'", queue);
-                return Ok(());
-            }
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&items)?);
-                }
-                _ => {
+            let mut items = client.list_queue_items(&queue, project, Some(project_path)).await?;
+            items.sort_by(|a, b| b.pushed_at_ms.cmp(&a.pushed_at_ms));
+            handle_list(
+                format,
+                &items,
+                &format!("No items in queue '{}'", queue),
+                |items, out| {
                     let mut table = Table::new(vec![
                         Column::muted("ID"),
                         Column::status("STATUS"),
@@ -407,21 +338,21 @@ pub async fn handle(
                         Column::left("WORKER"),
                         Column::left("DATA"),
                     ]);
-                    for item in &items {
+                    for item in items {
                         let data_str = format_item_data(&item.data);
                         let worker = item.worker_name.as_deref().unwrap_or("-").to_string();
-                        let age = format_time_ago(item.pushed_at_epoch_ms);
+                        let age = format_time_ago(item.pushed_at_ms);
                         table.row(vec![
-                            item.id.short(8).to_string(),
+                            oj_core::short(&item.id, 8).to_string(),
                             item.status.clone(),
                             age,
                             worker,
                             data_str,
                         ]);
                     }
-                    table.render(&mut std::io::stdout());
-                }
-            }
+                    table.render(out);
+                },
+            )?;
         }
     }
     Ok(())

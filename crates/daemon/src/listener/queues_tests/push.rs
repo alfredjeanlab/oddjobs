@@ -33,7 +33,7 @@ queue "issues" {
 
 worker "triager" {
   source  = { queue = "issues" }
-  handler = { job = "triage" }
+  run = { job = "triage" }
 }
 
 job "triage" {
@@ -61,7 +61,7 @@ fn push_auto_starts_stopped_worker() {
     let result = handle_queue_push(&ctx, project.path(), "", "tasks", data).unwrap();
 
     assert!(
-        matches!(result, Response::QueuePushed { ref queue_name, .. } if queue_name == "tasks"),
+        matches!(result, Response::QueuePushed { ref queue, .. } if queue == "tasks"),
         "expected QueuePushed, got {:?}",
         result
     );
@@ -71,7 +71,7 @@ fn push_auto_starts_stopped_worker() {
     assert_eq!(events.len(), 3, "expected 3 events, got: {:?}", events);
 
     assert!(
-        matches!(&events[0], Event::QueuePushed { queue_name, .. } if queue_name == "tasks"),
+        matches!(&events[0], Event::QueuePushed { queue, .. } if queue == "tasks"),
         "first event should be QueuePushed, got: {:?}",
         events[0]
     );
@@ -83,8 +83,8 @@ fn push_auto_starts_stopped_worker() {
     assert!(
         matches!(
             &events[2],
-            Event::WorkerStarted { worker_name, queue_name, .. }
-            if worker_name == "processor" && queue_name == "tasks"
+            Event::WorkerStarted { worker, queue, .. }
+            if worker == "processor" && queue == "tasks"
         ),
         "third event should be WorkerStarted for processor, got: {:?}",
         events[2]
@@ -103,14 +103,14 @@ fn push_wakes_running_worker() {
         "processor".to_string(),
         oj_storage::WorkerRecord {
             name: "processor".to_string(),
-            project_root: project.path().to_path_buf(),
+            project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_job_ids: vec![],
-            queue_name: "tasks".to_string(),
+            active: vec![],
+            queue: "tasks".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
-            namespace: String::new(),
+            owners: HashMap::new(),
+            project: String::new(),
         },
     );
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
@@ -128,7 +128,7 @@ fn push_wakes_running_worker() {
     assert!(
         matches!(
             &events[1],
-            Event::WorkerWake { worker_name, .. } if worker_name == "processor"
+            Event::WorkerWake { worker, .. } if worker == "processor"
         ),
         "second event should be WorkerWake, got: {:?}",
         events[1]
@@ -168,14 +168,14 @@ fn push_external_queue_wakes_workers() {
         "triager".to_string(),
         oj_storage::WorkerRecord {
             name: "triager".to_string(),
-            project_root: project.path().to_path_buf(),
+            project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_job_ids: vec![],
-            queue_name: "issues".to_string(),
+            active: vec![],
+            queue: "issues".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
-            namespace: String::new(),
+            owners: HashMap::new(),
+            project: String::new(),
         },
     );
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
@@ -184,11 +184,7 @@ fn push_external_queue_wakes_workers() {
     let data = serde_json::json!({});
     let result = handle_queue_push(&ctx, project.path(), "", "issues", data).unwrap();
 
-    assert!(
-        matches!(result, Response::Ok),
-        "expected Ok, got {:?}",
-        result
-    );
+    assert!(matches!(result, Response::Ok), "expected Ok, got {:?}", result);
 
     let events = drain_events(&wal);
     // External push should only produce WorkerWake (no QueuePushed event)
@@ -196,7 +192,7 @@ fn push_external_queue_wakes_workers() {
     assert!(
         matches!(
             &events[0],
-            Event::WorkerWake { worker_name, .. } if worker_name == "triager"
+            Event::WorkerWake { worker, .. } if worker == "triager"
         ),
         "event should be WorkerWake, got: {:?}",
         events[0]
@@ -214,11 +210,7 @@ fn push_external_queue_auto_starts_stopped_worker() {
     let data = serde_json::json!({});
     let result = handle_queue_push(&ctx, project.path(), "", "issues", data).unwrap();
 
-    assert!(
-        matches!(result, Response::Ok),
-        "expected Ok, got {:?}",
-        result
-    );
+    assert!(matches!(result, Response::Ok), "expected Ok, got {:?}", result);
 
     let events = drain_events(&wal);
     // Expect: RunbookLoaded, WorkerStarted (auto-start, no QueuePushed)
@@ -231,8 +223,8 @@ fn push_external_queue_auto_starts_stopped_worker() {
     assert!(
         matches!(
             &events[1],
-            Event::WorkerStarted { worker_name, queue_name, .. }
-            if worker_name == "triager" && queue_name == "issues"
+            Event::WorkerStarted { worker, queue, .. }
+            if worker == "triager" && queue == "issues"
         ),
         "second event should be WorkerStarted, got: {:?}",
         events[1]
@@ -250,13 +242,11 @@ fn push_deduplicates_pending_item_with_same_data() {
     // Pre-populate state with a pending item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "existing-item-1".to_string(),
-        data: [("task".to_string(), "build-feature-x".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "build-feature-x".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -268,8 +258,8 @@ fn push_deduplicates_pending_item_with_same_data() {
     assert!(
         matches!(
             result,
-            Response::QueuePushed { ref queue_name, ref item_id }
-            if queue_name == "tasks" && item_id == "existing-item-1"
+            Response::QueuePushed { ref queue, ref item_id }
+            if queue == "tasks" && item_id == "existing-item-1"
         ),
         "expected QueuePushed with existing item ID, got {:?}",
         result
@@ -278,9 +268,7 @@ fn push_deduplicates_pending_item_with_same_data() {
     // No QueuePushed event should have been emitted (dedup)
     let events = drain_events(&wal);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        !events.iter().any(|e| matches!(e, Event::QueuePushed { .. })),
         "no QueuePushed event should be emitted for duplicate, got: {:?}",
         events
     );
@@ -295,19 +283,17 @@ fn push_deduplicates_active_item_with_same_data() {
     // Pre-populate state with an active item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-item-1".to_string(),
-        data: [("task".to_string(), "build-feature-y".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "build-feature-y".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     initial_state.apply_event(&Event::QueueTaken {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-item-1".to_string(),
-        worker_name: "w1".to_string(),
-        namespace: String::new(),
+        worker: "w1".to_string(),
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -319,8 +305,8 @@ fn push_deduplicates_active_item_with_same_data() {
     assert!(
         matches!(
             result,
-            Response::QueuePushed { ref queue_name, ref item_id }
-            if queue_name == "tasks" && item_id == "active-item-1"
+            Response::QueuePushed { ref queue, ref item_id }
+            if queue == "tasks" && item_id == "active-item-1"
         ),
         "expected QueuePushed with existing active item ID, got {:?}",
         result
@@ -328,9 +314,7 @@ fn push_deduplicates_active_item_with_same_data() {
 
     let events = drain_events(&wal);
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        !events.iter().any(|e| matches!(e, Event::QueuePushed { .. })),
         "no QueuePushed event should be emitted for duplicate active item",
     );
 }
@@ -344,18 +328,16 @@ fn push_allows_duplicate_data_when_previous_is_completed() {
     // Pre-populate state with a completed item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "completed-item-1".to_string(),
-        data: [("task".to_string(), "build-feature-z".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "build-feature-z".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     initial_state.apply_event(&Event::QueueCompleted {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "completed-item-1".to_string(),
-        namespace: String::new(),
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -365,11 +347,8 @@ fn push_allows_duplicate_data_when_previous_is_completed() {
 
     // Should create a new item (different ID from completed one)
     match result {
-        Response::QueuePushed {
-            ref queue_name,
-            ref item_id,
-        } => {
-            assert_eq!(queue_name, "tasks");
+        Response::QueuePushed { ref queue, ref item_id } => {
+            assert_eq!(queue, "tasks");
             assert_ne!(item_id, "completed-item-1", "should be a new item ID");
         }
         other => panic!("expected QueuePushed, got {:?}", other),
@@ -377,9 +356,7 @@ fn push_allows_duplicate_data_when_previous_is_completed() {
 
     let events = drain_events(&wal);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        events.iter().any(|e| matches!(e, Event::QueuePushed { .. })),
         "QueuePushed event should be emitted for re-push after completion",
     );
 }
@@ -393,18 +370,16 @@ fn push_allows_duplicate_data_when_previous_is_dead() {
     // Pre-populate state with a dead item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "dead-item-1".to_string(),
-        data: [("task".to_string(), "build-feature-w".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "build-feature-w".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
-    initial_state.apply_event(&Event::QueueItemDead {
-        queue_name: "tasks".to_string(),
+    initial_state.apply_event(&Event::QueueDead {
+        queue: "tasks".to_string(),
         item_id: "dead-item-1".to_string(),
-        namespace: String::new(),
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -413,11 +388,8 @@ fn push_allows_duplicate_data_when_previous_is_dead() {
     let result = handle_queue_push(&ctx, project.path(), "", "tasks", data).unwrap();
 
     match result {
-        Response::QueuePushed {
-            ref queue_name,
-            ref item_id,
-        } => {
-            assert_eq!(queue_name, "tasks");
+        Response::QueuePushed { ref queue, ref item_id } => {
+            assert_eq!(queue, "tasks");
             assert_ne!(item_id, "dead-item-1", "should be a new item ID");
         }
         other => panic!("expected QueuePushed, got {:?}", other),
@@ -425,9 +397,7 @@ fn push_allows_duplicate_data_when_previous_is_dead() {
 
     let events = drain_events(&wal);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        events.iter().any(|e| matches!(e, Event::QueuePushed { .. })),
         "QueuePushed event should be emitted for re-push after dead",
     );
 }
@@ -441,13 +411,11 @@ fn push_different_data_is_not_deduplicated() {
     // Pre-populate state with a pending item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "existing-item-1".to_string(),
-        data: [("task".to_string(), "build-feature-x".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "build-feature-x".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -456,11 +424,8 @@ fn push_different_data_is_not_deduplicated() {
     let result = handle_queue_push(&ctx, project.path(), "", "tasks", data).unwrap();
 
     match result {
-        Response::QueuePushed {
-            ref queue_name,
-            ref item_id,
-        } => {
-            assert_eq!(queue_name, "tasks");
+        Response::QueuePushed { ref queue, ref item_id } => {
+            assert_eq!(queue, "tasks");
             assert_ne!(item_id, "existing-item-1", "should be a new item ID");
         }
         other => panic!("expected QueuePushed, got {:?}", other),
@@ -468,54 +433,47 @@ fn push_different_data_is_not_deduplicated() {
 
     let events = drain_events(&wal);
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::QueuePushed { .. })),
+        events.iter().any(|e| matches!(e, Event::QueuePushed { .. })),
         "QueuePushed event should be emitted for different data",
     );
 }
 
-// ── Push namespace fallback test ──────────────────────────────────────
+// ── Push project fallback test ──────────────────────────────────────
 
 #[test]
-fn push_with_wrong_project_root_falls_back_to_namespace() {
+fn push_with_wrong_project_path_falls_back_to_namespace() {
     let project = project_with_queue_and_worker();
     let wal_dir = tempdir().unwrap();
     let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
 
     // Pre-populate state with a worker that knows the real project root,
-    // simulating `--project my-project` where the daemon already tracks the namespace.
+    // simulating `--project my-project` where the daemon already tracks the project.
     let mut initial = MaterializedState::default();
     initial.workers.insert(
         "my-project/processor".to_string(),
         oj_storage::WorkerRecord {
             name: "processor".to_string(),
-            project_root: project.path().to_path_buf(),
+            project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
-            active_job_ids: vec![],
-            queue_name: "tasks".to_string(),
+            active: vec![],
+            queue: "tasks".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
-            namespace: "my-project".to_string(),
+            owners: HashMap::new(),
+            project: "my-project".to_string(),
         },
     );
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial)));
 
-    // Call with a wrong project_root (simulating --project from a different directory).
+    // Call with a wrong project_path (simulating --project from a different directory).
     let data = serde_json::json!({ "task": "test-value" });
-    let result = handle_queue_push(
-        &ctx,
-        std::path::Path::new("/wrong/path"),
-        "my-project",
-        "tasks",
-        data,
-    )
-    .unwrap();
+    let result =
+        handle_queue_push(&ctx, std::path::Path::new("/wrong/path"), "my-project", "tasks", data)
+            .unwrap();
 
     assert!(
-        matches!(result, Response::QueuePushed { ref queue_name, .. } if queue_name == "tasks"),
-        "expected QueuePushed from namespace fallback, got {:?}",
+        matches!(result, Response::QueuePushed { ref queue, .. } if queue == "tasks"),
+        "expected QueuePushed from project fallback, got {:?}",
         result
     );
 }

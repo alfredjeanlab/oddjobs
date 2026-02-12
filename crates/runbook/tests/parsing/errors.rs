@@ -5,10 +5,6 @@
 
 use oj_runbook::{parse_runbook, ParseError};
 
-// ============================================================================
-// Missing Required Fields
-// ============================================================================
-
 #[test]
 fn missing_command_run() {
     super::assert_toml_err("[command.build]\nargs = \"<name>\"", &["run"]);
@@ -26,10 +22,6 @@ fn missing_step_run() {
     super::assert_toml_err("[job.test]\n[[job.test.step]]\nname = \"build\"", &["run"]);
 }
 
-// ============================================================================
-// Invalid Shell Commands
-// ============================================================================
-
 #[test]
 fn unterminated_quote_in_command_run() {
     let err = parse_runbook("[command.test]\nrun = \"echo 'unterminated\"").unwrap_err();
@@ -46,7 +38,7 @@ fn unterminated_subshell_in_step() {
 }
 
 #[test]
-fn unterminated_quote_in_agent_run() {
+fn unterminated_quote_in_crew() {
     let err = parse_runbook("[agent.test]\nrun = \"claude \\\"unterminated\"").unwrap_err();
     assert!(matches!(err, ParseError::ShellError { .. }));
     super::assert_err_contains(&err, &["agent.test.run"]);
@@ -68,10 +60,6 @@ run = "echo 'broken"
         matches!(err, ParseError::ShellError { ref location, .. } if location.contains("step[1]"))
     );
 }
-
-// ============================================================================
-// Invalid TOML Structure
-// ============================================================================
 
 #[test]
 fn command_not_table() {
@@ -96,10 +84,6 @@ fn job_not_table() {
         ParseError::Toml(_)
     ));
 }
-
-// ============================================================================
-// Invalid Argument Specs
-// ============================================================================
 
 #[test]
 fn duplicate_arg_name() {
@@ -126,10 +110,6 @@ fn optional_before_required() {
 fn agent_missing_run() {
     super::assert_toml_err("[agent.test]\nprompt = \"Do something\"", &["run"]);
 }
-
-// ============================================================================
-// Valid Shell Commands
-// ============================================================================
 
 #[yare::parameterized(
     simple              = { "cargo build --release" },

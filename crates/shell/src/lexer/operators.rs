@@ -7,7 +7,6 @@ use super::Lexer;
 use crate::token::{Span, Token, TokenKind};
 
 impl Lexer<'_> {
-    /// Skip consecutive newlines and intervening whitespace.
     pub(super) fn skip_newlines(&mut self) {
         loop {
             match self.peek_char() {
@@ -22,22 +21,17 @@ impl Lexer<'_> {
         }
     }
 
-    /// Lex a newline token, collapsing multiple consecutive newlines.
-    ///
-    /// Called when peek() has confirmed the next char is '\n'.
+    /// Collapses multiple consecutive newlines into one (unless heredocs are pending).
     pub(super) fn lex_newline(&mut self, start: usize) -> Token {
-        self.chars.next(); // consume \n
+        self.chars.next();
         if self.pending_heredocs.is_empty() {
             self.skip_newlines();
         }
         Token::new(TokenKind::Newline, Span::new(start, start + 1))
     }
 
-    /// Lex an ampersand, &&, &>, or &>> operator.
-    ///
-    /// Called when peek() has confirmed the next char is '&'.
     pub(super) fn lex_ampersand(&mut self, start: usize) -> Token {
-        self.chars.next(); // consume &
+        self.chars.next();
 
         match self.peek_char() {
             Some('&') => {
@@ -59,11 +53,8 @@ impl Lexer<'_> {
         }
     }
 
-    /// Lex a pipe or || operator.
-    ///
-    /// Called when peek() has confirmed the next char is '|'.
     pub(super) fn lex_pipe(&mut self, start: usize) -> Token {
-        self.chars.next(); // consume |
+        self.chars.next();
 
         if self.peek_char() == Some('|') {
             self.chars.next();

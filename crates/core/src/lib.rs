@@ -8,19 +8,22 @@
 
 //! oj-core: Core library for the Odd Jobs (oj) CLI tool
 
-pub mod action_tracker;
+pub mod macros;
+
+pub mod actions;
 pub mod agent;
 pub mod agent_record;
-pub mod agent_run;
 pub mod clock;
+pub mod container;
+pub mod crew;
 pub mod decision;
 pub mod effect;
 pub mod event;
 pub mod id;
 pub mod job;
-pub mod namespace;
 pub mod owner;
-pub mod session;
+pub mod project;
+pub mod target;
 pub mod time_fmt;
 pub mod timer;
 pub mod worker;
@@ -29,27 +32,28 @@ pub mod workspace;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 
-// ActionTracker and AgentSignal available via action_tracker module or job re-export
-pub use agent::{AgentError, AgentId, AgentState};
+// ActionTracker available via actions module or job re-export
+pub use agent::{agent_dir, AgentError, AgentId, AgentState, PromptResponse};
 pub use agent_record::{AgentRecord, AgentRecordStatus};
-#[cfg(any(test, feature = "test-support"))]
-pub use agent_run::AgentRunBuilder;
-pub use agent_run::{AgentRun, AgentRunId, AgentRunStatus};
 pub use clock::{Clock, FakeClock, SystemClock};
+pub use container::ContainerConfig;
+#[cfg(any(test, feature = "test-support"))]
+pub use crew::CrewBuilder;
+pub use crew::{Crew, CrewId, CrewStatus};
 pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};
 pub use effect::Effect;
-pub use event::{AgentSignalKind, Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
-pub use id::{IdGen, ShortId, UuidIdGen};
+pub use event::{Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
+pub use id::{short, IdGen, UuidIdGen};
 #[cfg(any(test, feature = "test-support"))]
 pub use job::JobBuilder;
 pub use job::{
     Job, JobConfig, JobConfigBuilder, JobId, StepOutcome, StepOutcomeKind, StepRecord, StepStatus,
     StepStatusKind,
 };
-pub use namespace::{namespace_to_option, scoped_name, split_scoped_name, Namespace};
-pub use owner::OwnerId;
-pub use session::SessionId;
+pub use owner::{OwnerId, OwnerMismatch};
+pub use project::{namespace_to_option, scoped_name, split_scoped_name, Namespace};
+pub use target::RunTarget;
 pub use time_fmt::{format_elapsed, format_elapsed_ms};
-pub use timer::TimerId;
+pub use timer::{TimerId, TimerKind};
 // WorkerId available via worker module if needed
 pub use workspace::{WorkspaceId, WorkspaceStatus};

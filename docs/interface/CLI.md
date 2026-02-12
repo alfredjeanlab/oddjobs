@@ -68,7 +68,7 @@ oj job list build               # Filter by runbook name
 oj job list --status running    # Filter by status
 oj job list -n 50               # Limit results (default: 20)
 oj job list --no-limit          # Show all results
-oj job show <id>                # Shows Project: field when namespace is set
+oj job show <id>                # Shows Project: field when project is set
 oj job resume <id>
 oj job resume <id> -m "message" --var key=value
 oj job cancel <id> [id...]
@@ -139,7 +139,7 @@ oj queue retry <queue> <item-id>     # Retry a dead or failed item
 
 Push validates the JSON data against the queue's `vars` and applies `defaults` before writing to the WAL. Pushing to a persisted queue automatically wakes any attached workers.
 
-`oj queue retry` resets a dead or failed item back to pending status, clearing its failure count. The item ID can be a prefix match. The `--project` flag overrides namespace resolution.
+`oj queue retry` resets a dead or failed item back to pending status, clearing its failure count. The item ID can be a prefix match. The `--project` flag overrides project resolution.
 
 ### oj worker
 
@@ -159,7 +159,7 @@ Manage time-driven daemons defined in runbooks.
 
 ```bash
 oj cron list                         # List all crons and their status
-oj cron list --project <name>        # Filter by project namespace
+oj cron list --project <name>        # Filter by project project
 oj cron start <name>                 # Start a cron (begins interval timer)
 oj cron stop <name>                  # Stop a cron (cancels interval timer)
 oj cron restart <name>               # Stop, reload runbook, and start
@@ -178,7 +178,7 @@ Manage human-in-the-loop decisions.
 
 ```bash
 oj decision list                     # List pending decisions
-oj decision list --project <name>    # Filter by project namespace
+oj decision list --project <name>    # Filter by project project
 oj decision show <id>                # Show details of a decision
 oj decision review                   # Interactively review pending decisions
 oj decision resolve <id> 1           # Pick option #1
@@ -187,32 +187,16 @@ oj decision resolve <id> -m "msg"    # Resolve with freeform message
 
 Decisions are created when jobs escalate and require human input to continue. See [DECISIONS.md](DECISIONS.md) for sources, option mapping, and lifecycle.
 
-## Events
-
-### oj emit
-
-Emit events to the daemon.
-
-```bash
-# Signal successful completion (advances job to next step)
-oj emit agent:signal --agent <id> '{"kind": "complete"}'
-
-# Signal escalation (pauses job, notifies human)
-oj emit agent:signal --agent <id> '{"kind": "escalate", "message": "..."}'
-```
-
-The `kind` field also accepts the alias `action`. The JSON payload can also be passed via stdin.
-
 ## Namespace Isolation
 
-A single daemon serves all projects. Resources (jobs, workers, queues) are scoped by a project namespace to prevent collisions. The namespace is resolved in priority order:
+A single daemon serves all projects. Resources (jobs, workers, queues) are scoped by a project project to prevent collisions. The project is resolved in priority order:
 
 1. `--project <name>` flag (on commands that support it)
-2. `OJ_NAMESPACE` environment variable (set automatically for nested `oj` calls from agents)
+2. `OJ_PROJECT` environment variable (set automatically for nested `oj` calls from agents)
 3. `.oj/config.toml` `[project].name` field
 4. Directory basename of the project root
 
-When multiple namespaces are present, `oj job list` shows a `PROJECT` column. `oj job show` includes a `Project:` line when the namespace is set.
+When multiple namespaces are present, `oj job list` shows a `PROJECT` column. `oj job show` includes a `Project:` line when the project is set.
 
 ## JSON Output
 

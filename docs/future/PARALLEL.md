@@ -136,7 +136,7 @@ Resolution order: `step > agent > job > project default > "local"`.
 
 ```hcl
 job "release" {
-  workspace { git = "worktree" }
+  source { git = true }
 
   step "build" {
     run     = "cargo build --release"

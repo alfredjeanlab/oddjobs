@@ -9,79 +9,61 @@ use crate::prelude::*;
 fn fast_scenario(name: &str) -> String {
     format!(
         r#"
-name = "{name}"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = {{ type = "any" }}
+on = "*"
+say = "Agent {name} complete."
 
-[responses.response]
-text = "Agent {name} complete."
-
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#
     )
 }
 
 /// Blocking scenario that keeps agent alive via sleep
-fn blocking_scenario(name: &str) -> String {
-    format!(
-        r#"
-name = "{name}"
+const BLOCKING_SCENARIO: &str = r#"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = {{ type = "any" }}
+on = "*"
+say = "Starting blocking work."
 
-[responses.response]
-text = "Starting blocking work."
+[[responses.tools]]
+call = "Bash"
+input = { command = "sleep 30" }
 
-[[responses.response.tool_calls]]
-tool = "Bash"
-input = {{ command = "sleep 30" }}
-
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
-"#
-    )
-}
+[tools.Bash]
+approve = true
+"#;
 
 /// Scenario that fails immediately
-fn failing_scenario(name: &str) -> String {
-    format!(
-        r#"
-name = "{name}"
+const FAILING_SCENARIO: &str = r#"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = {{ type = "any" }}
+on = "*"
+say = "About to fail."
 
-[responses.response]
-text = "About to fail."
+[[responses.tools]]
+call = "Bash"
+input = { command = "exit 1" }
 
-[[responses.response.tool_calls]]
-tool = "Bash"
-input = {{ command = "exit 1" }}
-
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
-"#
-    )
-}
-
-// =============================================================================
-// Test 1: Multiple agents from different jobs run simultaneously
-// =============================================================================
+[tools.Bash]
+approve = true
+"#;
 
 #[test]
 fn multiple_agents_run_simultaneously() {
@@ -145,10 +127,7 @@ on_idle = "done"
     if !both_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        both_done,
-        "both agent jobs should complete, proving multiple agents can run"
-    );
+    assert!(both_done, "both agent jobs should complete, proving multiple agents can run");
 
     // Verify both jobs completed
     let job_output = temp.oj().args(&["job", "list"]).passes().stdout();
@@ -158,10 +137,6 @@ on_idle = "done"
         job_output
     );
 }
-
-// =============================================================================
-// Test 2: Three agents run concurrently and complete independently
-// =============================================================================
 
 #[test]
 fn three_agents_complete_independently() {
@@ -241,15 +216,8 @@ on_idle = "done"
     if !all_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        all_done,
-        "all three agent jobs should complete independently"
-    );
+    assert!(all_done, "all three agent jobs should complete independently");
 }
-
-// =============================================================================
-// Test 3: Blocking agents can run alongside fast agents
-// =============================================================================
 
 #[test]
 fn blocking_and_fast_agents_coexist() {
@@ -257,7 +225,7 @@ fn blocking_and_fast_agents_coexist() {
     temp.git_init();
 
     // One blocking agent, one fast agent
-    temp.file(".oj/scenarios/blocker.toml", &blocking_scenario("blocker"));
+    temp.file(".oj/scenarios/blocker.toml", BLOCKING_SCENARIO);
     temp.file(".oj/scenarios/fast.toml", &fast_scenario("fast"));
 
     let blocker_path = temp.path().join(".oj/scenarios/blocker.toml");
@@ -315,13 +283,9 @@ on_idle = "done"
     }
     assert!(
         fast_done_blocking_running,
-        "fast agent should complete while blocking agent runs (independent execution)"
+        "fast agent should complete while blocking crew (independent execution)"
     );
 }
-
-// =============================================================================
-// Test 4: Failed agent doesn't block other agents
-// =============================================================================
 
 #[test]
 fn failed_agent_does_not_block_others() {
@@ -329,7 +293,7 @@ fn failed_agent_does_not_block_others() {
     temp.git_init();
 
     // One failing agent, one succeeding agent
-    temp.file(".oj/scenarios/fail.toml", &failing_scenario("fail"));
+    temp.file(".oj/scenarios/fail.toml", FAILING_SCENARIO);
     temp.file(".oj/scenarios/succeed.toml", &fast_scenario("succeed"));
 
     let fail_path = temp.path().join(".oj/scenarios/fail.toml");
@@ -377,20 +341,13 @@ on_idle = "done"
 
     // Succeeding job should complete regardless of failing job
     let succeed_done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !succeed_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        succeed_done,
-        "succeeding agent should complete even when another agent fails"
-    );
+    assert!(succeed_done, "succeeding agent should complete even when another agent fails");
 
     // Verify both final states
     let job_output = temp.oj().args(&["job", "list"]).passes().stdout();
@@ -399,16 +356,8 @@ on_idle = "done"
         "succeeding job should be completed:\n{}",
         job_output
     );
-    assert!(
-        job_output.contains("failed"),
-        "failing job should be failed:\n{}",
-        job_output
-    );
+    assert!(job_output.contains("failed"), "failing job should be failed:\n{}", job_output);
 }
-
-// =============================================================================
-// Test 5: Rapid agent starts and completions work correctly
-// =============================================================================
 
 #[test]
 fn rapid_agent_completions_work() {
@@ -417,15 +366,11 @@ fn rapid_agent_completions_work() {
 
     // Create scenarios for four fast agents
     for i in 1..=4 {
-        temp.file(
-            &format!(".oj/scenarios/rapid{}.toml", i),
-            &fast_scenario(&format!("rapid{}", i)),
-        );
+        temp.file(format!(".oj/scenarios/rapid{}.toml", i), &fast_scenario(&format!("rapid{}", i)));
     }
 
-    let paths: Vec<_> = (1..=4)
-        .map(|i| temp.path().join(format!(".oj/scenarios/rapid{}.toml", i)))
-        .collect();
+    let paths: Vec<_> =
+        (1..=4).map(|i| temp.path().join(format!(".oj/scenarios/rapid{}.toml", i))).collect();
 
     let runbook = format!(
         r#"
@@ -506,8 +451,5 @@ on_idle = "done"
     if !all_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        all_done,
-        "all four rapidly-started agent jobs should complete"
-    );
+    assert!(all_done, "all four rapidly-started agent jobs should complete");
 }

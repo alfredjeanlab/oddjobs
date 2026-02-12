@@ -46,14 +46,13 @@ Actions:
   suspend     Suspend one or more running jobs
   resume      Resume an escalated job
   status      Show overview of active work across all projects
-  show        Show details of a job, agent, session, or queue
-  peek        Peek at the active tmux session
-  attach      Attach to a tmux session
+  show        Show details of a job, agent, or queue
+  peek        Peek at the active agent session
+  attach      Attach to an agent session
 
 Resources:
-  job    Job management
+  job         Job management
   agent       Agent management
-  session     Session management
   workspace   Workspace management
   queue       Queue management
   worker      Worker management
@@ -63,9 +62,7 @@ Resources:
   runbook     Runbook management
 
 System:
-  env         Environment variable management
   logs        View logs for a job or agent
-  emit        Emit events to the daemon
   daemon      Daemon management"
         .to_string()
 }
@@ -94,11 +91,7 @@ pub fn format_help(cmd: Command) -> String {
         Err(_) => unreachable!("clap help output is always valid UTF-8"),
     };
 
-    let output = if color::should_colorize() {
-        colorize_help(&raw_help)
-    } else {
-        raw_help
-    };
+    let output = if color::should_colorize() { colorize_help(&raw_help) } else { raw_help };
 
     if output.ends_with('\n') {
         output
@@ -119,16 +112,9 @@ pub fn print_help(cmd: Command) {
 ///
 /// Used for help text generated outside of clap (e.g., runbook commands).
 pub fn print_help_text(raw_help: &str) {
-    let output = if color::should_colorize() {
-        colorize_help(raw_help)
-    } else {
-        raw_help.to_string()
-    };
-    let output = if output.ends_with('\n') {
-        output
-    } else {
-        format!("{}\n", output)
-    };
+    let output =
+        if color::should_colorize() { colorize_help(raw_help) } else { raw_help.to_string() };
+    let output = if output.ends_with('\n') { output } else { format!("{}\n", output) };
     let mut stdout = std::io::stdout();
     let _ = stdout.write_all(output.as_bytes());
     let _ = stdout.flush();
@@ -259,11 +245,8 @@ fn colorize_option_line(line: &str) -> Option<String> {
     // We need to find where flags+value end and description begins
     let desc_start = find_description_start(trimmed);
 
-    let (flags_part, desc_part) = if let Some(pos) = desc_start {
-        (&trimmed[..pos], &trimmed[pos..])
-    } else {
-        (trimmed, "")
-    };
+    let (flags_part, desc_part) =
+        if let Some(pos) = desc_start { (&trimmed[..pos], &trimmed[pos..]) } else { (trimmed, "") };
 
     // Colorize the flags portion
     let colored_flags = colorize_flags(flags_part);

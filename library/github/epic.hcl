@@ -113,7 +113,7 @@ queue "plans" {
 
 worker "plan" {
   source      = { queue = "plans" }
-  handler     = { job = "plan" }
+  run = { job = "plan" }
   concurrency = 5
 }
 
@@ -123,9 +123,9 @@ job "plan" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "plan/${var.epic.number}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "plan/${var.epic.number}-${source.nonce}"
   }
 
   locals {
@@ -175,7 +175,7 @@ queue "epics" {
 
 worker "epic" {
   source      = { queue = "epics" }
-  handler     = { job = "epic" }
+  run = { job = "epic" }
   concurrency = 5
 }
 
@@ -185,9 +185,9 @@ job "epic" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "epic/${var.epic.number}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "epic/${var.epic.number}-${source.nonce}"
   }
 
   locals {
@@ -216,10 +216,10 @@ job "epic" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        branch="${workspace.branch}"
+        branch="${source.branch}"
         git push origin "$branch"
         gh pr create --title "${local.title}" --body "Closes #${var.epic.number}" --head "$branch" --label merge:auto
-        gh pr merge --squash --auto
+        gh pr merge --squash --auto || echo "auto-merge unavailable; merge cron will handle"
         gh issue edit ${var.epic.number} --remove-label build:needed,in-progress --add-label build:ready
       else
         echo "No changes" >&2

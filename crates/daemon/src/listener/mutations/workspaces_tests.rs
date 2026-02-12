@@ -2,19 +2,22 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use tempfile::tempdir;
+use tokio_util::sync::CancellationToken;
 
 use oj_core::Event;
 
 use crate::protocol::Response;
 
-use super::super::test_helpers::{make_job_ns, make_workspace, test_ctx};
 use super::super::PruneFlags;
 use super::workspace_prune_inner;
+use crate::listener::test_ctx;
+use crate::listener::test_fixtures::{make_job_ns, make_workspace};
 
 #[tokio::test]
 async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
+    let cancel = CancellationToken::new();
 
     let workspaces_dir = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspaces_dir).unwrap();
@@ -26,22 +29,15 @@ async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
 
     {
         let mut s = ctx.state.lock();
-        s.workspaces.insert(
-            "ws-test-1".to_string(),
-            make_workspace("ws-test-1", ws1_path.clone(), None),
-        );
-        s.workspaces.insert(
-            "ws-test-2".to_string(),
-            make_workspace("ws-test-2", ws2_path.clone(), None),
-        );
+        s.workspaces
+            .insert("ws-test-1".to_string(), make_workspace("ws-test-1", ws1_path.clone(), None));
+        s.workspaces
+            .insert("ws-test-2".to_string(), make_workspace("ws-test-2", ws2_path.clone(), None));
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
-    let result = workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir).await;
+    let flags = PruneFlags { all: true, dry_run: false, project: None };
+    let result =
+        workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir, &cancel).await;
 
     match result {
         Ok(Response::WorkspacesPruned { pruned, skipped }) => {
@@ -59,12 +55,8 @@ async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
 
     {
         let mut s = ctx.state.lock();
-        s.apply_event(&Event::WorkspaceDeleted {
-            id: oj_core::WorkspaceId::new("ws-test-1"),
-        });
-        s.apply_event(&Event::WorkspaceDeleted {
-            id: oj_core::WorkspaceId::new("ws-test-2"),
-        });
+        s.apply_event(&Event::WorkspaceDeleted { id: oj_core::WorkspaceId::new("ws-test-1") });
+        s.apply_event(&Event::WorkspaceDeleted { id: oj_core::WorkspaceId::new("ws-test-2") });
         assert!(!s.workspaces.contains_key("ws-test-1"));
         assert!(!s.workspaces.contains_key("ws-test-2"));
     }
@@ -74,6 +66,7 @@ async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
 async fn workspace_prune_removes_orphaned_state_entries() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
+    let cancel = CancellationToken::new();
 
     let workspaces_dir = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspaces_dir).unwrap();
@@ -90,12 +83,9 @@ async fn workspace_prune_removes_orphaned_state_entries() {
         );
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
-    let result = workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir).await;
+    let flags = PruneFlags { all: true, dry_run: false, project: None };
+    let result =
+        workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir, &cancel).await;
 
     match result {
         Ok(Response::WorkspacesPruned { pruned, skipped }) => {
@@ -110,6 +100,7 @@ async fn workspace_prune_removes_orphaned_state_entries() {
 async fn workspace_prune_dry_run_does_not_delete() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
+    let cancel = CancellationToken::new();
 
     let workspaces_dir = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspaces_dir).unwrap();
@@ -119,18 +110,13 @@ async fn workspace_prune_dry_run_does_not_delete() {
 
     {
         let mut s = ctx.state.lock();
-        s.workspaces.insert(
-            "ws-keep".to_string(),
-            make_workspace("ws-keep", ws_path.clone(), None),
-        );
+        s.workspaces
+            .insert("ws-keep".to_string(), make_workspace("ws-keep", ws_path.clone(), None));
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: true,
-        namespace: None,
-    };
-    let result = workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir).await;
+    let flags = PruneFlags { all: true, dry_run: true, project: None };
+    let result =
+        workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir, &cancel).await;
 
     match result {
         Ok(Response::WorkspacesPruned { pruned, skipped }) => {
@@ -140,22 +126,17 @@ async fn workspace_prune_dry_run_does_not_delete() {
         other => panic!("expected WorkspacesPruned, got: {:?}", other),
     }
 
-    assert!(
-        ws_path.exists(),
-        "workspace dir should remain after dry run"
-    );
+    assert!(ws_path.exists(), "workspace dir should remain after dry run");
 
     let s = ctx.state.lock();
-    assert!(
-        s.workspaces.contains_key("ws-keep"),
-        "workspace should remain in state after dry run"
-    );
+    assert!(s.workspaces.contains_key("ws-keep"), "workspace should remain in state after dry run");
 }
 
 #[tokio::test]
 async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
+    let cancel = CancellationToken::new();
 
     let workspaces_dir = dir.path().join("workspaces");
     std::fs::create_dir_all(&workspaces_dir).unwrap();
@@ -170,26 +151,16 @@ async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
                 Some("deleted-job-id"),
             ),
         );
-        s.jobs.insert(
-            "live-job".to_string(),
-            make_job_ns("live-job", "done", "myproject"),
-        );
+        s.jobs.insert("live-job".to_string(), make_job_ns("live-job", "done", "myproject"));
         s.workspaces.insert(
             "ws-with-owner".to_string(),
-            make_workspace(
-                "ws-with-owner",
-                workspaces_dir.join("ws-with-owner"),
-                Some("live-job"),
-            ),
+            make_workspace("ws-with-owner", workspaces_dir.join("ws-with-owner"), Some("live-job")),
         );
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: Some("myproject"),
-    };
-    let result = workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir).await;
+    let flags = PruneFlags { all: true, dry_run: false, project: Some("myproject") };
+    let result =
+        workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir, &cancel).await;
 
     match result {
         Ok(Response::WorkspacesPruned { pruned, .. }) => {
@@ -201,10 +172,52 @@ async fn workspace_prune_includes_orphaned_owner_workspaces_with_namespace() {
             );
             assert!(
                 ids.contains(&"ws-with-owner"),
-                "matching namespace workspace should be pruned, got: {:?}",
+                "matching project workspace should be pruned, got: {:?}",
                 ids
             );
         }
         other => panic!("expected WorkspacesPruned, got: {:?}", other),
     }
+}
+
+#[tokio::test]
+async fn workspace_prune_returns_cancelled_when_token_is_cancelled() {
+    let dir = tempdir().unwrap();
+    let ctx = test_ctx(dir.path());
+    let cancel = CancellationToken::new();
+
+    let workspaces_dir = dir.path().join("workspaces");
+    std::fs::create_dir_all(&workspaces_dir).unwrap();
+
+    let ws_path = workspaces_dir.join("ws-cancel-test");
+    std::fs::create_dir_all(&ws_path).unwrap();
+
+    {
+        let mut s = ctx.state.lock();
+        s.workspaces.insert(
+            "ws-cancel-test".to_string(),
+            make_workspace("ws-cancel-test", ws_path.clone(), None),
+        );
+    }
+
+    // Cancel before the handler runs
+    cancel.cancel();
+
+    let flags = PruneFlags { all: true, dry_run: false, project: None };
+    let result =
+        workspace_prune_inner(&ctx.state, &ctx.event_bus, &flags, &workspaces_dir, &cancel).await;
+
+    match result {
+        Ok(Response::Error { message }) => {
+            assert!(
+                message.contains("cancelled"),
+                "expected cancellation message, got: {}",
+                message
+            );
+        }
+        other => panic!("expected Error with cancelled message, got: {:?}", other),
+    }
+
+    // Directory should still exist since we cancelled before deletion
+    assert!(ws_path.exists(), "workspace dir should remain after cancellation");
 }

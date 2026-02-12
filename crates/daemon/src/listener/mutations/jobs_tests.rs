@@ -9,12 +9,13 @@ use oj_core::StepStatus;
 
 use crate::protocol::Response;
 
-use super::super::test_helpers::{
-    load_runbook_into_state, load_runbook_json_into_state, make_agent_runbook_json,
-    make_breadcrumb, make_job, make_job_ns, make_shell_runbook_json, test_ctx,
-};
 use super::super::PruneFlags;
 use super::{handle_job_cancel, handle_job_prune, handle_job_resume, handle_job_resume_all};
+use crate::listener::test_ctx;
+use crate::listener::test_fixtures::{
+    load_runbook_into_state, load_runbook_json_into_state, make_agent_runbook_json,
+    make_breadcrumb, make_job, make_job_ns, make_shell_runbook_json,
+};
 
 // --- handle_job_resume tests ---
 
@@ -25,13 +26,12 @@ fn resume_existing_job_emits_event() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs
-            .insert("pipe-1".to_string(), make_job("pipe-1", "work"));
+        s.jobs.insert("job-1".to_string(), make_job("job-1", "work"));
     }
 
     let result = handle_job_resume(
         &ctx,
-        "pipe-1".to_string(),
+        "job-1".to_string(),
         Some("try again".to_string()),
         HashMap::new(),
         false,
@@ -163,18 +163,13 @@ fn resume_with_runbook(is_agent: bool, step_name: &str, job_step: &str, message:
     };
     load_runbook_json_into_state(&ctx.state, runbook_hash, runbook_json);
 
-    let job_id = format!("pipe-{}", job_step);
+    let job_id = format!("job-{}", job_step);
     let mut job = make_job(&job_id, job_step);
     job.runbook_hash = runbook_hash.to_string();
     ctx.state.lock().jobs.insert(job_id.clone(), job);
 
-    let result = handle_job_resume(
-        &ctx,
-        job_id,
-        message.map(|s| s.to_string()),
-        HashMap::new(),
-        false,
-    );
+    let result =
+        handle_job_resume(&ctx, job_id, message.map(|s| s.to_string()), HashMap::new(), false);
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }
 
@@ -182,9 +177,9 @@ fn resume_with_runbook(is_agent: bool, step_name: &str, job_step: &str, message:
 
 #[yare::parameterized(
     single_running = {
-        &[("pipe-1", "work")],
-        &["pipe-1"],
-        &["pipe-1"], &[], &[]
+        &[("job-1", "work")],
+        &["job-1"],
+        &["job-1"], &[], &[]
     },
     nonexistent = {
         &[],
@@ -192,14 +187,14 @@ fn resume_with_runbook(is_agent: bool, step_name: &str, job_step: &str, message:
         &[], &[], &["no-such-pipe"]
     },
     already_terminal = {
-        &[("pipe-done", "done"), ("pipe-failed", "failed"), ("pipe-cancelled", "cancelled")],
-        &["pipe-done", "pipe-failed", "pipe-cancelled"],
-        &[], &["pipe-done", "pipe-failed", "pipe-cancelled"], &[]
+        &[("job-done", "done"), ("job-failed", "failed"), ("job-cancelled", "cancelled")],
+        &["job-done", "job-failed", "job-cancelled"],
+        &[], &["job-done", "job-failed", "job-cancelled"], &[]
     },
     mixed = {
-        &[("pipe-a", "build"), ("pipe-b", "test"), ("pipe-c", "done")],
-        &["pipe-a", "pipe-b", "pipe-c", "pipe-d"],
-        &["pipe-a", "pipe-b"], &["pipe-c"], &["pipe-d"]
+        &[("job-a", "build"), ("job-b", "test"), ("job-c", "done")],
+        &["job-a", "job-b", "job-c", "job-d"],
+        &["job-a", "job-b"], &["job-c"], &["job-d"]
     },
     empty_ids = {
         &[], &[], &[], &[], &[]
@@ -226,11 +221,7 @@ fn cancel_job(
     let result = handle_job_cancel(&ctx, ids);
 
     match result {
-        Ok(Response::JobsCancelled {
-            cancelled,
-            already_terminal,
-            not_found,
-        }) => {
+        Ok(Response::JobsCancelled { cancelled, already_terminal, not_found }) => {
             assert_eq!(cancelled, exp_cancelled);
             assert_eq!(already_terminal, exp_terminal);
             assert_eq!(not_found, exp_not_found);
@@ -250,39 +241,23 @@ fn job_prune_all_without_namespace_prunes_across_all_projects() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-a".to_string(),
-            make_job_ns("pipe-a", "done", "proj-alpha"),
-        );
-        s.jobs.insert(
-            "pipe-b".to_string(),
-            make_job_ns("pipe-b", "failed", "proj-beta"),
-        );
-        s.jobs.insert(
-            "pipe-c".to_string(),
-            make_job_ns("pipe-c", "cancelled", "proj-gamma"),
-        );
+        s.jobs.insert("job-a".to_string(), make_job_ns("job-a", "done", "proj-alpha"));
+        s.jobs.insert("job-b".to_string(), make_job_ns("job-b", "failed", "proj-beta"));
+        s.jobs.insert("job-c".to_string(), make_job_ns("job-c", "cancelled", "proj-gamma"));
         // Non-terminal job should be skipped
-        s.jobs.insert(
-            "pipe-d".to_string(),
-            make_job_ns("pipe-d", "work", "proj-alpha"),
-        );
+        s.jobs.insert("job-d".to_string(), make_job_ns("job-d", "work", "proj-alpha"));
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
+    let flags = PruneFlags { all: true, dry_run: false, project: None };
     let result = handle_job_prune(&ctx, &flags, false, false);
 
     match result {
         Ok(Response::JobsPruned { pruned, skipped }) => {
             assert_eq!(pruned.len(), 3);
             let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
-            assert!(pruned_ids.contains(&"pipe-a"));
-            assert!(pruned_ids.contains(&"pipe-b"));
-            assert!(pruned_ids.contains(&"pipe-c"));
+            assert!(pruned_ids.contains(&"job-a"));
+            assert!(pruned_ids.contains(&"job-b"));
+            assert!(pruned_ids.contains(&"job-c"));
             assert_eq!(skipped, 1);
         }
         other => panic!("expected JobsPruned, got: {:?}", other),
@@ -298,33 +273,20 @@ fn job_prune_all_with_namespace_only_prunes_matching_project() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-a".to_string(),
-            make_job_ns("pipe-a", "done", "proj-alpha"),
-        );
-        s.jobs.insert(
-            "pipe-b".to_string(),
-            make_job_ns("pipe-b", "failed", "proj-beta"),
-        );
-        s.jobs.insert(
-            "pipe-c".to_string(),
-            make_job_ns("pipe-c", "cancelled", "proj-alpha"),
-        );
+        s.jobs.insert("job-a".to_string(), make_job_ns("job-a", "done", "proj-alpha"));
+        s.jobs.insert("job-b".to_string(), make_job_ns("job-b", "failed", "proj-beta"));
+        s.jobs.insert("job-c".to_string(), make_job_ns("job-c", "cancelled", "proj-alpha"));
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: Some("proj-alpha"),
-    };
+    let flags = PruneFlags { all: true, dry_run: false, project: Some("proj-alpha") };
     let result = handle_job_prune(&ctx, &flags, false, false);
 
     match result {
         Ok(Response::JobsPruned { pruned, skipped }) => {
             assert_eq!(pruned.len(), 2);
             let pruned_ids: Vec<&str> = pruned.iter().map(|e| e.id.as_str()).collect();
-            assert!(pruned_ids.contains(&"pipe-a"));
-            assert!(pruned_ids.contains(&"pipe-c"));
+            assert!(pruned_ids.contains(&"job-a"));
+            assert!(pruned_ids.contains(&"job-c"));
             assert_eq!(skipped, 0);
         }
         other => panic!("expected JobsPruned, got: {:?}", other),
@@ -340,19 +302,11 @@ fn job_prune_skips_non_terminal_steps() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-running".to_string(),
-            make_job("pipe-running", "implement"),
-        );
-        s.jobs
-            .insert("pipe-work".to_string(), make_job("pipe-work", "work"));
+        s.jobs.insert("job-running".to_string(), make_job("job-running", "implement"));
+        s.jobs.insert("job-work".to_string(), make_job("job-work", "work"));
     }
 
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
+    let flags = PruneFlags { all: true, dry_run: false, project: None };
     let result = handle_job_prune(&ctx, &flags, false, false);
 
     match result {

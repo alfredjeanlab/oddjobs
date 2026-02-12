@@ -3,7 +3,8 @@
 
 //! Runtime for the Odd Jobs engine
 
-pub(crate) mod agent_run;
+pub(crate) mod agent;
+mod gate;
 mod handlers;
 mod job;
 mod monitor;
@@ -20,11 +21,13 @@ use handlers::cron::CronState;
 use handlers::worker::WorkerState;
 #[cfg(test)]
 use handlers::worker::WorkerStatus;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{AgentId, Clock, Job, OwnerId, ShortId};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
+use oj_core::actions::ActionTracker;
+use oj_core::{AgentId, Clock, Crew, Job, OwnerId};
 use oj_runbook::Runbook;
 
 use oj_storage::MaterializedState;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -32,9 +35,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 
-// Re-export for tests
 #[cfg(test)]
-pub use oj_core::{Event, StepStatus};
+use oj_core::{Event, StepStatus};
 
 /// Runtime path configuration
 pub struct RuntimeConfig {
@@ -44,17 +46,23 @@ pub struct RuntimeConfig {
     pub log_dir: PathBuf,
 }
 
+/// Mutable references to fields shared between Job and Crew.
+/// Used by `with_run_mut` to avoid duplicating OwnerId dispatch logic.
+struct RunState<'a> {
+    actions: &'a mut ActionTracker,
+    last_nudge_at: &'a mut Option<u64>,
+}
+
 /// Runtime adapter dependencies
-pub struct RuntimeDeps<S, A, N> {
-    pub sessions: S,
+pub struct RuntimeDeps<A, N> {
     pub agents: A,
     pub notifier: N,
     pub state: Arc<Mutex<MaterializedState>>,
 }
 
 /// Runtime that coordinates the system
-pub struct Runtime<S, A, N, C: Clock> {
-    pub(crate) executor: Executor<S, A, N, C>,
+pub struct Runtime<A, N, C: Clock> {
+    pub executor: Executor<A, N, C>,
     pub(crate) state_dir: PathBuf,
     pub(crate) logger: JobLogger,
     pub(crate) worker_logger: WorkerLogger,
@@ -66,27 +74,21 @@ pub struct Runtime<S, A, N, C: Clock> {
     pub(crate) cron_states: Mutex<HashMap<String, CronState>>,
 }
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
 {
     /// Create a new runtime
     pub fn new(
-        deps: RuntimeDeps<S, A, N>,
+        deps: RuntimeDeps<A, N>,
         clock: C,
         config: RuntimeConfig,
         event_tx: mpsc::Sender<oj_core::Event>,
     ) -> Self {
         Self {
-            executor: Executor::new(
-                deps,
-                Arc::new(Mutex::new(Scheduler::new())),
-                clock,
-                event_tx,
-            ),
+            executor: Executor::new(deps, Arc::new(Mutex::new(Scheduler::new())), clock, event_tx),
             state_dir: config.state_dir,
             logger: JobLogger::new(config.log_dir.clone()),
             worker_logger: WorkerLogger::new(config.log_dir.clone()),
@@ -97,16 +99,6 @@ where
             worker_states: Mutex::new(HashMap::new()),
             cron_states: Mutex::new(HashMap::new()),
         }
-    }
-
-    /// Get a reference to the clock
-    pub fn clock(&self) -> &C {
-        self.executor.clock()
-    }
-
-    /// Get a shared reference to the scheduler (for timer checking in the daemon loop)
-    pub fn scheduler(&self) -> Arc<Mutex<Scheduler>> {
-        self.executor.scheduler()
     }
 
     /// Get current jobs
@@ -134,14 +126,14 @@ where
     }
 
     /// Count currently active (non-terminal) jobs spawned by a given cron.
-    pub(crate) fn count_active_cron_jobs(&self, cron_name: &str, namespace: &str) -> usize {
+    pub(crate) fn count_active_cron_jobs(&self, cron_name: &str, project: &str) -> usize {
         self.lock_state(|state| {
             state
                 .jobs
                 .values()
                 .filter(|p| {
                     p.cron_name.as_deref() == Some(cron_name)
-                        && p.namespace == namespace
+                        && p.project == project
                         && !p.is_terminal()
                 })
                 .count()
@@ -149,15 +141,15 @@ where
     }
 
     /// Count currently running (non-terminal) instances of an agent by name.
-    pub(crate) fn count_running_agents(&self, agent_name: &str, namespace: &str) -> usize {
+    pub(crate) fn count_running_agents(&self, agent_name: &str, project: &str) -> usize {
         self.lock_state(|state| {
             state
-                .agent_runs
+                .crew
                 .values()
-                .filter(|ar| {
-                    ar.agent_name == agent_name
-                        && ar.namespace == namespace
-                        && !ar.status.is_terminal()
+                .filter(|run| {
+                    run.agent_name == agent_name
+                        && run.project == project
+                        && !run.status.is_terminal()
                 })
                 .count()
         })
@@ -172,8 +164,12 @@ where
     }
 
     pub(crate) fn require_job(&self, id: &str) -> Result<Job, RuntimeError> {
-        self.get_job(id)
-            .ok_or_else(|| RuntimeError::JobNotFound(id.to_string()))
+        self.get_job(id).ok_or_else(|| RuntimeError::JobNotFound(id.to_string()))
+    }
+
+    pub(crate) fn require_crew(&self, id: &str) -> Result<Crew, RuntimeError> {
+        self.lock_state(|s| s.crew.get(id).cloned())
+            .ok_or_else(|| RuntimeError::InvalidRequest(format!("crew {} not found", id)))
     }
 
     /// Get a job by ID, returning None if not found or if the job is terminal.
@@ -186,11 +182,24 @@ where
         self.get_job(id).filter(|job| !job.is_terminal())
     }
 
-    pub(crate) fn execution_dir(&self, job: &Job) -> PathBuf {
-        // Use workspace_path if in workspace mode, otherwise use cwd
-        job.workspace_path
-            .clone()
-            .unwrap_or_else(|| job.cwd.clone())
+    /// Resolve a non-terminal run for the given owner.
+    pub(crate) fn get_active_run(
+        &self,
+        owner: &OwnerId,
+    ) -> Option<Box<dyn crate::lifecycle::RunLifecycle>> {
+        match owner {
+            OwnerId::Job(job_id) => {
+                let job = self.get_active_job(job_id.as_str())?;
+                Some(Box::new(job))
+            }
+            OwnerId::Crew(run_id) => {
+                let run = self.lock_state(|s| s.crew.get(run_id.as_str()).cloned())?;
+                if run.status.is_terminal() {
+                    return None;
+                }
+                Some(Box::new(run))
+            }
+        }
     }
 
     /// Look up the owner of an agent.
@@ -203,71 +212,90 @@ where
         self.agent_owners.lock().insert(agent_id, owner);
     }
 
-    /// Deregister an agent (returns the previous owner if any).
-    pub(crate) fn deregister_agent(&self, agent_id: &AgentId) -> Option<OwnerId> {
-        self.agent_owners.lock().remove(agent_id)
+    /// Resolve mutable references to the shared run fields for the given owner.
+    fn with_run_mut<R>(&self, owner: &OwnerId, f: impl FnOnce(RunState<'_>) -> R) -> Option<R> {
+        self.lock_state_mut(|state| match owner {
+            OwnerId::Job(job_id) => state.jobs.get_mut(job_id.as_str()).map(|j| {
+                f(RunState { actions: &mut j.actions, last_nudge_at: &mut j.last_nudge_at })
+            }),
+            OwnerId::Crew(crew_id) => state.crew.get_mut(crew_id.as_str()).map(|crew| {
+                f(RunState { actions: &mut crew.actions, last_nudge_at: &mut crew.last_nudge_at })
+            }),
+        })
+    }
+
+    pub(crate) fn increment_run_attempt(
+        &self,
+        owner: &OwnerId,
+        trigger: &str,
+        chain_pos: usize,
+    ) -> u32 {
+        self.with_run_mut(owner, |e| e.actions.increment_attempt(trigger, chain_pos)).unwrap_or(1)
+    }
+
+    pub(crate) fn reset_run_attempts(&self, owner: &OwnerId) {
+        self.with_run_mut(owner, |e| e.actions.reset_attempts());
+    }
+
+    pub(crate) fn set_run_nudge_at(&self, owner: &OwnerId, epoch_ms: u64) {
+        self.with_run_mut(owner, |e| *e.last_nudge_at = Some(epoch_ms));
+    }
+
+    /// Look up the source of a pending (unresolved) decision for an owner.
+    /// Returns None if no pending decision exists.
+    pub(crate) fn pending_decision_source(
+        &self,
+        owner: &OwnerId,
+    ) -> Option<(oj_core::DecisionId, oj_core::DecisionSource)> {
+        self.lock_state(|state| {
+            state
+                .decisions
+                .values()
+                .find(|d| d.owner == *owner && !d.is_resolved())
+                .map(|d| (d.id.clone(), d.source.clone()))
+        })
     }
 
     /// Load a runbook containing the given command name.
     pub(crate) fn load_runbook_for_command(
         &self,
-        project_root: &Path,
+        project_path: &Path,
         command: &str,
     ) -> Result<Runbook, RuntimeError> {
-        let runbook_dir = project_root.join(".oj/runbooks");
+        let runbook_dir = project_path.join(".oj/runbooks");
         oj_runbook::find_runbook_by_command(&runbook_dir, command)
             .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
             .ok_or_else(|| RuntimeError::CommandNotFound(command.to_string()))
     }
 
-    /// Re-read the runbook from disk for a running worker.
-    ///
-    /// If the content has changed since last cached, updates the in-process
-    /// cache and worker state, and returns a `RunbookLoaded` event for WAL
-    /// persistence.  Returns `Ok(None)` when the runbook is unchanged.
-    pub(crate) fn refresh_worker_runbook(
+    /// Re-read a supervisor's runbook from disk and return a `RunbookLoaded`
+    /// event if the content changed. Returns `Ok(None)` when unchanged.
+    pub(crate) fn refresh_runbook(
         &self,
-        worker_key: &str,
+        project_path: &Path,
+        old_hash: &str,
+        scoped_key: &str,
+        find_runbook: impl FnOnce(&Path, &str) -> Result<Option<Runbook>, oj_runbook::FindError>,
+        apply: impl FnOnce(&str, String, &Runbook),
     ) -> Result<Option<oj_core::Event>, RuntimeError> {
-        let project_root = {
-            let workers = self.worker_states.lock();
-            match workers.get(worker_key) {
-                Some(s) => s.project_root.clone(),
-                None => return Ok(None),
-            }
-        };
-
-        // Load runbook from disk
-        let (_, bare_name) = oj_core::split_scoped_name(worker_key);
-        let runbook_dir = project_root.join(".oj/runbooks");
-        let runbook = oj_runbook::find_runbook_by_worker(&runbook_dir, bare_name)
+        let (_, bare_name) = oj_core::split_scoped_name(scoped_key);
+        let runbook_dir = project_path.join(".oj/runbooks");
+        let runbook = find_runbook(&runbook_dir, bare_name)
             .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
             .ok_or_else(|| {
                 RuntimeError::RunbookLoadError(format!(
-                    "no runbook found containing worker '{}'",
+                    "no runbook found containing '{}'",
                     bare_name
                 ))
             })?;
 
-        // Compute content hash
         let runbook_json = serde_json::to_value(&runbook)
             .map_err(|e| RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e)))?;
         let runbook_hash = {
-            use sha2::{Digest, Sha256};
             let canonical = serde_json::to_string(&runbook_json).map_err(|e| {
                 RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e))
             })?;
-            let digest = Sha256::digest(canonical.as_bytes());
-            format!("{:x}", digest)
-        };
-
-        // Check if hash changed
-        let old_hash = {
-            let workers = self.worker_states.lock();
-            workers
-                .get(worker_key)
-                .map(|s| s.runbook_hash.clone())
-                .unwrap_or_default()
+            format!("{:x}", Sha256::digest(canonical.as_bytes()))
         };
 
         if old_hash == runbook_hash {
@@ -275,19 +303,13 @@ where
         }
 
         tracing::info!(
-            worker = worker_key,
-            old_hash = old_hash.short(12),
-            new_hash = runbook_hash.short(12),
+            supervisor = scoped_key,
+            old_hash = oj_core::short(old_hash, 12),
+            new_hash = oj_core::short(&runbook_hash, 12),
             "runbook changed on disk, refreshing"
         );
 
-        // Update worker state
-        {
-            let mut workers = self.worker_states.lock();
-            if let Some(state) = workers.get_mut(worker_key) {
-                state.runbook_hash = runbook_hash.clone();
-            }
-        }
+        apply(bare_name, runbook_hash.clone(), &runbook);
 
         // Update in-process cache
         {
@@ -295,12 +317,61 @@ where
             cache.insert(runbook_hash.clone(), runbook);
         }
 
-        // Return RunbookLoaded event for WAL persistence
         Ok(Some(oj_core::Event::RunbookLoaded {
             hash: runbook_hash,
             version: 1,
             runbook: runbook_json,
         }))
+    }
+
+    pub(crate) fn refresh_worker_runbook(
+        &self,
+        scoped_key: &str,
+    ) -> Result<Option<oj_core::Event>, RuntimeError> {
+        let (project_path, old_hash) = {
+            let guard = self.worker_states.lock();
+            match guard.get(scoped_key) {
+                Some(s) => (s.project_path.clone(), s.runbook_hash.clone()),
+                None => return Ok(None),
+            }
+        };
+        self.refresh_runbook(
+            &project_path,
+            &old_hash,
+            scoped_key,
+            oj_runbook::find_runbook_by_worker,
+            |_, hash, _| {
+                if let Some(s) = self.worker_states.lock().get_mut(scoped_key) {
+                    s.runbook_hash = hash;
+                }
+            },
+        )
+    }
+
+    pub(crate) fn refresh_cron_runbook(
+        &self,
+        scoped_key: &str,
+    ) -> Result<Option<oj_core::Event>, RuntimeError> {
+        let (project_path, old_hash) = {
+            let guard = self.cron_states.lock();
+            match guard.get(scoped_key) {
+                Some(s) => (s.project_path.clone(), s.runbook_hash.clone()),
+                None => return Ok(None),
+            }
+        };
+        self.refresh_runbook(
+            &project_path,
+            &old_hash,
+            scoped_key,
+            oj_runbook::find_runbook_by_cron,
+            |bare_name, hash, runbook| {
+                if let Some(s) = self.cron_states.lock().get_mut(scoped_key) {
+                    s.runbook_hash = hash;
+                    s.concurrency =
+                        runbook.get_cron(bare_name).and_then(|c| c.concurrency).unwrap_or(1);
+                }
+            },
+        )
     }
 
     /// Load a runbook from disk by worker name, hash it, and cache it.
@@ -312,10 +383,10 @@ where
     /// Returns `(runbook, hash, RunbookLoaded event)`.
     pub(crate) fn load_runbook_from_disk(
         &self,
-        project_root: &Path,
+        project_path: &Path,
         worker_name: &str,
     ) -> Result<(Runbook, String, oj_core::Event), RuntimeError> {
-        let runbook_dir = project_root.join(".oj/runbooks");
+        let runbook_dir = project_path.join(".oj/runbooks");
         let runbook = oj_runbook::find_runbook_by_worker(&runbook_dir, worker_name)
             .map_err(|e| RuntimeError::RunbookLoadError(e.to_string()))?
             .ok_or_else(|| {
@@ -328,7 +399,6 @@ where
         let runbook_json = serde_json::to_value(&runbook)
             .map_err(|e| RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e)))?;
         let runbook_hash = {
-            use sha2::{Digest, Sha256};
             let canonical = serde_json::to_string(&runbook_json).map_err(|e| {
                 RuntimeError::RunbookLoadError(format!("failed to serialize: {}", e))
             })?;

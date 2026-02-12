@@ -16,8 +16,8 @@ take = "echo taken"
 poll = "500ms"
 
 [worker.runner]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 3
 
 [job.process]
@@ -26,10 +26,6 @@ concurrency = 3
 name = "work"
 run = "echo done"
 "#;
-
-// =============================================================================
-// Test 1: Numeric external queue item IDs dispatched independently
-// =============================================================================
 
 /// External queue items with numeric ID fields (e.g. {"id": 123}) should
 /// all be dispatched independently. Before the fix, `as_str()` returned

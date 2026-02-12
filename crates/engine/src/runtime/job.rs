@@ -6,15 +6,14 @@
 use super::Runtime;
 use crate::error::RuntimeError;
 use crate::steps;
-use oj_adapters::{AgentAdapter, NotifyAdapter, SessionAdapter};
-use oj_core::{Clock, Effect, Event, Job, JobId, SessionId, TimerId};
+use oj_adapters::{AgentAdapter, NotifyAdapter};
+use oj_core::{Clock, Effect, Event, Job, JobId, TimerId};
 use oj_runbook::{NotifyConfig, RunDirective};
 use std::collections::HashMap;
 use std::path::Path;
 
-impl<S, A, N, C> Runtime<S, A, N, C>
+impl<A, N, C> Runtime<A, N, C>
 where
-    S: SessionAdapter,
     A: AgentAdapter,
     N: NotifyAdapter,
     C: Clock,
@@ -53,8 +52,7 @@ where
 
             // Emit on_fail notification for the terminal failure
             result_events.extend(
-                self.emit_notify(&job, &job_def.notify, job_def.notify.on_fail.as_ref())
-                    .await?,
+                self.emit_notify(&job, &job_def.notify, job_def.notify.on_fail.as_ref()).await?,
             );
 
             return Ok(result_events);
@@ -69,8 +67,7 @@ where
         // Mark step as running
         let effects = steps::step_start_effects(job_id, step_name);
         result_events.extend(self.executor.execute_all(effects).await?);
-        self.logger
-            .append(job_id.as_str(), step_name, "step started");
+        self.logger.append(job_id.as_str(), step_name, "step started");
 
         // Write breadcrumb after step status change (captures agent info)
         if let Some(job) = self.get_job(job_id.as_str()) {
@@ -80,15 +77,12 @@ where
         // Dispatch based on run directive
         match &step_def.run {
             RunDirective::Shell(cmd) => {
-                // Build template variables — namespace bare keys under "var." prefix.
+                // Build template variables — project bare keys under "var." prefix.
                 // Values are escaped by interpolate_shell() during substitution.
                 let mut vars = crate::vars::namespace_vars(input);
                 vars.insert("job_id".to_string(), job_id.to_string());
                 vars.insert("name".to_string(), job.name.clone());
-                vars.insert(
-                    "workspace".to_string(),
-                    workspace_path.display().to_string(),
-                );
+                vars.insert("workspace".to_string(), workspace_path.display().to_string());
 
                 let command = oj_runbook::interpolate_shell(cmd, &vars);
                 self.logger.append(
@@ -98,14 +92,8 @@ where
                 );
 
                 let mut shell_env = HashMap::new();
-                if !job.namespace.is_empty() {
-                    shell_env.insert("OJ_NAMESPACE".to_string(), job.namespace.clone());
-                }
-
-                // Inject user-managed env vars (global + per-project)
-                let user_env = crate::env::load_merged_env(&self.state_dir, &job.namespace);
-                for (key, value) in user_env {
-                    shell_env.entry(key).or_insert(value);
+                if !job.project.is_empty() {
+                    shell_env.insert("OJ_PROJECT".to_string(), job.project.clone());
                 }
 
                 let effects = vec![Effect::Shell {
@@ -114,6 +102,7 @@ where
                     command,
                     cwd: workspace_path.to_path_buf(),
                     env: shell_env,
+                    container: None,
                 }];
 
                 result_events.extend(self.executor.execute_all(effects).await?);
@@ -142,67 +131,22 @@ where
             return self.complete_job(job).await;
         }
 
+        if self.is_agent_step(job) {
+            self.finalize_agent_step(job).await?;
+        }
+
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
-
-        // Cancel session monitor timer when leaving an agent step
-        let current_is_agent = current_step_def
-            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
-            .unwrap_or(false);
         let job_id = JobId::new(&job.id);
-        if current_is_agent {
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&job_id),
-                })
-                .await?;
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&job_id),
-                })
-                .await?;
-
-            // Deregister the agent→job mapping so stale watcher events
-            // from the old agent are dropped as unknown.
-            if let Some(agent_id) = job
-                .step_history
-                .iter()
-                .rfind(|r| r.name == job.step)
-                .and_then(|r| r.agent_id.as_ref())
-            {
-                self.deregister_agent(&oj_core::AgentId::new(agent_id));
-            }
-
-            // Capture terminal + session log before killing
-            self.capture_before_kill_job(job).await;
-
-            // Kill the agent's tmux session before moving to the next step
-            if let Some(session_id) = &job.session_id {
-                let sid = SessionId::new(session_id);
-                self.executor
-                    .execute(Effect::KillSession {
-                        session_id: sid.clone(),
-                    })
-                    .await?;
-                self.executor
-                    .execute(Effect::Emit {
-                        event: Event::SessionDeleted { id: sid },
-                    })
-                    .await?;
-            }
-        }
 
         // Mark current step as completed so that JobAdvanced sees
-        // step_status == Completed and correctly resets action_attempts.
+        // step_status == Completed and correctly resets attempts.
         // (Without this, an agent exiting non-zero with on_dead="done" would
-        // leave step_status == Failed, causing action_attempts to carry over.)
+        // leave step_status == Failed, causing attempts to carry over.)
         self.executor
             .execute(Effect::Emit {
-                event: Event::StepCompleted {
-                    job_id: job_id.clone(),
-                    step: job.step.clone(),
-                },
+                event: Event::StepCompleted { job_id: job_id.clone(), step: job.step.clone() },
             })
             .await?;
 
@@ -215,23 +159,18 @@ where
         match next_transition {
             Some(transition) => {
                 let next_step = transition.step_name();
-                self.logger
-                    .append(&job.id, &job.step, &format!("advancing to {}", next_step));
+                self.logger.append(&job.id, &job.step, &format!("advancing to {}", next_step));
                 let effects = steps::step_transition_effects(job, next_step);
                 result_events.extend(self.executor.execute_all(effects).await?);
 
-                let has_step_def = job_def
-                    .as_ref()
-                    .and_then(|p| p.get_step(next_step))
-                    .is_some();
+                let has_step_def = job_def.as_ref().and_then(|p| p.get_step(next_step)).is_some();
                 let is_terminal = next_step == "done" || next_step == "failed";
 
                 if !has_step_def && is_terminal {
                     result_events.extend(self.complete_job(job).await?);
                 } else {
                     result_events.extend(
-                        self.start_step(&job_id, next_step, &job.vars, &self.execution_dir(job))
-                            .await?,
+                        self.start_step(&job_id, next_step, &job.vars, job.execution_dir()).await?,
                     );
                 }
             }
@@ -249,13 +188,8 @@ where
                         let effects = steps::step_transition_effects(job, on_done_step);
                         result_events.extend(self.executor.execute_all(effects).await?);
                         result_events.extend(
-                            self.start_step(
-                                &job_id,
-                                on_done_step,
-                                &job.vars,
-                                &self.execution_dir(job),
-                            )
-                            .await?,
+                            self.start_step(&job_id, on_done_step, &job.vars, job.execution_dir())
+                                .await?,
                         );
                     } else {
                         // Already at on_done target; complete normally
@@ -263,15 +197,12 @@ where
                         result_events.extend(self.executor.execute_all(effects).await?);
                         result_events.extend(self.complete_job(job).await?);
                     }
+                } else if job.failing {
+                    // On-fail cleanup step completed; go to terminal "failed"
+                    result_events.extend(self.terminate_failed_job(job).await?);
                 } else if job.cancelling {
                     // Cancel cleanup step completed; go to terminal "cancelled"
-                    let mut effects = steps::cancellation_effects(job);
-                    effects.extend(self.workspace_cleanup_effects(job));
-                    result_events.extend(self.executor.execute_all(effects).await?);
-                    self.breadcrumb.delete(&job.id);
-                    // Update queue item status immediately (don't rely on event loop)
-                    result_events
-                        .extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
+                    result_events.extend(self.terminate_cancelled_job(job).await?);
                 } else {
                     let effects = steps::step_transition_effects(job, "done");
                     result_events.extend(self.executor.execute_all(effects).await?);
@@ -288,70 +219,32 @@ where
         job: &Job,
         error: &str,
     ) -> Result<Vec<Event>, RuntimeError> {
+        if self.is_agent_step(job) {
+            self.finalize_agent_step(job).await?;
+        }
+
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_fail = current_step_def.and_then(|p| p.on_fail.as_ref());
-
-        // Cancel session monitor timers when leaving an agent step
-        let current_is_agent = current_step_def
-            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
-            .unwrap_or(false);
         let job_id = JobId::new(&job.id);
-        if current_is_agent {
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&job_id),
-                })
-                .await?;
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&job_id),
-                })
-                .await?;
 
-            // Deregister the agent→job mapping so stale watcher events
-            // from the old agent are dropped as unknown.
-            if let Some(agent_id) = job
-                .step_history
-                .iter()
-                .rfind(|r| r.name == job.step)
-                .and_then(|r| r.agent_id.as_ref())
-            {
-                self.deregister_agent(&oj_core::AgentId::new(agent_id));
-            }
-
-            // Capture terminal + session log before killing
-            self.capture_before_kill_job(job).await;
-
-            // Kill the agent's tmux session before moving to the failure step
-            if let Some(session_id) = &job.session_id {
-                let sid = SessionId::new(session_id);
-                self.executor
-                    .execute(Effect::KillSession {
-                        session_id: sid.clone(),
-                    })
-                    .await?;
-                self.executor
-                    .execute(Effect::Emit {
-                        event: Event::SessionDeleted { id: sid },
-                    })
-                    .await?;
-            }
-        }
-
-        self.logger
-            .append(&job.id, &job.step, &format!("job failed: {}", error));
+        self.logger.append(&job.id, &job.step, &format!("job failed: {}", error));
 
         let mut result_events = Vec::new();
 
         if let Some(on_fail) = on_fail {
             let on_fail_step = on_fail.step_name();
+            // Mark job as failing so advance_job() routes to failed terminal after cleanup
+            result_events.extend(
+                self.executor
+                    .execute(Effect::Emit { event: Event::JobFailing { id: job_id.clone() } })
+                    .await?,
+            );
             let effects = steps::failure_transition_effects(job, on_fail_step, error);
             result_events.extend(self.executor.execute_all(effects).await?);
             result_events.extend(
-                self.start_step(&job_id, on_fail_step, &job.vars, &self.execution_dir(job))
-                    .await?,
+                self.start_step(&job_id, on_fail_step, &job.vars, job.execution_dir()).await?,
             );
         } else if let Some(ref job_on_fail) = job_def.as_ref().and_then(|p| p.on_fail.clone()) {
             let on_fail_step = job_on_fail.step_name();
@@ -362,11 +255,16 @@ where
                     &job.step,
                     &format!("job on_fail: advancing to {}", on_fail_step),
                 );
+                // Mark job as failing so advance_job() routes to failed terminal after cleanup
+                result_events.extend(
+                    self.executor
+                        .execute(Effect::Emit { event: Event::JobFailing { id: job_id.clone() } })
+                        .await?,
+                );
                 let effects = steps::failure_transition_effects(job, on_fail_step, error);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
-                    self.start_step(&job_id, on_fail_step, &job.vars, &self.execution_dir(job))
-                        .await?,
+                    self.start_step(&job_id, on_fail_step, &job.vars, job.execution_dir()).await?,
                 );
             } else {
                 // Already at the job on_fail target; terminal failure
@@ -388,37 +286,12 @@ where
             // Emit on_fail notification only on terminal failure (not on_fail transition)
             if let Some(job_def) = job_def.as_ref() {
                 result_events.extend(
-                    self.emit_notify(job, &job_def.notify, job_def.notify.on_fail.as_ref())
-                        .await?,
+                    self.emit_notify(job, &job_def.notify, job_def.notify.on_fail.as_ref()).await?,
                 );
             }
         }
 
         Ok(result_events)
-    }
-
-    /// Build workspace cleanup effects for a job (if it has a workspace).
-    fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
-        // Try job.workspace_id first; fall back to scanning workspaces by owner
-        let job_owner = oj_core::OwnerId::Job(JobId::new(&job.id));
-        let ws_id = job.workspace_id.clone().or_else(|| {
-            self.lock_state(|s| {
-                s.workspaces
-                    .values()
-                    .find(|ws| ws.owner.as_ref() == Some(&job_owner))
-                    .map(|ws| oj_core::WorkspaceId::new(&ws.id))
-            })
-        });
-        if let Some(ws_id) = ws_id {
-            let exists = self.lock_state(|s| s.workspaces.contains_key(ws_id.as_str()));
-
-            if exists {
-                return vec![Effect::DeleteWorkspace {
-                    workspace_id: ws_id,
-                }];
-            }
-        }
-        vec![]
     }
 
     pub(crate) async fn complete_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
@@ -439,8 +312,7 @@ where
         if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
             if let Some(job_def) = runbook.get_job(&job.kind) {
                 result_events.extend(
-                    self.emit_notify(job, &job_def.notify, job_def.notify.on_done.as_ref())
-                        .await?,
+                    self.emit_notify(job, &job_def.notify, job_def.notify.on_done.as_ref()).await?,
                 );
             }
         }
@@ -464,13 +336,8 @@ where
             }
 
             let message = NotifyConfig::render(template, &vars);
-            let event = self
-                .executor
-                .execute(Effect::Notify {
-                    title: job.name.clone(),
-                    message,
-                })
-                .await?;
+            let event =
+                self.executor.execute(Effect::Notify { title: job.name.clone(), message }).await?;
             return Ok(event.into_iter().collect());
         }
         let _ = notify; // silence unused warning when no template
@@ -495,53 +362,8 @@ where
             return Ok(vec![]);
         }
 
-        let runbook = self.cached_runbook(&job.runbook_hash)?;
-        let job_def = runbook.get_job(&job.kind);
-        let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
-
-        let job_id = JobId::new(&job.id);
-
-        // Cancel timers and kill session for agent steps
-        let current_is_agent = current_step_def
-            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
-            .unwrap_or(false);
-        if current_is_agent {
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&job_id),
-                })
-                .await?;
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&job_id),
-                })
-                .await?;
-
-            if let Some(agent_id) = job
-                .step_history
-                .iter()
-                .rfind(|r| r.name == job.step)
-                .and_then(|r| r.agent_id.as_ref())
-            {
-                self.deregister_agent(&oj_core::AgentId::new(agent_id));
-            }
-
-            // Capture terminal + session log before killing
-            self.capture_before_kill_job(job).await;
-
-            if let Some(session_id) = &job.session_id {
-                let sid = SessionId::new(session_id);
-                self.executor
-                    .execute(Effect::KillSession {
-                        session_id: sid.clone(),
-                    })
-                    .await?;
-                self.executor
-                    .execute(Effect::Emit {
-                        event: Event::SessionDeleted { id: sid },
-                    })
-                    .await?;
-            }
+        if self.is_agent_step(job) {
+            self.finalize_agent_step(job).await?;
         }
 
         // Go directly to suspended terminal — no cleanup step routing
@@ -572,55 +394,15 @@ where
             return Ok(vec![]);
         }
 
+        if self.is_agent_step(job) {
+            self.finalize_agent_step(job).await?;
+        }
+
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_cancel = current_step_def.and_then(|s| s.on_cancel.as_ref());
-
         let job_id = JobId::new(&job.id);
-
-        // Cancel timers and kill session (same cleanup as fail_job for agent steps)
-        let current_is_agent = current_step_def
-            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
-            .unwrap_or(false);
-        if current_is_agent {
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::liveness(&job_id),
-                })
-                .await?;
-            self.executor
-                .execute(Effect::CancelTimer {
-                    id: TimerId::exit_deferred(&job_id),
-                })
-                .await?;
-
-            if let Some(agent_id) = job
-                .step_history
-                .iter()
-                .rfind(|r| r.name == job.step)
-                .and_then(|r| r.agent_id.as_ref())
-            {
-                self.deregister_agent(&oj_core::AgentId::new(agent_id));
-            }
-
-            // Capture terminal + session log before killing
-            self.capture_before_kill_job(job).await;
-
-            if let Some(session_id) = &job.session_id {
-                let sid = SessionId::new(session_id);
-                self.executor
-                    .execute(Effect::KillSession {
-                        session_id: sid.clone(),
-                    })
-                    .await?;
-                self.executor
-                    .execute(Effect::Emit {
-                        event: Event::SessionDeleted { id: sid },
-                    })
-                    .await?;
-            }
-        }
 
         let mut result_events = Vec::new();
 
@@ -629,17 +411,13 @@ where
             let target = on_cancel.step_name();
             result_events.extend(
                 self.executor
-                    .execute(Effect::Emit {
-                        event: Event::JobCancelling { id: job_id.clone() },
-                    })
+                    .execute(Effect::Emit { event: Event::JobCancelling { id: job_id.clone() } })
                     .await?,
             );
             let effects = steps::cancellation_transition_effects(job, target);
             result_events.extend(self.executor.execute_all(effects).await?);
-            result_events.extend(
-                self.start_step(&job_id, target, &job.vars, &self.execution_dir(job))
-                    .await?,
-            );
+            result_events
+                .extend(self.start_step(&job_id, target, &job.vars, job.execution_dir()).await?);
         } else if let Some(ref job_on_cancel) = job_def.as_ref().and_then(|p| p.on_cancel.clone()) {
             // Job-level on_cancel fallback
             let target = job_on_cancel.step_name();
@@ -654,29 +432,109 @@ where
                 let effects = steps::cancellation_transition_effects(job, target);
                 result_events.extend(self.executor.execute_all(effects).await?);
                 result_events.extend(
-                    self.start_step(&job_id, target, &job.vars, &self.execution_dir(job))
-                        .await?,
+                    self.start_step(&job_id, target, &job.vars, job.execution_dir()).await?,
                 );
             } else {
                 // Already at the cancel target; go terminal
-                let mut effects = steps::cancellation_effects(job);
-                effects.extend(self.workspace_cleanup_effects(job));
-                result_events.extend(self.executor.execute_all(effects).await?);
-                self.breadcrumb.delete(&job.id);
-                // Update queue item status immediately (don't rely on event loop)
-                result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
+                result_events.extend(self.terminate_cancelled_job(job).await?);
             }
         } else {
-            // No on_cancel configured; terminal cancellation as before
-            let mut effects = steps::cancellation_effects(job);
-            effects.extend(self.workspace_cleanup_effects(job));
-            result_events.extend(self.executor.execute_all(effects).await?);
-            self.breadcrumb.delete(&job.id);
-            // Update queue item status immediately (don't rely on event loop)
-            result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
+            // No on_cancel configured; terminal cancellation
+            result_events.extend(self.terminate_cancelled_job(job).await?);
         }
 
         tracing::info!(job_id = %job.id, "cancelled job");
         Ok(result_events)
+    }
+
+    /// Whether the job's current step is an agent step.
+    fn is_agent_step(&self, job: &Job) -> bool {
+        self.cached_runbook(&job.runbook_hash)
+            .ok()
+            .and_then(|rb| rb.get_job(&job.kind)?.get_step(&job.step).cloned())
+            .map(|s| matches!(&s.run, RunDirective::Agent { .. }))
+            .unwrap_or(false)
+    }
+
+    /// Build workspace cleanup effects for a job (if it has a workspace).
+    fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
+        let job_owner: oj_core::OwnerId = oj_core::JobId::new(&job.id).into();
+        let ws_id = job.workspace_id.clone().or_else(|| {
+            self.lock_state(|s| {
+                s.workspaces
+                    .values()
+                    .find(|ws| ws.owner == job_owner)
+                    .map(|ws| oj_core::WorkspaceId::new(&ws.id))
+            })
+        });
+        if let Some(ws_id) = ws_id {
+            if self.lock_state(|s| s.workspaces.contains_key(ws_id.as_str())) {
+                return vec![Effect::DeleteWorkspace { workspace_id: ws_id }];
+            }
+        }
+        vec![]
+    }
+
+    /// Terminal failure after on_fail cleanup: emit failure effects, update queue.
+    async fn terminate_failed_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
+        let error = job.error.as_deref().unwrap_or("on_fail cleanup completed");
+        self.logger.append(
+            &job.id,
+            &job.step,
+            &format!("on_fail cleanup done, failing job: {}", error),
+        );
+        let effects = steps::failure_after_cleanup_effects(job, error);
+        let mut result_events = self.executor.execute_all(effects).await?;
+        self.breadcrumb.delete(&job.id);
+        let job_id = JobId::new(&job.id);
+        result_events.extend(self.check_worker_job_complete(&job_id, "failed").await?);
+
+        // Emit on_fail notification on terminal failure
+        if let Ok(runbook) = self.cached_runbook(&job.runbook_hash) {
+            if let Some(job_def) = runbook.get_job(&job.kind) {
+                result_events.extend(
+                    self.emit_notify(job, &job_def.notify, job_def.notify.on_fail.as_ref()).await?,
+                );
+            }
+        }
+
+        Ok(result_events)
+    }
+
+    /// Terminal cancellation: emit cancel effects, clean up workspace, update queue.
+    async fn terminate_cancelled_job(&self, job: &Job) -> Result<Vec<Event>, RuntimeError> {
+        let mut effects = steps::cancellation_effects(job);
+        effects.extend(self.workspace_cleanup_effects(job));
+        let mut result_events = self.executor.execute_all(effects).await?;
+        self.breadcrumb.delete(&job.id);
+        let job_id = JobId::new(&job.id);
+        result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
+        Ok(result_events)
+    }
+
+    /// Clean up when leaving an agent step: cancel timers, deregister agent
+    /// mapping, capture terminal output, and kill the agent process.
+    async fn finalize_agent_step(&self, job: &Job) -> Result<(), RuntimeError> {
+        let job_id = JobId::new(&job.id);
+        self.executor.execute(Effect::CancelTimer { id: TimerId::liveness(&job_id) }).await?;
+        self.executor.execute(Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) }).await?;
+
+        if let Some(agent_id) =
+            job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
+        {
+            self.agent_owners.lock().remove(&oj_core::AgentId::new(agent_id));
+        }
+
+        self.capture_before_kill_job(job).await;
+
+        // Kill agent via AgentAdapter (handles session cleanup internally)
+        if let Some(agent_id) =
+            job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
+        {
+            self.executor
+                .execute(Effect::KillAgent { agent_id: oj_core::AgentId::new(agent_id) })
+                .await?;
+        }
+        Ok(())
     }
 }

@@ -159,10 +159,12 @@ The fix: `spawn.rs` passes `OJ_STATE_DIR` to spawned sessions via the env list.
 4. **Job stuck** - Check `daemon.log` for the request log: `received request`
 5. **Agent completes but job stuck** - Check if `OJ_STATE_DIR` was passed to the session
 
-**Tmux sessions (agent tests):**
+**Coop sessions (agent tests):**
 
 ```bash
-tmux list-sessions           # See active sessions
-tmux attach -t <session>     # Attach to inspect
-tmux capture-pane -p -t <session>  # Dump pane contents
+# Find coop socket for an agent
+ls ~/.local/state/oj/agents/*/coop.sock
+
+# Attach to inspect
+coop attach --socket <socket-path>
 ```

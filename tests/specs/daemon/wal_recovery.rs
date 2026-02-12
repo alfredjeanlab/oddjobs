@@ -5,10 +5,6 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// High-Load Recovery Tests
-// =============================================================================
-
 /// Runbook with a worker that processes many items to generate high event load.
 /// Based on the working pattern from concurrency.rs tests.
 ///
@@ -21,8 +17,8 @@ vars = ["cmd"]
 retry = { attempts = 3, cooldown = "0s" }
 
 [worker.processor]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 4
 
 [job.process]
@@ -60,12 +56,7 @@ fn recovers_state_correctly_after_crash_with_many_events() {
     // QueueItemCreated, ItemDispatched, JobCreated, StepStarted, etc.)
     for i in 0..20 {
         temp.oj()
-            .args(&[
-                "queue",
-                "push",
-                "tasks",
-                &format!(r#"{{"cmd": "echo item-{}"}}"#, i),
-            ])
+            .args(&["queue", "push", "tasks", &format!(r#"{{"cmd": "echo item-{}"}}"#, i)])
             .passes();
     }
 
@@ -73,21 +64,13 @@ fn recovers_state_correctly_after_crash_with_many_events() {
     // contains many durable events (the ~10ms flush interval will have run
     // many times during processing) without racing the flush task.
     let all_processed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 20
     });
 
     if !all_processed {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         eprintln!("=== QUEUE STATE ===\n{}\n=== END QUEUE ===", items);
     }
     assert!(all_processed, "all items should complete before crash");
@@ -100,12 +83,7 @@ fn recovers_state_correctly_after_crash_with_many_events() {
     // because after SIGKILL the stale socket may cause "Connection closed"
     // errors (exit code 1) which would panic inside the wait_for closure.
     let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .unwrap();
+        let output = temp.oj().args(&["daemon", "status"]).command().output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -116,27 +94,15 @@ fn recovers_state_correctly_after_crash_with_many_events() {
 
     // Verify all items are still completed after recovery.
     // No worker restart needed — all items were already done pre-crash.
-    let recovered = temp
-        .oj()
-        .args(&["queue", "show", "tasks"])
-        .passes()
-        .stdout();
+    let recovered = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
     let completed = recovered.matches("completed").count();
 
     if completed < 20 {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!("=== QUEUE STATE ===\n{}\n=== END QUEUE ===", recovered);
     }
-    assert!(
-        completed >= 20,
-        "all 20 items should be recovered as completed, got {}",
-        completed,
-    );
+    assert!(completed >= 20, "all 20 items should be recovered as completed, got {}", completed,);
 }
-
-// =============================================================================
-// Snapshot Corruption Tests
-// =============================================================================
 
 /// Tests that daemon recovers correctly when a .tmp snapshot file exists
 /// (simulating a crash during snapshot creation).
@@ -160,21 +126,12 @@ fn recovers_when_tmp_snapshot_exists_from_interrupted_save() {
     // Push a few items and wait for completion
     for i in 0..5 {
         temp.oj()
-            .args(&[
-                "queue",
-                "push",
-                "tasks",
-                &format!(r#"{{"cmd": "echo pre-crash-{}"}}"#, i),
-            ])
+            .args(&["queue", "push", "tasks", &format!(r#"{{"cmd": "echo pre-crash-{}"}}"#, i)])
             .passes();
     }
 
     let items_done = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 5
     });
     assert!(items_done, "items should complete before crash test");
@@ -184,11 +141,7 @@ fn recovers_when_tmp_snapshot_exists_from_interrupted_save() {
 
     // Wait for daemon to fully stop
     let stopped = wait_for(SPEC_WAIT_MAX_MS, || {
-        temp.oj()
-            .args(&["daemon", "status"])
-            .passes()
-            .stdout()
-            .contains("not running")
+        temp.oj().args(&["daemon", "status"]).passes().stdout().contains("not running")
     });
     assert!(stopped, "daemon should stop");
 
@@ -206,17 +159,10 @@ fn recovers_when_tmp_snapshot_exists_from_interrupted_save() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Verify the daemon started successfully and state is preserved
-    temp.oj()
-        .args(&["daemon", "status"])
-        .passes()
-        .stdout_has("Status: running");
+    temp.oj().args(&["daemon", "status"]).passes().stdout_has("Status: running");
 
     // Verify previous state is preserved (the 5 completed items)
-    let recovered_items = temp
-        .oj()
-        .args(&["queue", "show", "tasks"])
-        .passes()
-        .stdout();
+    let recovered_items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
     let completed_count = recovered_items.matches("completed").count();
     assert!(
         completed_count >= 5,
@@ -245,8 +191,7 @@ fn corrupt_snapshot_produces_clear_error() {
         let mut file = std::fs::File::create(&snapshot_path).unwrap();
         // Write content that looks like zstd but is invalid
         // (real zstd magic number but garbage payload)
-        file.write_all(b"\x28\xb5\x2f\xfd\x00\x00CORRUPT_DATA_HERE")
-            .unwrap();
+        file.write_all(b"\x28\xb5\x2f\xfd\x00\x00CORRUPT_DATA_HERE").unwrap();
         file.sync_all().unwrap();
     }
 
@@ -257,10 +202,6 @@ fn corrupt_snapshot_produces_clear_error() {
         .stderr_has("Snapshot error")
         .stderr_lacks("Connection timeout");
 }
-
-// =============================================================================
-// Multi-Crash Recovery Tests
-// =============================================================================
 
 /// Tests that multiple crash-recovery cycles don't corrupt state.
 ///
@@ -280,21 +221,12 @@ fn multiple_crash_recovery_cycles_preserve_state() {
 
     for i in 0..5 {
         temp.oj()
-            .args(&[
-                "queue",
-                "push",
-                "tasks",
-                &format!(r#"{{"cmd": "echo cycle1-{}"}}"#, i),
-            ])
+            .args(&["queue", "push", "tasks", &format!(r#"{{"cmd": "echo cycle1-{}"}}"#, i)])
             .passes();
     }
 
     let cycle1_done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 5
     });
     assert!(cycle1_done, "cycle 1: all 5 items should complete");
@@ -304,12 +236,7 @@ fn multiple_crash_recovery_cycles_preserve_state() {
     assert!(killed1, "should kill daemon #1");
 
     let dead1 = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .unwrap();
+        let output = temp.oj().args(&["daemon", "status"]).command().output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -321,22 +248,13 @@ fn multiple_crash_recovery_cycles_preserve_state() {
 
     for i in 0..5 {
         temp.oj()
-            .args(&[
-                "queue",
-                "push",
-                "tasks",
-                &format!(r#"{{"cmd": "echo cycle2-{}"}}"#, i),
-            ])
+            .args(&["queue", "push", "tasks", &format!(r#"{{"cmd": "echo cycle2-{}"}}"#, i)])
             .passes();
     }
 
     // All 10 items (5 from cycle 1 recovered + 5 new) should complete
     let cycle2_done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 10
     });
     assert!(cycle2_done, "cycle 2: all 10 items should complete");
@@ -346,12 +264,7 @@ fn multiple_crash_recovery_cycles_preserve_state() {
     assert!(killed2, "should kill daemon #2");
 
     let dead2 = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .unwrap();
+        let output = temp.oj().args(&["daemon", "status"]).command().output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -363,37 +276,21 @@ fn multiple_crash_recovery_cycles_preserve_state() {
 
     for i in 0..5 {
         temp.oj()
-            .args(&[
-                "queue",
-                "push",
-                "tasks",
-                &format!(r#"{{"cmd": "echo cycle3-{}"}}"#, i),
-            ])
+            .args(&["queue", "push", "tasks", &format!(r#"{{"cmd": "echo cycle3-{}"}}"#, i)])
             .passes();
     }
 
     // All 15 items from all cycles should complete
     let all_done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 15
     });
 
     if !all_done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         eprintln!("=== QUEUE STATE ===\n{}\n=== END QUEUE ===", items);
     }
 
-    assert!(
-        all_done,
-        "all 15 items (5 per cycle) should complete after 2 crash cycles"
-    );
+    assert!(all_done, "all 15 items (5 per cycle) should complete after 2 crash cycles");
 }

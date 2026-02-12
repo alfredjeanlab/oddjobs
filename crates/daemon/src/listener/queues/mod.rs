@@ -22,31 +22,29 @@ use super::ListenCtx;
 /// Handle a QueuePush request.
 pub(super) fn handle_queue_push(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     data: serde_json::Value,
 ) -> Result<Response, ConnectionError> {
     let (runbook, effective_root) = match validation::load_and_validate_queue_def(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue push",
     ) {
         Ok(r) => r,
         Err(resp) => return Ok(resp),
     };
-    let project_root = &effective_root;
-    let Some(queue_def) = runbook.get_queue(queue_name) else {
-        return Ok(Response::Error {
-            message: format!("unknown queue: {}", queue_name),
-        });
+    let project_path = &effective_root;
+    let Some(queue_def) = runbook.get_queue(queue) else {
+        return Ok(Response::Error { message: format!("unknown queue: {}", queue) });
     };
 
     // External queues: wake workers to re-run the list command (no data needed)
     if queue_def.queue_type != oj_runbook::QueueType::Persisted {
-        workers::wake_attached_workers(ctx, project_root, namespace, queue_name, &runbook)?;
+        workers::wake_attached_workers(ctx, project_path, project, queue, &runbook)?;
         return Ok(Response::Ok);
     }
 
@@ -62,58 +60,50 @@ pub(super) fn handle_queue_push(
 
     // Deduplicate: if a pending or active item with the same data exists, return it
     if let Some(existing_id) =
-        data_handling::find_duplicate_item(&ctx.state, namespace, queue_name, &final_data)
+        data_handling::find_duplicate_item(&ctx.state, project, queue, &final_data)
     {
-        workers::wake_attached_workers(ctx, project_root, namespace, queue_name, &runbook)?;
-        return Ok(Response::QueuePushed {
-            queue_name: queue_name.to_string(),
-            item_id: existing_id,
-        });
+        workers::wake_attached_workers(ctx, project_path, project, queue, &runbook)?;
+        return Ok(Response::QueuePushed { queue: queue.to_string(), item_id: existing_id });
     }
 
     // Generate item ID and timestamp
     let item_id = uuid::Uuid::new_v4().to_string();
-    let pushed_at_epoch_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let pushed_at_ms =
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 
     // Emit event and wake workers
     workers::emit_and_wake_workers(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         &runbook,
         Event::QueuePushed {
-            queue_name: queue_name.to_string(),
+            queue: queue.to_string(),
             item_id: item_id.clone(),
             data: final_data,
-            pushed_at_epoch_ms,
-            namespace: namespace.to_string(),
+            pushed_at_ms,
+            project: project.to_string(),
         },
     )?;
 
-    Ok(Response::QueuePushed {
-        queue_name: queue_name.to_string(),
-        item_id,
-    })
+    Ok(Response::QueuePushed { queue: queue.to_string(), item_id })
 }
 
 /// Handle a QueueDrop request.
 pub(super) fn handle_queue_drop(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue drop",
     ) {
         Ok(info) => info,
@@ -121,29 +111,25 @@ pub(super) fn handle_queue_drop(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
-    let resolved_id =
-        match validation::resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
-            Ok(id) => id,
-            Err(resp) => return Ok(resp),
-        };
+    let resolved_id = match validation::resolve_queue_item_id(&ctx.state, project, queue, item_id) {
+        Ok(id) => id,
+        Err(resp) => return Ok(resp),
+    };
 
     emit(
         &ctx.event_bus,
         Event::QueueDropped {
-            queue_name: queue_name.to_string(),
+            queue: queue.to_string(),
             item_id: resolved_id.clone(),
-            namespace: namespace.to_string(),
+            project: project.to_string(),
         },
     )?;
 
-    Ok(Response::QueueDropped {
-        queue_name: queue_name.to_string(),
-        item_id: resolved_id,
-    })
+    Ok(Response::QueueDropped { queue: queue.to_string(), item_id: resolved_id })
 }
 
 /// Filter parameters for queue retry operations.
@@ -156,23 +142,19 @@ pub(super) struct RetryFilter<'a> {
 /// Handle a QueueRetry request (single or bulk).
 pub(super) fn handle_queue_retry(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     filter: RetryFilter<'_>,
 ) -> Result<Response, ConnectionError> {
-    let RetryFilter {
-        item_ids,
-        all_dead,
-        status_filter,
-    } = filter;
+    let RetryFilter { item_ids, all_dead, status_filter } = filter;
 
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue retry",
     ) {
         Ok(info) => info,
@@ -180,7 +162,7 @@ pub(super) fn handle_queue_retry(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
@@ -188,7 +170,7 @@ pub(super) fn handle_queue_retry(
     let items_to_process: Vec<String> = if all_dead || status_filter.is_some() {
         // Filter mode: collect items by status
         let st = ctx.state.lock();
-        let key = scoped_name(namespace, queue_name);
+        let key = scoped_name(project, queue);
         st.queue_items
             .get(&key)
             .map(|items| {
@@ -215,62 +197,24 @@ pub(super) fn handle_queue_retry(
         item_ids.to_vec()
     };
 
-    // If no items to process and using filters, return early with empty result
-    if items_to_process.is_empty() && (all_dead || status_filter.is_some()) {
-        return Ok(Response::QueueItemsRetried {
-            queue_name: queue_name.to_string(),
+    // If no items to process, return early with empty result
+    if items_to_process.is_empty() {
+        return Ok(Response::QueueRetried {
+            queue: queue.to_string(),
             item_ids: vec![],
             already_retried: vec![],
             not_found: vec![],
         });
     }
 
-    // For backward compatibility: single item without filters uses old response
-    if items_to_process.len() == 1 && !all_dead && status_filter.is_none() {
-        let item_id = &items_to_process[0];
-
-        let resolved_id =
-            match validation::resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
-                Ok(id) => id,
-                Err(resp) => return Ok(resp),
-            };
-        if let Err(resp) = validation::validate_item_is_dead_or_failed(
-            &ctx.state,
-            namespace,
-            queue_name,
-            &resolved_id,
-        ) {
-            return Ok(resp);
-        }
-
-        emit(
-            &ctx.event_bus,
-            Event::QueueItemRetry {
-                queue_name: queue_name.to_string(),
-                item_id: resolved_id.clone(),
-                namespace: namespace.to_string(),
-            },
-        )?;
-
-        // Wake workers attached to this queue (if runbook is available)
-        if let Some((ref runbook, ref effective_root)) = runbook_info {
-            workers::wake_attached_workers(ctx, effective_root, namespace, queue_name, runbook)?;
-        }
-
-        return Ok(Response::QueueRetried {
-            queue_name: queue_name.to_string(),
-            item_id: resolved_id,
-        });
-    }
-
-    // Bulk retry: process multiple items
+    // Process items
     let mut retried = Vec::new();
     let mut already_retried = Vec::new();
     let mut not_found = Vec::new();
 
     for item_id in &items_to_process {
         let resolved_id =
-            match validation::resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
+            match validation::resolve_queue_item_id(&ctx.state, project, queue, item_id) {
                 Ok(id) => id,
                 Err(_) => {
                     not_found.push(item_id.clone());
@@ -281,7 +225,7 @@ pub(super) fn handle_queue_retry(
         // Check item status
         let item_status = {
             let st = ctx.state.lock();
-            let key = scoped_name(namespace, queue_name);
+            let key = scoped_name(project, queue);
             st.queue_items
                 .get(&key)
                 .and_then(|items| items.iter().find(|i| i.id == resolved_id))
@@ -292,10 +236,10 @@ pub(super) fn handle_queue_retry(
             Some(QueueItemStatus::Dead) | Some(QueueItemStatus::Failed) => {
                 emit(
                     &ctx.event_bus,
-                    Event::QueueItemRetry {
-                        queue_name: queue_name.to_string(),
+                    Event::QueueRetry {
+                        queue: queue.to_string(),
                         item_id: resolved_id.clone(),
-                        namespace: namespace.to_string(),
+                        project: project.to_string(),
                     },
                 )?;
                 retried.push(resolved_id);
@@ -312,12 +256,12 @@ pub(super) fn handle_queue_retry(
     // Wake workers if any items were retried (and runbook is available)
     if !retried.is_empty() {
         if let Some((ref runbook, ref effective_root)) = runbook_info {
-            workers::wake_attached_workers(ctx, effective_root, namespace, queue_name, runbook)?;
+            workers::wake_attached_workers(ctx, effective_root, project, queue, runbook)?;
         }
     }
 
-    Ok(Response::QueueItemsRetried {
-        queue_name: queue_name.to_string(),
+    Ok(Response::QueueRetried {
+        queue: queue.to_string(),
         item_ids: retried,
         already_retried,
         not_found,
@@ -329,16 +273,16 @@ pub(super) fn handle_queue_retry(
 /// Removes all pending items from a persisted queue and returns them.
 pub(super) fn handle_queue_drain(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
 ) -> Result<Response, ConnectionError> {
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue drain",
     ) {
         Ok(info) => info,
@@ -346,14 +290,14 @@ pub(super) fn handle_queue_drain(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
     // Collect pending item IDs and build response summaries
     let pending_items: Vec<crate::protocol::QueueItemSummary> = {
         let state = ctx.state.lock();
-        let key = scoped_name(namespace, queue_name);
+        let key = scoped_name(project, queue);
         state
             .queue_items
             .get(&key)
@@ -365,9 +309,9 @@ pub(super) fn handle_queue_drain(
                         id: i.id.clone(),
                         status: oj_storage::QueueItemStatus::Pending.to_string(),
                         data: i.data.clone(),
-                        worker_name: i.worker_name.clone(),
-                        pushed_at_epoch_ms: i.pushed_at_epoch_ms,
-                        failure_count: i.failure_count,
+                        worker_name: i.worker.clone(),
+                        pushed_at_ms: i.pushed_at_ms,
+                        failures: i.failures,
                     })
                     .collect()
             })
@@ -379,33 +323,30 @@ pub(super) fn handle_queue_drain(
         emit(
             &ctx.event_bus,
             Event::QueueDropped {
-                queue_name: queue_name.to_string(),
+                queue: queue.to_string(),
                 item_id: item.id.clone(),
-                namespace: namespace.to_string(),
+                project: project.to_string(),
             },
         )?;
     }
 
-    Ok(Response::QueueDrained {
-        queue_name: queue_name.to_string(),
-        items: pending_items,
-    })
+    Ok(Response::QueueDrained { queue: queue.to_string(), items: pending_items })
 }
 
 /// Handle a QueueFail request — force-fail an active item.
 pub(super) fn handle_queue_fail(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue fail",
     ) {
         Ok(info) => info,
@@ -413,19 +354,18 @@ pub(super) fn handle_queue_fail(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
-    let resolved_id =
-        match validation::resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
-            Ok(id) => id,
-            Err(resp) => return Ok(resp),
-        };
+    let resolved_id = match validation::resolve_queue_item_id(&ctx.state, project, queue, item_id) {
+        Ok(id) => id,
+        Err(resp) => return Ok(resp),
+    };
     if let Err(resp) = validation::validate_item_is_active(
         &ctx.state,
-        namespace,
-        queue_name,
+        project,
+        queue,
         &resolved_id,
         "force-failed",
     ) {
@@ -435,33 +375,30 @@ pub(super) fn handle_queue_fail(
     emit(
         &ctx.event_bus,
         Event::QueueFailed {
-            queue_name: queue_name.to_string(),
+            queue: queue.to_string(),
             item_id: resolved_id.clone(),
             error: "force-failed via oj queue fail".to_string(),
-            namespace: namespace.to_string(),
+            project: project.to_string(),
         },
     )?;
 
-    Ok(Response::QueueFailed {
-        queue_name: queue_name.to_string(),
-        item_id: resolved_id,
-    })
+    Ok(Response::QueueFailed { queue: queue.to_string(), item_id: resolved_id })
 }
 
 /// Handle a QueueDone request — force-complete an active item.
 pub(super) fn handle_queue_done(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     item_id: &str,
 ) -> Result<Response, ConnectionError> {
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue done",
     ) {
         Ok(info) => info,
@@ -469,19 +406,18 @@ pub(super) fn handle_queue_done(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
-    let resolved_id =
-        match validation::resolve_queue_item_id(&ctx.state, namespace, queue_name, item_id) {
-            Ok(id) => id,
-            Err(resp) => return Ok(resp),
-        };
+    let resolved_id = match validation::resolve_queue_item_id(&ctx.state, project, queue, item_id) {
+        Ok(id) => id,
+        Err(resp) => return Ok(resp),
+    };
     if let Err(resp) = validation::validate_item_is_active(
         &ctx.state,
-        namespace,
-        queue_name,
+        project,
+        queue,
         &resolved_id,
         "force-completed",
     ) {
@@ -491,16 +427,13 @@ pub(super) fn handle_queue_done(
     emit(
         &ctx.event_bus,
         Event::QueueCompleted {
-            queue_name: queue_name.to_string(),
+            queue: queue.to_string(),
             item_id: resolved_id.clone(),
-            namespace: namespace.to_string(),
+            project: project.to_string(),
         },
     )?;
 
-    Ok(Response::QueueCompleted {
-        queue_name: queue_name.to_string(),
-        item_id: resolved_id,
-    })
+    Ok(Response::QueueCompleted { queue: queue.to_string(), item_id: resolved_id })
 }
 
 /// Handle a QueuePrune request.
@@ -510,18 +443,18 @@ pub(super) fn handle_queue_done(
 /// items regardless of age.
 pub(super) fn handle_queue_prune(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    queue_name: &str,
+    project_path: &Path,
+    project: &str,
+    queue: &str,
     all: bool,
     dry_run: bool,
 ) -> Result<Response, ConnectionError> {
     // Load runbook (optional — queue may exist only in persisted state).
     let runbook_info = match validation::load_runbook_for_queue_or_state(
         ctx,
-        project_root,
-        namespace,
-        queue_name,
+        project_path,
+        project,
+        queue,
         "oj queue prune",
     ) {
         Ok(info) => info,
@@ -529,14 +462,12 @@ pub(super) fn handle_queue_prune(
     };
 
     // Validate queue is persisted (if runbook is available)
-    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue_name) {
+    if let Err(resp) = validation::validate_persisted_queue(&runbook_info, queue) {
         return Ok(resp);
     }
 
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now_ms =
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
     let age_threshold_ms: u64 = 12 * 60 * 60 * 1000; // 12 hours
 
     // Collect terminal items (Completed, Dead)
@@ -544,23 +475,21 @@ pub(super) fn handle_queue_prune(
     let mut skipped = 0usize;
     {
         let state = ctx.state.lock();
-        let key = scoped_name(namespace, queue_name);
+        let key = scoped_name(project, queue);
         if let Some(items) = state.queue_items.get(&key) {
             for item in items {
-                let is_terminal = matches!(
-                    item.status,
-                    QueueItemStatus::Completed | QueueItemStatus::Dead
-                );
+                let is_terminal =
+                    matches!(item.status, QueueItemStatus::Completed | QueueItemStatus::Dead);
                 if !is_terminal {
                     skipped += 1;
                     continue;
                 }
-                if !all && now_ms.saturating_sub(item.pushed_at_epoch_ms) < age_threshold_ms {
+                if !all && now_ms.saturating_sub(item.pushed_at_ms) < age_threshold_ms {
                     skipped += 1;
                     continue;
                 }
                 to_prune.push(QueueItemEntry {
-                    queue_name: queue_name.to_string(),
+                    queue: queue.to_string(),
                     item_id: item.id.clone(),
                     status: item.status.to_string(),
                 });
@@ -574,18 +503,15 @@ pub(super) fn handle_queue_prune(
             emit(
                 &ctx.event_bus,
                 Event::QueueDropped {
-                    queue_name: queue_name.to_string(),
+                    queue: queue.to_string(),
                     item_id: entry.item_id.clone(),
-                    namespace: namespace.to_string(),
+                    project: project.to_string(),
                 },
             )?;
         }
     }
 
-    Ok(Response::QueuesPruned {
-        pruned: to_prune,
-        skipped,
-    })
+    Ok(Response::QueuesPruned { pruned: to_prune, skipped })
 }
 
 #[cfg(test)]

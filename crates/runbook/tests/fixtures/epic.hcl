@@ -10,11 +10,11 @@ command "epic" {
 job "epic" {
   name      = "${var.name}"
   vars      = ["name", "instructions", "blocked-by"]
-  workspace = "folder"
+  source = "folder"
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "feature/${var.name}-${workspace.nonce}"
+    branch = "feature/${var.name}-${source.nonce}"
     title  = "feat(${var.name}): ${var.instructions}"
   }
 
@@ -26,7 +26,7 @@ job "epic" {
 
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree add -b "${local.branch}" "${workspace.root}" HEAD
+      git -C "${local.repo}" worktree add -b "${local.branch}" "${source.root}" HEAD
     SHELL
     on_done = { step = "decompose" }
   }
@@ -53,7 +53,7 @@ job "epic" {
   }
 
   step "cleanup" {
-    run = "git -C \"${local.repo}\" worktree remove --force \"${workspace.root}\" 2>/dev/null || true"
+    run = "git -C \"${local.repo}\" worktree remove --force \"${source.root}\" 2>/dev/null || true"
   }
 }
 

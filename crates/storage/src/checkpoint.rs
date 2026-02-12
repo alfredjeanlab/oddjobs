@@ -201,21 +201,12 @@ impl<W: CheckpointWriter + Clone> Checkpointer<W> {
         let (tx, rx) = mpsc::channel();
 
         let handle = thread::spawn(move || {
-            let result = checkpoint_blocking(
-                &writer,
-                seq,
-                &state_clone,
-                &snapshot_path,
-                compression_level,
-            );
+            let result =
+                checkpoint_blocking(&writer, seq, &state_clone, &snapshot_path, compression_level);
             let _ = tx.send(result);
         });
 
-        CheckpointHandle {
-            seq,
-            receiver: rx,
-            handle,
-        }
+        CheckpointHandle { seq, receiver: rx, handle }
     }
 
     /// Perform a synchronous checkpoint (for shutdown).
@@ -224,13 +215,7 @@ impl<W: CheckpointWriter + Clone> Checkpointer<W> {
         seq: u64,
         state: &MaterializedState,
     ) -> Result<CheckpointResult, CheckpointError> {
-        checkpoint_blocking(
-            &self.writer,
-            seq,
-            state,
-            &self.snapshot_path,
-            self.compression_level,
-        )
+        checkpoint_blocking(&self.writer, seq, state, &self.snapshot_path, self.compression_level)
     }
 }
 
@@ -274,9 +259,7 @@ fn checkpoint_blocking<W: CheckpointWriter>(
     }
 
     // 8. Get final size for metrics
-    let size_bytes = writer
-        .file_size(snapshot_path)
-        .unwrap_or(compressed.len() as u64);
+    let size_bytes = writer.file_size(snapshot_path).unwrap_or(compressed.len() as u64);
 
     Ok(CheckpointResult { seq, size_bytes })
 }

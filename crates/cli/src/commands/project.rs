@@ -7,7 +7,7 @@ use anyhow::Result;
 use clap::{Args, Subcommand};
 
 use crate::client::DaemonClient;
-use crate::output::OutputFormat;
+use crate::output::{self, OutputFormat};
 use crate::table::{Column, Table};
 
 #[derive(Args)]
@@ -35,66 +35,41 @@ pub async fn handle_not_running_or(command: ProjectCommand, format: OutputFormat
 }
 
 fn handle_not_running(format: OutputFormat) -> Result<()> {
-    match format {
-        OutputFormat::Text => println!("oj daemon: not running"),
-        OutputFormat::Json => println!(r#"{{ "status": "not_running" }}"#),
-    }
-    Ok(())
+    let obj = serde_json::json!({ "status": "not_running" });
+    output::format_or_json(format, &obj, || println!("oj daemon: not running"))
 }
 
 async fn handle_list(client: &DaemonClient, format: OutputFormat) -> Result<()> {
     let projects = match client.list_projects().await {
         Ok(data) => data,
-        Err(crate::client::ClientError::DaemonNotRunning) => {
-            return handle_not_running(format);
-        }
-        Err(crate::client::ClientError::Io(ref e))
-            if matches!(
-                e.kind(),
-                std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
-            ) =>
-        {
-            return handle_not_running(format);
-        }
+        Err(e) if e.is_not_running() => return handle_not_running(format),
         Err(e) => return Err(e.into()),
     };
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&projects)?);
-        }
-        OutputFormat::Text => {
-            if projects.is_empty() {
-                println!("No active projects");
-                return Ok(());
-            }
-
-            let mut table = Table::new(vec![
-                Column::left("NAME"),
-                Column::left("ROOT"),
-                Column::right("JOBS"),
-                Column::right("WORKERS"),
-                Column::right("AGENTS"),
-                Column::right("CRONS"),
+    output::handle_list(format, &projects, "No active projects", |items, out| {
+        let mut table = Table::new(vec![
+            Column::left("NAME"),
+            Column::left("ROOT"),
+            Column::right("JOBS"),
+            Column::right("WORKERS"),
+            Column::right("AGENTS"),
+            Column::right("CRONS"),
+        ]);
+        for p in items {
+            let root = if p.root.as_os_str().is_empty() {
+                "(unknown)".to_string()
+            } else {
+                p.root.display().to_string()
+            };
+            table.row(vec![
+                p.name.clone(),
+                root,
+                p.active_jobs.to_string(),
+                p.workers.to_string(),
+                p.active_agents.to_string(),
+                p.crons.to_string(),
             ]);
-            for p in &projects {
-                let root = if p.root.as_os_str().is_empty() {
-                    "(unknown)".to_string()
-                } else {
-                    p.root.display().to_string()
-                };
-                table.row(vec![
-                    p.name.clone(),
-                    root,
-                    p.active_jobs.to_string(),
-                    p.workers.to_string(),
-                    p.active_agents.to_string(),
-                    p.crons.to_string(),
-                ]);
-            }
-            table.render(&mut std::io::stdout());
         }
-    }
-
-    Ok(())
+        table.render(out);
+    })
 }

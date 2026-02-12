@@ -1,29 +1,15 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Subprocess execution helpers
-
 use std::process::Output;
 use std::time::Duration;
 use tokio::process::Command;
 
-/// Default timeout for tmux commands.
-pub const TMUX_TIMEOUT: Duration = Duration::from_secs(10);
-
 /// Default timeout for git worktree operations.
 pub const GIT_WORKTREE_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Timeout for PeekSession handler (tmux capture-pane).
-pub const PEEK_SESSION_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// Timeout for AgentKill/AgentResume handler (tmux kill-session per session).
-pub const AGENT_KILL_TIMEOUT: Duration = Duration::from_secs(5);
-
 /// Timeout for WorkspacePrune handler (git worktree remove per workspace).
 pub const WORKSPACE_PRUNE_TIMEOUT: Duration = Duration::from_secs(30);
-
-/// Timeout for SessionPrune handler (tmux kill-session per session).
-pub const SESSION_PRUNE_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Default timeout for shell evaluation commands.
 pub const SHELL_EVAL_TIMEOUT: Duration = Duration::from_secs(10);
@@ -52,11 +38,7 @@ pub async fn run_with_timeout(
     match tokio::time::timeout(timeout, cmd.output()).await {
         Ok(Ok(output)) => Ok(output),
         Ok(Err(io_err)) => Err(format!("{} failed: {}", description, io_err)),
-        Err(_elapsed) => Err(format!(
-            "{} timed out after {}s",
-            description,
-            timeout.as_secs()
-        )),
+        Err(_elapsed) => Err(format!("{} timed out after {}s", description, timeout.as_secs())),
     }
 }
 

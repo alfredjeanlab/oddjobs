@@ -11,29 +11,15 @@ use oj_daemon::{JobDetail, JobSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
 
-#[test]
-fn parse_duration_seconds() {
-    assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-}
-
-#[test]
-fn parse_duration_minutes() {
-    assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
-}
-
-#[test]
-fn parse_duration_hours() {
-    assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-}
-
-#[test]
-fn parse_duration_combined() {
-    assert_eq!(parse_duration("1h30m").unwrap(), Duration::from_secs(5400));
-}
-
-#[test]
-fn parse_duration_bare_number() {
-    assert_eq!(parse_duration("60").unwrap(), Duration::from_secs(60));
+#[yare::parameterized(
+    seconds     = { "30s",   30 },
+    minutes     = { "5m",    300 },
+    hours       = { "1h",    3600 },
+    combined    = { "1h30m", 5400 },
+    bare_number = { "60",    60 },
+)]
+fn parse_duration_valid(input: &str, expected_secs: u64) {
+    assert_eq!(parse_duration(input).unwrap(), Duration::from_secs(expected_secs));
 }
 
 #[test]
@@ -43,7 +29,7 @@ fn parse_duration_zero_fails() {
 
 #[test]
 fn sort_order_most_recently_updated_first() {
-    let mut jobs = vec![
+    let mut jobs = [
         JobSummary {
             id: "done-1".into(),
             name: "done-job".into(),
@@ -52,8 +38,8 @@ fn sort_order_most_recently_updated_first() {
             step_status: StepStatusKind::Completed,
             created_at_ms: 1000,
             updated_at_ms: 5000,
-            namespace: String::new(),
-            retry_count: 0,
+            project: String::new(),
+            retries: 0,
         },
         JobSummary {
             id: "failed-1".into(),
@@ -63,8 +49,8 @@ fn sort_order_most_recently_updated_first() {
             step_status: StepStatusKind::Failed,
             created_at_ms: 2000,
             updated_at_ms: 2000,
-            namespace: String::new(),
-            retry_count: 0,
+            project: String::new(),
+            retries: 0,
         },
         JobSummary {
             id: "active-1".into(),
@@ -74,8 +60,8 @@ fn sort_order_most_recently_updated_first() {
             step_status: StepStatusKind::Running,
             created_at_ms: 3000,
             updated_at_ms: 3000,
-            namespace: String::new(),
-            retry_count: 0,
+            project: String::new(),
+            retries: 0,
         },
     ];
 
@@ -88,7 +74,7 @@ fn sort_order_most_recently_updated_first() {
 
 #[test]
 fn sort_order_most_recent_updated_first_within_same_status() {
-    let mut jobs = vec![
+    let mut jobs = [
         JobSummary {
             id: "old".into(),
             name: "old-job".into(),
@@ -97,8 +83,8 @@ fn sort_order_most_recent_updated_first_within_same_status() {
             step_status: StepStatusKind::Running,
             created_at_ms: 1000,
             updated_at_ms: 1000,
-            namespace: String::new(),
-            retry_count: 0,
+            project: String::new(),
+            retries: 0,
         },
         JobSummary {
             id: "new".into(),
@@ -108,8 +94,8 @@ fn sort_order_most_recent_updated_first_within_same_status() {
             step_status: StepStatusKind::Running,
             created_at_ms: 5000,
             updated_at_ms: 5000,
-            namespace: String::new(),
-            retry_count: 0,
+            project: String::new(),
+            retries: 0,
         },
     ];
 
@@ -128,11 +114,10 @@ fn make_detail(name: &str, steps: Vec<StepRecordDetail>) -> JobDetail {
         step_status: StepStatusKind::Running,
         vars: HashMap::new(),
         workspace_path: None,
-        session_id: None,
         error: None,
         steps,
         agents: vec![],
-        namespace: String::new(),
+        project: String::new(),
     }
 }
 
@@ -160,10 +145,7 @@ fn output_string(buf: &[u8]) -> String {
 #[test]
 fn step_progress_no_steps() {
     let detail = make_detail("test", vec![]);
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
     assert_eq!(output_string(&buf), "");
@@ -172,14 +154,8 @@ fn step_progress_no_steps() {
 
 #[test]
 fn step_progress_single_running() {
-    let detail = make_detail(
-        "test",
-        vec![make_step("plan", StepOutcomeKind::Running, 1000, None)],
-    );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let detail = make_detail("test", vec![make_step("plan", StepOutcomeKind::Running, 1000, None)]);
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
     assert_eq!(output_string(&buf), "plan started\n");
@@ -189,19 +165,9 @@ fn step_progress_single_running() {
 
 #[test]
 fn step_progress_single_completed() {
-    let detail = make_detail(
-        "test",
-        vec![make_step(
-            "init",
-            StepOutcomeKind::Completed,
-            1000,
-            Some(1000),
-        )],
-    );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let detail =
+        make_detail("test", vec![make_step("init", StepOutcomeKind::Completed, 1000, Some(1000))]);
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
     assert_eq!(output_string(&buf), "init completed (0s)\n");
@@ -211,19 +177,9 @@ fn step_progress_single_completed() {
 #[test]
 fn step_progress_skipped_running() {
     // Step goes directly from not-present to completed (fast step)
-    let detail = make_detail(
-        "test",
-        vec![make_step(
-            "push",
-            StepOutcomeKind::Completed,
-            5000,
-            Some(5500),
-        )],
-    );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let detail =
+        make_detail("test", vec![make_step("push", StepOutcomeKind::Completed, 5000, Some(5500))]);
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
     // Should print only "completed", not "started" then "completed"
@@ -240,10 +196,7 @@ fn step_progress_multiple_steps_one_poll() {
             make_step("plan", StepOutcomeKind::Completed, 1000, Some(165000)),
         ],
     );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
     let out = output_string(&buf);
@@ -257,56 +210,29 @@ fn step_progress_failed_with_detail() {
     let mut step = make_step("implement", StepOutcomeKind::Failed, 1000, Some(453000));
     step.detail = Some("shell exit code: 2".into());
     let detail = make_detail("test", vec![step]);
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
-    assert_eq!(
-        output_string(&buf),
-        "implement failed (7m 32s) - shell exit code: 2\n"
-    );
+    assert_eq!(output_string(&buf), "implement failed (7m 32s) - shell exit code: 2\n");
 }
 
 #[test]
 fn step_progress_multi_job_prefix() {
     let detail = make_detail(
         "auto-start-worker",
-        vec![make_step(
-            "init",
-            StepOutcomeKind::Completed,
-            1000,
-            Some(1000),
-        )],
+        vec![make_step("init", StepOutcomeKind::Completed, 1000, Some(1000))],
     );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, true, &mut buf);
-    assert_eq!(
-        output_string(&buf),
-        "[auto-start-worker] init completed (0s)\n"
-    );
+    assert_eq!(output_string(&buf), "[auto-start-worker] init completed (0s)\n");
 }
 
 #[test]
 fn step_progress_idempotent_repolling() {
-    let detail = make_detail(
-        "test",
-        vec![make_step(
-            "init",
-            StepOutcomeKind::Completed,
-            1000,
-            Some(1000),
-        )],
-    );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let detail =
+        make_detail("test", vec![make_step("init", StepOutcomeKind::Completed, 1000, Some(1000))]);
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
 
     let mut buf = Vec::new();
     print_step_progress(&detail, &mut tracker, false, &mut buf);
@@ -321,14 +247,9 @@ fn step_progress_idempotent_repolling() {
 #[test]
 fn step_progress_running_then_completed() {
     // First poll: step is running
-    let detail1 = make_detail(
-        "test",
-        vec![make_step("plan", StepOutcomeKind::Running, 1000, None)],
-    );
-    let mut tracker = StepTracker {
-        printed_count: 0,
-        printed_started: false,
-    };
+    let detail1 =
+        make_detail("test", vec![make_step("plan", StepOutcomeKind::Running, 1000, None)]);
+    let mut tracker = StepTracker { printed_count: 0, printed_started: false };
     let mut buf = Vec::new();
     print_step_progress(&detail1, &mut tracker, false, &mut buf);
     assert_eq!(output_string(&buf), "plan started\n");
@@ -336,12 +257,7 @@ fn step_progress_running_then_completed() {
     // Second poll: step completed
     let detail2 = make_detail(
         "test",
-        vec![make_step(
-            "plan",
-            StepOutcomeKind::Completed,
-            1000,
-            Some(165000),
-        )],
+        vec![make_step("plan", StepOutcomeKind::Completed, 1000, Some(165000))],
     );
     let mut buf2 = Vec::new();
     print_step_progress(&detail2, &mut tracker, false, &mut buf2);
@@ -412,7 +328,7 @@ fn make_summary_ns(
     kind: &str,
     step: &str,
     status: StepStatusKind,
-    namespace: &str,
+    project: &str,
 ) -> JobSummary {
     JobSummary {
         id: id.into(),
@@ -422,8 +338,8 @@ fn make_summary_ns(
         step_status: status,
         created_at_ms: 0,
         updated_at_ms: 0,
-        namespace: namespace.into(),
-        retry_count: 0,
+        project: project.into(),
+        retries: 0,
     }
 }
 
@@ -442,8 +358,8 @@ fn make_summary(
         step_status: status,
         created_at_ms: 0,
         updated_at_ms: 0,
-        namespace: String::new(),
-        retry_count: 0,
+        project: String::new(),
+        retries: 0,
     }
 }
 
@@ -457,20 +373,8 @@ fn list_empty() {
 #[test]
 fn list_columns_fit_data() {
     let jobs = vec![
-        make_summary(
-            "abcdef123456",
-            "my-build",
-            "build",
-            "plan",
-            StepStatusKind::Running,
-        ),
-        make_summary(
-            "999999999999",
-            "x",
-            "fix",
-            "implement",
-            StepStatusKind::Running,
-        ),
+        make_summary("abcdef123456", "my-build", "build", "plan", StepStatusKind::Running),
+        make_summary("999999999999", "x", "fix", "implement", StepStatusKind::Running),
     ];
     let mut buf = Vec::new();
     format_job_list(&mut buf, &jobs);
@@ -496,22 +400,11 @@ fn list_columns_fit_data() {
 
 #[test]
 fn list_with_project_column() {
-    let mut p1 = make_summary(
-        "abcdef123456",
-        "api-server",
-        "build",
-        "test",
-        StepStatusKind::Running,
-    );
-    p1.namespace = "myproject".into();
-    let mut p2 = make_summary(
-        "999999999999",
-        "worker",
-        "fix",
-        "done",
-        StepStatusKind::Completed,
-    );
-    p2.namespace = "other".into();
+    let mut p1 =
+        make_summary("abcdef123456", "api-server", "build", "test", StepStatusKind::Running);
+    p1.project = "myproject".into();
+    let mut p2 = make_summary("999999999999", "worker", "fix", "done", StepStatusKind::Completed);
+    p2.project = "other".into();
     let jobs = vec![p1, p2];
 
     let mut buf = Vec::new();
@@ -529,22 +422,11 @@ fn list_with_project_column() {
 
 #[test]
 fn list_mixed_namespace_shows_no_project_for_empty() {
-    let mut p1 = make_summary(
-        "abcdef123456",
-        "api-server",
-        "build",
-        "test",
-        StepStatusKind::Running,
-    );
-    p1.namespace = "myproject".into();
-    let p2 = make_summary(
-        "999999999999",
-        "worker",
-        "fix",
-        "done",
-        StepStatusKind::Completed,
-    );
-    // p2 has empty namespace
+    let mut p1 =
+        make_summary("abcdef123456", "api-server", "build", "test", StepStatusKind::Running);
+    p1.project = "myproject".into();
+    let p2 = make_summary("999999999999", "worker", "fix", "done", StepStatusKind::Completed);
+    // p2 has empty project
     let jobs = vec![p1, p2];
 
     let mut buf = Vec::new();
@@ -555,33 +437,23 @@ fn list_mixed_namespace_shows_no_project_for_empty() {
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("PROJECT"));
     assert!(lines[1].contains("myproject"));
-    assert!(lines[2].contains("(no project)"));
+    assert!(lines[2].contains("-"));
 }
 
 #[test]
-fn list_no_project_when_all_empty_namespace() {
-    let jobs = vec![make_summary(
-        "abcdef123456",
-        "build-a",
-        "build",
-        "plan",
-        StepStatusKind::Running,
-    )];
+fn list_always_shows_project_column() {
+    let jobs =
+        vec![make_summary("abcdef123456", "build-a", "build", "plan", StepStatusKind::Running)];
     let mut buf = Vec::new();
     format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
-    assert!(!out.contains("PROJECT"));
+    assert!(out.contains("PROJECT"));
 }
 
 #[test]
 fn list_no_retries_column_when_all_zero() {
-    let jobs = vec![make_summary(
-        "abcdef123456",
-        "build-a",
-        "build",
-        "plan",
-        StepStatusKind::Running,
-    )];
+    let jobs =
+        vec![make_summary("abcdef123456", "build-a", "build", "plan", StepStatusKind::Running)];
     let mut buf = Vec::new();
     format_job_list(&mut buf, &jobs);
     let out = output_string(&buf);
@@ -590,21 +462,9 @@ fn list_no_retries_column_when_all_zero() {
 
 #[test]
 fn list_retries_column_shown_when_nonzero() {
-    let mut p1 = make_summary(
-        "abcdef123456",
-        "build-a",
-        "build",
-        "plan",
-        StepStatusKind::Running,
-    );
-    p1.retry_count = 3;
-    let p2 = make_summary(
-        "999999999999",
-        "build-b",
-        "build",
-        "test",
-        StepStatusKind::Running,
-    );
+    let mut p1 = make_summary("abcdef123456", "build-a", "build", "plan", StepStatusKind::Running);
+    p1.retries = 3;
+    let p2 = make_summary("999999999999", "build-b", "build", "test", StepStatusKind::Running);
     let jobs = vec![p1, p2];
     let mut buf = Vec::new();
     format_job_list(&mut buf, &jobs);
@@ -622,36 +482,15 @@ fn list_retries_column_shown_when_nonzero() {
 #[test]
 fn project_filter_retains_matching_namespace() {
     let mut jobs = vec![
-        make_summary_ns(
-            "aaa",
-            "build-wok",
-            "build",
-            "plan",
-            StepStatusKind::Running,
-            "wok",
-        ),
-        make_summary_ns(
-            "bbb",
-            "build-bar",
-            "build",
-            "test",
-            StepStatusKind::Running,
-            "bar",
-        ),
-        make_summary_ns(
-            "ccc",
-            "build-wok2",
-            "build",
-            "done",
-            StepStatusKind::Completed,
-            "wok",
-        ),
+        make_summary_ns("aaa", "build-wok", "build", "plan", StepStatusKind::Running, "wok"),
+        make_summary_ns("bbb", "build-bar", "build", "test", StepStatusKind::Running, "bar"),
+        make_summary_ns("ccc", "build-wok2", "build", "done", StepStatusKind::Completed, "wok"),
     ];
 
     // Simulate: --project wok
     let project_filter: Option<&str> = Some("wok");
     if let Some(proj) = project_filter {
-        jobs.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.project == proj);
     }
 
     assert_eq!(jobs.len(), 2);
@@ -662,69 +501,30 @@ fn project_filter_retains_matching_namespace() {
 #[test]
 fn project_filter_none_retains_all() {
     let mut jobs = vec![
-        make_summary_ns(
-            "aaa",
-            "build-wok",
-            "build",
-            "plan",
-            StepStatusKind::Running,
-            "wok",
-        ),
-        make_summary_ns(
-            "bbb",
-            "build-bar",
-            "build",
-            "test",
-            StepStatusKind::Running,
-            "bar",
-        ),
-        make_summary_ns(
-            "ccc",
-            "build-wok2",
-            "build",
-            "done",
-            StepStatusKind::Completed,
-            "wok",
-        ),
+        make_summary_ns("aaa", "build-wok", "build", "plan", StepStatusKind::Running, "wok"),
+        make_summary_ns("bbb", "build-bar", "build", "test", StepStatusKind::Running, "bar"),
+        make_summary_ns("ccc", "build-wok2", "build", "done", StepStatusKind::Completed, "wok"),
     ];
 
-    // Simulate: no --project flag (OJ_NAMESPACE should NOT filter)
+    // Simulate: no --project flag (OJ_PROJECT should NOT filter)
     let project_filter: Option<&str> = None;
     if let Some(proj) = project_filter {
-        jobs.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.project == proj);
     }
 
-    assert_eq!(
-        jobs.len(),
-        3,
-        "all jobs should be retained when no --project flag"
-    );
+    assert_eq!(jobs.len(), 3, "all jobs should be retained when no --project flag");
 }
 
 #[test]
 fn project_filter_no_match_returns_empty() {
     let mut jobs = vec![
-        make_summary_ns(
-            "aaa",
-            "build-wok",
-            "build",
-            "plan",
-            StepStatusKind::Running,
-            "wok",
-        ),
-        make_summary_ns(
-            "bbb",
-            "build-bar",
-            "build",
-            "test",
-            StepStatusKind::Running,
-            "bar",
-        ),
+        make_summary_ns("aaa", "build-wok", "build", "plan", StepStatusKind::Running, "wok"),
+        make_summary_ns("bbb", "build-bar", "build", "test", StepStatusKind::Running, "bar"),
     ];
 
     let project_filter: Option<&str> = Some("nonexistent");
     if let Some(proj) = project_filter {
-        jobs.retain(|p| p.namespace == proj);
+        jobs.retain(|p| p.project == proj);
     }
 
     assert!(jobs.is_empty());
@@ -732,39 +532,21 @@ fn project_filter_no_match_returns_empty() {
 
 // ── Variable sorting tests ─────────────────────────────────────────────────
 
-#[test]
-fn var_scope_order_var_first() {
-    assert_eq!(var_scope_order("var.input").0, 0);
-    assert_eq!(var_scope_order("var.output").0, 0);
-}
-
-#[test]
-fn var_scope_order_local_second() {
-    assert_eq!(var_scope_order("local.temp").0, 1);
-    assert_eq!(var_scope_order("local.result").0, 1);
-}
-
-#[test]
-fn var_scope_order_workspace_third() {
-    assert_eq!(var_scope_order("workspace.path").0, 2);
-    assert_eq!(var_scope_order("workspace.name").0, 2);
-}
-
-#[test]
-fn var_scope_order_invoke_fourth() {
-    assert_eq!(var_scope_order("invoke.item").0, 3);
-    assert_eq!(var_scope_order("invoke.foo.bar").0, 3);
-}
-
-#[test]
-fn var_scope_order_other_namespaced() {
-    assert_eq!(var_scope_order("custom.value").0, 4);
-}
-
-#[test]
-fn var_scope_order_unnamespaced_last() {
-    assert_eq!(var_scope_order("result").0, 5);
-    assert_eq!(var_scope_order("unknown").0, 5);
+#[yare::parameterized(
+    var_input        = { "var.input",       0 },
+    var_output       = { "var.output",      0 },
+    local_temp       = { "local.temp",      1 },
+    local_result     = { "local.result",    1 },
+    workspace_path   = { "workspace.path",  2 },
+    workspace_name   = { "workspace.name",  2 },
+    invoke_item      = { "invoke.item",     3 },
+    invoke_nested    = { "invoke.foo.bar",  3 },
+    other_namespaced = { "custom.value",    4 },
+    unnamespaced     = { "result",          5 },
+    unknown          = { "unknown",         5 },
+)]
+fn var_scope_order_mapping(key: &str, expected: usize) {
+    assert_eq!(var_scope_order(key).0, expected);
 }
 
 #[test]
@@ -778,10 +560,7 @@ fn group_vars_by_scope_groups_by_namespace() {
     let sorted = group_vars_by_scope(&vars);
     let keys: Vec<&str> = sorted.iter().map(|(k, _)| k.as_str()).collect();
 
-    assert_eq!(
-        keys,
-        vec!["var.output", "local.temp", "workspace.path", "invoke.item"]
-    );
+    assert_eq!(keys, vec!["var.output", "local.temp", "workspace.path", "invoke.item"]);
 }
 
 #[test]

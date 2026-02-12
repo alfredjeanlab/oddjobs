@@ -19,9 +19,9 @@ fn test_config(id: &str, name: &str) -> JobConfig {
 fn create_test_state() -> MaterializedState {
     let mut state = MaterializedState::default();
 
-    let job = Job::new(test_config("pipe-1", "test-job"), &SystemClock);
+    let job = Job::new(test_config("job-1", "test-job"), &SystemClock);
 
-    state.jobs.insert("pipe-1".to_string(), job);
+    state.jobs.insert("job-1".to_string(), job);
     state
 }
 
@@ -41,7 +41,7 @@ fn test_snapshot_save_and_load() {
     let loaded = Snapshot::load(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 42);
     assert_eq!(loaded.state.jobs.len(), 1);
-    assert!(loaded.state.jobs.contains_key("pipe-1"));
+    assert!(loaded.state.jobs.contains_key("job-1"));
 }
 
 #[test]
@@ -80,10 +80,10 @@ fn test_snapshot_preserves_state() {
 
     // Add multiple items
     for i in 0..3 {
-        let mut config = test_config(&format!("pipe-{}", i), &format!("test-{}", i));
+        let mut config = test_config(&format!("job-{}", i), &format!("test-{}", i));
         config.vars = HashMap::from([("key".to_string(), format!("value-{}", i))]);
         let job = Job::new(config, &SystemClock);
-        state.jobs.insert(format!("pipe-{}", i), job);
+        state.jobs.insert(format!("job-{}", i), job);
     }
 
     let snapshot = Snapshot::new(100, state);
@@ -94,7 +94,7 @@ fn test_snapshot_preserves_state() {
     assert_eq!(loaded.state.jobs.len(), 3);
 
     for i in 0..3 {
-        let key = format!("pipe-{}", i);
+        let key = format!("job-{}", i);
         let job = loaded.state.jobs.get(&key).unwrap();
         assert_eq!(job.name, format!("test-{}", i));
         assert_eq!(job.vars.get("key"), Some(&format!("value-{}", i)));
@@ -157,19 +157,19 @@ fn test_load_corrupt_snapshot_rotates_bak_files() {
 }
 
 #[test]
-fn test_snapshot_round_trip_with_action_attempts() {
+fn test_snapshot_round_trip_with_attempts() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("snapshot.json");
 
     let mut state = MaterializedState::default();
-    let mut job = Job::new(test_config("pipe-1", "test-job"), &SystemClock);
+    let mut job = Job::new(test_config("job-1", "test-job"), &SystemClock);
 
-    // Populate action_attempts (previously caused serialization failure)
-    job.increment_action_attempt("on_idle", 0);
-    job.increment_action_attempt("on_idle", 0);
-    job.increment_action_attempt("on_fail", 1);
+    // Populate attempts (previously caused serialization failure)
+    job.increment_attempt("on_idle", 0);
+    job.increment_attempt("on_idle", 0);
+    job.increment_attempt("on_fail", 1);
 
-    state.jobs.insert("pipe-1".to_string(), job);
+    state.jobs.insert("job-1".to_string(), job);
 
     let snapshot = Snapshot::new(50, state);
     snapshot.save(&path).unwrap();
@@ -177,10 +177,10 @@ fn test_snapshot_round_trip_with_action_attempts() {
     let loaded = Snapshot::load(&path).unwrap().unwrap();
     assert_eq!(loaded.seq, 50);
 
-    let p = loaded.state.jobs.get("pipe-1").unwrap();
-    assert_eq!(p.get_action_attempt("on_idle", 0), 2);
-    assert_eq!(p.get_action_attempt("on_fail", 1), 1);
-    assert_eq!(p.get_action_attempt("unknown", 0), 0);
+    let p = loaded.state.jobs.get("job-1").unwrap();
+    assert_eq!(p.actions.get_action_attempt("on_idle", 0), 2);
+    assert_eq!(p.actions.get_action_attempt("on_fail", 1), 1);
+    assert_eq!(p.actions.get_action_attempt("unknown", 0), 0);
 }
 
 #[test]

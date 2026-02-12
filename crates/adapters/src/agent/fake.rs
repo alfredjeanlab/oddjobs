@@ -4,7 +4,7 @@
 //! Fake agent adapter for deterministic testing
 #![cfg_attr(coverage_nightly, coverage(off))]
 
-use super::{AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig, AgentSpawnConfig};
+use super::{AgentAdapter, AgentAdapterError, AgentConfig, AgentHandle, AgentReconnectConfig};
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event, OwnerId};
 use parking_lot::Mutex;
@@ -16,24 +16,11 @@ use tokio::sync::mpsc;
 /// Recorded call to FakeAgentAdapter
 #[derive(Debug, Clone)]
 pub enum AgentCall {
-    Spawn {
-        agent_id: AgentId,
-        command: String,
-    },
-    Reconnect {
-        agent_id: AgentId,
-        session_id: String,
-    },
-    Send {
-        agent_id: AgentId,
-        input: String,
-    },
-    Kill {
-        agent_id: AgentId,
-    },
-    GetState {
-        agent_id: AgentId,
-    },
+    Spawn { agent_id: AgentId, command: String },
+    Reconnect { agent_id: AgentId },
+    Send { agent_id: AgentId, input: String },
+    Kill { agent_id: AgentId },
+    GetState { agent_id: AgentId },
 }
 
 /// Fake agent adapter for testing
@@ -56,7 +43,8 @@ struct FakeAgent {
     state: AgentState,
     owner: OwnerId,
     event_tx: Option<mpsc::Sender<Event>>,
-    session_log_size: Option<u64>,
+    alive: bool,
+    output: Vec<String>,
 }
 
 impl Default for FakeAgentAdapter {
@@ -108,9 +96,7 @@ impl FakeAgentAdapter {
         };
 
         if let Some(tx) = event_tx {
-            let _ = tx
-                .send(Event::from_agent_state(agent_id.clone(), state, owner))
-                .await;
+            let _ = tx.send(Event::from_agent_state(agent_id.clone(), state, owner)).await;
         }
     }
 
@@ -129,14 +115,6 @@ impl FakeAgentAdapter {
         self.inner.lock().kill_error = Some(error);
     }
 
-    /// Set the session log size for an agent (for idle grace timer testing)
-    pub fn set_session_log_size(&self, agent_id: &AgentId, size: Option<u64>) {
-        let mut inner = self.inner.lock();
-        if let Some(agent) = inner.agents.get_mut(agent_id) {
-            agent.session_log_size = size;
-        }
-    }
-
     /// Check if an agent exists
     pub fn has_agent(&self, agent_id: &AgentId) -> bool {
         self.inner.lock().agents.contains_key(agent_id)
@@ -145,6 +123,22 @@ impl FakeAgentAdapter {
     /// Get the number of active agents
     pub fn agent_count(&self) -> usize {
         self.inner.lock().agents.len()
+    }
+
+    /// Set whether an agent is considered alive
+    pub fn set_agent_alive(&self, agent_id: &AgentId, alive: bool) {
+        let mut inner = self.inner.lock();
+        if let Some(agent) = inner.agents.get_mut(agent_id) {
+            agent.alive = alive;
+        }
+    }
+
+    /// Set the terminal output lines for an agent
+    pub fn set_agent_output(&self, agent_id: &AgentId, output: Vec<String>) {
+        let mut inner = self.inner.lock();
+        if let Some(agent) = inner.agents.get_mut(agent_id) {
+            agent.output = output;
+        }
     }
 }
 
@@ -162,10 +156,11 @@ impl FakeAgentState {
                 state: AgentState::Working,
                 owner,
                 event_tx: Some(event_tx),
-                session_log_size: None,
+                alive: true,
+                output: Vec::new(),
             },
         );
-        AgentHandle::new(agent_id.clone(), agent_id.to_string(), workspace_path)
+        AgentHandle::new(agent_id.clone(), workspace_path)
     }
 }
 
@@ -173,7 +168,7 @@ impl FakeAgentState {
 impl AgentAdapter for FakeAgentAdapter {
     async fn spawn(
         &self,
-        config: AgentSpawnConfig,
+        config: AgentConfig,
         event_tx: mpsc::Sender<Event>,
     ) -> Result<AgentHandle, AgentAdapterError> {
         let mut inner = self.inner.lock();
@@ -184,12 +179,7 @@ impl AgentAdapter for FakeAgentAdapter {
         if let Some(error) = inner.spawn_error.take() {
             return Err(error);
         }
-        Ok(inner.register_agent(
-            config.agent_id,
-            config.owner,
-            event_tx,
-            config.workspace_path,
-        ))
+        Ok(inner.register_agent(config.agent_id, config.owner, event_tx, config.workspace_path))
     }
 
     async fn reconnect(
@@ -198,27 +188,16 @@ impl AgentAdapter for FakeAgentAdapter {
         event_tx: mpsc::Sender<Event>,
     ) -> Result<AgentHandle, AgentAdapterError> {
         let mut inner = self.inner.lock();
-        inner.calls.push(AgentCall::Reconnect {
-            agent_id: config.agent_id.clone(),
-            session_id: config.session_id.clone(),
-        });
+        inner.calls.push(AgentCall::Reconnect { agent_id: config.agent_id.clone() });
         if let Some(error) = inner.spawn_error.take() {
             return Err(error);
         }
-        Ok(inner.register_agent(
-            config.agent_id,
-            config.owner,
-            event_tx,
-            config.workspace_path,
-        ))
+        Ok(inner.register_agent(config.agent_id, config.owner, event_tx, config.workspace_path))
     }
 
     async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
         let mut inner = self.inner.lock();
-        inner.calls.push(AgentCall::Send {
-            agent_id: agent_id.clone(),
-            input: input.to_string(),
-        });
+        inner.calls.push(AgentCall::Send { agent_id: agent_id.clone(), input: input.to_string() });
         if let Some(error) = inner.send_error.take() {
             return Err(error);
         }
@@ -230,9 +209,7 @@ impl AgentAdapter for FakeAgentAdapter {
 
     async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
         let mut inner = self.inner.lock();
-        inner.calls.push(AgentCall::Kill {
-            agent_id: agent_id.clone(),
-        });
+        inner.calls.push(AgentCall::Kill { agent_id: agent_id.clone() });
         if let Some(error) = inner.kill_error.take() {
             return Err(error);
         }
@@ -245,9 +222,7 @@ impl AgentAdapter for FakeAgentAdapter {
 
     async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
         let mut inner = self.inner.lock();
-        inner.calls.push(AgentCall::GetState {
-            agent_id: agent_id.clone(),
-        });
+        inner.calls.push(AgentCall::GetState { agent_id: agent_id.clone() });
         inner
             .agents
             .get(agent_id)
@@ -255,15 +230,37 @@ impl AgentAdapter for FakeAgentAdapter {
             .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))
     }
 
-    async fn session_log_size(&self, agent_id: &AgentId) -> Option<u64> {
-        self.inner
-            .lock()
-            .agents
-            .get(agent_id)
-            .and_then(|a| a.session_log_size)
+    async fn last_message(&self, _agent_id: &AgentId) -> Option<String> {
+        None
     }
 
-    async fn last_assistant_message(&self, _agent_id: &AgentId) -> Option<String> {
+    async fn resolve_stop(&self, _agent_id: &AgentId) {
+        // no-op in fake adapter
+    }
+
+    async fn is_alive(&self, agent_id: &AgentId) -> bool {
+        self.inner.lock().agents.get(agent_id).map(|a| a.alive).unwrap_or(false)
+    }
+
+    async fn capture_output(
+        &self,
+        agent_id: &AgentId,
+        lines: u32,
+    ) -> Result<String, AgentAdapterError> {
+        let inner = self.inner.lock();
+        let agent = inner
+            .agents
+            .get(agent_id)
+            .ok_or_else(|| AgentAdapterError::NotFound(agent_id.to_string()))?;
+        let start = agent.output.len().saturating_sub(lines as usize);
+        Ok(agent.output[start..].join("\n"))
+    }
+
+    async fn fetch_transcript(&self, _agent_id: &AgentId) -> Result<String, AgentAdapterError> {
+        Ok(String::new())
+    }
+
+    async fn fetch_usage(&self, _agent_id: &AgentId) -> Option<super::UsageData> {
         None
     }
 }

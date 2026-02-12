@@ -37,18 +37,15 @@
 //! See [`docs/01-concepts/EXECUTION.md`] for the full rationale.
 
 use crate::command::RunDirective;
+use crate::container::ContainerConfig;
 use indexmap::IndexMap;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 
-/// A step transition target.
-///
-/// Accepts either:
-///   `{ step = "name" }`  — structured form (preferred)
-///   `"name"`             — bare string (backward compat)
-#[derive(Debug, Clone, Serialize)]
+/// A step transition target: `{ step = "name" }`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepTransition {
     pub step: String,
 }
@@ -56,23 +53,6 @@ pub struct StepTransition {
 impl StepTransition {
     pub fn step_name(&self) -> &str {
         &self.step
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum StepTransitionRaw {
-    Structured { step: String },
-    Bare(String),
-}
-
-impl<'de> Deserialize<'de> for StepTransition {
-    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let raw = StepTransitionRaw::deserialize(d)?;
-        Ok(match raw {
-            StepTransitionRaw::Structured { step } => StepTransition { step },
-            StepTransitionRaw::Bare(s) => StepTransition { step: s },
-        })
     }
 }
 
@@ -97,17 +77,17 @@ impl NotifyConfig {
     }
 }
 
-/// Workspace configuration for job execution.
+/// Source configuration for job execution.
 ///
 /// Supports two forms:
-///   `workspace = "folder"`                    — plain directory
-///   `workspace { git = "worktree" }`          — git worktree (engine-managed)
+///   `source = "folder"`                — plain directory
+///   `source { git = true }`            — git worktree (engine-managed)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum WorkspaceConfig {
-    /// Short form: `workspace = "folder"`
+    /// Short form: `source = "folder"`
     Simple(WorkspaceType),
-    /// Block form: `workspace { git = "worktree" }`
+    /// Block form: `source { git = true }`
     Block(WorkspaceBlock),
 }
 
@@ -119,11 +99,24 @@ pub enum WorkspaceType {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspaceBlock {
+    #[serde(deserialize_with = "deserialize_git_mode")]
     pub git: GitWorkspaceMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
     #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
     pub from_ref: Option<String>,
+}
+
+fn deserialize_git_mode<'de, D>(deserializer: D) -> Result<GitWorkspaceMode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = bool::deserialize(deserializer)?;
+    if value {
+        Ok(GitWorkspaceMode::Worktree)
+    } else {
+        Err(de::Error::custom("git = false is not valid; omit the source block instead"))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -136,10 +129,7 @@ impl WorkspaceConfig {
     pub fn is_git_worktree(&self) -> bool {
         matches!(
             self,
-            WorkspaceConfig::Block(WorkspaceBlock {
-                git: GitWorkspaceMode::Worktree,
-                ..
-            })
+            WorkspaceConfig::Block(WorkspaceBlock { git: GitWorkspaceMode::Worktree, .. })
         )
     }
 }
@@ -205,9 +195,13 @@ pub struct JobDef {
     /// Base directory or repo path for execution (supports template interpolation)
     #[serde(default)]
     pub cwd: Option<String>,
-    /// Workspace configuration: "folder" (plain dir) or `{ git = "worktree" }` (engine-managed)
+    /// Source configuration: "folder" (plain dir) or `{ git = true }` (engine-managed).
     #[serde(default)]
-    pub workspace: Option<WorkspaceConfig>,
+    pub source: Option<WorkspaceConfig>,
+    /// Container configuration for running this job's agents/steps in a container.
+    /// Short form: `container = "image"`, block form: `container { image = "..." }`.
+    #[serde(default)]
+    pub container: Option<ContainerConfig>,
     /// Step to route to when the job completes (no step-level on_done)
     #[serde(default)]
     pub on_done: Option<StepTransition>,

@@ -3,17 +3,10 @@
 
 //! Pure type definitions for materialized state records.
 
-use oj_core::{OwnerId, WorkspaceStatus};
+use oj_core::{OwnerId, RunTarget, WorkspaceStatus};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-
-/// Session record
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub id: String,
-    pub job_id: String,
-}
 
 /// Workspace type for lifecycle management
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,10 +33,7 @@ impl<'de> serde::Deserialize<'de> for WorkspaceType {
         match s.as_str() {
             "folder" => Ok(WorkspaceType::Folder),
             "worktree" => Ok(WorkspaceType::Worktree),
-            other => Err(serde::de::Error::unknown_variant(
-                other,
-                &["folder", "worktree"],
-            )),
+            other => Err(serde::de::Error::unknown_variant(other, &["folder", "worktree"])),
         }
     }
 }
@@ -55,16 +45,13 @@ pub struct Workspace {
     pub path: PathBuf,
     /// Branch for the worktree (None for folder workspaces)
     pub branch: Option<String>,
-    /// Owner of the workspace (job or agent_run)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub owner: Option<OwnerId>,
+    /// Owner of the workspace (job or crew)
+    pub owner: OwnerId,
     /// Current lifecycle status
     pub status: WorkspaceStatus,
     /// Workspace type (folder or worktree)
-    #[serde(default)]
     pub workspace_type: WorkspaceType,
     /// Epoch milliseconds when workspace was created (0 for pre-existing workspaces)
-    #[serde(default)]
     pub created_at_ms: u64,
 }
 
@@ -79,22 +66,17 @@ pub struct StoredRunbook {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkerRecord {
     pub name: String,
-    #[serde(default)]
-    pub namespace: String,
-    pub project_root: PathBuf,
+    pub project: String,
+    pub project_path: PathBuf,
     pub runbook_hash: String,
     /// "running" or "stopped"
     pub status: String,
-    #[serde(default)]
-    pub active_job_ids: Vec<String>,
-    #[serde(default)]
-    pub queue_name: String,
-    #[serde(default)]
+    pub active: Vec<String>,
+    pub queue: String,
     pub concurrency: u32,
-    /// Mapping from job_id → item_id for queue item tracking.
-    /// Persisted via WorkerItemDispatched events for restart recovery.
-    #[serde(default)]
-    pub item_job_map: HashMap<String, String>,
+    /// Mapping from owner → item_id for queue item tracking.
+    /// Persisted via WorkerDispatched events for restart recovery.
+    pub owners: HashMap<String, String>,
 }
 
 /// Status of a queue item through its lifecycle
@@ -124,14 +106,13 @@ impl std::fmt::Display for QueueItemStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueItem {
     pub id: String,
-    pub queue_name: String,
+    pub queue: String,
     pub data: HashMap<String, String>,
     pub status: QueueItemStatus,
-    pub worker_name: Option<String>,
-    pub pushed_at_epoch_ms: u64,
+    pub worker: Option<String>,
+    pub pushed_at_ms: u64,
     /// Number of times this item has failed (for retry tracking)
-    #[serde(default)]
-    pub failure_count: u32,
+    pub failures: u32,
 }
 
 /// Runtime-only metadata from the most recent queue poll.
@@ -145,19 +126,15 @@ pub struct QueuePollMeta {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CronRecord {
     pub name: String,
-    #[serde(default)]
-    pub namespace: String,
-    pub project_root: PathBuf,
+    pub project: String,
+    pub project_path: PathBuf,
     pub runbook_hash: String,
     /// "running" or "stopped"
     pub status: String,
     pub interval: String,
-    /// What this cron runs: "job:name" or "agent:name"
-    pub run_target: String,
+    pub target: RunTarget,
     /// Epoch ms when the cron was started (timer began)
-    #[serde(default)]
     pub started_at_ms: u64,
     /// Epoch ms when the cron last fired (spawned a job)
-    #[serde(default)]
     pub last_fired_at_ms: Option<u64>,
 }

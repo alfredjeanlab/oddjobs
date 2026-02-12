@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use oj_core::{namespace_to_option, OwnerId, StepOutcome, StepOutcomeKind};
+use oj_engine::log_paths::agent_log_path;
 use oj_storage::MaterializedState;
 
 use crate::protocol::{AgentDetail, AgentSummary, Response, StepRecordDetail};
@@ -21,8 +22,8 @@ pub(super) fn handle_get_agent(
         let steps: Vec<StepRecordDetail> =
             p.step_history.iter().map(StepRecordDetail::from).collect();
 
-        let namespace = namespace_to_option(&p.namespace);
-        let summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
+        let project = namespace_to_option(&p.project);
+        let summaries = compute_agent_summaries(&p.id, &steps, logs_path, project);
 
         // Find agent matching by exact ID or prefix
         let summary = summaries
@@ -30,9 +31,7 @@ pub(super) fn handle_get_agent(
             .find(|a| a.agent_id == agent_id || a.agent_id.starts_with(&agent_id))?;
 
         // Find the matching step record for timestamps and error
-        let step = steps
-            .iter()
-            .find(|s| s.agent_id.as_deref() == Some(&summary.agent_id));
+        let step = steps.iter().find(|s| s.agent_id.as_deref() == Some(&summary.agent_id));
 
         let error = step.and_then(|s| {
             if s.outcome == StepOutcomeKind::Failed {
@@ -45,122 +44,19 @@ pub(super) fn handle_get_agent(
         let started_at_ms = step.map(|s| s.started_at_ms).unwrap_or(0);
         let finished_at_ms = step.and_then(|s| s.finished_at_ms);
 
-        Some(Box::new(AgentDetail {
-            agent_id: summary.agent_id.clone(),
-            agent_name: summary.agent_name.clone(),
-            job_id: p.id.clone(),
-            job_name: p.name.clone(),
-            step_name: summary.step_name.clone(),
-            namespace: namespace.map(|s| s.to_string()),
-            status: summary.status.clone(),
-            workspace_path: p.workspace_path.clone(),
-            session_id: p.session_id.clone(),
-            files_read: summary.files_read,
-            files_written: summary.files_written,
-            commands_run: summary.commands_run,
-            exit_reason: summary.exit_reason.clone(),
-            error,
-            started_at_ms,
-            finished_at_ms,
-            updated_at_ms: summary.updated_at_ms,
-        }))
+        Some(Box::new(AgentDetail::from_summary(summary, p, error, started_at_ms, finished_at_ms)))
     });
 
-    // If not found in jobs, check standalone agent runs
+    // If not found in jobs, check crew
     let agent = agent.or_else(|| {
-        state.agent_runs.values().find_map(|ar| {
-            let ar_agent_id = ar.agent_id.as_deref().unwrap_or(&ar.id);
-            if ar_agent_id != agent_id
-                && !ar_agent_id.starts_with(&agent_id)
-                && ar.id != agent_id
-                && !ar.id.starts_with(&agent_id)
-            {
-                return None;
-            }
-            let namespace = namespace_to_option(&ar.namespace).map(str::to_string);
-            Some(Box::new(AgentDetail {
-                agent_id: ar_agent_id.to_string(),
-                agent_name: Some(ar.agent_name.clone()),
-                job_id: String::new(),
-                job_name: ar.command_name.clone(),
-                step_name: String::new(),
-                namespace,
-                status: format!("{}", ar.status),
-                workspace_path: Some(ar.cwd.clone()),
-                session_id: ar.session_id.clone(),
-                files_read: 0,
-                files_written: 0,
-                commands_run: 0,
-                exit_reason: ar.error.clone(),
-                error: ar.error.clone(),
-                started_at_ms: ar.created_at_ms,
-                finished_at_ms: None,
-                updated_at_ms: ar.updated_at_ms,
-            }))
+        state.crew.values().find_map(|run| {
+            let matches = run.agent_id.as_deref().is_some_and(|aid| aid.starts_with(&agent_id))
+                || run.id.starts_with(&agent_id);
+            matches.then(|| Box::new(AgentDetail::from(run)))
         })
     });
 
     Response::Agent { agent }
-}
-
-pub(super) fn handle_get_agent_signal(agent_id: String, state: &MaterializedState) -> Response {
-    // Check standalone agent runs first
-    let agent_run_match = state
-        .agent_runs
-        .values()
-        .find(|ar| ar.agent_id.as_deref() == Some(&agent_id));
-    if let Some(ar) = agent_run_match {
-        if let Some(s) = &ar.action_tracker.agent_signal {
-            return Response::AgentSignal {
-                signaled: true,
-                kind: Some(s.kind.clone()),
-                message: s.message.clone(),
-            };
-        }
-        // Agent run exists but no signal — don't allow exit
-        return Response::AgentSignal {
-            signaled: false,
-            kind: None,
-            message: None,
-        };
-    }
-
-    // Find job by agent_id in current step and return its signal
-    let job_signal = state.jobs.values().find_map(|p| {
-        let matches = p
-            .step_history
-            .iter()
-            .rfind(|r| r.name == p.step)
-            .and_then(|r| r.agent_id.as_deref())
-            == Some(&agent_id);
-        if matches {
-            Some(p.action_tracker.agent_signal.as_ref())
-        } else {
-            None
-        }
-    });
-
-    match job_signal {
-        Some(Some(s)) => Response::AgentSignal {
-            signaled: true,
-            kind: Some(s.kind.clone()),
-            message: s.message.clone(),
-        },
-        Some(None) => Response::AgentSignal {
-            signaled: false,
-            kind: None,
-            message: None,
-        },
-        None => {
-            // No job or agent_run owns this agent — orphaned or job advanced.
-            // Allow exit to prevent the agent from getting stuck.
-            Response::AgentSignal {
-                signaled: true,
-                kind: None,
-                message: None,
-            }
-        }
-    }
 }
 
 pub(super) fn handle_list_agents(
@@ -179,7 +75,7 @@ pub(super) fn handle_list_agents(
             match &record.owner {
                 OwnerId::Job(jid) if jid.as_str().starts_with(prefix.as_str()) => {}
                 OwnerId::Job(_) => continue,
-                OwnerId::AgentRun(_) => continue,
+                OwnerId::Crew(_) => continue,
             }
         }
 
@@ -212,10 +108,10 @@ pub(super) fn handle_list_agents(
                     .unwrap_or_default();
                 (jid.to_string(), sname)
             }
-            OwnerId::AgentRun(_) => (String::new(), String::new()),
+            OwnerId::Crew(_) => (String::new(), String::new()),
         };
 
-        let namespace = namespace_to_option(&record.namespace).map(str::to_string);
+        let project = record.project.clone();
 
         // Read agent log for file stats
         let (files_read, files_written, commands_run) =
@@ -234,20 +130,18 @@ pub(super) fn handle_list_agents(
                         _ => None,
                     })
             }),
-            OwnerId::AgentRun(arid) => state
-                .agent_runs
-                .get(arid.as_str())
-                .and_then(|ar| ar.error.clone()),
+            OwnerId::Crew(arid) => state.crew.get(arid.as_str()).and_then(|run| run.error.clone()),
         };
 
         tracked_agent_ids.insert(record.agent_id.clone());
 
         agents.push(AgentSummary {
             job_id: owner_job_id,
+            crew_id: String::new(),
             step_name,
             agent_id: record.agent_id.clone(),
             agent_name: Some(record.agent_name.clone()),
-            namespace,
+            project,
             status: status_str.to_string(),
             files_read,
             files_written,
@@ -268,8 +162,8 @@ pub(super) fn handle_list_agents(
         let steps: Vec<StepRecordDetail> =
             p.step_history.iter().map(StepRecordDetail::from).collect();
 
-        let namespace = namespace_to_option(&p.namespace);
-        let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path, namespace);
+        let project = namespace_to_option(&p.project);
+        let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path, project);
 
         // Skip agents already tracked from the agents map
         summaries.retain(|a| !tracked_agent_ids.contains(&a.agent_id));
@@ -281,33 +175,19 @@ pub(super) fn handle_list_agents(
         agents.extend(summaries);
     }
 
-    // Fallback: standalone agent runs not in agents map
-    for ar in state.agent_runs.values() {
-        let aid = ar.agent_id.clone().unwrap_or_else(|| ar.id.clone());
-        if tracked_agent_ids.contains(&aid) {
+    // Fallback: crew not in agents map
+    for run in state.crew.values() {
+        if run.agent_id.as_ref().is_some_and(|aid| tracked_agent_ids.contains(aid)) {
             continue;
         }
 
-        let ar_status = format!("{}", ar.status);
+        let ar_status = run.status.to_string();
         if let Some(ref s) = status {
             if ar_status != *s {
                 continue;
             }
         }
-        let namespace = namespace_to_option(&ar.namespace).map(str::to_string);
-        agents.push(AgentSummary {
-            job_id: String::new(),
-            step_name: String::new(),
-            agent_id: aid,
-            agent_name: Some(ar.agent_name.clone()),
-            namespace,
-            status: ar_status,
-            files_read: 0,
-            files_written: 0,
-            commands_run: 0,
-            exit_reason: ar.error.clone(),
-            updated_at_ms: ar.updated_at_ms,
-        });
+        agents.push(AgentSummary::from(run));
     }
 
     // Sort by most recently updated first
@@ -318,8 +198,6 @@ pub(super) fn handle_list_agents(
 
 /// Count file read/write/command stats from an agent log file.
 fn count_agent_log_stats(logs_path: &Path, agent_id: &str) -> (usize, usize, usize) {
-    use oj_engine::log_paths::agent_log_path;
-
     let log_path = agent_log_path(logs_path, agent_id);
     let content = std::fs::read_to_string(&log_path).unwrap_or_default();
 
@@ -350,10 +228,8 @@ pub(super) fn compute_agent_summaries(
     job_id: &str,
     steps: &[StepRecordDetail],
     logs_path: &Path,
-    namespace: Option<&str>,
+    project: Option<&str>,
 ) -> Vec<AgentSummary> {
-    use oj_engine::log_paths::agent_log_path;
-
     steps
         .iter()
         .filter_map(|step| {
@@ -406,10 +282,11 @@ pub(super) fn compute_agent_summaries(
 
             Some(AgentSummary {
                 job_id: job_id.to_string(),
+                crew_id: String::new(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
                 agent_name: step.agent_name.clone(),
-                namespace: namespace.map(|s| s.to_string()),
+                project: project.unwrap_or_default().to_string(),
                 status: step.outcome.to_string(),
                 files_read,
                 files_written,

@@ -31,7 +31,7 @@ queue "merges" {
 
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { job = "merge" }
+  run = { job = "merge" }
   concurrency = 1
 }
 

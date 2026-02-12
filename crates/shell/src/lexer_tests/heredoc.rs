@@ -6,10 +6,6 @@
 use crate::lexer::{Lexer, LexerError};
 use crate::token::TokenKind;
 
-// =============================================================================
-// Basic Heredoc with Body
-// =============================================================================
-
 lex_tests! {
     basic_heredoc: "cat <<EOF\nhello\nworld\nEOF" => [
         TokenKind::Word("cat".into()),
@@ -56,10 +52,6 @@ lex_tests! {
         TokenKind::Newline,
     ],
 }
-
-// =============================================================================
-// Tab Stripping (<<-)
-// =============================================================================
 
 lex_tests! {
     strip_tabs_body: "cat <<-EOF\n\thello\n\tworld\nEOF" => [
@@ -108,10 +100,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// File Descriptor Prefix
-// =============================================================================
-
 lex_tests! {
     heredoc_fd_3: "cmd 3<<EOF\ncontent\nEOF" => [
         TokenKind::Word("cmd".into()),
@@ -147,10 +135,6 @@ lex_tests! {
         TokenKind::Newline,
     ],
 }
-
-// =============================================================================
-// Quoted Delimiters
-// =============================================================================
 
 lex_tests! {
     single_quoted_delimiter: "cat <<'EOF'\nhello\nEOF" => [
@@ -188,10 +172,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Heredoc in Job
-// =============================================================================
-
 lex_tests! {
     heredoc_pipe: "cat <<EOF | sort\ndata\nEOF" => [
         TokenKind::Word("cat".into()),
@@ -223,10 +203,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Multiple Heredocs
-// =============================================================================
-
 lex_tests! {
     two_heredocs: "cat <<A <<B\na\nA\nb\nB" => [
         TokenKind::Word("cat".into()),
@@ -247,10 +223,6 @@ lex_tests! {
         TokenKind::Newline,
     ],
 }
-
-// =============================================================================
-// Body Content Preservation
-// =============================================================================
 
 lex_tests! {
     body_with_quotes: "cat <<EOF\n\"quoted\"\n'single'\nEOF" => [
@@ -299,20 +271,12 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Error Cases
-// =============================================================================
-
 lex_error_tests! {
     unterminated_heredoc: "cat <<EOF\nhello" => LexerError::UnterminatedHereDoc { .. },
     unterminated_no_body: "cat <<EOF" => LexerError::UnterminatedHereDoc { .. },
     missing_delimiter: "cat <<\nEOF" => LexerError::InvalidRedirection { .. },
     missing_delimiter_strip: "cat <<-\nEOF" => LexerError::InvalidRedirection { .. },
 }
-
-// =============================================================================
-// Span Tests
-// =============================================================================
 
 // HereDoc span covers the operator and delimiter on the command line (not the body).
 // The body content is captured but doesn't extend the span.

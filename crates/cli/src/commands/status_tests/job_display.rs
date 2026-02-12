@@ -13,19 +13,12 @@ fn active_job_shows_kind_not_name() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.active_jobs
-        .push(job_entry("abcd1234-0000-0000-0000", "build", "check"));
+    ns.active_jobs.push(job_entry("abcd1234-0000-0000-0000", "build", "check"));
 
     let output = format_text(30, &[ns], None, None);
 
-    assert!(
-        output.contains("build"),
-        "output should contain job kind 'build':\n{output}"
-    );
-    assert!(
-        output.contains("check"),
-        "output should contain step name 'check':\n{output}"
-    );
+    assert!(output.contains("build"), "output should contain job kind 'build':\n{output}");
+    assert!(output.contains("check"), "output should contain step name 'check':\n{output}");
     // The job UUID name should not appear in the rendered text
     assert!(
         !output.contains("abcd1234-0000"),
@@ -82,8 +75,7 @@ fn orphaned_job_hides_name_when_same_as_id() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.orphaned_jobs
-        .push(job_entry("ijkl9012-0000-0000-0000", "ci", "lint"));
+    ns.orphaned_jobs.push(job_entry("ijkl9012-0000-0000-0000", "ci", "lint"));
 
     let output = format_text(30, &[ns], None, None);
 
@@ -174,10 +166,7 @@ fn escalated_job_shows_source_label() {
 
     let output = format_text(30, &[ns], None, None);
 
-    assert!(
-        output.contains("[idle]"),
-        "output should contain source label '[idle]':\n{output}"
-    );
+    assert!(output.contains("[idle]"), "output should contain source label '[idle]':\n{output}");
 }
 
 #[test]
@@ -221,8 +210,5 @@ fn escalated_job_truncates_long_reason() {
         !output.contains(&long_reason),
         "output should not contain the full long reason:\n{output}"
     );
-    assert!(
-        output.contains("..."),
-        "output should contain truncation indicator '...':\n{output}"
-    );
+    assert!(output.contains("..."), "output should contain truncation indicator '...':\n{output}");
 }

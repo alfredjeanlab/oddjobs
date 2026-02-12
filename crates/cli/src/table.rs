@@ -6,7 +6,6 @@
 //! Provides consistent column alignment, color application, and truncation
 //! across all `oj * list` commands.
 
-use std::collections::HashSet;
 use std::io::Write;
 
 use crate::color;
@@ -41,13 +40,7 @@ pub struct Column {
 impl Column {
     /// Left-aligned, plain style.
     pub fn left(name: &'static str) -> Self {
-        Self {
-            name,
-            align: Align::Left,
-            style: CellStyle::Plain,
-            min_width: None,
-            max_width: None,
-        }
+        Self { name, align: Align::Left, style: CellStyle::Plain, min_width: None, max_width: None }
     }
 
     /// Right-aligned, plain style.
@@ -63,13 +56,7 @@ impl Column {
 
     /// Left-aligned, muted style.
     pub fn muted(name: &'static str) -> Self {
-        Self {
-            name,
-            align: Align::Left,
-            style: CellStyle::Muted,
-            min_width: None,
-            max_width: None,
-        }
+        Self { name, align: Align::Left, style: CellStyle::Muted, min_width: None, max_width: None }
     }
 
     /// Left-aligned, status style.
@@ -102,31 +89,19 @@ const SEP: &str = "  ";
 
 impl Table {
     pub fn new(columns: Vec<Column>) -> Self {
-        Self {
-            columns,
-            rows: Vec::new(),
-            colorize: color::should_colorize(),
-        }
+        Self { columns, rows: Vec::new(), colorize: color::should_colorize() }
     }
 
     /// Create a table that never emits color codes.
     #[cfg(test)]
     pub fn plain(columns: Vec<Column>) -> Self {
-        Self {
-            columns,
-            rows: Vec::new(),
-            colorize: false,
-        }
+        Self { columns, rows: Vec::new(), colorize: false }
     }
 
     /// Create a table that always emits color codes.
     #[cfg(test)]
     pub fn colored(columns: Vec<Column>) -> Self {
-        Self {
-            columns,
-            rows: Vec::new(),
-            colorize: true,
-        }
+        Self { columns, rows: Vec::new(), colorize: true }
     }
 
     pub fn row(&mut self, cells: Vec<String>) {
@@ -138,7 +113,7 @@ impl Table {
     /// Column widths are auto-computed from data. The last column is never
     /// padded. Color is applied **after** padding so ANSI escapes don't
     /// corrupt width calculations.
-    pub fn render(&self, out: &mut impl Write) {
+    pub fn render(&self, out: &mut (impl Write + ?Sized)) {
         if self.rows.is_empty() {
             return;
         }
@@ -215,23 +190,6 @@ impl Table {
                 min.max(max_data)
             })
             .collect()
-    }
-}
-
-/// Determines if a PROJECT column should be shown based on namespace diversity.
-///
-/// Returns `true` when items span multiple namespaces OR any namespace is non-empty.
-pub fn should_show_project<'a>(namespaces: impl Iterator<Item = &'a str>) -> bool {
-    let set: HashSet<&str> = namespaces.collect();
-    set.len() > 1 || set.iter().any(|n| !n.is_empty())
-}
-
-/// Formats a namespace for display in a PROJECT column.
-pub fn project_cell(namespace: &str) -> String {
-    if namespace.is_empty() {
-        "(no project)".to_string()
-    } else {
-        namespace.to_string()
     }
 }
 

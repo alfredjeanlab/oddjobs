@@ -20,10 +20,6 @@ use super::helpers::{assert_literal, cmd_name, get_simple_command};
 use crate::ast::WordPart;
 use crate::parser::Parser;
 
-// =============================================================================
-// Standalone Assignment (Bash Compatibility)
-// =============================================================================
-
 #[test]
 fn standalone_assignment() {
     // VAR=value with no command is allowed (bash compatibility)
@@ -53,10 +49,6 @@ fn standalone_empty_assignment() {
     assert!(cmd.args.is_empty());
 }
 
-// =============================================================================
-// Assignment with Command
-// =============================================================================
-
 #[test]
 fn assignment_with_command() {
     // VAR=value cmd → env contains VAR=value, name is cmd
@@ -84,10 +76,6 @@ fn multiple_assignments_with_command() {
     assert_eq!(cmd.env[2].name, "C");
     assert_literal(&cmd.name, "cmd");
 }
-
-// =============================================================================
-// Assignment-like Pattern After Command (now works as argument)
-// =============================================================================
 
 #[test]
 fn assignment_pattern_after_command_is_argument() {
@@ -117,10 +105,6 @@ fn flag_equals_value() {
     assert_eq!(cmd.args[0].parts, vec![WordPart::literal("--color=auto")]);
 }
 
-// =============================================================================
-// Assignment in Job
-// =============================================================================
-
 #[test]
 fn assignment_in_job() {
     // VAR=value cmd | other → assignment applies to first command only
@@ -146,10 +130,6 @@ fn assignment_in_job() {
     assert_eq!(cmd_name(second_cmd), "other");
 }
 
-// =============================================================================
-// Assignment with Variable Expansion
-// =============================================================================
-
 #[test]
 fn assignment_with_variable_expansion() {
     // VAR=$OTHER cmd
@@ -165,20 +145,13 @@ fn assignment_with_variable_expansion() {
     // The assignment value is the variable
     assert_eq!(
         cmd.env[0].value.parts,
-        vec![WordPart::Variable {
-            name: "OTHER".into(),
-            modifier: None,
-        }]
+        vec![WordPart::Variable { name: "OTHER".into(), modifier: None }]
     );
     // "cmd" is the command name
     assert_literal(&cmd.name, "cmd");
     // No arguments
     assert!(cmd.args.is_empty());
 }
-
-// =============================================================================
-// Assignment in Sequences
-// =============================================================================
 
 #[test]
 fn assignment_in_sequence() {
@@ -226,10 +199,6 @@ fn assignment_with_and_or() {
     assert_eq!(cmd_name(second_cmd), "cmd2");
 }
 
-// =============================================================================
-// Empty Quoted Value Assignments
-// =============================================================================
-
 #[test]
 fn standalone_empty_double_quoted_assignment() {
     // failures="" is a standalone assignment with an empty double-quoted value
@@ -260,10 +229,6 @@ fn empty_double_quoted_assignment_then_command() {
     assert!(cmd2.env.is_empty());
     assert_eq!(cmd_name(cmd2), "echo");
 }
-
-// =============================================================================
-// Span Verification
-// =============================================================================
 
 #[test]
 fn assignment_span() {

@@ -49,12 +49,7 @@ pub struct Snapshot {
 impl Snapshot {
     /// Create a new snapshot.
     pub fn new(seq: u64, state: MaterializedState) -> Self {
-        Self {
-            version: CURRENT_SNAPSHOT_VERSION,
-            seq,
-            state,
-            created_at: Utc::now(),
-        }
+        Self { version: CURRENT_SNAPSHOT_VERSION, seq, state, created_at: Utc::now() }
     }
 
     /// Save snapshot atomically (write to .tmp, then rename).

@@ -12,10 +12,7 @@ use super::types::QueueItem;
 
 /// Current epoch time in milliseconds.
 pub(crate) fn epoch_ms_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 /// Get a value by exact ID or unique prefix (like git commit hashes).
@@ -57,7 +54,7 @@ pub(crate) fn create_agent_record(
     agent_id: &str,
     agent_name: String,
     owner: OwnerId,
-    namespace: String,
+    project: String,
     workspace_path: PathBuf,
     status: AgentRecordStatus,
 ) -> AgentRecord {
@@ -66,9 +63,8 @@ pub(crate) fn create_agent_record(
         agent_id: agent_id.to_string(),
         agent_name,
         owner,
-        namespace,
+        project,
         workspace_path,
-        session_id: None,
         status,
         created_at_ms: now,
         updated_at_ms: now,

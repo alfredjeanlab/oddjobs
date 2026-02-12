@@ -25,11 +25,7 @@ fn read_library_dir(dir: &Path) -> Result<LibraryFiles, std::io::Error> {
     for entry in std::fs::read_dir(dir)?.flatten() {
         let path = entry.path();
         if path.extension().is_some_and(|e| e == "hcl") {
-            let filename = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
+            let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
             let content = std::fs::read_to_string(&path)?;
             files.push((filename, content));
         }
@@ -74,11 +70,7 @@ pub fn available_libraries(library_dirs: &[PathBuf]) -> Vec<LibraryInfo> {
                     .map(|c| c.short)
                     .unwrap_or_default();
                 seen.insert(source.clone());
-                result.push(LibraryInfo {
-                    source,
-                    files,
-                    description,
-                });
+                result.push(LibraryInfo { source, files, description });
             }
         }
     }
@@ -98,11 +90,7 @@ pub fn available_libraries(library_dirs: &[PathBuf]) -> Vec<LibraryInfo> {
         seen.insert(source.clone());
         result.push(LibraryInfo {
             source,
-            files: lib
-                .files
-                .iter()
-                .map(|(f, c)| (f.to_string(), c.to_string()))
-                .collect(),
+            files: lib.files.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect(),
             description,
         });
     }
@@ -129,11 +117,7 @@ pub fn resolve_library(source: &str, library_dirs: &[PathBuf]) -> Result<Library
     // Fall back to built-in
     for lib in BUILTIN_LIBRARIES {
         if lib.source == source {
-            return Ok(lib
-                .files
-                .iter()
-                .map(|(f, c)| (f.to_string(), c.to_string()))
-                .collect());
+            return Ok(lib.files.iter().map(|(f, c)| (f.to_string(), c.to_string())).collect());
         }
     }
     let available: Vec<&str> = BUILTIN_LIBRARIES.iter().map(|l| l.source).collect();

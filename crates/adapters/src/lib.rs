@@ -11,24 +11,19 @@
 //! Adapters for external I/O
 
 pub mod agent;
-mod env;
+pub mod credential;
 pub mod notify;
-pub mod session;
 pub mod subprocess;
-pub mod traced;
 
+pub use agent::attach_proxy::ws_proxy_bridge_tcp;
 pub use agent::{
-    extract_process_name, AgentAdapter, AgentAdapterError, AgentHandle, AgentReconnectConfig,
-    AgentSpawnConfig, ClaudeAgentAdapter,
+    extract_process_name, AgentAdapter, AgentAdapterError, AgentConfig, AgentHandle,
+    AgentReconnectConfig, CoopInfo, DockerAdapter, KubernetesAdapter, LocalAdapter, RuntimeRouter,
 };
-pub use notify::{DesktopNotifyAdapter, NoOpNotifyAdapter, NotifyAdapter};
-pub use session::{NoOpSessionAdapter, SessionAdapter, TmuxAdapter};
-pub use traced::{TracedAgent, TracedSession};
+pub use notify::{DesktopNotifyAdapter, NotifyAdapter};
 
 // Test support - only compiled for tests or when explicitly requested
 #[cfg(any(test, feature = "test-support"))]
 pub use agent::{AgentCall, FakeAgentAdapter};
 #[cfg(any(test, feature = "test-support"))]
 pub use notify::{FakeNotifyAdapter, NotifyCall};
-#[cfg(any(test, feature = "test-support"))]
-pub use session::{FakeSession, FakeSessionAdapter, SessionCall};

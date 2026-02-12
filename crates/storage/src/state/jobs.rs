@@ -19,9 +19,9 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             cwd,
             vars,
             initial_step,
-            created_at_epoch_ms,
-            namespace,
-            cron_name,
+            created_at_ms,
+            project,
+            cron,
         } => {
             let mut builder =
                 JobConfig::builder(id.to_string(), kind.clone(), initial_step.clone())
@@ -29,28 +29,21 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     .vars(vars.clone())
                     .runbook_hash(runbook_hash.clone())
                     .cwd(cwd.clone())
-                    .namespace(namespace.clone());
-            if let Some(cn) = cron_name {
+                    .project(project.clone());
+            if let Some(cn) = cron {
                 builder = builder.cron_name(cn.clone());
             }
             let config = builder.build();
-            let job = Job::new_with_epoch_ms(config, *created_at_epoch_ms);
+            let job = Job::new_with_epoch_ms(config, *created_at_ms);
             state.jobs.insert(id.to_string(), job);
         }
 
-        Event::RunbookLoaded {
-            hash,
-            version,
-            runbook,
-        } => {
+        Event::RunbookLoaded { hash, version, runbook } => {
             // Only insert if not already present (dedup by content hash)
             if !state.runbooks.contains_key(hash) {
                 state.runbooks.insert(
                     hash.clone(),
-                    StoredRunbook {
-                        version: *version,
-                        data: runbook.clone(),
-                    },
+                    StoredRunbook { version: *version, data: runbook.clone() },
                 );
             }
         }
@@ -71,7 +64,6 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     && step != "suspended";
                 if was_terminal && target_is_nonterminal {
                     job.error = None;
-                    job.session_id = None;
                     job.suspending = false;
                 }
 
@@ -98,10 +90,14 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 // cycle limits work — the agent action's `attempts` field should
                 // bound retries across the entire on_fail chain, not per-step.
                 if !is_failure_transition {
-                    job.reset_action_attempts();
+                    job.actions.reset_attempts();
+                    // Clear failing flag on success transitions: when a cleanup
+                    // step (routed via on_fail) completes and its on_done
+                    // advances to a new step, the recovery chain succeeded.
+                    // Without this, the failing flag persists and causes the
+                    // job to terminate as failed when the next step completes.
+                    job.failing = false;
                 }
-                job.clear_agent_signal();
-
                 // Push new step record and track visits (unless terminal)
                 if step != "done" && step != "failed" && step != "cancelled" && step != "suspended"
                 {
@@ -110,51 +106,38 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 }
             }
 
-            // Remove from worker active_job_ids and item_job_map on terminal states
+            // Remove from worker active_job_ids and item_owners on terminal states
             if step == "done" || step == "failed" || step == "cancelled" || step == "suspended" {
                 let job_id_str = id.to_string();
                 for record in state.workers.values_mut() {
-                    record.active_job_ids.retain(|pid| pid != &job_id_str);
-                    record.item_job_map.remove(&job_id_str);
+                    record.active.retain(|pid| pid != &job_id_str);
+                    record.owners.remove(&job_id_str);
                 }
                 // Clean up unresolved decisions for the completed job
-                let pid = id.as_str();
-                state
-                    .decisions
-                    .retain(|_, d| d.job_id != pid || d.is_resolved());
+                let owner = OwnerId::Job(id.clone());
+                helpers::cleanup_unresolved_decisions_for_owner(&mut state.decisions, &owner);
             }
         }
 
-        Event::StepStarted {
-            job_id,
-            agent_id,
-            agent_name,
-            ..
-        } => {
+        Event::StepStarted { job_id, agent_id, agent_name, .. } => {
             if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
                 job.step_status = StepStatus::Running;
                 if let Some(aid) = agent_id {
                     job.set_current_step_agent_id(aid.as_str());
 
                     // Insert unified agent record for job-embedded agents
-                    let workspace = job
-                        .workspace_path
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| job.cwd.clone());
-                    state
-                        .agents
-                        .entry(aid.as_str().to_string())
-                        .or_insert_with(|| {
-                            helpers::create_agent_record(
-                                aid.as_str(),
-                                agent_name.clone().unwrap_or_default(),
-                                OwnerId::Job(job_id.clone()),
-                                job.namespace.clone(),
-                                workspace,
-                                AgentRecordStatus::Starting,
-                            )
-                        });
+                    let workspace =
+                        job.workspace_path.as_ref().cloned().unwrap_or_else(|| job.cwd.clone());
+                    state.agents.entry(aid.as_str().to_string()).or_insert_with(|| {
+                        helpers::create_agent_record(
+                            aid.as_str(),
+                            agent_name.clone().unwrap_or_default(),
+                            OwnerId::Job(job_id.clone()),
+                            job.project.clone(),
+                            workspace,
+                            AgentRecordStatus::Starting,
+                        )
+                    });
                 }
                 if let Some(aname) = agent_name {
                     job.set_current_step_agent_name(aname.as_str());
@@ -163,12 +146,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
-        Event::StepWaiting {
-            job_id,
-            reason,
-            decision_id,
-            ..
-        } => {
+        Event::StepWaiting { job_id, reason, decision_id, .. } => {
             if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
                 job.step_status = StepStatus::Waiting(decision_id.clone());
                 if reason.is_some() {
@@ -202,6 +180,12 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
+        Event::JobFailing { id } => {
+            if let Some(job) = state.jobs.get_mut(id.as_str()) {
+                job.failing = true;
+            }
+        }
+
         Event::JobCancelling { id } => {
             if let Some(job) = state.jobs.get_mut(id.as_str()) {
                 job.cancelling = true;
@@ -216,16 +200,13 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
 
         Event::JobDeleted { id } => {
             state.jobs.remove(id.as_str());
-            // Clean up all decisions associated with the deleted job
-            state.decisions.retain(|_, d| d.job_id != id.as_str());
-            // Remove agents owned by this job
+            // Clean up all decisions and agents associated with the deleted job
             let owner = OwnerId::Job(id.clone());
+            state.decisions.retain(|_, d| d.owner != owner);
             state.agents.retain(|_, rec| rec.owner != owner);
         }
 
-        Event::ShellExited {
-            job_id, exit_code, ..
-        } => {
+        Event::ShellExited { job_id, exit_code, .. } => {
             if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
                 let now = helpers::epoch_ms_now();
                 if *exit_code == 0 {

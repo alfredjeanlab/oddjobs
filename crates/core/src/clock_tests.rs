@@ -14,7 +14,7 @@ fn system_clock_returns_increasing_time() {
 
 #[test]
 fn system_clock_default() {
-    let clock = SystemClock::default();
+    let clock = SystemClock;
     let _ = clock.now();
 }
 

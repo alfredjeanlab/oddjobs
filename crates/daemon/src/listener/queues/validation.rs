@@ -22,10 +22,10 @@ use super::super::ListenCtx;
 
 /// Load a runbook that contains the given queue name.
 fn load_runbook_for_queue(
-    project_root: &Path,
+    project_path: &Path,
     queue_name: &str,
 ) -> Result<oj_runbook::Runbook, String> {
-    let runbook_dir = project_root.join(".oj/runbooks");
+    let runbook_dir = project_path.join(".oj/runbooks");
     oj_runbook::find_runbook_by_queue(&runbook_dir, queue_name)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no runbook found containing queue '{}'", queue_name))
@@ -33,17 +33,17 @@ fn load_runbook_for_queue(
 
 /// Generate a "did you mean" suggestion for a queue name.
 fn suggest_for_queue(
-    project_root: &Path,
+    project_path: &Path,
     queue_name: &str,
-    namespace: &str,
+    project: &str,
     command_prefix: &str,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> String {
-    let ns = namespace.to_string();
-    let runbook_dir = project_root.join(".oj/runbooks");
+    let ns = project.to_string();
+    let runbook_dir = project_path.join(".oj/runbooks");
     suggest::suggest_for_resource(
         queue_name,
-        namespace,
+        project,
         command_prefix,
         state,
         suggest::ResourceType::Queue,
@@ -73,36 +73,26 @@ fn suggest_for_queue(
 
 /// Load and validate a queue definition from the runbook.
 ///
-/// Loads the runbook with namespace fallback, validates the queue exists,
+/// Loads the runbook with project fallback, validates the queue exists,
 /// and returns the runbook and effective project root.
 pub(super) fn load_and_validate_queue_def(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     queue_name: &str,
     command_name: &str,
 ) -> Result<(oj_runbook::Runbook, PathBuf), Response> {
     let (runbook, effective_root) = super::super::load_runbook_with_fallback(
-        project_root,
-        namespace,
+        project_path,
+        project,
         &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                command_name,
-                &ctx.state,
-            )
-        },
+        || suggest_for_queue(project_path, queue_name, project, command_name, &ctx.state),
     )?;
 
     // Validate queue exists in the runbook
     if runbook.get_queue(queue_name).is_none() {
-        return Err(Response::Error {
-            message: format!("unknown queue: {}", queue_name),
-        });
+        return Err(Response::Error { message: format!("unknown queue: {}", queue_name) });
     }
 
     Ok((runbook, effective_root))
@@ -121,9 +111,7 @@ pub(super) fn validate_persisted_queue(
                 });
             }
             None => {
-                return Err(Response::Error {
-                    message: format!("unknown queue: {}", queue_name),
-                });
+                return Err(Response::Error { message: format!("unknown queue: {}", queue_name) });
             }
             _ => {}
         }
@@ -138,30 +126,22 @@ pub(super) fn validate_persisted_queue(
 /// Returns `Ok(None)` when no runbook is found but the queue exists in state.
 pub(super) fn load_runbook_for_queue_or_state(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     queue_name: &str,
     command_prefix: &str,
 ) -> Result<Option<(oj_runbook::Runbook, PathBuf)>, Response> {
     match super::super::load_runbook_with_fallback(
-        project_root,
-        namespace,
+        project_path,
+        project,
         &ctx.state,
         |root| load_runbook_for_queue(root, queue_name),
-        || {
-            suggest_for_queue(
-                project_root,
-                queue_name,
-                namespace,
-                command_prefix,
-                &ctx.state,
-            )
-        },
+        || suggest_for_queue(project_path, queue_name, project, command_prefix, &ctx.state),
     ) {
         Ok(result) => Ok(Some(result)),
         Err(error_resp) => {
             // No runbook found — check if queue exists in persisted state
-            let key = oj_core::scoped_name(namespace, queue_name);
+            let key = oj_core::scoped_name(project, queue_name);
             let exists = ctx.state.lock().queue_items.contains_key(&key);
             if exists {
                 Ok(None)
@@ -178,12 +158,12 @@ pub(super) fn load_runbook_for_queue_or_state(
 /// is not found or the prefix is ambiguous.
 pub(super) fn resolve_queue_item_id(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     item_id: &str,
 ) -> Result<String, Response> {
     let state = state.lock();
-    let key = scoped_name(namespace, queue_name);
+    let key = scoped_name(project, queue_name);
     let items = state.queue_items.get(&key);
 
     // Try exact match first
@@ -193,12 +173,7 @@ pub(super) fn resolve_queue_item_id(
 
     // Try prefix match
     let matches: Vec<_> = items
-        .map(|items| {
-            items
-                .iter()
-                .filter(|i| i.id.starts_with(item_id))
-                .collect::<Vec<_>>()
-        })
+        .map(|items| items.iter().filter(|i| i.id.starts_with(item_id)).collect::<Vec<_>>())
         .unwrap_or_default();
 
     match matches.len() {
@@ -218,49 +193,21 @@ pub(super) fn resolve_queue_item_id(
 /// Validate that a queue item is in Active status.
 pub(super) fn validate_item_is_active(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     resolved_id: &str,
     action: &str,
 ) -> Result<(), Response> {
     let st = state.lock();
-    let key = scoped_name(namespace, queue_name);
-    let item = st
-        .queue_items
-        .get(&key)
-        .and_then(|items| items.iter().find(|i| i.id == resolved_id));
+    let key = scoped_name(project, queue_name);
+    let item =
+        st.queue_items.get(&key).and_then(|items| items.iter().find(|i| i.id == resolved_id));
     if let Some(item) = item {
         if item.status != QueueItemStatus::Active {
             return Err(Response::Error {
                 message: format!(
                     "item '{}' is {:?}, only active items can be {}",
                     resolved_id, item.status, action
-                ),
-            });
-        }
-    }
-    Ok(())
-}
-
-/// Validate that a queue item is in Dead or Failed status (for retry).
-pub(super) fn validate_item_is_dead_or_failed(
-    state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
-    queue_name: &str,
-    resolved_id: &str,
-) -> Result<(), Response> {
-    let st = state.lock();
-    let key = scoped_name(namespace, queue_name);
-    let item = st
-        .queue_items
-        .get(&key)
-        .and_then(|items| items.iter().find(|i| i.id == resolved_id));
-    if let Some(item) = item {
-        if item.status != QueueItemStatus::Dead && item.status != QueueItemStatus::Failed {
-            return Err(Response::Error {
-                message: format!(
-                    "item '{}' is {:?}, only dead or failed items can be retried",
-                    resolved_id, item.status
                 ),
             });
         }

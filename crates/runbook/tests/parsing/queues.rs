@@ -3,10 +3,6 @@
 
 use oj_runbook::QueueType;
 
-// ============================================================================
-// Queue Type
-// ============================================================================
-
 #[test]
 fn external_queue_with_explicit_type() {
     let hcl = r#"
@@ -42,10 +38,7 @@ queue "merges" {
 #[test]
 fn queue_defaults_to_external() {
     let hcl = "queue \"items\" {\n  list = \"echo '[]'\"\n  take = \"echo ok\"\n}";
-    assert_eq!(
-        super::parse_hcl(hcl).queues["items"].queue_type,
-        QueueType::External
-    );
+    assert_eq!(super::parse_hcl(hcl).queues["items"].queue_type, QueueType::External);
 }
 
 #[test]
@@ -88,10 +81,6 @@ fn error_persisted_with_take() {
     );
 }
 
-// ============================================================================
-// Queue Poll
-// ============================================================================
-
 #[test]
 fn external_queue_with_poll() {
     let hcl = r#"
@@ -117,10 +106,7 @@ queue "fast" {
   poll = "200ms"
 }
 "#;
-    assert_eq!(
-        super::parse_hcl(hcl).queues["fast"].poll.as_deref(),
-        Some("200ms")
-    );
+    assert_eq!(super::parse_hcl(hcl).queues["fast"].poll.as_deref(), Some("200ms"));
 }
 
 #[test]

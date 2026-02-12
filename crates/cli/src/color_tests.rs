@@ -19,10 +19,7 @@ fn header_produces_ansi_when_color_forced() {
     std::env::remove_var("NO_COLOR");
 
     let result = header("foo");
-    assert!(
-        result.contains("\x1b[38;5;74m"),
-        "expected ANSI header color"
-    );
+    assert!(result.contains("\x1b[38;5;74m"), "expected ANSI header color");
     assert!(result.contains("foo"));
     assert!(result.contains("\x1b[0m"), "expected ANSI reset");
 }
@@ -34,10 +31,7 @@ fn context_produces_ansi_when_color_forced() {
     std::env::remove_var("NO_COLOR");
 
     let result = context("baz");
-    assert!(
-        result.contains("\x1b[38;5;245m"),
-        "expected ANSI context color"
-    );
+    assert!(result.contains("\x1b[38;5;245m"), "expected ANSI context color");
 }
 
 #[test]
@@ -47,10 +41,7 @@ fn muted_produces_ansi_when_color_forced() {
     std::env::remove_var("NO_COLOR");
 
     let result = muted("dim");
-    assert!(
-        result.contains("\x1b[38;5;240m"),
-        "expected ANSI muted color"
-    );
+    assert!(result.contains("\x1b[38;5;240m"), "expected ANSI muted color");
 }
 
 #[test]
@@ -87,10 +78,7 @@ fn status_green_for_running() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("running");
-    assert!(
-        result.contains("\x1b[32m"),
-        "expected green ANSI for running"
-    );
+    assert!(result.contains("\x1b[32m"), "expected green ANSI for running");
     assert!(result.contains("running"));
     assert!(result.contains("\x1b[0m"), "expected ANSI reset");
 }
@@ -102,10 +90,7 @@ fn status_green_for_completed() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("completed");
-    assert!(
-        result.contains("\x1b[32m"),
-        "expected green ANSI for completed"
-    );
+    assert!(result.contains("\x1b[32m"), "expected green ANSI for completed");
 }
 
 #[test]
@@ -115,10 +100,7 @@ fn status_yellow_for_waiting() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("waiting");
-    assert!(
-        result.contains("\x1b[33m"),
-        "expected yellow ANSI for waiting"
-    );
+    assert!(result.contains("\x1b[33m"), "expected yellow ANSI for waiting");
     assert!(result.contains("waiting"));
 }
 
@@ -129,10 +111,7 @@ fn status_yellow_for_escalated() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("escalated");
-    assert!(
-        result.contains("\x1b[33m"),
-        "expected yellow ANSI for escalated"
-    );
+    assert!(result.contains("\x1b[33m"), "expected yellow ANSI for escalated");
 }
 
 #[test]
@@ -153,10 +132,7 @@ fn status_red_for_cancelled() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("cancelled");
-    assert!(
-        result.contains("\x1b[31m"),
-        "expected red ANSI for cancelled"
-    );
+    assert!(result.contains("\x1b[31m"), "expected red ANSI for cancelled");
 }
 
 #[test]
@@ -177,10 +153,7 @@ fn status_unknown_returns_plain() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("custom_status");
-    assert_eq!(
-        result, "custom_status",
-        "unknown statuses should not be colored"
-    );
+    assert_eq!(result, "custom_status", "unknown statuses should not be colored");
 }
 
 #[test]
@@ -190,14 +163,8 @@ fn status_case_insensitive() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("Running");
-    assert!(
-        result.contains("\x1b[32m"),
-        "expected green ANSI for Running (case insensitive)"
-    );
-    assert!(
-        result.contains("Running"),
-        "should preserve original casing"
-    );
+    assert!(result.contains("\x1b[32m"), "expected green ANSI for Running (case insensitive)");
+    assert!(result.contains("Running"), "should preserve original casing");
 }
 
 #[test]
@@ -207,10 +174,7 @@ fn status_compound_failed_gets_red() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("failed: timeout");
-    assert!(
-        result.contains("\x1b[31m"),
-        "expected red ANSI for compound failed status"
-    );
+    assert!(result.contains("\x1b[31m"), "expected red ANSI for compound failed status");
     assert!(result.contains("failed: timeout"));
 }
 
@@ -221,10 +185,7 @@ fn status_compound_waiting_gets_yellow() {
     std::env::remove_var("NO_COLOR");
 
     let result = status("waiting (decision-123)");
-    assert!(
-        result.contains("\x1b[33m"),
-        "expected yellow ANSI for compound waiting status"
-    );
+    assert!(result.contains("\x1b[33m"), "expected yellow ANSI for compound waiting status");
 }
 
 #[test]

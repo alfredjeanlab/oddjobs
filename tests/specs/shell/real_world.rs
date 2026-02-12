@@ -23,27 +23,20 @@ vars  = ["name", "prompt"]
 [[job.build.step]]
 name = "init"
 run = "echo 'Starting build: ${name}'"
-on_done = "merge"
+on_done = { step = "merge" }
 
 [[job.build.step]]
 name = "merge"
 run = "git fetch origin main && git rebase origin/main && git push"
-on_done = "done"
+on_done = { step = "done" }
 
 [[job.build.step]]
 name = "done"
 run = "echo 'Build complete: ${name}'"
-
-[job.build.events]
-on_step = "echo '${name} -> ${step}' >> .oj/build.log"
-on_complete = "echo '${name} complete' >> .oj/build.log"
-on_fail = "echo '${name} failed: ${error}' >> .oj/build.log"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "build", "test", "test prompt"])
-        .passes();
+    temp.oj().args(&["run", "build", "test", "test prompt"]).passes();
 }
 
 /// Test merge step with remote guard is valid shell
@@ -76,9 +69,7 @@ git push origin HEAD:${branch}
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "build", "test", "test prompt"])
-        .passes();
+    temp.oj().args(&["run", "build", "test", "test prompt"]).passes();
 }
 
 /// Test multi-line done step with delete and wok
@@ -130,11 +121,6 @@ vars  = ["name"]
 [[job.events.step]]
 name = "work"
 run = "echo 'working'"
-
-[job.events.events]
-on_step = "oj emit job:advanced --id ${name} --step ${step}"
-on_complete = "oj emit job:complete --id ${name}"
-on_fail = "oj emit job:fail --id ${name} --error '${error}'"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();

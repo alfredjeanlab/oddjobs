@@ -19,10 +19,7 @@ fn parse_list_subcommand() {
 #[test]
 fn parse_search_no_query() {
     let cli = Cli::try_parse_from(["test", "search"]).unwrap();
-    assert!(matches!(
-        cli.command,
-        RunbookCommand::Search { query: None }
-    ));
+    assert!(matches!(cli.command, RunbookCommand::Search { query: None }));
 }
 
 #[test]
@@ -58,10 +55,7 @@ fn parse_add_with_name() {
 #[test]
 fn parse_add_project_flag() {
     let cli = Cli::try_parse_from(["test", "add", "./path", "--project"]).unwrap();
-    assert!(matches!(
-        cli.command,
-        RunbookCommand::Add { project: true, .. }
-    ));
+    assert!(matches!(cli.command, RunbookCommand::Add { project: true, .. }));
 }
 
 #[test]

@@ -83,10 +83,7 @@ pub(crate) fn group_vars_by_scope(vars: &HashMap<String, String>) -> Vec<(&Strin
     sorted.sort_by(|(a, _), (b, _)| {
         let (order_a, scope_a) = var_scope_order(a);
         let (order_b, scope_b) = var_scope_order(b);
-        order_a
-            .cmp(&order_b)
-            .then_with(|| scope_a.cmp(scope_b))
-            .then_with(|| a.cmp(b))
+        order_a.cmp(&order_b).then_with(|| scope_a.cmp(scope_b)).then_with(|| a.cmp(b))
     });
     sorted
 }
@@ -94,20 +91,8 @@ pub(crate) fn group_vars_by_scope(vars: &HashMap<String, String>) -> Vec<(&Strin
 /// Print follow-up commands for a job.
 pub(crate) fn print_job_commands(short_id: &str) {
     println!("    oj job show {short_id}");
-    println!(
-        "    oj job wait {short_id}      {}",
-        color::muted("# Wait until job ends")
-    );
-    println!(
-        "    oj job logs {short_id} -f   {}",
-        color::muted("# Follow logs")
-    );
-    println!(
-        "    oj job peek {short_id}      {}",
-        color::muted("# Capture tmux pane")
-    );
-    println!(
-        "    oj job attach {short_id}    {}",
-        color::muted("# Attach to tmux")
-    );
+    println!("    oj job wait {short_id}      {}", color::muted("# Wait until job ends"));
+    println!("    oj job logs {short_id} -f   {}", color::muted("# Follow logs"));
+    println!("    oj job peek {short_id}      {}", color::muted("# Capture agent output"));
+    println!("    oj job attach {short_id}    {}", color::muted("# Attach to agent"));
 }

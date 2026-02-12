@@ -10,18 +10,18 @@ vars  = ["name", "prompt"]
 [[job.build.step]]
 name = "init"
 run = "git worktree add worktrees/${name} -b feature/${name}"
-on_done = "plan"
+on_done = { step = "plan" }
 
 [[job.build.step]]
 name = "plan"
 run = { agent = "planner" }
-on_done = "execute"
+on_done = { step = "execute" }
 
 [[job.build.step]]
 name = "execute"
 run = { agent = "executor" }
-on_done = "done"
-on_fail = "failed"
+on_done = { step = "done" }
+on_fail = { step = "failed" }
 
 [[job.build.step]]
 name = "done"

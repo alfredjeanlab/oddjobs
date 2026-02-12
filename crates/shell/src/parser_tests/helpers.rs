@@ -39,6 +39,22 @@ pub fn cmd_name(cmd: &SimpleCommand) -> &str {
     }
 }
 
+/// Extract a subshell from an AndOrList.
+pub fn get_subshell(and_or: &AndOrList) -> &Subshell {
+    match get_command(and_or) {
+        Command::Subshell(s) => s,
+        other => panic!("expected subshell, got {:?}", std::mem::discriminant(other)),
+    }
+}
+
+/// Extract a brace group from an AndOrList.
+pub fn get_brace_group(and_or: &AndOrList) -> &BraceGroup {
+    match get_command(and_or) {
+        Command::BraceGroup(bg) => bg,
+        other => panic!("expected brace group, got {:?}", std::mem::discriminant(other)),
+    }
+}
+
 /// Assert a word contains a single literal with the expected value.
 /// Ignores the quote style.
 pub fn assert_literal(word: &Word, expected: &str) {
@@ -46,5 +62,16 @@ pub fn assert_literal(word: &Word, expected: &str) {
     match &word.parts[0] {
         WordPart::Literal { value, .. } => assert_eq!(value, expected),
         _ => panic!("Expected single literal, got {:?}", word.parts[0]),
+    }
+}
+
+/// Assert a word part is a literal with the expected value and quote style.
+pub fn assert_quoted_literal(part: &WordPart, expected_value: &str, expected_style: QuoteStyle) {
+    match part {
+        WordPart::Literal { value, quoted } => {
+            assert_eq!(value, expected_value);
+            assert_eq!(*quoted, expected_style);
+        }
+        _ => panic!("expected literal, got {:?}", part),
     }
 }

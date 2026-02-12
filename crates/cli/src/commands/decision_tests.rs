@@ -40,12 +40,7 @@ fn parse_review() {
 #[test]
 fn parse_resolve_with_choice() {
     let cli = TestCli::parse_from(["test", "resolve", "abc123", "2"]);
-    if let DecisionCommand::Resolve {
-        id,
-        choice,
-        message,
-    } = cli.command
-    {
+    if let DecisionCommand::Resolve { id, choice, message } = cli.command {
         assert_eq!(id, "abc123");
         assert_eq!(choice, vec![2]);
         assert_eq!(message, None);
@@ -57,12 +52,7 @@ fn parse_resolve_with_choice() {
 #[test]
 fn parse_resolve_with_message() {
     let cli = TestCli::parse_from(["test", "resolve", "abc123", "-m", "looks good"]);
-    if let DecisionCommand::Resolve {
-        id,
-        choice,
-        message,
-    } = cli.command
-    {
+    if let DecisionCommand::Resolve { id, choice, message } = cli.command {
         assert_eq!(id, "abc123");
         assert!(choice.is_empty());
         assert_eq!(message, Some("looks good".to_string()));
@@ -74,12 +64,7 @@ fn parse_resolve_with_message() {
 #[test]
 fn parse_resolve_with_choice_and_message() {
     let cli = TestCli::parse_from(["test", "resolve", "abc123", "1", "-m", "approved"]);
-    if let DecisionCommand::Resolve {
-        id,
-        choice,
-        message,
-    } = cli.command
-    {
+    if let DecisionCommand::Resolve { id, choice, message } = cli.command {
         assert_eq!(id, "abc123");
         assert_eq!(choice, vec![1]);
         assert_eq!(message, Some("approved".to_string()));
@@ -88,24 +73,24 @@ fn parse_resolve_with_choice_and_message() {
     }
 }
 
-fn make_decision(id: &str, namespace: &str, job: &str) -> DecisionSummary {
+fn make_decision(id: &str, project: &str, job: &str) -> DecisionSummary {
     DecisionSummary {
         id: id.to_string(),
-        job_id: "pipe-1234567890".to_string(),
-        job_name: job.to_string(),
+        owner_id: "job-1234567890".to_string(),
+        owner_name: job.to_string(),
         source: "agent".to_string(),
         summary: "Should we proceed?".to_string(),
         created_at_ms: 0,
-        namespace: namespace.to_string(),
+        project: project.to_string(),
     }
 }
 
 fn make_detail(resolved: bool) -> DecisionDetail {
     DecisionDetail {
         id: "abcdef1234567890".to_string(),
-        job_id: "pipe-1234567890".to_string(),
-        job_name: "build".to_string(),
-        agent_id: Some("agent-abc12345".to_string()),
+        owner_id: "job-1234567890".to_string(),
+        owner_name: "build".to_string(),
+        agent_id: "agent-abc12345".to_string(),
         source: "agent".to_string(),
         context: "Should we deploy?".to_string(),
         options: vec![
@@ -123,17 +108,12 @@ fn make_detail(resolved: bool) -> DecisionDetail {
             },
         ],
         question_groups: vec![],
-        chosen: if resolved { Some(1) } else { None },
-        choices: vec![],
-        message: if resolved {
-            Some("approved".to_string())
-        } else {
-            None
-        },
+        choices: if resolved { vec![1] } else { vec![] },
+        message: if resolved { Some("approved".to_string()) } else { None },
         created_at_ms: 0,
         resolved_at_ms: if resolved { Some(1000) } else { None },
         superseded_by: None,
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
     }
 }
 
@@ -154,9 +134,9 @@ fn list_uses_table_with_dynamic_widths() {
 
     assert_eq!(lines.len(), 3);
     assert!(lines[0].contains("ID"));
-    assert!(lines[0].contains("JOB"));
+    assert!(lines[0].contains("AGENT"));
     assert!(lines[0].contains("SOURCE"));
-    assert!(!lines[0].contains("PROJECT"));
+    assert!(lines[0].contains("PROJECT"));
     // ID should be truncated to 8 chars
     assert!(lines[1].contains("abcdef12"));
 }
@@ -189,7 +169,7 @@ fn format_decision_detail_with_hint() {
 
     assert!(out.contains("Decision:"));
     assert!(out.contains("abcdef12"));
-    assert!(out.contains("Job:"));
+    assert!(out.contains("Agent:"));
     assert!(out.contains("build"));
     assert!(out.contains("Source:"));
     assert!(out.contains("agent"));
@@ -232,42 +212,28 @@ fn format_decision_detail_resolved() {
 
 // --- parse_review_input tests ---
 
-#[test]
-fn review_input_pick_valid() {
-    assert_eq!(parse_review_input("1", 3), ReviewAction::Pick(1));
-    assert_eq!(parse_review_input("2", 3), ReviewAction::Pick(2));
-    assert_eq!(parse_review_input("3", 3), ReviewAction::Pick(3));
-    assert_eq!(parse_review_input(" 2 ", 3), ReviewAction::Pick(2));
-}
-
-#[test]
-fn review_input_pick_out_of_range() {
-    assert_eq!(parse_review_input("0", 3), ReviewAction::Invalid);
-    assert_eq!(parse_review_input("4", 3), ReviewAction::Invalid);
-    assert_eq!(parse_review_input("1", 0), ReviewAction::Invalid);
-}
-
-#[test]
-fn review_input_skip() {
-    assert_eq!(parse_review_input("", 3), ReviewAction::Skip);
-    assert_eq!(parse_review_input("s", 3), ReviewAction::Skip);
-    assert_eq!(parse_review_input("S", 3), ReviewAction::Skip);
-    assert_eq!(parse_review_input("  ", 3), ReviewAction::Skip);
-}
-
-#[test]
-fn review_input_quit() {
-    assert_eq!(parse_review_input("q", 3), ReviewAction::Quit);
-    assert_eq!(parse_review_input("Q", 3), ReviewAction::Quit);
-    assert_eq!(parse_review_input("x", 3), ReviewAction::Quit);
-    assert_eq!(parse_review_input("X", 3), ReviewAction::Quit);
-}
-
-#[test]
-fn review_input_invalid() {
-    assert_eq!(parse_review_input("abc", 3), ReviewAction::Invalid);
-    assert_eq!(parse_review_input("-1", 3), ReviewAction::Invalid);
-    assert_eq!(parse_review_input("pick", 3), ReviewAction::Invalid);
+#[yare::parameterized(
+    pick_1         = { "1",    3, ReviewAction::Pick(1) },
+    pick_2         = { "2",    3, ReviewAction::Pick(2) },
+    pick_3         = { "3",    3, ReviewAction::Pick(3) },
+    pick_trimmed   = { " 2 ", 3, ReviewAction::Pick(2) },
+    out_of_range_0 = { "0",    3, ReviewAction::Invalid },
+    out_of_range_4 = { "4",    3, ReviewAction::Invalid },
+    out_of_range_n = { "1",    0, ReviewAction::Invalid },
+    skip_empty     = { "",     3, ReviewAction::Skip },
+    skip_s         = { "s",    3, ReviewAction::Skip },
+    skip_upper_s   = { "S",    3, ReviewAction::Skip },
+    skip_spaces    = { "  ",   3, ReviewAction::Skip },
+    quit_q         = { "q",    3, ReviewAction::Quit },
+    quit_upper_q   = { "Q",    3, ReviewAction::Quit },
+    quit_x         = { "x",    3, ReviewAction::Quit },
+    quit_upper_x   = { "X",    3, ReviewAction::Quit },
+    invalid_abc    = { "abc",  3, ReviewAction::Invalid },
+    invalid_neg    = { "-1",   3, ReviewAction::Invalid },
+    invalid_word   = { "pick", 3, ReviewAction::Invalid },
+)]
+fn review_input(input: &str, max: usize, expected: ReviewAction) {
+    assert_eq!(parse_review_input(input, max), expected);
 }
 
 // --- needs_follow_up_message tests ---
@@ -299,9 +265,9 @@ fn no_follow_up_message_for_terminal_options() {
 fn format_decision_detail_grouped_questions() {
     let d = DecisionDetail {
         id: "abcdef1234567890".to_string(),
-        job_id: "pipe-1234567890".to_string(),
-        job_name: "build".to_string(),
-        agent_id: None,
+        owner_id: "job-1234567890".to_string(),
+        owner_name: "build".to_string(),
+        agent_id: "agent-1".to_string(),
         source: "question".to_string(),
         context: "Agent is asking questions".to_string(),
         options: vec![], // flat options empty for multi-question
@@ -355,13 +321,12 @@ fn format_decision_detail_grouped_questions() {
                 ],
             },
         ],
-        chosen: None,
         choices: vec![],
         message: None,
         created_at_ms: 0,
         resolved_at_ms: None,
         superseded_by: None,
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
     };
 
     let mut buf = Vec::new();
@@ -393,12 +358,7 @@ fn format_decision_detail_grouped_questions() {
 #[test]
 fn parse_resolve_multi_question() {
     let cli = TestCli::parse_from(["test", "resolve", "abc123", "1", "2"]);
-    if let DecisionCommand::Resolve {
-        id,
-        choice,
-        message,
-    } = cli.command
-    {
+    if let DecisionCommand::Resolve { id, choice, message } = cli.command {
         assert_eq!(id, "abc123");
         assert_eq!(choice, vec![1, 2]);
         assert_eq!(message, None);
@@ -413,9 +373,9 @@ fn parse_resolve_multi_question() {
 fn format_plan_decision_detail() {
     let d = DecisionDetail {
         id: "abcdef1234567890".to_string(),
-        job_id: "pipe-1234567890".to_string(),
-        job_name: "epic-auth".to_string(),
-        agent_id: Some("agent-abc12345".to_string()),
+        owner_id: "job-1234567890".to_string(),
+        owner_name: "epic-auth".to_string(),
+        agent_id: "agent-abc12345".to_string(),
         source: "plan".to_string(),
         context: "Agent in job \"epic-auth\" is requesting plan approval.\n\n--- Plan ---\n# Auth Plan\n\n## Steps\n1. Add JWT module\n2. Write tests".to_string(),
         options: vec![
@@ -451,13 +411,12 @@ fn format_plan_decision_detail() {
             },
         ],
         question_groups: vec![],
-        chosen: None,
         choices: vec![],
         message: None,
         created_at_ms: 0,
         resolved_at_ms: None,
         superseded_by: None,
-        namespace: "myproject".to_string(),
+        project: "myproject".to_string(),
     };
 
     let mut buf = Vec::new();
@@ -465,11 +424,7 @@ fn format_plan_decision_detail() {
     let out = output_string(&buf);
 
     // Source should display as "Plan Approval"
-    assert!(
-        out.contains("Plan Approval"),
-        "missing Plan Approval source label, got:\n{}",
-        out
-    );
+    assert!(out.contains("Plan Approval"), "missing Plan Approval source label, got:\n{}", out);
     // Plan content should appear in context
     assert!(out.contains("# Auth Plan"), "missing plan content");
     assert!(out.contains("Add JWT module"), "missing plan step");

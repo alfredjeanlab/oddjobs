@@ -16,10 +16,7 @@ fn test_migrate_same_version_is_noop() {
 fn test_too_new_error() {
     let v99 = json!({"v": 99, "seq": 1, "state": {}});
     let registry = MigrationRegistry::new();
-    assert!(matches!(
-        registry.migrate_to(v99, 1),
-        Err(MigrationError::TooNew(99, 1))
-    ));
+    assert!(matches!(registry.migrate_to(v99, 1), Err(MigrationError::TooNew(99, 1))));
 }
 
 #[test]
@@ -27,10 +24,7 @@ fn test_no_path_error() {
     // Try to migrate from v1 to v2 with no registered migrations
     let v1 = json!({"v": 1, "seq": 1, "state": {}});
     let registry = MigrationRegistry::new();
-    assert!(matches!(
-        registry.migrate_to(v1, 2),
-        Err(MigrationError::NoPath(1, 2))
-    ));
+    assert!(matches!(registry.migrate_to(v1, 2), Err(MigrationError::NoPath(1, 2))));
 }
 
 /// Test migration with a mock migration

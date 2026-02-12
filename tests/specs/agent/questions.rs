@@ -11,26 +11,18 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
 /// Agent asks a question and auto-answers it.
 /// PreToolUse hook fires first, creating the decision, then auto-answer proceeds.
 fn scenario_ask_question_auto_answer() -> &'static str {
     r#"
-name = "ask-question-auto"
-
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Let me ask you a question first."
 
-[responses.response]
-text = "Let me ask you a question first."
+[[responses.tools]]
+call = "AskUserQuestion"
 
-[[responses.response.tool_calls]]
-tool = "AskUserQuestion"
-
-[responses.response.tool_calls.input]
+[responses.tools.input]
 questions = [
     { question = "Which framework should we use?", header = "Framework", options = [
         { label = "React", description = "Component-based UI library" },
@@ -39,16 +31,16 @@ questions = [
 ]
 
 [[responses]]
-pattern = { type = "any" }
-response = "Got it, I'll use React."
+on = "*"
+say = "Got it, I'll use React."
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.AskUserQuestion]
-auto_approve = true
+[tools.AskUserQuestion]
+approve = true
 
-[tool_execution.tools.AskUserQuestion.answers]
+[tools.AskUserQuestion.answers]
 "Which framework should we use?" = "React"
 "#
 }
@@ -57,18 +49,14 @@ auto_approve = true
 /// Used for Cancel tests where we need the agent to be blocked.
 fn scenario_ask_question_wait() -> &'static str {
     r#"
-name = "ask-question-wait"
-
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "I need to ask you something first."
 
-[responses.response]
-text = "I need to ask you something first."
+[[responses.tools]]
+call = "AskUserQuestion"
 
-[[responses.response.tool_calls]]
-tool = "AskUserQuestion"
-
-[responses.response.tool_calls.input]
+[responses.tools.input]
 questions = [
     { question = "Which approach should we take?", header = "Approach", options = [
         { label = "Option A", description = "First approach" },
@@ -76,14 +64,10 @@ questions = [
     ], multiSelect = false },
 ]
 
-[tool_execution]
+[tools]
 mode = "live"
 "#
 }
-
-// =============================================================================
-// Runbooks
-// =============================================================================
 
 /// Standard runbook for question tests with auto-answer scenarios.
 /// Uses default on_prompt = "escalate" which creates a Question decision.
@@ -135,10 +119,6 @@ prompt = "Help me build this feature."
     )
 }
 
-// =============================================================================
-// Tests: Decision Creation
-// =============================================================================
-
 /// Tests that AskUserQuestion creates a decision with "question" source.
 ///
 /// Lifecycle: agent spawns → calls AskUserQuestion → PreToolUse hook fires →
@@ -151,10 +131,7 @@ prompt = "Help me build this feature."
 fn ask_user_question_creates_question_decision() {
     let temp = Project::empty();
     temp.git_init();
-    temp.file(
-        ".oj/scenarios/test.toml",
-        scenario_ask_question_auto_answer(),
-    );
+    temp.file(".oj/scenarios/test.toml", scenario_ask_question_auto_answer());
 
     let scenario_path = temp.path().join(".oj/scenarios/test.toml");
     let runbook = runbook_question_auto(&scenario_path);
@@ -166,11 +143,7 @@ fn ask_user_question_creates_question_decision() {
     // Wait for decision to be created (check for "question" source in list)
     // The decision is created when PreToolUse hook fires, before auto-answer.
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
 
     // If no decision in list, check if job completed (decision may have been
@@ -178,11 +151,7 @@ fn ask_user_question_creates_question_decision() {
     if !has_decision {
         // Verify the job at least ran and completed successfully
         let completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-            temp.oj()
-                .args(&["job", "list"])
-                .passes()
-                .stdout()
-                .contains("completed")
+            temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
         });
         assert!(
             completed,
@@ -219,11 +188,7 @@ fn question_decision_shows_question_text() {
 
     // Wait for decision to be created
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -238,11 +203,7 @@ fn question_decision_shows_question_text() {
         .expect("should be able to extract decision ID from list output");
 
     // Show the decision and verify it contains the question text
-    let show_output = temp
-        .oj()
-        .args(&["decision", "show", &decision_id])
-        .passes()
-        .stdout();
+    let show_output = temp.oj().args(&["decision", "show", &decision_id]).passes().stdout();
 
     assert!(
         show_output.contains("Which approach should we take?"),
@@ -267,11 +228,7 @@ fn question_decision_shows_options() {
 
     // Wait for decision
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -283,11 +240,7 @@ fn question_decision_shows_options() {
     let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
-    let show_output = temp
-        .oj()
-        .args(&["decision", "show", &decision_id])
-        .passes()
-        .stdout();
+    let show_output = temp.oj().args(&["decision", "show", &decision_id]).passes().stdout();
 
     // Verify both options are shown
     assert!(
@@ -314,10 +267,6 @@ fn question_decision_shows_options() {
     );
 }
 
-// =============================================================================
-// Tests: Decision Resolution
-// =============================================================================
-
 /// Tests that resolving with Cancel (last option) cancels the job.
 ///
 /// Uses a scenario without auto-answer so the agent stays blocked at the
@@ -337,11 +286,7 @@ fn resolve_question_with_cancel_cancels_job() {
 
     // Wait for decision to be created
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -354,17 +299,11 @@ fn resolve_question_with_cancel_cancels_job() {
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
     // With 2 user options + Other + Cancel + Dismiss, Cancel is option 4
-    temp.oj()
-        .args(&["decision", "resolve", &decision_id, "4"])
-        .passes();
+    temp.oj().args(&["decision", "resolve", &decision_id, "4"]).passes();
 
     // Job should be cancelled
     let cancelled = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("cancelled")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("cancelled")
     });
     assert!(
         cancelled,
@@ -394,11 +333,7 @@ fn resolve_question_removes_from_pending_list() {
 
     // Wait for decision
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -412,18 +347,11 @@ fn resolve_question_removes_from_pending_list() {
     let short_id = &decision_id[..8.min(decision_id.len())];
 
     // Resolve with option 1
-    temp.oj()
-        .args(&["decision", "resolve", &decision_id, "1"])
-        .passes();
+    temp.oj().args(&["decision", "resolve", &decision_id, "1"]).passes();
 
     // Decision should no longer be in pending list (poll for async processing)
     let removed = wait_for(SPEC_WAIT_MAX_MS, || {
-        !temp
-            .oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains(short_id)
+        !temp.oj().args(&["decision", "list"]).passes().stdout().contains(short_id)
     });
     assert!(
         removed,
@@ -448,11 +376,7 @@ fn resolve_question_with_freeform_message() {
 
     // Wait for decision
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -466,24 +390,13 @@ fn resolve_question_with_freeform_message() {
 
     // Resolve with freeform message (no option number)
     temp.oj()
-        .args(&[
-            "decision",
-            "resolve",
-            &decision_id,
-            "-m",
-            "Use a different approach entirely",
-        ])
+        .args(&["decision", "resolve", &decision_id, "-m", "Use a different approach entirely"])
         .passes();
 
     // Decision should be resolved (removed from list, poll for async processing)
     let short_id = &decision_id[..8.min(decision_id.len())];
     let removed = wait_for(SPEC_WAIT_MAX_MS, || {
-        !temp
-            .oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains(short_id)
+        !temp.oj().args(&["decision", "list"]).passes().stdout().contains(short_id)
     });
     assert!(
         removed,
@@ -491,10 +404,6 @@ fn resolve_question_with_freeform_message() {
         temp.oj().args(&["decision", "list"]).passes().stdout()
     );
 }
-
-// =============================================================================
-// Tests: Edge Cases
-// =============================================================================
 
 /// Tests that `oj status` shows the question source for escalated jobs.
 #[test]
@@ -512,11 +421,7 @@ fn status_shows_question_source() {
 
     // Wait for job to escalate
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -550,11 +455,7 @@ fn question_decision_shows_option_descriptions() {
 
     // Wait for decision
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("question")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("question")
     });
     assert!(
         has_decision,
@@ -566,11 +467,7 @@ fn question_decision_shows_option_descriptions() {
     let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
-    let show_output = temp
-        .oj()
-        .args(&["decision", "show", &decision_id])
-        .passes()
-        .stdout();
+    let show_output = temp.oj().args(&["decision", "show", &decision_id]).passes().stdout();
 
     // Verify option descriptions are shown
     assert!(
@@ -579,10 +476,6 @@ fn question_decision_shows_option_descriptions() {
         show_output
     );
 }
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 /// Extract the first decision ID from `oj decision list` output.
 /// The format is typically: `<id>  <source>  <job>  <context>`

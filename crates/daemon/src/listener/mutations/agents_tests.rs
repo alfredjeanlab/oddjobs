@@ -3,20 +3,36 @@
 
 use tempfile::tempdir;
 
-use oj_core::{AgentRunStatus, Event, StepOutcome, StepRecord};
+use oj_core::{CrewStatus, StepOutcome, StepRecord};
 
 use crate::protocol::Response;
 
-use super::super::test_helpers::{
-    make_agent_run, make_job, make_job_agent_in_history, make_job_with_agent, test_ctx,
-};
 use super::super::PruneFlags;
 use super::{handle_agent_prune, handle_agent_send};
+use crate::listener::test_ctx;
+use crate::listener::test_fixtures::{
+    make_crew, make_job, make_job_agent_in_history, make_job_with_agent,
+};
 
 // --- handle_agent_prune tests ---
 
-#[test]
-fn agent_prune_all_removes_terminal_jobs_from_state() {
+#[yare::parameterized(
+    removes_terminal_jobs       = { 1, 1, 0, 0, false, 1, 1 },
+    dry_run_terminal_job        = { 1, 0, 0, 0, true,  1, 0 },
+    skips_active_jobs           = { 0, 1, 0, 0, false, 0, 1 },
+    removes_terminal_standalone = { 0, 0, 2, 1, false, 2, 1 },
+    dry_run_standalone          = { 0, 0, 1, 0, true,  1, 0 },
+    mixed_job_and_standalone    = { 1, 0, 1, 0, false, 2, 0 },
+)]
+fn agent_prune(
+    terminal_jobs: usize,
+    active_jobs: usize,
+    terminal_runs: usize,
+    running_runs: usize,
+    dry_run: bool,
+    expected_pruned: usize,
+    expected_skipped: usize,
+) {
     let dir = tempdir().unwrap();
     let mut ctx = test_ctx(dir.path());
     ctx.logs_path = dir.path().join("logs");
@@ -24,253 +40,56 @@ fn agent_prune_all_removes_terminal_jobs_from_state() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-done".to_string(),
-            make_job_with_agent("pipe-done", "done", "agent-1"),
-        );
-        s.jobs.insert(
-            "pipe-running".to_string(),
-            make_job_with_agent("pipe-running", "work", "agent-2"),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
-    let result = handle_agent_prune(&ctx, &flags);
-
-    match result {
-        Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 1, "should prune 1 agent");
-            assert_eq!(pruned[0].agent_id, "agent-1");
-            assert_eq!(pruned[0].job_id, "pipe-done");
-            assert_eq!(skipped, 1, "should skip 1 non-terminal job");
-        }
-        other => panic!("expected AgentsPruned, got: {:?}", other),
-    }
-
-    {
-        let mut s = ctx.state.lock();
-        s.apply_event(&Event::JobDeleted {
-            id: oj_core::JobId::new("pipe-done".to_string()),
-        });
-        assert!(!s.jobs.contains_key("pipe-done"));
-        assert!(s.jobs.contains_key("pipe-running"));
-    }
-}
-
-#[test]
-fn agent_prune_dry_run_does_not_delete() {
-    let dir = tempdir().unwrap();
-    let mut ctx = test_ctx(dir.path());
-    ctx.logs_path = dir.path().join("logs");
-    std::fs::create_dir_all(ctx.logs_path.join("agent")).unwrap();
-
-    {
-        let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-failed".to_string(),
-            make_job_with_agent("pipe-failed", "failed", "agent-3"),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: true,
-        namespace: None,
-    };
-    let result = handle_agent_prune(&ctx, &flags);
-
-    match result {
-        Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 1, "should report 1 agent");
-            assert_eq!(skipped, 0);
-        }
-        other => panic!("expected AgentsPruned, got: {:?}", other),
-    }
-
-    let s = ctx.state.lock();
-    assert!(s.jobs.contains_key("pipe-failed"));
-}
-
-#[test]
-fn agent_prune_skips_non_terminal_jobs() {
-    let dir = tempdir().unwrap();
-    let mut ctx = test_ctx(dir.path());
-    ctx.logs_path = dir.path().join("logs");
-    std::fs::create_dir_all(ctx.logs_path.join("agent")).unwrap();
-
-    {
-        let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-active".to_string(),
-            make_job_with_agent("pipe-active", "build", "agent-4"),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
-    let result = handle_agent_prune(&ctx, &flags);
-
-    match result {
-        Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 0, "should not prune active agents");
-            assert_eq!(skipped, 1, "should skip the active job");
-        }
-        other => panic!("expected AgentsPruned, got: {:?}", other),
-    }
-
-    let s = ctx.state.lock();
-    assert!(s.jobs.contains_key("pipe-active"));
-}
-
-#[test]
-fn agent_prune_all_removes_terminal_standalone_agent_runs() {
-    let dir = tempdir().unwrap();
-    let mut ctx = test_ctx(dir.path());
-    ctx.logs_path = dir.path().join("logs");
-    std::fs::create_dir_all(ctx.logs_path.join("agent")).unwrap();
-
-    {
-        let mut s = ctx.state.lock();
-        s.agent_runs.insert(
-            "ar-completed".to_string(),
-            make_agent_run("ar-completed", AgentRunStatus::Completed),
-        );
-        s.agent_runs.insert(
-            "ar-failed".to_string(),
-            make_agent_run("ar-failed", AgentRunStatus::Failed),
-        );
-        s.agent_runs.insert(
-            "ar-running".to_string(),
-            make_agent_run("ar-running", AgentRunStatus::Running),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
-    let result = handle_agent_prune(&ctx, &flags);
-
-    match result {
-        Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 2, "should prune 2 terminal agent runs");
-            assert_eq!(skipped, 1, "should skip 1 running agent run");
-            for entry in &pruned {
-                assert!(
-                    entry.job_id.is_empty(),
-                    "standalone agents have empty job_id"
-                );
-            }
-        }
-        other => panic!("expected AgentsPruned, got: {:?}", other),
-    }
-
-    {
-        let mut s = ctx.state.lock();
-        s.apply_event(&Event::AgentRunDeleted {
-            id: oj_core::AgentRunId::new("ar-completed"),
-        });
-        s.apply_event(&Event::AgentRunDeleted {
-            id: oj_core::AgentRunId::new("ar-failed"),
-        });
-        assert!(!s.agent_runs.contains_key("ar-completed"));
-        assert!(!s.agent_runs.contains_key("ar-failed"));
-        assert!(s.agent_runs.contains_key("ar-running"));
-    }
-}
-
-#[test]
-fn agent_prune_dry_run_does_not_delete_standalone_agent_runs() {
-    let dir = tempdir().unwrap();
-    let mut ctx = test_ctx(dir.path());
-    ctx.logs_path = dir.path().join("logs");
-    std::fs::create_dir_all(ctx.logs_path.join("agent")).unwrap();
-
-    {
-        let mut s = ctx.state.lock();
-        s.agent_runs.insert(
-            "ar-done".to_string(),
-            make_agent_run("ar-done", AgentRunStatus::Completed),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: true,
-        namespace: None,
-    };
-    let result = handle_agent_prune(&ctx, &flags);
-
-    match result {
-        Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 1, "should report 1 agent");
-            assert_eq!(skipped, 0);
-            assert!(
-                pruned[0].job_id.is_empty(),
-                "standalone agent has empty job_id"
+        for i in 0..terminal_jobs {
+            s.jobs.insert(
+                format!("job-done-{i}"),
+                make_job_with_agent(&format!("job-done-{i}"), "done", &format!("agent-t{i}")),
             );
         }
-        other => panic!("expected AgentsPruned, got: {:?}", other),
+        for i in 0..active_jobs {
+            s.jobs.insert(
+                format!("job-active-{i}"),
+                make_job_with_agent(&format!("job-active-{i}"), "work", &format!("agent-a{i}")),
+            );
+        }
+        for i in 0..terminal_runs {
+            let status = if i % 2 == 0 { CrewStatus::Completed } else { CrewStatus::Failed };
+            s.crew.insert(format!("run-done-{i}"), make_crew(&format!("run-done-{i}"), status));
+        }
+        for i in 0..running_runs {
+            s.crew.insert(
+                format!("run-running-{i}"),
+                make_crew(&format!("run-running-{i}"), CrewStatus::Running),
+            );
+        }
     }
 
-    let s = ctx.state.lock();
-    assert!(s.agent_runs.contains_key("ar-done"));
-}
-
-#[test]
-fn agent_prune_all_handles_mixed_job_and_standalone_agents() {
-    let dir = tempdir().unwrap();
-    let mut ctx = test_ctx(dir.path());
-    ctx.logs_path = dir.path().join("logs");
-    std::fs::create_dir_all(ctx.logs_path.join("agent")).unwrap();
-
-    {
-        let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-done".to_string(),
-            make_job_with_agent("pipe-done", "done", "agent-from-job"),
-        );
-        s.agent_runs.insert(
-            "ar-done".to_string(),
-            make_agent_run("ar-done", AgentRunStatus::Completed),
-        );
-    }
-
-    let flags = PruneFlags {
-        all: true,
-        dry_run: false,
-        namespace: None,
-    };
+    let flags = PruneFlags { all: true, dry_run, project: None };
     let result = handle_agent_prune(&ctx, &flags);
 
     match result {
         Ok(Response::AgentsPruned { pruned, skipped }) => {
-            assert_eq!(pruned.len(), 2);
-            assert_eq!(skipped, 0);
-            assert!(pruned.iter().any(|e| !e.job_id.is_empty()));
-            assert!(pruned.iter().any(|e| e.job_id.is_empty()));
+            assert_eq!(pruned.len(), expected_pruned, "pruned count");
+            assert_eq!(skipped, expected_skipped, "skipped count");
         }
         other => panic!("expected AgentsPruned, got: {:?}", other),
     }
 
-    {
-        let mut s = ctx.state.lock();
-        s.apply_event(&Event::JobDeleted {
-            id: oj_core::JobId::new("pipe-done".to_string()),
-        });
-        s.apply_event(&Event::AgentRunDeleted {
-            id: oj_core::AgentRunId::new("ar-done"),
-        });
-        assert!(!s.jobs.contains_key("pipe-done"));
-        assert!(!s.agent_runs.contains_key("ar-done"));
+    // Verify non-terminal entities remain in state
+    let s = ctx.state.lock();
+    for i in 0..active_jobs {
+        assert!(s.jobs.contains_key(&format!("job-active-{i}")));
+    }
+    for i in 0..running_runs {
+        assert!(s.crew.contains_key(&format!("run-running-{i}")));
+    }
+    if dry_run {
+        for i in 0..terminal_jobs {
+            assert!(s.jobs.contains_key(&format!("job-done-{i}")));
+        }
+        for i in 0..terminal_runs {
+            assert!(s.crew.contains_key(&format!("run-done-{i}")));
+        }
     }
 }
 
@@ -283,85 +102,59 @@ async fn agent_send_finds_agent_in_last_step() {
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-1".to_string(),
-            make_job_with_agent("pipe-1", "work", "agent-abc"),
-        );
+        s.jobs.insert("job-1".to_string(), make_job_with_agent("job-1", "work", "agent-abc"));
     }
 
     let result = handle_agent_send(&ctx, "agent-abc".to_string(), "hello".to_string()).await;
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }
 
-#[tokio::test]
-async fn agent_send_finds_agent_in_earlier_step() {
-    let dir = tempdir().unwrap();
-    let ctx = test_ctx(dir.path());
+#[yare::parameterized(
+    by_agent_id = { "job-1",      "review", "work", "agent-xyz",                    "agent-xyz" },
+    by_job_id   = { "job-abc123", "review", "work", "agent-inner",                  "job-abc123" },
+    by_prefix   = { "job-1",      "review", "work", "agent-long-uuid-string-12345", "agent-long" },
+)]
+fn agent_send_lookup(
+    job_id: &str,
+    current_step: &str,
+    agent_step: &str,
+    agent_id: &str,
+    query: &str,
+) {
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let dir = tempdir().unwrap();
+        let ctx = test_ctx(dir.path());
 
-    {
-        let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-1".to_string(),
-            make_job_agent_in_history("pipe-1", "review", "work", "agent-xyz"),
-        );
-    }
+        {
+            let mut s = ctx.state.lock();
+            s.jobs.insert(
+                job_id.to_string(),
+                make_job_agent_in_history(job_id, current_step, agent_step, agent_id),
+            );
+        }
 
-    let result = handle_agent_send(&ctx, "agent-xyz".to_string(), "hello".to_string()).await;
-    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+        let result = handle_agent_send(&ctx, query.to_string(), "hello".to_string()).await;
+        assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
+    });
 }
 
 #[tokio::test]
-async fn agent_send_via_job_id_finds_agent_in_earlier_step() {
+async fn agent_send_finds_standalone_crew() {
     let dir = tempdir().unwrap();
     let ctx = test_ctx(dir.path());
 
     {
         let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-abc123".to_string(),
-            make_job_agent_in_history("pipe-abc123", "review", "work", "agent-inner"),
-        );
-    }
-
-    let result = handle_agent_send(&ctx, "pipe-abc123".to_string(), "hello".to_string()).await;
-    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
-}
-
-#[tokio::test]
-async fn agent_send_prefix_match_across_all_history() {
-    let dir = tempdir().unwrap();
-    let ctx = test_ctx(dir.path());
-
-    {
-        let mut s = ctx.state.lock();
-        s.jobs.insert(
-            "pipe-1".to_string(),
-            make_job_agent_in_history("pipe-1", "review", "work", "agent-long-uuid-string-12345"),
-        );
-    }
-
-    let result = handle_agent_send(&ctx, "agent-long".to_string(), "hello".to_string()).await;
-    assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
-}
-
-#[tokio::test]
-async fn agent_send_finds_standalone_agent_run() {
-    let dir = tempdir().unwrap();
-    let ctx = test_ctx(dir.path());
-
-    {
-        let mut s = ctx.state.lock();
-        s.agent_runs.insert(
+        s.crew.insert(
             "run-1".to_string(),
-            oj_core::AgentRun::builder()
+            oj_core::Crew::builder()
                 .id("run-1")
                 .agent_name("my-agent")
-                .command_name("oj agent run")
-                .namespace("proj")
+                .command_name("oj crew")
+                .project("proj")
                 .cwd("/tmp")
                 .runbook_hash("hash")
                 .agent_id("standalone-agent-42")
-                .session_id("oj-standalone-42")
                 .build(),
         );
     }
@@ -398,7 +191,7 @@ async fn agent_send_prefers_latest_step_history_entry() {
 
     {
         let mut s = ctx.state.lock();
-        let mut job = make_job("pipe-multi", "done");
+        let mut job = make_job("job-multi", "done");
         job.step_history = vec![
             StepRecord {
                 name: "work-1".to_string(),
@@ -425,9 +218,9 @@ async fn agent_send_prefers_latest_step_history_entry() {
                 agent_name: None,
             },
         ];
-        s.jobs.insert("pipe-multi".to_string(), job);
+        s.jobs.insert("job-multi".to_string(), job);
     }
 
-    let result = handle_agent_send(&ctx, "pipe-multi".to_string(), "hello".to_string()).await;
+    let result = handle_agent_send(&ctx, "job-multi".to_string(), "hello".to_string()).await;
     assert!(matches!(result, Ok(Response::Ok)), "got: {:?}", result);
 }

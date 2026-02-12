@@ -24,9 +24,12 @@ fn make_ctx(event_bus: EventBus, state: Arc<Mutex<MaterializedState>>) -> super:
         state,
         orphans: Arc::new(Mutex::new(Vec::new())),
         metrics_health: Arc::new(Mutex::new(Default::default())),
+        state_dir: std::path::PathBuf::new(),
         logs_path: std::path::PathBuf::new(),
         start_time: std::time::Instant::now(),
         shutdown: Arc::new(tokio::sync::Notify::new()),
+        auth_token: None,
+        agent_adapter: None,
     }
 }
 
@@ -35,7 +38,7 @@ fn test_event_bus(dir: &std::path::Path) -> (EventBus, Arc<Mutex<Wal>>, PathBuf)
     let wal_path = dir.join("test.wal");
     let wal = Wal::open(&wal_path, 0).unwrap();
     let (event_bus, reader) = EventBus::new(wal);
-    let wal = reader.wal();
+    let wal = Arc::clone(&reader.wal);
     (event_bus, wal, wal_path)
 }
 
@@ -54,7 +57,7 @@ queue "tasks" {
 
 worker "processor" {
   source  = { queue = "tasks" }
-  handler = { job = "handle" }
+  run = { job = "handle" }
 }
 
 job "handle" {
@@ -128,53 +131,47 @@ fn drain_events(wal: &Arc<Mutex<Wal>>) -> Vec<Event> {
 /// Helper: push an item and mark it as Dead so it can be retried.
 fn push_and_mark_dead(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     item_id: &str,
     data: &[(&str, &str)],
 ) {
-    let data_map = data
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let data_map = data.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     state.lock().apply_event(&Event::QueuePushed {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
         data: data_map,
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: namespace.to_string(),
+        pushed_at_ms: 1_000_000,
+        project: project.to_string(),
     });
-    state.lock().apply_event(&Event::QueueItemDead {
-        queue_name: queue_name.to_string(),
+    state.lock().apply_event(&Event::QueueDead {
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
-        namespace: namespace.to_string(),
+        project: project.to_string(),
     });
 }
 
 /// Helper: push an item and mark it as Failed.
 fn push_and_mark_failed(
     state: &Arc<Mutex<MaterializedState>>,
-    namespace: &str,
+    project: &str,
     queue_name: &str,
     item_id: &str,
     data: &[(&str, &str)],
-    pushed_at_epoch_ms: u64,
+    pushed_at_ms: u64,
 ) {
-    let data_map = data
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
+    let data_map = data.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
     state.lock().apply_event(&Event::QueuePushed {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
         data: data_map,
-        pushed_at_epoch_ms,
-        namespace: namespace.to_string(),
+        pushed_at_ms,
+        project: project.to_string(),
     });
     state.lock().apply_event(&Event::QueueFailed {
-        queue_name: queue_name.to_string(),
+        queue: queue_name.to_string(),
         item_id: item_id.to_string(),
         error: "test error".to_string(),
-        namespace: namespace.to_string(),
+        project: project.to_string(),
     });
 }

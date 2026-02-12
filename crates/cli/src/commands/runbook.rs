@@ -7,7 +7,7 @@ use anyhow::{bail, Result};
 use clap::{Args, Subcommand};
 use std::path::{Path, PathBuf};
 
-use crate::output::OutputFormat;
+use crate::output::{format_or_json, OutputFormat};
 use crate::table::{Column, Table};
 
 #[derive(Args)]
@@ -43,24 +43,22 @@ pub enum RunbookCommand {
     },
 }
 
-pub fn handle(command: RunbookCommand, project_root: &Path, format: OutputFormat) -> Result<()> {
-    let lib_dirs = library_dirs(project_root);
+pub fn handle(command: RunbookCommand, project_path: &Path, format: OutputFormat) -> Result<()> {
+    let lib_dirs = library_dirs(project_path);
     match command {
-        RunbookCommand::List {} => handle_list(project_root, format),
+        RunbookCommand::List {} => handle_list(project_path, format),
         RunbookCommand::Search { query } => handle_search(query.as_deref(), &lib_dirs, format),
         RunbookCommand::Info { path } => handle_show(&path, &lib_dirs, format),
-        RunbookCommand::Add {
-            path,
-            name,
-            project,
-        } => handle_add(&path, name.as_deref(), project, project_root),
+        RunbookCommand::Add { path, name, project } => {
+            handle_add(&path, name.as_deref(), project, project_path)
+        }
     }
 }
 
 /// Compute library directories for resolution: project-level then user-level.
-fn library_dirs(project_root: &Path) -> Vec<PathBuf> {
+fn library_dirs(project_path: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    let project_libs = project_root.join(".oj/libraries");
+    let project_libs = project_path.join(".oj/libraries");
     if project_libs.is_dir() {
         dirs.push(project_libs);
     }
@@ -73,9 +71,9 @@ fn library_dirs(project_root: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
-    let runbook_dir = project_root.join(".oj/runbooks");
-    let lib_dirs = library_dirs(project_root);
+fn handle_list(project_path: &Path, format: OutputFormat) -> Result<()> {
+    let runbook_dir = project_path.join(".oj/runbooks");
+    let lib_dirs = library_dirs(project_path);
     let summaries = oj_runbook::collect_runbook_summaries(&runbook_dir)?;
 
     if summaries.is_empty() {
@@ -83,73 +81,58 @@ fn handle_list(project_root: &Path, format: OutputFormat) -> Result<()> {
         return Ok(());
     }
 
-    match format {
-        OutputFormat::Text => {
-            let mut table = Table::new(vec![
-                Column::left("FILE"),
-                Column::left("IMPORTS"),
-                Column::left("COMMANDS"),
-                Column::left("DESCRIPTION").with_max(60),
-            ]);
+    let json_data: Vec<serde_json::Value> = summaries
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "file": s.file,
+                "imports": s.imports.keys().collect::<Vec<_>>(),
+                "commands": s.commands,
+                "jobs": s.jobs,
+                "agents": s.agents,
+                "queues": s.queues,
+                "workers": s.workers,
+                "crons": s.crons,
+                "description": s.description,
+            })
+        })
+        .collect();
+    format_or_json(format, &json_data, || {
+        let mut table = Table::new(vec![
+            Column::left("FILE"),
+            Column::left("IMPORTS"),
+            Column::left("COMMANDS"),
+            Column::left("DESCRIPTION").with_max(60),
+        ]);
 
-            for summary in &summaries {
-                let imports = if summary.imports.is_empty() {
+        for summary in &summaries {
+            let imports = if summary.imports.is_empty() {
+                "-".to_string()
+            } else {
+                summary.imports.keys().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            };
+
+            let commands = if summary.commands.is_empty() {
+                let imported_cmds = imported_command_names(&summary.imports, &lib_dirs);
+                if imported_cmds.is_empty() {
                     "-".to_string()
                 } else {
-                    summary
-                        .imports
-                        .keys()
-                        .map(|s| s.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                };
+                    format!("{} (imported)", imported_cmds.join(", "))
+                }
+            } else {
+                summary.commands.join(", ")
+            };
 
-                let commands = if summary.commands.is_empty() {
-                    // Show imported command names if no local commands
-                    let imported_cmds = imported_command_names(&summary.imports, &lib_dirs);
-                    if imported_cmds.is_empty() {
-                        "-".to_string()
-                    } else {
-                        format!("{} (imported)", imported_cmds.join(", "))
-                    }
-                } else {
-                    summary.commands.join(", ")
-                };
-
-                let description = summary.description.as_deref().unwrap_or("");
-
-                table.row(vec![
-                    summary.file.clone(),
-                    imports,
-                    commands,
-                    description.to_string(),
-                ]);
-            }
-
-            table.render(&mut std::io::stdout());
+            table.row(vec![
+                summary.file.clone(),
+                imports,
+                commands,
+                summary.description.as_deref().unwrap_or("").to_string(),
+            ]);
         }
-        OutputFormat::Json => {
-            let entries: Vec<serde_json::Value> = summaries
-                .iter()
-                .map(|s| {
-                    serde_json::json!({
-                        "file": s.file,
-                        "imports": s.imports.keys().collect::<Vec<_>>(),
-                        "commands": s.commands,
-                        "jobs": s.jobs,
-                        "agents": s.agents,
-                        "queues": s.queues,
-                        "workers": s.workers,
-                        "crons": s.crons,
-                        "description": s.description,
-                    })
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&entries)?);
-        }
-    }
 
-    Ok(())
+        table.render(&mut std::io::stdout());
+    })
 }
 
 /// Resolve command names from imports by parsing each library.
@@ -213,42 +196,33 @@ fn handle_search(
         return Ok(());
     }
 
-    match format {
-        OutputFormat::Text => {
-            let mut table = Table::new(vec![
-                Column::left("LIBRARY"),
-                Column::left("CONSTS"),
-                Column::left("DESCRIPTION").with_max(60),
+    let json_data: Vec<serde_json::Value> = filtered
+        .iter()
+        .map(|lib| {
+            serde_json::json!({
+                "source": lib.source,
+                "description": lib.description,
+                "consts": format_consts_json(&lib.files),
+            })
+        })
+        .collect();
+    format_or_json(format, &json_data, || {
+        let mut table = Table::new(vec![
+            Column::left("LIBRARY"),
+            Column::left("CONSTS"),
+            Column::left("DESCRIPTION").with_max(60),
+        ]);
+
+        for lib in &filtered {
+            table.row(vec![
+                lib.source.clone(),
+                format_const_summary(&lib.files),
+                lib.description.clone(),
             ]);
-
-            for lib in &filtered {
-                let consts_display = format_const_summary(&lib.files);
-                table.row(vec![
-                    lib.source.clone(),
-                    consts_display,
-                    lib.description.clone(),
-                ]);
-            }
-
-            table.render(&mut std::io::stdout());
         }
-        OutputFormat::Json => {
-            let entries: Vec<serde_json::Value> = filtered
-                .iter()
-                .map(|lib| {
-                    let consts_json = format_consts_json(&lib.files);
-                    serde_json::json!({
-                        "source": lib.source,
-                        "description": lib.description,
-                        "consts": consts_json,
-                    })
-                })
-                .collect();
-            println!("{}", serde_json::to_string_pretty(&entries)?);
-        }
-    }
 
-    Ok(())
+        table.render(&mut std::io::stdout());
+    })
 }
 
 fn handle_show(path: &str, library_dirs: &[PathBuf], format: OutputFormat) -> Result<()> {
@@ -265,167 +239,109 @@ fn handle_show(path: &str, library_dirs: &[PathBuf], format: OutputFormat) -> Re
         .map(|c| c.short)
         .unwrap_or_default();
 
-    // Collect const definitions and merge all files into a single runbook
     let const_defs = extract_const_defs(&files);
     let runbook = merge_library_files(&files)?;
+    let consts_json = const_defs_to_json(&const_defs);
 
-    match format {
-        OutputFormat::Text => {
-            println!("Library: {}", path);
-            if !description.is_empty() {
-                println!("{}", description);
-            }
+    let obj = serde_json::json!({
+        "source": path,
+        "description": &description,
+        "consts": consts_json,
+        "entities": build_entity_map(&runbook),
+    });
+    format_or_json(format, &obj, || {
+        println!("Library: {}", path);
+        if !description.is_empty() {
+            println!("{}", description);
+        }
 
-            if !const_defs.is_empty() {
-                println!("\nParameters:");
-                let mut sorted_consts: Vec<_> = const_defs.iter().collect();
-                sorted_consts.sort_by_key(|(name, _)| *name);
-                for (name, def) in &sorted_consts {
-                    let req = if def.default.is_none() {
-                        "(required)"
-                    } else {
-                        "(optional)"
-                    };
-                    let default_str = match &def.default {
-                        Some(d) => format!(" [default: \"{}\"]", d),
-                        None => String::new(),
-                    };
-                    println!("  {:<12} {:<12} {}", name, req, default_str.trim());
-                }
-            }
-
-            let mut entity_lines = Vec::new();
-            if !runbook.commands.is_empty() {
-                let mut names: Vec<_> = runbook.commands.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Commands:  {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-            if !runbook.jobs.is_empty() {
-                let mut names: Vec<_> = runbook.jobs.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Jobs:      {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-            if !runbook.agents.is_empty() {
-                let mut names: Vec<_> = runbook.agents.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Agents:    {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-            if !runbook.queues.is_empty() {
-                let mut names: Vec<_> = runbook.queues.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Queues:    {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-            if !runbook.workers.is_empty() {
-                let mut names: Vec<_> = runbook.workers.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Workers:   {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-            if !runbook.crons.is_empty() {
-                let mut names: Vec<_> = runbook.crons.keys().collect();
-                names.sort();
-                entity_lines.push(format!(
-                    "  Crons:     {}",
-                    names.into_iter().cloned().collect::<Vec<_>>().join(", ")
-                ));
-            }
-
-            if !entity_lines.is_empty() {
-                println!("\nEntities:");
-                for line in &entity_lines {
-                    println!("{}", line);
-                }
-            }
-
-            // Usage example
-            println!("\nUsage:");
-            if const_defs.values().any(|c| c.default.is_none()) {
-                println!("  import \"{}\" {{", path);
-                let mut required: Vec<_> = const_defs
-                    .iter()
-                    .filter(|(_, c)| c.default.is_none())
-                    .map(|(name, _)| name.as_str())
-                    .collect();
-                required.sort();
-                for name in required {
-                    println!("    const \"{}\" {{ value = \"...\" }}", name);
-                }
-                println!("  }}");
-            } else {
-                println!("  import \"{}\" {{}}", path);
+        if !const_defs.is_empty() {
+            println!("\nParameters:");
+            let mut sorted_consts: Vec<_> = const_defs.iter().collect();
+            sorted_consts.sort_by_key(|(name, _)| *name);
+            for (name, def) in &sorted_consts {
+                let req = if def.default.is_none() { "(required)" } else { "(optional)" };
+                let default_str = match &def.default {
+                    Some(d) => format!(" [default: \"{}\"]", d),
+                    None => String::new(),
+                };
+                println!("  {:<12} {:<12} {}", name, req, default_str.trim());
             }
         }
-        OutputFormat::Json => {
-            let mut consts_json: Vec<serde_json::Value> = const_defs
+
+        let entity_lines = collect_entity_lines(&runbook);
+        if !entity_lines.is_empty() {
+            println!("\nEntities:");
+            for line in &entity_lines {
+                println!("{}", line);
+            }
+        }
+
+        // Usage example
+        println!("\nUsage:");
+        if const_defs.values().any(|c| c.default.is_none()) {
+            println!("  import \"{}\" {{", path);
+            let mut required: Vec<_> = const_defs
                 .iter()
-                .map(|(name, c)| {
-                    serde_json::json!({
-                        "name": name,
-                        "required": c.default.is_none(),
-                        "default": c.default,
-                    })
-                })
+                .filter(|(_, c)| c.default.is_none())
+                .map(|(name, _)| name.as_str())
                 .collect();
-            consts_json.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
-
-            let entities = build_entity_map(&runbook);
-
-            let obj = serde_json::json!({
-                "source": path,
-                "description": description,
-                "consts": consts_json,
-                "entities": entities,
-            });
-            println!("{}", serde_json::to_string_pretty(&obj)?);
+            required.sort();
+            for name in required {
+                println!("    const \"{}\" {{ value = \"...\" }}", name);
+            }
+            println!("  }}");
+        } else {
+            println!("  import \"{}\" {{}}", path);
         }
-    }
+    })
+}
 
-    Ok(())
+/// Sorted keys from a HashMap.
+fn sorted_keys<V>(map: &std::collections::HashMap<String, V>) -> Vec<String> {
+    let mut keys: Vec<_> = map.keys().cloned().collect();
+    keys.sort();
+    keys
+}
+
+/// Collect (label, sorted-keys) pairs for all non-empty entity types.
+fn runbook_entity_pairs(runbook: &oj_runbook::Runbook) -> Vec<(&'static str, Vec<String>)> {
+    let candidates: Vec<(&str, Vec<String>)> = vec![
+        ("commands", sorted_keys(&runbook.commands)),
+        ("jobs", sorted_keys(&runbook.jobs)),
+        ("agents", sorted_keys(&runbook.agents)),
+        ("queues", sorted_keys(&runbook.queues)),
+        ("workers", sorted_keys(&runbook.workers)),
+        ("crons", sorted_keys(&runbook.crons)),
+    ];
+    candidates.into_iter().filter(|(_, names)| !names.is_empty()).collect()
+}
+
+/// Collect formatted entity lines for text display.
+fn collect_entity_lines(runbook: &oj_runbook::Runbook) -> Vec<String> {
+    // Capitalize first letter of label for display
+    runbook_entity_pairs(runbook)
+        .into_iter()
+        .map(|(label, names)| {
+            let cap = format!("{}{}:", &label[..1].to_uppercase(), &label[1..]);
+            format!("  {:<11}{}", cap, names.join(", "))
+        })
+        .collect()
 }
 
 /// Build a JSON map of entity types to sorted name lists.
 fn build_entity_map(runbook: &oj_runbook::Runbook) -> serde_json::Value {
-    fn sorted<V>(map: &std::collections::HashMap<String, V>) -> Vec<String> {
-        let mut keys: Vec<_> = map.keys().cloned().collect();
-        keys.sort();
-        keys
-    }
-    fn insert<V>(
-        m: &mut serde_json::Map<String, serde_json::Value>,
-        key: &str,
-        map: &std::collections::HashMap<String, V>,
-    ) {
-        if !map.is_empty() {
-            m.insert(key.to_string(), serde_json::json!(sorted(map)));
-        }
-    }
     let mut m = serde_json::Map::new();
-    insert(&mut m, "commands", &runbook.commands);
-    insert(&mut m, "jobs", &runbook.jobs);
-    insert(&mut m, "agents", &runbook.agents);
-    insert(&mut m, "queues", &runbook.queues);
-    insert(&mut m, "workers", &runbook.workers);
-    insert(&mut m, "crons", &runbook.crons);
+    for (key, names) in runbook_entity_pairs(runbook) {
+        m.insert(key.to_string(), serde_json::json!(names));
+    }
     serde_json::Value::Object(m)
 }
 
-/// Format const definitions as a JSON array.
-fn format_consts_json(files: &[(String, String)]) -> Vec<serde_json::Value> {
-    let consts = extract_const_defs(files);
+/// Convert const definitions to a sorted JSON array.
+fn const_defs_to_json(
+    consts: &std::collections::HashMap<String, oj_runbook::ConstDef>,
+) -> Vec<serde_json::Value> {
     let mut result: Vec<serde_json::Value> = consts
         .iter()
         .map(|(name, c)| {
@@ -438,6 +354,11 @@ fn format_consts_json(files: &[(String, String)]) -> Vec<serde_json::Value> {
         .collect();
     result.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     result
+}
+
+/// Format const definitions from library files as a JSON array.
+fn format_consts_json(files: &[(String, String)]) -> Vec<serde_json::Value> {
+    const_defs_to_json(&extract_const_defs(files))
 }
 
 /// Extract const definitions from all library files.
@@ -489,13 +410,7 @@ fn format_const_summary(files: &[(String, String)]) -> String {
     }
     let mut items: Vec<_> = defs
         .iter()
-        .map(|(name, c)| {
-            if c.default.is_none() {
-                format!("{} (req)", name)
-            } else {
-                name.clone()
-            }
-        })
+        .map(|(name, c)| if c.default.is_none() { format!("{} (req)", name) } else { name.clone() })
         .collect();
     items.sort();
     items.join(", ")
@@ -505,15 +420,11 @@ fn handle_add(
     source_path: &str,
     name: Option<&str>,
     project_level: bool,
-    project_root: &Path,
+    project_path: &Path,
 ) -> Result<()> {
     // Resolve source path
     let source = PathBuf::from(source_path);
-    let source = if source.is_absolute() {
-        source
-    } else {
-        std::env::current_dir()?.join(source)
-    };
+    let source = if source.is_absolute() { source } else { std::env::current_dir()?.join(source) };
     let source = source
         .canonicalize()
         .map_err(|e| anyhow::anyhow!("cannot resolve '{}': {}", source_path, e))?;
@@ -542,19 +453,13 @@ fn handle_add(
     if lib_name.is_empty() || lib_name.contains("..") {
         bail!("invalid library name '{}'", lib_name);
     }
-    if !lib_name
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/')
-    {
-        bail!(
-            "invalid library name '{}': only alphanumeric, '-', '_', '/' allowed",
-            lib_name
-        );
+    if !lib_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_' || c == '/') {
+        bail!("invalid library name '{}': only alphanumeric, '-', '_', '/' allowed", lib_name);
     }
 
     // Determine target directory
     let target_dir = if project_level {
-        project_root.join(".oj/libraries").join(&lib_name)
+        project_path.join(".oj/libraries").join(&lib_name)
     } else {
         let state_dir = crate::env::state_dir()
             .map_err(|e| anyhow::anyhow!("cannot determine state directory: {}", e))?;
@@ -587,10 +492,7 @@ fn handle_add(
         std::fs::copy(&source, target_dir.join(filename))?;
         copied = 1;
     } else {
-        bail!(
-            "source must be an .hcl file or directory of .hcl files: {}",
-            source.display()
-        );
+        bail!("source must be an .hcl file or directory of .hcl files: {}", source.display());
     }
 
     if copied == 0 {
@@ -610,9 +512,7 @@ fn handle_add(
             {
                 eprintln!(
                     "warning: {} has parse errors: {}",
-                    path.file_name()
-                        .map(|f| f.to_string_lossy())
-                        .unwrap_or_default(),
+                    path.file_name().map(|f| f.to_string_lossy()).unwrap_or_default(),
                     e
                 );
             }

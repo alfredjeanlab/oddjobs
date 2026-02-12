@@ -3,12 +3,14 @@
 
 //! Daemon lifecycle and diagnostic logging for the CLI client.
 
+use std::io::Write;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use crate::client::{timeout_exit, ClientError, DaemonClient};
 use crate::daemon_process::{
-    cleanup_stale_pid, daemon_dir, daemon_socket, force_kill_daemon, process_exists,
-    read_daemon_pid, wait_for_exit,
+    cleanup_stale_pid, daemon_dir, daemon_socket, process_exists, read_daemon_pid, send_signal,
+    wait_for_exit,
 };
 
 /// Stop the daemon (graceful first, then forceful)
@@ -37,7 +39,7 @@ pub async fn daemon_stop(kill: bool) -> Result<bool, ClientError> {
 
         // Force kill if still running
         if process_exists(pid) {
-            force_kill_daemon(pid);
+            send_signal(nix::sys::signal::Signal::SIGKILL, pid);
             wait_for_exit(pid, timeout_exit()).await;
         }
     }
@@ -52,9 +54,6 @@ pub async fn daemon_stop(kill: bool) -> Result<bool, ClientError> {
 
 /// Write a diagnostic message to `~/.local/state/oj/cli.log`.
 fn write_cli_log(message: String) {
-    use std::io::Write;
-    use std::time::SystemTime;
-
     let log_path = daemon_dir()
         .or_else(|_| crate::env::state_dir())
         .unwrap_or_else(|_| PathBuf::from("/tmp"))
@@ -64,11 +63,7 @@ fn write_cli_log(message: String) {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)
-    {
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&log_path) {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())

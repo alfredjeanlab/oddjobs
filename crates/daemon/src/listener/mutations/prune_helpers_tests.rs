@@ -11,26 +11,26 @@ fn cleanup_job_files_removes_log_and_breadcrumb() {
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
 
-    let log_file = oj_engine::log_paths::job_log_path(&logs_path, "pipe-cleanup");
+    let log_file = oj_engine::log_paths::job_log_path(&logs_path, "job-cleanup");
     if let Some(parent) = log_file.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(&log_file, "log data").unwrap();
 
-    let crumb_file = oj_engine::log_paths::breadcrumb_path(&logs_path, "pipe-cleanup");
+    let crumb_file = oj_engine::log_paths::breadcrumb_path(&logs_path, "job-cleanup");
     if let Some(parent) = crumb_file.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(&crumb_file, "crumb data").unwrap();
 
-    let agent_log = logs_path.join("agent").join("pipe-cleanup.log");
+    let agent_log = logs_path.join("agent").join("job-cleanup.log");
     std::fs::write(&agent_log, "agent log").unwrap();
 
-    let agent_dir = logs_path.join("agent").join("pipe-cleanup");
+    let agent_dir = logs_path.join("agent").join("job-cleanup");
     std::fs::create_dir_all(&agent_dir).unwrap();
     std::fs::write(agent_dir.join("session.log"), "session").unwrap();
 
-    cleanup_job_files(&logs_path, "pipe-cleanup");
+    cleanup_job_files(&logs_path, "job-cleanup");
 
     assert!(!log_file.exists(), "job log should be removed");
     assert!(!crumb_file.exists(), "breadcrumb should be removed");

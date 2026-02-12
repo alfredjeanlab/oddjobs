@@ -58,12 +58,10 @@
 //! - [`CommandList::has_command_substitutions`] - Check for command substitutions
 //! - [`CommandList::max_nesting_depth`] - Get maximum subshell/brace group nesting
 
-// Existing modules from shell-common
 mod error;
 mod span;
 mod validation;
 
-// Moved modules from runbook::shell
 mod ast;
 mod lexer;
 mod parse_error;
@@ -71,27 +69,21 @@ mod parser;
 mod token;
 mod validator;
 
-// Existing exports from shell-common
 pub use error::LexerError;
 pub use span::{context_snippet, diagnostic_context, locate_span, Span};
 pub use validation::ValidationError;
 
-// AST types
 pub use ast::{
     AndOrList, AstVisitor, BraceGroup, CliArg, Command, CommandItem, CommandList, EnvAssignment,
     Job, LogicalOp, QuoteStyle, Redirection, SimpleCommand, Subshell, SubstitutionBody, Word,
     WordPart,
 };
 
-// Lexer
 pub use lexer::Lexer;
 
-// Parser
 pub use parse_error::{ParseError, ParseResult};
 pub use parser::Parser;
 
-// Tokens
 pub use token::{DupTarget, Token, TokenKind};
 
-// Validator
 pub use validator::{validate, validate_with_config, ValidatorConfig};

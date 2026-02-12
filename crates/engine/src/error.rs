@@ -37,4 +37,6 @@ pub enum RuntimeError {
     CronNotFound(String),
     #[error("shell error: {0}")]
     ShellError(String),
+    #[error("owner mismatch: {0}")]
+    OwnerMismatch(#[from] oj_core::OwnerMismatch),
 }

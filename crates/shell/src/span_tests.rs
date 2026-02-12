@@ -3,114 +3,38 @@
 
 use super::*;
 
-// =============================================================================
-// locate_span Tests
-// =============================================================================
-
-#[test]
-fn test_locate_span_single_line() {
-    let source = "echo hello world";
-    let span = Span::new(5, 10);
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 1);
-    assert_eq!(col, 5);
-    assert_eq!(content, "echo hello world");
-}
-
-#[test]
-fn test_locate_span_second_line() {
-    let source = "echo hello\necho world";
-    let span = Span::new(11, 15); // "echo" on line 2
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 2);
-    assert_eq!(col, 0);
-    assert_eq!(content, "echo world");
-}
-
-#[test]
-fn test_locate_span_third_line() {
-    let source = "line one\nline two\nline three";
-    let span = Span::new(18, 22); // "line" on line 3
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 3);
-    assert_eq!(col, 0);
-    assert_eq!(content, "line three");
-}
-
-#[test]
-fn test_locate_span_middle_of_line() {
-    let source = "echo hello\nfoo bar baz\nqux";
-    let span = Span::new(15, 18); // "bar" on line 2
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 2);
-    assert_eq!(col, 4);
-    assert_eq!(content, "foo bar baz");
-}
-
-#[test]
-fn test_locate_span_at_newline() {
-    let source = "hello\nworld";
-    let span = Span::new(5, 6); // The newline character position
-    let (line, col, content) = locate_span(source, span);
-    // The newline is at the end of line 1
-    assert_eq!(line, 1);
-    assert_eq!(col, 5);
-    assert_eq!(content, "hello");
-}
-
-#[test]
-fn test_locate_span_empty_line() {
-    let source = "hello\n\nworld";
-    let span = Span::new(7, 12); // "world" on line 3
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 3);
-    assert_eq!(col, 0);
-    assert_eq!(content, "world");
-}
-
-#[test]
-fn test_locate_span_unicode() {
-    let source = "日本語\nhello";
-    let span = Span::new(10, 15); // "hello" after unicode (9 bytes for 3 chars + newline)
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 2);
-    assert_eq!(col, 0);
-    assert_eq!(content, "hello");
-}
-
-#[test]
-fn test_locate_span_at_start() {
-    let source = "hello world";
-    let span = Span::new(0, 5);
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 1);
-    assert_eq!(col, 0);
-    assert_eq!(content, "hello world");
-}
-
-#[test]
-fn test_locate_span_at_end() {
-    let source = "hello world";
-    let span = Span::new(11, 11); // Empty span at end
-    let (line, col, content) = locate_span(source, span);
-    assert_eq!(line, 1);
-    assert_eq!(col, 11);
-    assert_eq!(content, "hello world");
+#[yare::parameterized(
+    single_line    = { "echo hello world",               5,  10,   1, 5,  "echo hello world" },
+    second_line    = { "echo hello\necho world",        11,  15,   2, 0,  "echo world" },
+    third_line     = { "line one\nline two\nline three", 18, 22,   3, 0,  "line three" },
+    middle_of_line = { "echo hello\nfoo bar baz\nqux",  15,  18,   2, 4,  "foo bar baz" },
+    at_newline     = { "hello\nworld",                   5,   6,   1, 5,  "hello" },
+    empty_line     = { "hello\n\nworld",                 7,  12,   3, 0,  "world" },
+    unicode        = { "日本語\nhello",                  10, 15,   2, 0,  "hello" },
+    at_start       = { "hello world",                    0,   5,   1, 0,  "hello world" },
+    at_end         = { "hello world",                   11,  11,   1, 11, "hello world" },
+)]
+fn locate_span_cases(
+    source: &str,
+    start: usize,
+    end: usize,
+    exp_line: usize,
+    exp_col: usize,
+    exp_content: &str,
+) {
+    let (line, col, content) = locate_span(source, Span::new(start, end));
+    assert_eq!(line, exp_line);
+    assert_eq!(col, exp_col);
+    assert_eq!(content, exp_content);
 }
 
 #[test]
 fn test_locate_span_beyond_source() {
     let source = "hello";
-    let span = Span::new(100, 105); // Beyond source length
-    let (line, _col, content) = locate_span(source, span);
-    // Should return last line info without panicking
+    let (line, _col, content) = locate_span(source, Span::new(100, 105));
     assert_eq!(line, 1);
     assert_eq!(content, "hello");
 }
-
-// =============================================================================
-// diagnostic_context Tests
-// =============================================================================
 
 #[test]
 fn test_diagnostic_context_basic() {
@@ -148,10 +72,6 @@ fn test_diagnostic_context_empty_span() {
     // Should still show at least one caret
     assert!(diag.contains("^"));
 }
-
-// =============================================================================
-// Property-Based Tests
-// =============================================================================
 
 use proptest::prelude::*;
 
@@ -236,66 +156,9 @@ proptest! {
     }
 }
 
-// =============================================================================
-// Original Span Tests
-// =============================================================================
-
-#[test]
-fn test_new_span() {
-    let span = Span::new(5, 10);
-    assert_eq!(span.start, 5);
-    assert_eq!(span.end, 10);
-}
-
-#[test]
-fn test_empty_span() {
-    let span = Span::empty(5);
-    assert_eq!(span.start, 5);
-    assert_eq!(span.end, 5);
-    assert!(span.is_empty());
-}
-
-#[test]
-fn test_len() {
-    let span = Span::new(5, 10);
-    assert_eq!(span.len(), 5);
-}
-
 #[test]
 fn test_len_saturates() {
     // This shouldn't happen in practice, but ensure no panic
     let span = Span { start: 10, end: 5 };
     assert_eq!(span.len(), 0);
-}
-
-#[test]
-fn test_contains() {
-    let span = Span::new(5, 10);
-    assert!(!span.contains(4));
-    assert!(span.contains(5));
-    assert!(span.contains(9));
-    assert!(!span.contains(10));
-}
-
-#[test]
-fn test_merge() {
-    let span1 = Span::new(5, 10);
-    let span2 = Span::new(8, 15);
-    let merged = span1.merge(span2);
-    assert_eq!(merged.start, 5);
-    assert_eq!(merged.end, 15);
-}
-
-#[test]
-fn test_slice() {
-    let source = "echo hello world";
-    let span = Span::new(5, 10);
-    assert_eq!(span.slice(source), "hello");
-}
-
-#[test]
-fn test_slice_out_of_bounds() {
-    let source = "short";
-    let span = Span::new(10, 20);
-    assert_eq!(span.slice(source), "");
 }

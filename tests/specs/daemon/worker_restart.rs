@@ -13,8 +13,8 @@ type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 1
 
 [job.process]
@@ -28,24 +28,22 @@ run = "${var.task.cmd}"
 /// Scenario for an agent that runs a slow command.
 /// The sleep gives us time to kill the daemon mid-job.
 const SLOW_AGENT_SCENARIO: &str = r#"
-name = "slow-agent"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Running a slow task..."
 
-[responses.response]
-text = "Running a slow task..."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "sleep 2" }
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#;
 
 /// Queue-driven agent job for crash recovery testing.
@@ -60,7 +58,7 @@ vars = ["name"]
 
 [worker.runner]
 source = {{ queue = "tasks" }}
-handler = {{ job = "process" }}
+run = {{ job = "process" }}
 concurrency = 1
 
 [job.process]
@@ -79,10 +77,6 @@ on_dead = "done"
     )
 }
 
-// =============================================================================
-// Test 1: Worker stop while job running → job completes → item released
-// =============================================================================
-
 /// When a worker is stopped while a job is running, the job should continue
 /// to completion, and the queue item should be released (completed) correctly.
 #[test]
@@ -95,22 +89,11 @@ fn worker_stop_while_job_running_completes_item() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a slow command so we can stop the worker mid-job
-    temp.oj()
-        .args(&[
-            "queue",
-            "push",
-            "tasks",
-            r#"{"cmd": "sleep 1 && echo done"}"#,
-        ])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "sleep 1 && echo done"}"#]).passes();
 
     // Wait for the queue item to become active (job is running)
     let active = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.contains("active")
     });
     assert!(active, "queue item should become active");
@@ -120,11 +103,7 @@ fn worker_stop_while_job_running_completes_item() {
 
     // Job should continue to completion even though worker is stopped
     let completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.contains("completed")
     });
 
@@ -132,25 +111,15 @@ fn worker_stop_while_job_running_completes_item() {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
         eprintln!(
             "=== JOBS ===\n{}\n=== END JOBS ===",
             temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
-    assert!(
-        completed,
-        "queue item should complete even after worker stop"
-    );
+    assert!(completed, "queue item should complete even after worker stop");
 }
-
-// =============================================================================
-// Test 2: Worker stop → restart → processes new items
-// =============================================================================
 
 /// After stopping and restarting a worker, it should resume processing
 /// new queue items.
@@ -164,16 +133,10 @@ fn worker_restart_processes_new_items() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Complete one item to verify worker is functional
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo first"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo first"}"#]).passes();
 
     let first_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.contains("completed")
     });
     assert!(first_done, "first item should complete before stop");
@@ -182,17 +145,11 @@ fn worker_restart_processes_new_items() {
     temp.oj().args(&["worker", "stop", "runner"]).passes();
 
     // Push a new item while worker is stopped
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#]).passes();
 
     // Verify item is pending (worker is stopped)
     let pending = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.contains("pending")
     });
     assert!(pending, "new item should be pending while worker stopped");
@@ -202,11 +159,7 @@ fn worker_restart_processes_new_items() {
 
     // Worker should process the pending item
     let second_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.matches("completed").count() >= 2
     });
 
@@ -215,10 +168,6 @@ fn worker_restart_processes_new_items() {
     }
     assert!(second_done, "worker should process new items after restart");
 }
-
-// =============================================================================
-// Test 3: Daemon crash with active item → restart → item state reconciled
-// =============================================================================
 
 /// When the daemon crashes while a queue item's job is running an agent,
 /// restarting the daemon triggers reconciliation which detects the dead agent,
@@ -232,30 +181,25 @@ fn daemon_crash_with_active_item_reconciles_state() {
     // Set up scenario and runbook
     temp.file(".oj/scenarios/slow.toml", SLOW_AGENT_SCENARIO);
     let scenario_path = temp.path().join(".oj/scenarios/slow.toml");
-    temp.file(
-        ".oj/runbooks/queue.toml",
-        &crash_recovery_queue_runbook(&scenario_path),
-    );
+    temp.file(".oj/runbooks/queue.toml", &crash_recovery_queue_runbook(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item — the agent will start running a slow task
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"name": "crash-test"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"name": "crash-test"}"#]).passes();
 
-    // Wait for the queue item to become active and the job to reach running
+    // Wait for the queue item to become active, the job running, and the
+    // agent to be fully spawned (persisted to WAL). Without the agent check,
+    // SIGKILL can arrive before AgentSpawned is flushed, causing reconciliation
+    // to fail the job (no agent record).
     let active = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         let jobs = temp.oj().args(&["job", "list"]).passes().stdout();
-        items.contains("active") && jobs.contains("running")
+        let log = temp.daemon_log();
+        items.contains("active") && jobs.contains("running") && log.contains("agent spawned")
     });
-    assert!(active, "queue item should be active with a running job");
+    assert!(active, "queue item should be active with a running agent");
 
     // Kill the daemon with SIGKILL (simulates crash)
     let killed = temp.daemon_kill();
@@ -263,12 +207,8 @@ fn daemon_crash_with_active_item_reconciles_state() {
 
     // Wait for daemon to actually die
     let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .expect("command should run");
+        let output =
+            temp.oj().args(&["daemon", "status"]).command().output().expect("command should run");
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -280,11 +220,7 @@ fn daemon_crash_with_active_item_reconciles_state() {
     // Wait for the job to complete via recovery (on_dead = "done")
     // and the queue item to reach completed status
     let item_completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.contains("completed")
     });
 
@@ -292,25 +228,15 @@ fn daemon_crash_with_active_item_reconciles_state() {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
         eprintln!(
             "=== JOBS ===\n{}\n=== END JOBS ===",
             temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
-    assert!(
-        item_completed,
-        "queue item should complete after daemon crash recovery"
-    );
+    assert!(item_completed, "queue item should complete after daemon crash recovery");
 }
-
-// =============================================================================
-// Test 4: Worker stop with multiple in-flight items → all complete
-// =============================================================================
 
 /// When a worker is stopped with multiple jobs running, all in-flight jobs
 /// should complete and their queue items should be released correctly.
@@ -326,8 +252,8 @@ type = "persisted"
 vars = ["cmd"]
 
 [worker.runner]
+run = { job = "process" }
 source = { queue = "tasks" }
-handler = { job = "process" }
 concurrency = 3
 
 [job.process]
@@ -356,11 +282,7 @@ run = "${var.task.cmd}"
 
     // Wait for all items to become active
     let all_active = wait_for(SPEC_WAIT_MAX_MS, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.matches("active").count() >= 3
     });
     assert!(all_active, "all items should become active");
@@ -370,11 +292,7 @@ run = "${var.task.cmd}"
 
     // All jobs should continue to completion
     let all_completed = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        let items = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let items = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         items.matches("completed").count() >= 3
     });
 
@@ -382,21 +300,11 @@ run = "${var.task.cmd}"
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
     }
-    assert!(
-        all_completed,
-        "all in-flight items should complete after worker stop"
-    );
+    assert!(all_completed, "all in-flight items should complete after worker stop");
 }
-
-// =============================================================================
-// Test 5: Poll timer survives daemon restart
-// =============================================================================
 
 /// After a daemon crash and restart, the recovered worker should automatically
 /// process new queue items without needing a manual `worker start`.
@@ -415,16 +323,10 @@ fn poll_timer_survives_daemon_restart() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item and wait for completion (proves worker is functional)
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo first"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo first"}"#]).passes();
 
     let first_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("completed")
     });
     assert!(first_done, "first item should complete before crash");
@@ -434,12 +336,7 @@ fn poll_timer_survives_daemon_restart() {
     assert!(killed, "should be able to kill daemon");
 
     let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .unwrap();
+        let output = temp.oj().args(&["daemon", "status"]).command().output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
@@ -449,16 +346,10 @@ fn poll_timer_survives_daemon_restart() {
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Push new item — recovered worker should auto-process it
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo second"}"#]).passes();
 
     let second_done = wait_for(SPEC_WAIT_MAX_MS, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.matches("completed").count() >= 2
     });
 
@@ -466,10 +357,7 @@ fn poll_timer_survives_daemon_restart() {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
     }
     assert!(
@@ -478,13 +366,9 @@ fn poll_timer_survives_daemon_restart() {
     );
 }
 
-// =============================================================================
-// Test 6: Zombie shell job failed after crash frees worker slot
-// =============================================================================
-
 /// When the daemon crashes while a shell step is running, the shell process
 /// dies (child of daemon). After restart, WAL replay shows the job in
-/// "running" state with no session_id. The reconcile code detects this
+/// "running" state with no live agent. The reconcile code detects this
 /// zombie and marks it as failed, freeing the worker slot for new items.
 ///
 /// Would have caught commit e6c2197 where zombie jobs stayed "running"
@@ -499,14 +383,7 @@ fn zombie_shell_job_failed_after_crash_frees_worker_slot() {
     temp.oj().args(&["worker", "start", "runner"]).passes();
 
     // Push item with a long-running command so we can crash mid-execution
-    temp.oj()
-        .args(&[
-            "queue",
-            "push",
-            "tasks",
-            r#"{"cmd": "sleep 30 && echo slow"}"#,
-        ])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "sleep 30 && echo slow"}"#]).passes();
 
     // Wait for the job to start running
     let running = wait_for(SPEC_WAIT_MAX_MS, || {
@@ -520,18 +397,13 @@ fn zombie_shell_job_failed_after_crash_frees_worker_slot() {
     assert!(killed, "should be able to kill daemon");
 
     let daemon_dead = wait_for(SPEC_WAIT_MAX_MS, || {
-        let output = temp
-            .oj()
-            .args(&["daemon", "status"])
-            .command()
-            .output()
-            .unwrap();
+        let output = temp.oj().args(&["daemon", "status"]).command().output().unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         !stdout.contains("Status: running")
     });
     assert!(daemon_dead, "daemon should be dead after kill");
 
-    // Restart daemon — reconcile detects zombie job (no session_id) and fails it
+    // Restart daemon — reconcile detects zombie job (no live agent) and fails it
     temp.oj().args(&["daemon", "start"]).passes();
 
     // Zombie job should be failed, not stuck "running"
@@ -547,22 +419,13 @@ fn zombie_shell_job_failed_after_crash_frees_worker_slot() {
             temp.oj().args(&["job", "list"]).passes().stdout()
         );
     }
-    assert!(
-        job_failed,
-        "zombie job should be failed after crash recovery, not stuck running"
-    );
+    assert!(job_failed, "zombie job should be failed after crash recovery, not stuck running");
 
     // Push a new quick item — worker slot should be freed
-    temp.oj()
-        .args(&["queue", "push", "tasks", r#"{"cmd": "echo after-crash"}"#])
-        .passes();
+    temp.oj().args(&["queue", "push", "tasks", r#"{"cmd": "echo after-crash"}"#]).passes();
 
     let new_done = wait_for(SPEC_WAIT_MAX_MS * 2, || {
-        let out = temp
-            .oj()
-            .args(&["queue", "show", "tasks"])
-            .passes()
-            .stdout();
+        let out = temp.oj().args(&["queue", "show", "tasks"]).passes().stdout();
         out.contains("completed")
     });
 
@@ -570,14 +433,8 @@ fn zombie_shell_job_failed_after_crash_frees_worker_slot() {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
         eprintln!(
             "=== QUEUE ITEMS ===\n{}\n=== END ITEMS ===",
-            temp.oj()
-                .args(&["queue", "show", "tasks"])
-                .passes()
-                .stdout()
+            temp.oj().args(&["queue", "show", "tasks"]).passes().stdout()
         );
     }
-    assert!(
-        new_done,
-        "new item should complete after zombie job freed worker slot"
-    );
+    assert!(new_done, "new item should complete after zombie job freed worker slot");
 }

@@ -10,28 +10,26 @@ use crate::prelude::*;
 
 /// Scenario that produces output frequently via a bash loop.
 ///
-/// The agent runs a shell command that outputs every 200ms for ~1.2 seconds,
+/// The crew a shell command that outputs every 200ms for ~1.2 seconds,
 /// generating frequent file watcher events. This simulates "event activity"
 /// that would have blocked timer checks in the old implementation.
 const FREQUENT_OUTPUT_SCENARIO: &str = r#"
-name = "frequent-output"
+[claude]
 trusted = true
 
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+say = "Running continuous output..."
 
-[responses.response]
-text = "Running continuous output..."
-
-[[responses.response.tool_calls]]
-tool = "Bash"
+[[responses.tools]]
+call = "Bash"
 input = { command = "for i in 1 2 3 4 5 6; do echo 'tick'; sleep 0.2; done && echo 'done'" }
 
-[tool_execution]
+[tools]
 mode = "live"
 
-[tool_execution.tools.Bash]
-auto_approve = true
+[tools.Bash]
+approve = true
 "#;
 
 /// Runbook with on_dead = done for the frequent output agent.
@@ -78,15 +76,12 @@ fn timer_check_fires_during_event_activity() {
     temp.file(".oj/scenarios/timer-test.toml", FREQUENT_OUTPUT_SCENARIO);
 
     let scenario_path = temp.path().join(".oj/scenarios/timer-test.toml");
-    temp.file(
-        ".oj/runbooks/test.toml",
-        &frequent_output_runbook(&scenario_path),
-    );
+    temp.file(".oj/runbooks/test.toml", &frequent_output_runbook(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "test", "timer-test"]).passes();
 
-    // The agent runs for ~1.2 seconds, producing output every 200ms.
+    // The crew for ~1.2 seconds, producing output every 200ms.
     // During this time:
     // - File watcher emits events on each output line
     // - Daemon processes events frequently (faster than timer check interval)
@@ -98,24 +93,14 @@ fn timer_check_fires_during_event_activity() {
     // specific test would still pass via the watcher's 5s poll fallback.
     // The fix ensures timer checks fire consistently regardless of events.
     let done = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
 
     if !done {
         eprintln!("=== DAEMON LOG ===\n{}\n=== END LOG ===", temp.daemon_log());
     }
-    assert!(
-        done,
-        "job should complete - timer check must fire during event activity"
-    );
+    assert!(done, "job should complete - timer check must fire during event activity");
 
     // Verify the job completed successfully
-    temp.oj()
-        .args(&["job", "list"])
-        .passes()
-        .stdout_has("completed");
+    temp.oj().args(&["job", "list"]).passes().stdout_has("completed");
 }

@@ -3,15 +3,14 @@
 
 //! Daemon startup and initialization logic.
 
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Instant;
 
 use parking_lot::Mutex;
 
 use fs2::FileExt;
-use oj_adapters::{
-    ClaudeAgentAdapter, DesktopNotifyAdapter, TmuxAdapter, TracedAgent, TracedSession,
-};
+use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
 use oj_core::{Event, JobId, SystemClock};
 use oj_engine::breadcrumb;
 use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
@@ -54,12 +53,9 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         .create(true)
         .truncate(false)
         .open(&config.lock_path)?;
-    lock_file
-        .try_lock_exclusive()
-        .map_err(LifecycleError::LockFailed)?;
+    lock_file.try_lock_exclusive().map_err(LifecycleError::LockFailed)?;
 
     // Write PID to lock file (truncate now that we hold the lock)
-    use std::io::Write;
     let mut lock_file = lock_file;
     lock_file.set_len(0)?;
     writeln!(lock_file, "{}", std::process::id())?;
@@ -84,10 +80,9 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     let (mut state, processed_seq) = match load_snapshot(&config.snapshot_path)? {
         Some(snapshot) => {
             info!(
-                "Loaded snapshot at seq {}: {} jobs, {} sessions, {} workspaces",
+                "Loaded snapshot at seq {}: {} jobs, {} workspaces",
                 snapshot.seq,
                 snapshot.state.jobs.len(),
-                snapshot.state.sessions.len(),
                 snapshot.state.workspaces.len()
             );
             (snapshot.state, snapshot.seq)
@@ -108,27 +103,21 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     }
 
     if replay_count > 0 {
-        info!(
-            "Replayed {} events from WAL after seq {}",
-            replay_count, processed_seq
-        );
+        info!("Replayed {} events from WAL after seq {}", replay_count, processed_seq);
     }
 
     info!(
-        "Recovered state: {} jobs, {} sessions, {} workspaces, {} agent_runs",
+        "Recovered state: {} jobs, {} workspaces, {} crew",
         state.jobs.len(),
-        state.sessions.len(),
         state.workspaces.len(),
-        state.agent_runs.len()
+        state.crew.len()
     );
 
-    // 5. Set up adapters (wrapped with tracing for observability)
-    let session_adapter = TracedSession::new(TmuxAdapter::new());
+    // 5. Set up adapters
     // Set up agent log extraction channel
     let (log_entry_tx, log_entry_rx) = mpsc::channel(256);
-    let agent_adapter = TracedAgent::new(
-        ClaudeAgentAdapter::new(session_adapter.clone()).with_log_entry_tx(log_entry_tx),
-    );
+    let agent_adapter =
+        RuntimeRouter::new(config.state_dir.clone()).with_log_entry_tx(log_entry_tx);
 
     // Spawn background task to write agent log entries
     AgentLogger::spawn_writer(config.logs_path.clone(), log_entry_rx);
@@ -172,10 +161,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                 }
             };
             if is_stale {
-                warn!(
-                    job_id = %bc.job_id,
-                    "auto-dismissing stale orphan breadcrumb (> 7 days old)"
-                );
+                warn!(job_id = %bc.job_id, "auto-dismissing stale orphan breadcrumb (> 7 days old)");
                 let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             } else {
@@ -193,20 +179,14 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                         kind: bc.kind.clone(),
                         name: bc.name.clone(),
                         runbook_hash: bc.runbook_hash.clone(),
-                        cwd: bc
-                            .cwd
-                            .clone()
-                            .unwrap_or_else(|| std::path::PathBuf::from("/")),
+                        cwd: bc.cwd.clone().unwrap_or_else(|| std::path::PathBuf::from("/")),
                         vars: bc.vars.clone(),
                         initial_step: bc.current_step.clone(),
-                        created_at_epoch_ms: now_ms,
-                        namespace: bc.project.clone(),
-                        cron_name: None,
+                        created_at_ms: now_ms,
+                        project: bc.project.clone(),
+                        cron: None,
                     },
-                    Event::JobAdvanced {
-                        id: job_id,
-                        step: "failed".to_string(),
-                    },
+                    Event::JobAdvanced { id: job_id, step: "failed".to_string() },
                 ];
 
                 // For shell-based orphans (no agents), mark the queue item
@@ -219,15 +199,15 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                         for items in state.queue_items.values() {
                             if let Some(item) = items.iter().find(|i| i.id == item_id) {
                                 events.push(Event::QueueFailed {
-                                    queue_name: item.queue_name.clone(),
+                                    queue: item.queue.clone(),
                                     item_id: item_id.to_string(),
                                     error: "job orphaned after daemon crash".to_string(),
-                                    namespace: bc.project.clone(),
+                                    project: bc.project.clone(),
                                 });
-                                events.push(Event::QueueItemDead {
-                                    queue_name: item.queue_name.clone(),
+                                events.push(Event::QueueDead {
+                                    queue: item.queue.clone(),
                                     item_id: item_id.to_string(),
-                                    namespace: bc.project.clone(),
+                                    project: bc.project.clone(),
                                 });
                                 break;
                             }
@@ -242,11 +222,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                     event_bus.send(event)?;
                 }
 
-                info!(
-                    job_id = %bc.job_id,
-                    project = %bc.project,
-                    "failed orphaned job from breadcrumb"
-                );
+                info!(job_id = %bc.job_id, project = %bc.project, "failed orphaned job from breadcrumb");
 
                 // Delete breadcrumb now that the job is properly failed
                 let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
@@ -255,13 +231,10 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         }
     }
     // Flush synthetic orphan events to WAL before continuing
-    event_bus.flush()?;
+    event_bus.wal.lock().flush()?;
 
     if !orphans.is_empty() {
-        warn!(
-            "{} orphaned job(s) detected from breadcrumbs",
-            orphans.len()
-        );
+        warn!("{} orphaned job(s) detected from breadcrumbs", orphans.len());
     }
     let orphans = Arc::new(Mutex::new(orphans));
 
@@ -271,22 +244,19 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     // 9. Create runtime (runbook loaded on-demand per project)
     let runtime = Arc::new(Runtime::new(
         RuntimeDeps {
-            sessions: session_adapter.clone(),
-            agents: agent_adapter,
+            agents: agent_adapter.clone(),
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
         },
         SystemClock,
-        RuntimeConfig {
-            state_dir: config.state_dir.clone(),
-            log_dir: config.logs_path.clone(),
-        },
+        RuntimeConfig { state_dir: config.state_dir.clone(), log_dir: config.logs_path.clone() },
         internal_tx.clone(),
     ));
 
     // 10. Spawn usage metrics collector
     let metrics_health = UsageMetricsCollector::spawn_collector(
         Arc::clone(&state),
+        agent_adapter.clone(),
         config.state_dir.join("metrics"),
     );
 
@@ -299,26 +269,10 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         let state_guard = state.lock();
         state_guard.clone()
     };
-    let job_count = state_snapshot
-        .jobs
-        .values()
-        .filter(|p| !p.is_terminal())
-        .count();
-    let worker_count = state_snapshot
-        .workers
-        .values()
-        .filter(|w| w.status == "running")
-        .count();
-    let cron_count = state_snapshot
-        .crons
-        .values()
-        .filter(|c| c.status == "running")
-        .count();
-    let agent_run_count = state_snapshot
-        .agent_runs
-        .values()
-        .filter(|ar| !ar.is_terminal())
-        .count();
+    let job_count = state_snapshot.jobs.values().filter(|p| !p.is_terminal()).count();
+    let worker_count = state_snapshot.workers.values().filter(|w| w.status == "running").count();
+    let cron_count = state_snapshot.crons.values().filter(|c| c.status == "running").count();
+    let crew_count = state_snapshot.crew.values().filter(|run| !run.status.is_terminal()).count();
 
     info!("Daemon started");
 
@@ -338,12 +292,12 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
         reconcile_ctx: ReconcileCtx {
             runtime,
             state_snapshot,
-            session_adapter,
             event_tx: internal_tx,
+            state_dir: config.state_dir.clone(),
             job_count,
             worker_count,
             cron_count,
-            agent_run_count,
+            crew_count,
         },
     })
 }
@@ -372,7 +326,7 @@ fn spawn_runtime_event_forwarder(mut rx: mpsc::Receiver<Event>, event_bus: Event
             }
 
             // Flush the batch to disk
-            if let Err(e) = event_bus.flush() {
+            if let Err(e) = event_bus.wal.lock().flush() {
                 tracing::error!("Failed to flush runtime events: {}", e);
             }
         }

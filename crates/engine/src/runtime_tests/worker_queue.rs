@@ -7,17 +7,18 @@ use super::*;
 
 use super::worker::{
     count_dispatched, dispatched_job_ids, push_persisted_items, queue_item_status,
-    start_worker_and_poll, CONCURRENT_WORKER_RUNBOOK,
+    start_worker_and_poll,
 };
 
 /// When a worker job completes ("done"), the queue item should transition
 /// from Active to Completed.
 #[tokio::test]
 async fn queue_item_completed_on_job_done() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 1);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 1).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 1).await;
     assert_eq!(count_dispatched(&events), 1);
 
     // Verify item is Active
@@ -32,10 +33,7 @@ async fn queue_item_completed_on_job_done() {
 
     // Complete the job
     ctx.runtime
-        .handle_event(Event::JobAdvanced {
-            id: job_id.clone(),
-            step: "done".to_string(),
-        })
+        .handle_event(Event::JobAdvanced { id: job_id.clone(), step: "done".to_string() })
         .await
         .unwrap();
 
@@ -51,10 +49,11 @@ async fn queue_item_completed_on_job_done() {
 /// to Failed (and then Dead if no retry config).
 #[tokio::test]
 async fn queue_item_failed_on_job_failure() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 1);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 1).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 1).await;
     assert_eq!(count_dispatched(&events), 1);
 
     assert_eq!(
@@ -66,16 +65,7 @@ async fn queue_item_failed_on_job_failure() {
     let job_id = &dispatched[0];
 
     // Simulate shell failure which triggers fail_job
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: job_id.clone(),
-            step: "init".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(job_id.as_str(), "init")).await.unwrap();
 
     // Queue item should no longer be Active
     let status = queue_item_status(&ctx, "bugs", "item-1");
@@ -90,10 +80,11 @@ async fn queue_item_failed_on_job_failure() {
 /// Active to Failed (and then Dead if no retry config).
 #[tokio::test]
 async fn queue_item_failed_on_job_cancel() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 1);
 
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 1).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 1).await;
     assert_eq!(count_dispatched(&events), 1);
 
     assert_eq!(
@@ -105,10 +96,7 @@ async fn queue_item_failed_on_job_cancel() {
     let job_id = &dispatched[0];
 
     // Cancel the job
-    ctx.runtime
-        .handle_event(Event::JobCancel { id: job_id.clone() })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(Event::JobCancel { id: job_id.clone() }).await.unwrap();
 
     // Queue item should no longer be Active
     let status = queue_item_status(&ctx, "bugs", "item-1");
@@ -119,26 +107,24 @@ async fn queue_item_failed_on_job_cancel() {
     );
 }
 
-/// Stale WorkerPollComplete events whose items were already dispatched should
+/// Stale WorkerPolled events whose items were already dispatched should
 /// not create duplicate jobs. This guards against overlapping polls that
 /// carry the same items when multiple QueuePushed events trigger rapid re-polls.
 #[tokio::test]
 async fn stale_poll_does_not_create_duplicate_jobs() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 2);
 
     // Start worker and dispatch both items (concurrency=2, 2 items)
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
     // Complete both jobs so active_jobs goes to 0
     let dispatched = dispatched_job_ids(&events);
     for pid in &dispatched {
         ctx.runtime
-            .handle_event(Event::JobAdvanced {
-                id: pid.clone(),
-                step: "done".to_string(),
-            })
+            .handle_event(Event::JobAdvanced { id: pid.clone(), step: "done".to_string() })
             .await
             .unwrap();
     }
@@ -157,10 +143,10 @@ async fn stale_poll_does_not_create_duplicate_jobs() {
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(state.active_jobs.len(), 0);
+        assert_eq!(state.active.len(), 0);
     }
 
-    // Simulate a stale WorkerPollComplete with the same items
+    // Simulate a stale WorkerPolled with the same items
     // (as if a second poll was generated before the first one was processed)
     let stale_items: Vec<serde_json::Value> = vec![
         serde_json::json!({"id": "item-1", "title": "bug 1"}),
@@ -169,8 +155,9 @@ async fn stale_poll_does_not_create_duplicate_jobs() {
 
     let stale_events = ctx
         .runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: stale_items,
         })
         .await
@@ -188,37 +175,31 @@ async fn stale_poll_does_not_create_duplicate_jobs() {
 /// should skip them instead of creating duplicate jobs.
 #[tokio::test]
 async fn stale_poll_skips_active_items() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
     push_persisted_items(&ctx, "bugs", 3);
 
     // Dispatch first 2 items (concurrency=2)
-    let events = start_worker_and_poll(&ctx, CONCURRENT_WORKER_RUNBOOK, "fixer", 2).await;
+    let events = start_worker_and_poll(&ctx, &runbook, "fixer", 2).await;
     assert_eq!(count_dispatched(&events), 2);
 
     // Complete one job to free a slot
     let dispatched = dispatched_job_ids(&events);
     let completion_events = ctx
         .runtime
-        .handle_event(Event::JobAdvanced {
-            id: dispatched[0].clone(),
-            step: "done".to_string(),
-        })
+        .handle_event(Event::JobAdvanced { id: dispatched[0].clone(), step: "done".to_string() })
         .await
         .unwrap();
 
     // Process re-poll from completion (should dispatch item-3)
     let mut repoll_events = Vec::new();
     for event in &completion_events {
-        if matches!(event, Event::WorkerPollComplete { .. }) {
+        if matches!(event, Event::WorkerPolled { .. }) {
             let result = ctx.runtime.handle_event(event.clone()).await.unwrap();
             repoll_events.extend(result);
         }
     }
-    assert_eq!(
-        count_dispatched(&repoll_events),
-        1,
-        "re-poll should dispatch item-3"
-    );
+    assert_eq!(count_dispatched(&repoll_events), 1, "re-poll should dispatch item-3");
 
     // Now simulate a stale poll with all 3 original items.
     // item-1 is Completed, item-2 and item-3 are Active. No slots available.
@@ -228,8 +209,9 @@ async fn stale_poll_skips_active_items() {
 
     let stale_events = ctx
         .runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: stale_items,
         })
         .await

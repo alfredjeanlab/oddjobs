@@ -1,54 +1,24 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! External queue dedup, inflight tracking, namespace vars, pending_takes tests
+//! External queue dedup, inflight tracking, project vars, pending_takes tests
 
 use super::*;
 
 use super::worker::{count_dispatched, load_runbook_hash, start_worker_and_poll};
-
-/// Runbook with an external queue and concurrency > 1
-const EXTERNAL_CONCURRENT_RUNBOOK: &str = r#"
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[queue.bugs]
-list = "echo '[]'"
-take = "echo taken"
-
-[worker.fixer]
-source = { queue = "bugs" }
-handler = { job = "build" }
-concurrency = 3
-"#;
 
 /// Overlapping polls for external queues should not dispatch the same item twice.
 /// When the first poll dispatches a take command for an item, a second poll
 /// with the same item should skip it because it's already in-flight.
 #[tokio::test]
 async fn external_queue_overlapping_polls_skip_inflight_items() {
-    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 3);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     // Start the worker (external queue, concurrency=3)
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
@@ -59,8 +29,9 @@ async fn external_queue_overlapping_polls_skip_inflight_items() {
 
     // First poll: both items should be dispatched (take commands fired)
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: items.clone(),
         })
         .await
@@ -71,21 +42,16 @@ async fn external_queue_overlapping_polls_skip_inflight_items() {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
         assert_eq!(state.pending_takes, 2, "should have 2 pending takes");
-        assert!(
-            state.inflight_items.contains("bug-1"),
-            "bug-1 should be in-flight"
-        );
-        assert!(
-            state.inflight_items.contains("bug-2"),
-            "bug-2 should be in-flight"
-        );
+        assert!(state.inflight_items.contains("bug-1"), "bug-1 should be in-flight");
+        assert!(state.inflight_items.contains("bug-2"), "bug-2 should be in-flight");
     }
 
     // Second poll with the same items (simulates overlapping poll):
     // should skip both because they are already in-flight
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: items.clone(),
         })
         .await
@@ -99,11 +65,7 @@ async fn external_queue_overlapping_polls_skip_inflight_items() {
             state.pending_takes, 2,
             "overlapping poll should not dispatch duplicate takes for in-flight items"
         );
-        assert_eq!(
-            state.inflight_items.len(),
-            2,
-            "inflight set should still have exactly 2 items"
-        );
+        assert_eq!(state.inflight_items.len(), 2, "inflight set should still have exactly 2 items");
     }
 }
 
@@ -111,25 +73,20 @@ async fn external_queue_overlapping_polls_skip_inflight_items() {
 /// so it can be retried on the next poll.
 #[tokio::test]
 async fn external_queue_take_failure_clears_inflight() {
-    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 3);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
     // Poll with one item
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![serde_json::json!({"id": "bug-1", "title": "a bug"})],
         })
         .await
@@ -145,8 +102,9 @@ async fn external_queue_take_failure_clears_inflight() {
 
     // Simulate take command failure
     ctx.runtime
-        .handle_event(Event::WorkerTakeComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerTook {
+            worker: "fixer".to_string(),
+            project: String::new(),
             item_id: "bug-1".to_string(),
             item: serde_json::json!({"id": "bug-1", "title": "a bug"}),
             exit_code: 1,
@@ -173,18 +131,12 @@ async fn external_queue_take_failure_clears_inflight() {
 /// Worker stop should clear inflight_items so stale state doesn't carry over.
 #[tokio::test]
 async fn worker_stop_clears_inflight_items() {
-    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 3);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
@@ -198,10 +150,7 @@ async fn worker_stop_clears_inflight_items() {
 
     // Stop the worker
     ctx.runtime
-        .handle_event(Event::WorkerStopped {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerStopped { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -209,14 +158,11 @@ async fn worker_stop_clears_inflight_items() {
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert!(
-            state.inflight_items.is_empty(),
-            "worker stop should clear inflight_items"
-        );
+        assert!(state.inflight_items.is_empty(), "worker stop should clear inflight_items");
     }
 }
 
-// -- Variable namespace isolation tests --
+// -- Variable project isolation tests --
 
 /// Runbook with a worker that creates jobs from queue items.
 /// The job declares vars = ["epic"] so fields should be mapped to var.epic.*
@@ -227,7 +173,7 @@ vars = ["epic"]
 [[job.handle-epic.step]]
 name = "init"
 run = "echo ${var.epic.title}"
-on_done = "done"
+on_done = { step = "done" }
 
 [[job.handle-epic.step]]
 name = "done"
@@ -238,8 +184,8 @@ type = "persisted"
 vars = ["title", "labels"]
 
 [worker.fixer]
+run = { job = "handle-epic" }
 source = { queue = "bugs" }
-handler = { job = "handle-epic" }
 concurrency = 1
 "#;
 
@@ -247,7 +193,7 @@ concurrency = 1
 /// - var.${first_var}.* (fields namespaced under the job's first declared var)
 /// - invoke.* (system-provided invocation context)
 ///
-/// Bare keys (like "title" without a namespace prefix) should NOT be present.
+/// Bare keys (like "title" without a project prefix) should NOT be present.
 #[tokio::test]
 async fn worker_dispatch_uses_namespaced_vars_only() {
     let ctx = setup_with_runbook(NAMESPACED_WORKER_RUNBOOK).await;
@@ -255,16 +201,11 @@ async fn worker_dispatch_uses_namespaced_vars_only() {
     // Push a queue item with title and labels fields
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::QueuePushed {
-            queue_name: "bugs".to_string(),
+            queue: "bugs".to_string(),
             item_id: "item-1".to_string(),
-            data: {
-                let mut m = HashMap::new();
-                m.insert("title".to_string(), "Fix login bug".to_string());
-                m.insert("labels".to_string(), "bug,p1".to_string());
-                m
-            },
-            pushed_at_epoch_ms: 1000,
-            namespace: String::new(),
+            data: vars!("title" => "Fix login bug", "labels" => "bug,p1"),
+            pushed_at_ms: 1000,
+            project: String::new(),
         });
     });
 
@@ -283,10 +224,7 @@ async fn worker_dispatch_uses_namespaced_vars_only() {
         "job.vars should contain var.epic.title, got keys: {:?}",
         job.vars.keys().collect::<Vec<_>>()
     );
-    assert!(
-        job.vars.contains_key("var.epic.labels"),
-        "job.vars should contain var.epic.labels"
-    );
+    assert!(job.vars.contains_key("var.epic.labels"), "job.vars should contain var.epic.labels");
 
     // Verify NO item.* keys (item fields are only in var.${first_var}.*)
     assert!(
@@ -299,22 +237,12 @@ async fn worker_dispatch_uses_namespaced_vars_only() {
     );
 
     // Verify NO bare keys (keys without a dot prefix that came from queue item fields)
-    assert!(
-        !job.vars.contains_key("title"),
-        "job.vars should NOT contain bare 'title' key"
-    );
-    assert!(
-        !job.vars.contains_key("labels"),
-        "job.vars should NOT contain bare 'labels' key"
-    );
+    assert!(!job.vars.contains_key("title"), "job.vars should NOT contain bare 'title' key");
+    assert!(!job.vars.contains_key("labels"), "job.vars should NOT contain bare 'labels' key");
 
-    // All keys should have a namespace prefix (contain a dot)
+    // All keys should have a project prefix (contain a dot)
     let bare_keys: Vec<_> = job.vars.keys().filter(|k| !k.contains('.')).collect();
-    assert!(
-        bare_keys.is_empty(),
-        "job.vars should not contain bare keys, found: {:?}",
-        bare_keys
-    );
+    assert!(bare_keys.is_empty(), "job.vars should not contain bare keys, found: {:?}", bare_keys);
 }
 
 // -- pending_takes tracking tests --
@@ -323,19 +251,13 @@ async fn worker_dispatch_uses_namespaced_vars_only() {
 /// over-dispatch when external queue take commands are in-flight.
 #[tokio::test]
 async fn pending_takes_counted_toward_concurrency() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, WORKER_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     // Start the worker (external queue, concurrency=1)
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 1, ""))
         .await
         .unwrap();
 
@@ -350,35 +272,26 @@ async fn pending_takes_counted_toward_concurrency() {
     // uses the only concurrency slot
     let events = ctx
         .runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![serde_json::json!({"id": "item-1", "title": "bug 1"})],
         })
         .await
         .unwrap();
 
-    assert_eq!(
-        count_dispatched(&events),
-        0,
-        "pending_takes should count toward concurrency limit"
-    );
+    assert_eq!(count_dispatched(&events), 0, "pending_takes should count toward concurrency limit");
 }
 
 /// Worker stop should clear pending_takes so stale counts don't carry over.
 #[tokio::test]
 async fn worker_stop_clears_pending_takes() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, WORKER_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 1, ""))
         .await
         .unwrap();
 
@@ -391,10 +304,7 @@ async fn worker_stop_clears_pending_takes() {
 
     // Stop the worker
     ctx.runtime
-        .handle_event(Event::WorkerStopped {
-            worker_name: "fixer".to_string(),
-            namespace: String::new(),
-        })
+        .handle_event(Event::WorkerStopped { worker: "fixer".to_string(), project: String::new() })
         .await
         .unwrap();
 
@@ -402,10 +312,7 @@ async fn worker_stop_clears_pending_takes() {
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(
-            state.pending_takes, 0,
-            "worker stop should clear pending_takes"
-        );
+        assert_eq!(state.pending_takes, 0, "worker stop should clear pending_takes");
     }
 }
 
@@ -425,26 +332,21 @@ async fn worker_stop_clears_pending_takes() {
 /// - Engine: handle_worker_started delegates to wake if worker is already Running
 #[tokio::test]
 async fn duplicate_worker_started_preserves_inflight() {
-    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 3);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     // Start the worker (external queue, concurrency=3)
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
     // First poll: dispatch bug-1 (adds to inflight_items, pending_takes=1)
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![serde_json::json!({"id": "bug-1"})],
         })
         .await
@@ -461,14 +363,7 @@ async fn duplicate_worker_started_preserves_inflight() {
     // Send a SECOND WorkerStarted — engine should delegate to wake,
     // preserving inflight_items and pending_takes.
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
@@ -476,10 +371,7 @@ async fn duplicate_worker_started_preserves_inflight() {
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(
-            state.pending_takes, 1,
-            "duplicate WorkerStarted should preserve pending_takes"
-        );
+        assert_eq!(state.pending_takes, 1, "duplicate WorkerStarted should preserve pending_takes");
         assert!(
             state.inflight_items.contains("bug-1"),
             "duplicate WorkerStarted should preserve inflight_items"
@@ -488,8 +380,9 @@ async fn duplicate_worker_started_preserves_inflight() {
 
     // Second poll with same item — should NOT dispatch duplicate
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![serde_json::json!({"id": "bug-1"})],
         })
         .await
@@ -503,11 +396,7 @@ async fn duplicate_worker_started_preserves_inflight() {
             state.pending_takes, 1,
             "poll after duplicate WorkerStarted should not dispatch duplicate take"
         );
-        assert_eq!(
-            state.inflight_items.len(),
-            1,
-            "inflight set should still have exactly 1 item"
-        );
+        assert_eq!(state.inflight_items.len(), 1, "inflight set should still have exactly 1 item");
     }
 }
 
@@ -517,18 +406,12 @@ async fn duplicate_worker_started_preserves_inflight() {
 /// inflight guard to skip all but the first item.
 #[tokio::test]
 async fn external_queue_numeric_ids_dispatched_independently() {
-    let ctx = setup_with_runbook(EXTERNAL_CONCURRENT_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, EXTERNAL_CONCURRENT_RUNBOOK);
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 3);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 3,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 3, ""))
         .await
         .unwrap();
 
@@ -539,8 +422,9 @@ async fn external_queue_numeric_ids_dispatched_independently() {
     ];
 
     ctx.runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items,
         })
         .await
@@ -548,44 +432,7 @@ async fn external_queue_numeric_ids_dispatched_independently() {
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    assert_eq!(
-        state.pending_takes, 2,
-        "both items with numeric IDs should be dispatched"
-    );
-    assert!(
-        state.inflight_items.contains("6"),
-        "numeric id 6 should be in-flight"
-    );
-    assert!(
-        state.inflight_items.contains("7"),
-        "numeric id 7 should be in-flight"
-    );
+    assert_eq!(state.pending_takes, 2, "both items with numeric IDs should be dispatched");
+    assert!(state.inflight_items.contains("6"), "numeric id 6 should be in-flight");
+    assert!(state.inflight_items.contains("7"), "numeric id 7 should be in-flight");
 }
-
-/// The WORKER_RUNBOOK constant from the parent module (used by pending_takes tests).
-const WORKER_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[queue.bugs]
-list = "echo '[]'"
-take = "echo taken"
-
-[worker.fixer]
-source = { queue = "bugs" }
-handler = { job = "build" }
-concurrency = 1
-"#;

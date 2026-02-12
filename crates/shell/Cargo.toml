@@ -12,5 +12,5 @@ thiserror.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-proptest = "1.4"
+proptest.workspace = true
 yare.workspace = true

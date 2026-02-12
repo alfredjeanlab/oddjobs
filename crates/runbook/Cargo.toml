@@ -10,8 +10,8 @@ workspace = true
 [dependencies]
 hcl-rs.workspace = true
 indexmap.workspace = true
-oj-core = { path = "../core", version = "0.1.0" }
-oj-shell = { path = "../shell", version = "0.1.0" }
+oj-core = { path = "../core" }
+oj-shell = { path = "../shell" }
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true

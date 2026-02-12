@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use oj_core::{ShortId, StepOutcomeKind};
+use oj_core::StepOutcomeKind;
 
 use crate::client::DaemonClient;
 use crate::exit_error::ExitError;
@@ -33,9 +33,7 @@ pub async fn handle(
     timeout: Option<String>,
     client: &DaemonClient,
 ) -> Result<()> {
-    let timeout_dur = timeout
-        .map(|s| super::job::parse_duration(&s))
-        .transpose()?;
+    let timeout_dur = timeout.map(|s| super::job::parse_duration(&s)).transpose()?;
     let mut poller = Poller::new(crate::client::wait_poll_interval(), timeout_dur);
 
     let mut finished: HashMap<String, JobOutcome> = HashMap::new();
@@ -54,16 +52,11 @@ pub async fn handle(
                     return Err(ExitError::new(3, format!("Job not found: {}", input_id)).into());
                 }
                 Some(p) => {
-                    canonical_ids
-                        .entry(input_id.clone())
-                        .or_insert_with(|| p.id.clone());
+                    canonical_ids.entry(input_id.clone()).or_insert_with(|| p.id.clone());
 
                     let tracker = step_trackers
                         .entry(input_id.clone())
-                        .or_insert(StepTracker {
-                            printed_count: 0,
-                            printed_started: false,
-                        });
+                        .or_insert(StepTracker { printed_count: 0, printed_started: false });
                     let mut stdout = std::io::stdout();
                     print_step_progress(&p, tracker, show_prefix, &mut stdout);
 
@@ -76,7 +69,7 @@ pub async fn handle(
                         _ => None,
                     };
                     if let Some(outcome) = outcome {
-                        let short_id = canonical_ids[input_id].short(8);
+                        let short_id = oj_core::short(&canonical_ids[input_id], 8);
                         match &outcome {
                             JobOutcome::Done => {
                                 println!("Job {} ({}) completed", p.name, short_id);
@@ -113,12 +106,8 @@ pub async fn handle(
         }
     }
 
-    let any_failed = finished
-        .values()
-        .any(|o| matches!(o, JobOutcome::Failed(_)));
-    let any_cancelled = finished
-        .values()
-        .any(|o| matches!(o, JobOutcome::Cancelled));
+    let any_failed = finished.values().any(|o| matches!(o, JobOutcome::Failed(_)));
+    let any_cancelled = finished.values().any(|o| matches!(o, JobOutcome::Cancelled));
     if any_failed {
         return Err(ExitError::new(1, String::new()).into());
     }
@@ -136,21 +125,15 @@ pub(crate) fn print_step_progress(
     show_job_prefix: bool,
     out: &mut impl std::io::Write,
 ) {
-    let prefix = if show_job_prefix {
-        format!("[{}] ", detail.name)
-    } else {
-        String::new()
-    };
+    let prefix = if show_job_prefix { format!("[{}] ", detail.name) } else { String::new() };
 
     for (i, step) in detail.steps.iter().enumerate() {
         if i < tracker.printed_count {
             continue;
         }
 
-        let is_terminal = matches!(
-            step.outcome,
-            StepOutcomeKind::Completed | StepOutcomeKind::Failed
-        );
+        let is_terminal =
+            matches!(step.outcome, StepOutcomeKind::Completed | StepOutcomeKind::Failed);
 
         if is_terminal {
             // Print "started" for steps we haven't announced yet (skipped running state)
@@ -169,11 +152,7 @@ pub(crate) fn print_step_progress(
                         Some(d) if !d.is_empty() => format!(" - {}", d),
                         _ => String::new(),
                     };
-                    let _ = writeln!(
-                        out,
-                        "{}{} failed ({}){}",
-                        prefix, step.name, elapsed, suffix
-                    );
+                    let _ = writeln!(out, "{}{} failed ({}){}", prefix, step.name, elapsed, suffix);
                 }
                 _ => unreachable!(),
             }

@@ -1,5 +1,5 @@
 use oj_core::StepStatusKind;
-use oj_daemon::NamespaceStatus;
+use oj_daemon::ProjectStatus;
 
 mod formatting;
 mod frame;
@@ -12,8 +12,8 @@ pub(super) fn setup_no_color() {
     std::env::remove_var("COLOR");
 }
 
-/// Create a namespace with one active job (for filter tests).
-pub(super) fn make_ns(name: &str) -> NamespaceStatus {
+/// Create a project with one active job (for filter tests).
+pub(super) fn make_ns(name: &str) -> ProjectStatus {
     let mut entry = job_entry("abc12345", "job", "compile");
     entry.name = "build".to_string();
     entry.elapsed_ms = 5000;
@@ -39,10 +39,10 @@ pub(super) fn job_entry(id: &str, kind: &str, step: &str) -> oj_daemon::JobStatu
     }
 }
 
-/// Create an empty namespace.
-pub(super) fn empty_ns(name: &str) -> NamespaceStatus {
-    NamespaceStatus {
-        namespace: name.to_string(),
+/// Create an empty project.
+pub(super) fn empty_ns(name: &str) -> ProjectStatus {
+    ProjectStatus {
+        project: name.to_string(),
         active_jobs: vec![],
         escalated_jobs: vec![],
         suspended_jobs: vec![],

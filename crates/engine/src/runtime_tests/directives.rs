@@ -25,20 +25,12 @@ async fn command_with_shell_directive_creates_job() {
 
     handle_event_chain(
         &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "shell_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
+        command_event("job-1", "build", "shell_cmd", vars!("name" => "test"), &ctx.project_path),
     )
     .await;
 
     // Job should be created with kind = command name
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     assert_eq!(job.kind, "shell_cmd");
     assert_eq!(job.step, "run");
 }
@@ -49,15 +41,7 @@ async fn command_with_shell_directive_completes_on_exit() {
 
     handle_event_chain(
         &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "shell_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
+        command_event("job-1", "build", "shell_cmd", vars!("name" => "test"), &ctx.project_path),
     )
     .await;
 
@@ -68,12 +52,12 @@ async fn command_with_shell_directive_completes_on_exit() {
     // Process the ShellExited event - job should auto-complete (no next step)
     ctx.runtime.handle_event(event).await.unwrap();
 
-    let job = ctx.runtime.get_job("pipe-1").unwrap();
+    let job = ctx.runtime.get_job("job-1").unwrap();
     assert_eq!(job.step, "done");
     assert!(job.is_terminal());
 }
 
-/// Runbook with a command that uses args.* namespace interpolation in shell directive
+/// Runbook with a command that uses args.* project interpolation in shell directive
 const RUNBOOK_SHELL_ARGS_NAMESPACE: &str = r#"
 [command.file_bug]
 args = "<description>"
@@ -94,13 +78,11 @@ async fn command_shell_directive_interpolates_args_namespace() {
     handle_event_chain(
         &ctx,
         command_event(
-            "pipe-1",
+            "job-1",
             "build",
             "file_bug",
-            [("description".to_string(), "button broken".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("description" => "button broken"),
+            &ctx.project_path,
         ),
     )
     .await;
@@ -115,126 +97,69 @@ async fn command_shell_directive_interpolates_args_namespace() {
     );
 }
 
-/// Runbook with a command that uses input.* namespace is now rejected at parse time.
+/// Runbook with a command that uses input.* project is now rejected at parse time.
 /// The parser validates that command.run does not use job-only namespaces.
 /// See crates/runbook/src/parser_tests for parse-time validation tests.
 ///
 /// Previously this was a runtime test that checked ${input.*} wasn't interpolated;
 /// now the runbook parser rejects it outright with a helpful error message.
 
-/// Runbook with a command that uses agent run directive
-const RUNBOOK_AGENT_COMMAND: &str = r#"
-[command.agent_cmd]
-args = "<name>"
-run = { agent = "worker" }
-
-[agent.worker]
-run = 'claude'
-prompt = "Hello"
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn command_with_agent_directive_spawns_standalone_agent() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_COMMAND).await;
+    let ctx = setup_with_runbook(&test_runbook_agent("")).await;
 
     let result = ctx
         .runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
+        .handle_event(crew_command_event(
+            "job-1",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ))
         .await;
 
-    assert!(
-        result.is_ok(),
-        "agent directive should succeed: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "agent directive should succeed: {:?}", result.err());
     let events = result.unwrap();
-    // Should produce at least RunbookLoaded and AgentRunCreated events
+    // Should produce at least RunbookLoaded and CrewCreated events
     assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, Event::AgentRunCreated { .. })),
-        "expected AgentRunCreated event, got: {:?}",
+        events.iter().any(|e| matches!(e, Event::CrewCreated { .. })),
+        "expected CrewCreated event, got: {:?}",
         events
     );
 }
 
-/// Runbook with a command that uses agent directive with max_concurrency
-const RUNBOOK_AGENT_MAX_CONC_COMMAND: &str = r#"
-[command.agent_cmd]
-args = "<name>"
-run = { agent = "worker" }
-
-[agent.worker]
-max_concurrency = 1
-run = 'claude'
-prompt = "Hello"
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn command_agent_max_concurrency_error() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_MAX_CONC_COMMAND).await;
+    let ctx = setup_with_runbook(&test_runbook_agent("max_concurrency = 1")).await;
 
     // First spawn should succeed
     let result = ctx
         .runtime
-        .handle_event(command_event(
-            "pipe-1",
-            "build",
+        .handle_event(crew_command_event(
+            "job-1",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ))
         .await;
-    assert!(
-        result.is_ok(),
-        "first agent spawn should succeed: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "first agent spawn should succeed: {:?}", result.err());
 
     // Second spawn should fail due to max_concurrency=1
     let result = ctx
         .runtime
-        .handle_event(command_event(
-            "pipe-2",
-            "build",
+        .handle_event(crew_command_event(
+            "job-2",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test2".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test2"),
+            &ctx.project_path,
         ))
         .await;
     assert!(result.is_err(), "second spawn should fail");
     let err = result.unwrap_err().to_string();
-    assert!(
-        err.contains("max concurrency"),
-        "error should mention max concurrency, got: {}",
-        err
-    );
+    assert!(err.contains("max concurrency"), "error should mention max concurrency, got: {}", err);
 }
 
 /// Runbook with a step that uses job run directive
@@ -267,13 +192,11 @@ async fn step_with_job_directive_errors() {
     let events = ctx
         .runtime
         .handle_event(command_event(
-            "pipe-1",
+            "job-1",
             "build",
             "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ))
         .await
         .unwrap();

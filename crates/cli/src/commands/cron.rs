@@ -8,9 +8,10 @@ use clap::{Args, Subcommand};
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::output::{
-    display_log, print_prune_results, print_start_results, print_stop_results, OutputFormat,
+    display_log, filter_by_project, handle_list, poll_log_follow, print_prune_results,
+    print_start_results, print_stop_results, require_name_or_all, OutputFormat,
 };
-use crate::table::{project_cell, should_show_project, Column, Table};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct CronArgs {
@@ -83,123 +84,90 @@ impl CronCommand {
 pub async fn handle(
     command: CronCommand,
     client: &DaemonClient,
-    project_root: &std::path::Path,
-    namespace: &str,
+    project_path: &std::path::Path,
+    project: &str,
     project_filter: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
         CronCommand::Start { name, all } => {
-            if !all && name.is_none() {
-                anyhow::bail!("cron name required (or use --all)");
-            }
-            let cron_name = name.unwrap_or_default();
-            let result = client
-                .cron_start(project_root, namespace, &cron_name, all)
-                .await?;
-            print_start_results(&result, "Cron", "crons", namespace);
+            let cron_name = require_name_or_all(name, all, "cron")?;
+            let result = client.cron_start(project_path, project, &cron_name, all).await?;
+            print_start_results(&result, "Cron", "crons", project);
         }
         CronCommand::Stop { name, all } => {
-            if !all && name.is_none() {
-                anyhow::bail!("cron name required (or use --all)");
-            }
-            let cron_name = name.unwrap_or_default();
-            let result = client
-                .cron_stop(&cron_name, namespace, Some(project_root), all)
-                .await?;
-            print_stop_results(&result, "Cron", "crons", namespace);
+            let cron_name = require_name_or_all(name, all, "cron")?;
+            let result = client.cron_stop(&cron_name, project, Some(project_path), all).await?;
+            print_stop_results(&result, "Cron", "crons", project);
         }
         CronCommand::Restart { name } => {
-            let cron_name = client.cron_restart(project_root, namespace, &name).await?;
+            let cron_name = client.cron_restart(project_path, project, &name).await?;
             println!("Cron '{}' restarted", cron_name);
         }
         CronCommand::Once { name } => {
-            let (job_id, job_name) = client.cron_once(project_root, namespace, &name).await?;
+            let (job_id, job_name) = client.cron_once(project_path, project, &name).await?;
             println!("Job '{}' started ({})", job_name, job_id);
         }
-        CronCommand::Logs {
-            name,
-            follow,
-            limit,
-        } => {
-            let (log_path, content) = client
-                .get_cron_logs(&name, namespace, limit, Some(project_root))
+        CronCommand::Logs { name, follow, limit } => {
+            let (log_path, content, offset) =
+                client.get_cron_logs(&name, project, limit, 0, Some(project_path)).await?;
+            if let Some(off) =
+                display_log(&log_path, &content, follow, offset, format, "cron", &name).await?
+            {
+                let name = name.clone();
+                let ns = project.to_string();
+                poll_log_follow(off, |o| {
+                    let name = name.clone();
+                    let ns = ns.clone();
+                    async move {
+                        let (_, c, new_off) = client.get_cron_logs(&name, &ns, 0, o, None).await?;
+                        Ok((c, new_off))
+                    }
+                })
                 .await?;
-            display_log(&log_path, &content, follow, format, "cron", &name).await?;
+            }
         }
         CronCommand::Prune { all, dry_run } => {
             let (mut pruned, skipped) = client.cron_prune(all, dry_run).await?;
 
-            // Filter by project namespace
-            if !namespace.is_empty() {
-                pruned.retain(|e| e.namespace == namespace);
+            // Filter by project project
+            if !project.is_empty() {
+                pruned.retain(|e| e.project == project);
             }
 
-            print_prune_results(
-                &pruned,
-                skipped,
-                dry_run,
-                format,
-                "cron",
-                "skipped",
-                |entry| {
-                    let ns = if entry.namespace.is_empty() {
-                        "(no project)"
-                    } else {
-                        &entry.namespace
-                    };
-                    format!("cron '{}' ({})", entry.name, ns)
-                },
-            )?;
+            print_prune_results(&pruned, skipped, dry_run, format, "cron", "skipped", |entry| {
+                let ns = if entry.project.is_empty() { "(no project)" } else { &entry.project };
+                format!("cron '{}' ({})", entry.name, ns)
+            })?;
         }
         CronCommand::List {} => {
             let mut crons = client.list_crons().await?;
-
-            // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-            if let Some(proj) = project_filter {
-                crons.retain(|c| c.namespace == proj);
-            }
+            filter_by_project(&mut crons, project_filter, |c| &c.project);
             crons.sort_by(|a, b| a.name.cmp(&b.name));
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&crons)?);
+            handle_list(format, &crons, "No crons found", |items, out| {
+                let cols = vec![
+                    Column::left("KIND"),
+                    Column::left("PROJECT"),
+                    Column::left("INTERVAL"),
+                    Column::left("TARGET"),
+                    Column::left("TIME"),
+                    Column::status("STATUS"),
+                ];
+                let mut table = Table::new(cols);
+                for c in items {
+                    let ns = if c.project.is_empty() { "-" } else { &c.project };
+                    let cells = vec![
+                        c.name.clone(),
+                        ns.to_string(),
+                        c.interval.clone(),
+                        c.target.clone(),
+                        c.time.clone(),
+                        c.status.clone(),
+                    ];
+                    table.row(cells);
                 }
-                OutputFormat::Text => {
-                    if crons.is_empty() {
-                        println!("No crons found");
-                    } else {
-                        let show_project =
-                            should_show_project(crons.iter().map(|c| c.namespace.as_str()));
-
-                        let mut cols = vec![Column::left("KIND")];
-                        if show_project {
-                            cols.push(Column::left("PROJECT"));
-                        }
-                        cols.extend([
-                            Column::left("INTERVAL"),
-                            Column::left("JOB"),
-                            Column::left("TIME"),
-                            Column::status("STATUS"),
-                        ]);
-                        let mut table = Table::new(cols);
-
-                        for c in &crons {
-                            let mut cells = vec![c.name.clone()];
-                            if show_project {
-                                cells.push(project_cell(&c.namespace));
-                            }
-                            cells.extend([
-                                c.interval.clone(),
-                                c.job.clone(),
-                                c.time.clone(),
-                                c.status.clone(),
-                            ]);
-                            table.row(cells);
-                        }
-                        table.render(&mut std::io::stdout());
-                    }
-                }
-            }
+                table.render(out);
+            })?;
         }
     }
     Ok(())

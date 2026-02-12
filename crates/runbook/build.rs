@@ -38,12 +38,7 @@ fn generate() -> io::Result<()> {
         // Collect .hcl files in this directory (sorted)
         let mut hcl_entries: Vec<_> = fs::read_dir(entry.path())?
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map(|ext| ext == "hcl")
-                    .unwrap_or(false)
-            })
+            .filter(|e| e.path().extension().map(|ext| ext == "hcl").unwrap_or(false))
             .collect();
         hcl_entries.sort_by_key(|e| e.file_name());
 

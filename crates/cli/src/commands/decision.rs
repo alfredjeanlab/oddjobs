@@ -8,13 +8,14 @@ use std::io::{BufRead, IsTerminal, Write};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use oj_core::ShortId;
 use oj_daemon::protocol::DecisionDetail;
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
-use crate::output::{format_time_ago, OutputFormat};
-use crate::table::{project_cell, should_show_project, Column, Table};
+use crate::output::{
+    filter_by_project, format_or_json, format_time_ago, handle_list, OutputFormat,
+};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct DecisionArgs {
@@ -57,41 +58,25 @@ impl DecisionCommand {
 pub async fn handle(
     command: DecisionCommand,
     client: &DaemonClient,
-    namespace: &str,
+    project: &str,
     project_filter: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
         DecisionCommand::List {} => {
-            let mut decisions = client.list_decisions(namespace).await?;
-            if let Some(proj) = project_filter {
-                decisions.retain(|d| d.namespace == proj);
-            }
-            if decisions.is_empty() {
-                println!("No pending decisions");
-                return Ok(());
-            }
-            match format {
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&decisions)?);
-                }
-                _ => {
-                    format_decision_list(&mut std::io::stdout(), &decisions);
-                }
-            }
+            let mut decisions = client.list_decisions(project).await?;
+            filter_by_project(&mut decisions, project_filter, |d| &d.project);
+            handle_list(format, &decisions, "No pending decisions", |items, out| {
+                format_decision_list(out, items);
+            })?;
         }
 
         DecisionCommand::Show { id } => {
             let decision = client.get_decision(&id).await?;
             if let Some(d) = decision {
-                match format {
-                    OutputFormat::Json => {
-                        println!("{}", serde_json::to_string_pretty(&d)?);
-                    }
-                    _ => {
-                        format_decision_detail(&mut std::io::stdout(), &d, true);
-                    }
-                }
+                format_or_json(format, &d, || {
+                    format_decision_detail(&mut std::io::stdout(), &d, true);
+                })?;
             } else {
                 anyhow::bail!("decision not found: {}", id);
             }
@@ -105,9 +90,9 @@ pub async fn handle(
                 anyhow::bail!("review does not support --output json");
             }
 
-            let mut decisions = client.list_decisions(namespace).await?;
+            let mut decisions = client.list_decisions(project).await?;
             if let Some(proj) = project_filter {
-                decisions.retain(|d| d.namespace == proj);
+                decisions.retain(|d| d.project == proj);
             }
 
             if decisions.is_empty() {
@@ -116,11 +101,7 @@ pub async fn handle(
             }
 
             let total = decisions.len();
-            println!(
-                "{} pending decision{}",
-                total,
-                if total == 1 { "" } else { "s" }
-            );
+            println!("{} pending decision{}", total, if total == 1 { "" } else { "s" });
             println!();
 
             let mut resolved = 0usize;
@@ -136,7 +117,7 @@ pub async fn handle(
                         continue;
                     }
                     Err(e) => {
-                        eprintln!("error fetching {}: {}", summary.id.short(8), e);
+                        eprintln!("error fetching {}: {}", oj_core::short(&summary.id, 8), e);
                         skipped += 1;
                         continue;
                     }
@@ -187,10 +168,7 @@ pub async fn handle(
                             None
                         };
 
-                        match client
-                            .decision_resolve(&detail.id, Some(n), vec![], message)
-                            .await
-                        {
+                        match client.decision_resolve(&detail.id, vec![n], message).await {
                             Ok(_) => {
                                 let label = detail
                                     .options
@@ -198,7 +176,12 @@ pub async fn handle(
                                     .find(|o| o.number == n)
                                     .map(|o| o.label.as_str())
                                     .unwrap_or("?");
-                                println!("  Resolved {} -> {} ({})", detail.id.short(8), n, label);
+                                println!(
+                                    "  Resolved {} -> {} ({})",
+                                    oj_core::short(&detail.id, 8),
+                                    n,
+                                    label
+                                );
                                 resolved += 1;
                             }
                             Err(e) => {
@@ -225,23 +208,9 @@ pub async fn handle(
             println!("Done. {} resolved, {} skipped.", resolved, skipped);
         }
 
-        DecisionCommand::Resolve {
-            id,
-            choice,
-            message,
-        } => {
-            // Map CLI args: single choice → chosen (backward compat), multiple → choices
-            let (chosen, choices) = if choice.len() == 1 {
-                (Some(choice[0]), vec![])
-            } else if choice.len() > 1 {
-                (None, choice)
-            } else {
-                (None, vec![])
-            };
-            let resolved_id = client
-                .decision_resolve(&id, chosen, choices, message)
-                .await?;
-            println!("Resolved decision {}", resolved_id.short(8));
+        DecisionCommand::Resolve { id, choice, message } => {
+            let resolved_id = client.decision_resolve(&id, choice, message).await?;
+            println!("Resolved decision {}", oj_core::short(&resolved_id, 8));
         }
     }
     Ok(())
@@ -252,21 +221,16 @@ pub(crate) fn format_decision_detail(
     d: &DecisionDetail,
     show_resolve_hint: bool,
 ) {
-    let short_id = d.id.short(8);
-    let job_display = if d.job_name.is_empty() {
-        d.job_id.clone()
+    let short_id = oj_core::short(&d.id, 8);
+    let owner_display = if d.owner_name.is_empty() {
+        d.owner_id.clone()
     } else {
-        format!("{} ({})", d.job_name, d.job_id.short(8))
+        format!("{} ({})", d.owner_name, oj_core::short(&d.owner_id, 12))
     };
     let age = format_time_ago(d.created_at_ms);
 
-    let _ = writeln!(
-        out,
-        "{} {}",
-        color::header("Decision:"),
-        color::muted(short_id)
-    );
-    let _ = writeln!(out, "{} {}", color::context("Job:"), job_display);
+    let _ = writeln!(out, "{} {}", color::header("Decision:"), color::muted(short_id));
+    let _ = writeln!(out, "{} {}", color::context("Owner: "), owner_display);
     let source_display = match d.source.as_str() {
         "plan" => "Plan Approval",
         "approval" => "Permission Approval",
@@ -278,42 +242,28 @@ pub(crate) fn format_decision_detail(
     };
     let _ = writeln!(out, "{} {}", color::context("Source:  "), source_display);
     let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
-    if let Some(ref aid) = d.agent_id {
+    if !d.agent_id.is_empty() {
         let _ = writeln!(
             out,
             "{} {}",
             color::context("Agent:  "),
-            color::muted(aid.short(8))
+            color::muted(oj_core::short(&d.agent_id, 8))
         );
     }
 
     if let Some(ref sup_id) = d.superseded_by {
-        let _ = writeln!(
-            out,
-            "{} {}",
-            color::context("Status: "),
-            color::muted("superseded")
-        );
+        let _ = writeln!(out, "{} {}", color::context("Status: "), color::muted("superseded"));
         let _ = writeln!(
             out,
             "{} {}",
             color::context("Superseded by:"),
-            color::muted(sup_id.short(8))
+            color::muted(oj_core::short(sup_id, 8))
         );
     } else if d.resolved_at_ms.is_some() {
-        let _ = writeln!(
-            out,
-            "{} {}",
-            color::context("Status: "),
-            color::status("completed")
-        );
-        if let Some(c) = d.chosen {
-            let label = d
-                .options
-                .iter()
-                .find(|o| o.number == c)
-                .map(|o| o.label.as_str())
-                .unwrap_or("?");
+        let _ = writeln!(out, "{} {}", color::context("Status: "), color::status("completed"));
+        if let Some(&c) = d.choices.first() {
+            let label =
+                d.options.iter().find(|o| o.number == c).map(|o| o.label.as_str()).unwrap_or("?");
             let _ = writeln!(out, "{} {} ({})", color::context("Chosen: "), c, label);
         }
         if let Some(ref m) = d.message {
@@ -352,25 +302,16 @@ pub(crate) fn format_decision_detail(
 
         if show_resolve_hint && d.resolved_at_ms.is_none() {
             let _ = writeln!(out);
-            let placeholders: Vec<String> = (1..=d.question_groups.len())
-                .map(|i| format!("<q{}>", i))
-                .collect();
-            let _ = writeln!(
-                out,
-                "Use: oj decision resolve {} {}",
-                short_id,
-                placeholders.join(" ")
-            );
+            let placeholders: Vec<String> =
+                (1..=d.question_groups.len()).map(|i| format!("<q{}>", i)).collect();
+            let _ =
+                writeln!(out, "Use: oj decision resolve {} {}", short_id, placeholders.join(" "));
         }
     } else if !d.options.is_empty() {
         let _ = writeln!(out);
         let _ = writeln!(out, "{}", color::header("Options:"));
         for opt in &d.options {
-            let rec = if opt.recommended {
-                " (recommended)"
-            } else {
-                ""
-            };
+            let rec = if opt.recommended { " (recommended)" } else { "" };
             let _ = write!(out, "  {}. {}{}", opt.number, opt.label, rec);
             if let Some(ref desc) = opt.description {
                 let _ = write!(out, " - {}", desc);
@@ -380,11 +321,7 @@ pub(crate) fn format_decision_detail(
 
         if show_resolve_hint && d.resolved_at_ms.is_none() {
             let _ = writeln!(out);
-            let _ = writeln!(
-                out,
-                "Use: oj decision resolve {} <number> [-m message]",
-                short_id
-            );
+            let _ = writeln!(out, "Use: oj decision resolve {} <number> [-m message]", short_id);
         }
     }
 }
@@ -424,39 +361,30 @@ pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewActi
 }
 
 pub(crate) fn format_decision_list(
-    out: &mut impl Write,
+    out: &mut (impl Write + ?Sized),
     decisions: &[oj_daemon::protocol::DecisionSummary],
 ) {
-    let show_project = should_show_project(decisions.iter().map(|d| d.namespace.as_str()));
-
-    let mut cols = vec![Column::muted("ID").with_max(8)];
-    if show_project {
-        cols.push(Column::left("PROJECT"));
-    }
-    cols.extend([
-        Column::left("JOB").with_max(18),
+    let cols = vec![
+        Column::muted("ID").with_max(8),
+        Column::left("PROJECT"),
+        Column::left("AGENT").with_max(18),
         Column::left("AGE"),
         Column::left("SOURCE"),
         Column::left("SUMMARY").with_max(50),
-    ]);
+    ];
     let mut table = Table::new(cols);
 
     for d in decisions {
-        let job = if d.job_name.is_empty() {
-            &d.job_id
-        } else {
-            &d.job_name
-        };
-        let mut cells = vec![d.id.clone()];
-        if show_project {
-            cells.push(project_cell(&d.namespace));
-        }
-        cells.extend([
-            job.to_string(),
+        let ns = if d.project.is_empty() { "-" } else { &d.project };
+        let owner = if d.owner_name.is_empty() { &d.owner_id } else { &d.owner_name };
+        let cells = vec![
+            d.id.clone(),
+            ns.to_string(),
+            owner.to_string(),
             format_time_ago(d.created_at_ms),
             d.source.clone(),
             d.summary.clone(),
-        ]);
+        ];
         table.row(cells);
     }
 

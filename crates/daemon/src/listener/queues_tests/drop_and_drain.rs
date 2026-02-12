@@ -27,13 +27,11 @@ fn drop_removes_item_from_queue() {
     // Pre-populate state with a pushed item
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "item-abc123".to_string(),
-        data: [("task".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -42,8 +40,8 @@ fn drop_removes_item_from_queue() {
     assert!(
         matches!(
             result,
-            Response::QueueDropped { ref queue_name, ref item_id }
-            if queue_name == "tasks" && item_id == "item-abc123"
+            Response::QueueDropped { ref queue, ref item_id }
+            if queue == "tasks" && item_id == "item-abc123"
         ),
         "expected QueueDropped, got {:?}",
         result
@@ -54,10 +52,10 @@ fn drop_removes_item_from_queue() {
     assert!(matches!(
         &events[0],
         Event::QueueDropped {
-            queue_name,
+            queue,
             item_id,
             ..
-        } if queue_name == "tasks" && item_id == "item-abc123"
+        } if queue == "tasks" && item_id == "item-abc123"
     ));
 }
 
@@ -103,13 +101,11 @@ fn drop_with_prefix_resolves_unique_match() {
 
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "abc12345-0000-0000-0000-000000000000".to_string(),
-        data: [("task".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -143,13 +139,11 @@ fn drop_ambiguous_prefix_returns_error() {
     let mut initial_state = MaterializedState::default();
     for suffix in ["aaa", "bbb"] {
         initial_state.apply_event(&Event::QueuePushed {
-            queue_name: "tasks".to_string(),
+            queue: "tasks".to_string(),
             item_id: format!("abc-{}", suffix),
-            data: [("task".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            pushed_at_epoch_ms: 1_000_000,
-            namespace: String::new(),
+            data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+            pushed_at_ms: 1_000_000,
+            project: String::new(),
         });
     }
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
@@ -175,13 +169,11 @@ fn drain_removes_all_pending_items() {
     let mut initial_state = MaterializedState::default();
     for i in 1..=3 {
         initial_state.apply_event(&Event::QueuePushed {
-            queue_name: "tasks".to_string(),
+            queue: "tasks".to_string(),
             item_id: format!("item-{}", i),
-            data: [("task".to_string(), format!("task-{}", i))]
-                .into_iter()
-                .collect(),
-            pushed_at_epoch_ms: 1_000_000 + i,
-            namespace: String::new(),
+            data: [("task".to_string(), format!("task-{}", i))].into_iter().collect(),
+            pushed_at_ms: 1_000_000 + i,
+            project: String::new(),
         });
     }
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
@@ -189,11 +181,8 @@ fn drain_removes_all_pending_items() {
     let result = handle_queue_drain(&ctx, project.path(), "", "tasks").unwrap();
 
     match result {
-        Response::QueueDrained {
-            ref queue_name,
-            ref items,
-        } => {
-            assert_eq!(queue_name, "tasks");
+        Response::QueueDrained { ref queue, ref items } => {
+            assert_eq!(queue, "tasks");
             assert_eq!(items.len(), 3);
             let ids: Vec<&str> = items.iter().map(|i| i.id.as_str()).collect();
             assert!(ids.contains(&"item-1"));
@@ -207,7 +196,7 @@ fn drain_removes_all_pending_items() {
     assert_eq!(events.len(), 3, "expected 3 QueueDropped events");
     for event in &events {
         assert!(
-            matches!(event, Event::QueueDropped { queue_name, .. } if queue_name == "tasks"),
+            matches!(event, Event::QueueDropped { queue, .. } if queue == "tasks"),
             "expected QueueDropped, got {:?}",
             event
         );
@@ -223,44 +212,38 @@ fn drain_skips_non_pending_items() {
     let mut initial_state = MaterializedState::default();
     // One pending item
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "pending-1".to_string(),
-        data: [("task".to_string(), "pending".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "pending".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     // One active item
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-1".to_string(),
-        data: [("task".to_string(), "active".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 2_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "active".to_string())].into_iter().collect(),
+        pushed_at_ms: 2_000_000,
+        project: String::new(),
     });
     initial_state.apply_event(&Event::QueueTaken {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "active-1".to_string(),
-        worker_name: "w1".to_string(),
-        namespace: String::new(),
+        worker: "w1".to_string(),
+        project: String::new(),
     });
     // One dead item
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "dead-1".to_string(),
-        data: [("task".to_string(), "dead".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 3_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "dead".to_string())].into_iter().collect(),
+        pushed_at_ms: 3_000_000,
+        project: String::new(),
     });
-    initial_state.apply_event(&Event::QueueItemDead {
-        queue_name: "tasks".to_string(),
+    initial_state.apply_event(&Event::QueueDead {
+        queue: "tasks".to_string(),
         item_id: "dead-1".to_string(),
-        namespace: String::new(),
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -295,18 +278,15 @@ fn drain_empty_queue_returns_empty_list() {
     assert!(
         matches!(
             result,
-            Response::QueueDrained { ref queue_name, ref items }
-            if queue_name == "tasks" && items.is_empty()
+            Response::QueueDrained { ref queue, ref items }
+            if queue == "tasks" && items.is_empty()
         ),
         "expected empty QueueDrained, got {:?}",
         result
     );
 
     let events = drain_events(&wal);
-    assert!(
-        events.is_empty(),
-        "no events should be emitted for empty drain"
-    );
+    assert!(events.is_empty(), "no events should be emitted for empty drain");
 }
 
 #[test]
@@ -326,39 +306,37 @@ fn drain_unknown_queue_returns_error() {
     );
 }
 
-// ── Drop/Drain namespace fallback tests ───────────────────────────────
+// ── Drop/Drain project fallback tests ───────────────────────────────
 
 #[test]
-fn drop_with_wrong_project_root_falls_back_to_namespace() {
+fn drop_with_wrong_project_path_falls_back_to_namespace() {
     let project = project_with_queue_only();
     let wal_dir = tempdir().unwrap();
     let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
 
-    // Pre-populate state with a cron that knows the real project root
+    // Pre-populate state with a cron that knows the real project path
     let mut initial = MaterializedState::default();
     initial.crons.insert(
         "my-project/nightly".to_string(),
         oj_storage::CronRecord {
             name: "nightly".to_string(),
-            namespace: "my-project".to_string(),
-            project_root: project.path().to_path_buf(),
+            project: "my-project".to_string(),
+            project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            run_target: "job:handle".to_string(),
+            target: oj_core::RunTarget::job("handle"),
             started_at_ms: 1_000,
             last_fired_at_ms: None,
         },
     );
     // Also add a queue item so the drop has something to find
     initial.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "item-abc123".to_string(),
-        data: [("task".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: "my-project".to_string(),
+        data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: "my-project".to_string(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial)));
 
@@ -374,63 +352,57 @@ fn drop_with_wrong_project_root_falls_back_to_namespace() {
     assert!(
         matches!(
             result,
-            Response::QueueDropped { ref queue_name, ref item_id }
-            if queue_name == "tasks" && item_id == "item-abc123"
+            Response::QueueDropped { ref queue, ref item_id }
+            if queue == "tasks" && item_id == "item-abc123"
         ),
-        "expected QueueDropped from namespace fallback, got {:?}",
+        "expected QueueDropped from project fallback, got {:?}",
         result
     );
 }
 
 #[test]
-fn drain_with_wrong_project_root_falls_back_to_namespace() {
+fn drain_with_wrong_project_path_falls_back_to_namespace() {
     let project = project_with_queue_only();
     let wal_dir = tempdir().unwrap();
     let (event_bus, _wal, _) = test_event_bus(wal_dir.path());
 
-    // Pre-populate state with a cron that knows the real project root
+    // Pre-populate state with a cron that knows the real project path
     let mut initial = MaterializedState::default();
     initial.crons.insert(
         "my-project/nightly".to_string(),
         oj_storage::CronRecord {
             name: "nightly".to_string(),
-            namespace: "my-project".to_string(),
-            project_root: project.path().to_path_buf(),
+            project: "my-project".to_string(),
+            project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),
             status: "running".to_string(),
             interval: "24h".to_string(),
-            run_target: "job:handle".to_string(),
+            target: oj_core::RunTarget::job("handle"),
             started_at_ms: 1_000,
             last_fired_at_ms: None,
         },
     );
     // Add pending queue items
     initial.apply_event(&Event::QueuePushed {
-        queue_name: "tasks".to_string(),
+        queue: "tasks".to_string(),
         item_id: "pending-1".to_string(),
-        data: [("task".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: "my-project".to_string(),
+        data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: "my-project".to_string(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial)));
 
-    let result = handle_queue_drain(
-        &ctx,
-        std::path::Path::new("/wrong/path"),
-        "my-project",
-        "tasks",
-    )
-    .unwrap();
+    let result =
+        handle_queue_drain(&ctx, std::path::Path::new("/wrong/path"), "my-project", "tasks")
+            .unwrap();
 
     assert!(
         matches!(
             result,
-            Response::QueueDrained { ref queue_name, ref items }
-            if queue_name == "tasks" && items.len() == 1
+            Response::QueueDrained { ref queue, ref items }
+            if queue == "tasks" && items.len() == 1
         ),
-        "expected QueueDrained from namespace fallback, got {:?}",
+        "expected QueueDrained from project fallback, got {:?}",
         result
     );
 }
@@ -446,13 +418,11 @@ fn drop_works_without_runbook_definition() {
     // Pre-populate state with a queue item (persisted but no runbook definition)
     let mut initial_state = MaterializedState::default();
     initial_state.apply_event(&Event::QueuePushed {
-        queue_name: "removed-queue".to_string(),
+        queue: "removed-queue".to_string(),
         item_id: "item-orphan-1".to_string(),
-        data: [("task".to_string(), "test".to_string())]
-            .into_iter()
-            .collect(),
-        pushed_at_epoch_ms: 1_000_000,
-        namespace: String::new(),
+        data: [("task".to_string(), "test".to_string())].into_iter().collect(),
+        pushed_at_ms: 1_000_000,
+        project: String::new(),
     });
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
 
@@ -462,8 +432,8 @@ fn drop_works_without_runbook_definition() {
     assert!(
         matches!(
             result,
-            Response::QueueDropped { ref queue_name, ref item_id }
-            if queue_name == "removed-queue" && item_id == "item-orphan-1"
+            Response::QueueDropped { ref queue, ref item_id }
+            if queue == "removed-queue" && item_id == "item-orphan-1"
         ),
         "expected QueueDropped for queue without runbook, got {:?}",
         result
@@ -473,8 +443,8 @@ fn drop_works_without_runbook_definition() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0],
-        Event::QueueDropped { queue_name, item_id, .. }
-        if queue_name == "removed-queue" && item_id == "item-orphan-1"
+        Event::QueueDropped { queue, item_id, .. }
+        if queue == "removed-queue" && item_id == "item-orphan-1"
     ));
 }
 
@@ -504,13 +474,11 @@ fn drain_works_without_runbook_definition() {
     let mut initial_state = MaterializedState::default();
     for i in 1..=2 {
         initial_state.apply_event(&Event::QueuePushed {
-            queue_name: "removed-queue".to_string(),
+            queue: "removed-queue".to_string(),
             item_id: format!("item-{}", i),
-            data: [("task".to_string(), format!("task-{}", i))]
-                .into_iter()
-                .collect(),
-            pushed_at_epoch_ms: 1_000_000 + i,
-            namespace: String::new(),
+            data: [("task".to_string(), format!("task-{}", i))].into_iter().collect(),
+            pushed_at_ms: 1_000_000 + i,
+            project: String::new(),
         });
     }
     let ctx = make_ctx(event_bus, Arc::new(Mutex::new(initial_state)));
@@ -518,17 +486,11 @@ fn drain_works_without_runbook_definition() {
     let result = handle_queue_drain(&ctx, project.path(), "", "removed-queue").unwrap();
 
     match result {
-        Response::QueueDrained {
-            ref queue_name,
-            ref items,
-        } => {
-            assert_eq!(queue_name, "removed-queue");
+        Response::QueueDrained { ref queue, ref items } => {
+            assert_eq!(queue, "removed-queue");
             assert_eq!(items.len(), 2);
         }
-        other => panic!(
-            "expected QueueDrained for queue without runbook, got {:?}",
-            other
-        ),
+        other => panic!("expected QueueDrained for queue without runbook, got {:?}", other),
     }
 
     let events = drain_events(&wal);

@@ -57,7 +57,7 @@ Available variable namespaces:
 | `args.*` | Command arguments | `${args.description}` |
 | `item.*` | Queue item fields | `${item.id}` |
 | `local.*` | Job locals | `${local.repo}` |
-| `workspace.*` | Workspace context | `${workspace.root}` |
+| `source.*` | Source context | `${source.root}` |
 | `invoke.*` | CLI invocation context | `${invoke.dir}` |
 
 ## Command
@@ -80,7 +80,7 @@ Command fields:
 
 The `run` field specifies what to execute:
 - Job: `run = { job = "build" }`
-- Agent: `run = { agent = "planner" }` (optionally `run = { agent = "planner", attach = true }` to auto-attach to the tmux session)
+- Agent: `run = { agent = "planner" }` (optionally `run = { agent = "planner", attach = true }` to auto-attach to the agent process)
 - Shell: `run = "echo hello"`
 
 Commands also support a `defaults` map for default argument values:
@@ -116,9 +116,9 @@ job "bug" {
   name      = "${var.bug.title}"
   vars      = ["bug"]
 
-  workspace {
-    git    = "worktree"
-    branch = "fix/${var.bug.id}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "fix/${var.bug.id}-${source.nonce}"
   }
 
   locals {
@@ -140,8 +140,8 @@ job "bug" {
     run = <<-SHELL
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
-      git push origin "${workspace.branch}"
-      oj queue push merges --var branch="${workspace.branch}" --var title="${local.title}"
+      git push origin "${source.branch}"
+      oj queue push merges --var branch="${source.branch}" --var title="${local.title}"
     SHELL
   }
 }
@@ -153,7 +153,7 @@ Job fields:
 - **defaults**: Default values for vars
 - **locals**: Map of local variables computed once at job creation time (see [Locals](#locals) below)
 - **cwd**: Base directory for execution (supports template interpolation)
-- **workspace**: Workspace type -- `"folder"` (plain directory) or `workspace { git = "worktree" }` (engine-managed git worktree). Workspaces are deleted on completion (success or cancellation), kept on failure for debugging. Optional fields: `branch` (worktree branch name template, default `ws-<nonce>`) and `ref` (start point for worktree, default `HEAD`, supports `$(...)` shell expressions).
+- **source**: Source type -- `"folder"` (plain directory) or `source { git = true }` (engine-managed git worktree). Workspaces are deleted on completion (success or cancellation), kept on failure for debugging. Optional fields: `branch` (worktree branch name template, default `ws-<nonce>`) and `ref` (start point for worktree, default `HEAD`, supports `$(...)` shell expressions).
 - **notify**: Desktop notification templates for job lifecycle (see [Desktop Integration](../interface/DESKTOP.md))
 - **on_done**: Default step to route to when a step completes without an explicit `on_done`
 - **on_fail**: Default step to route to when a step fails without an explicit `on_fail`
@@ -174,7 +174,7 @@ job "build" {
 
 ### Locals
 
-The `locals` block defines variables computed once at job creation time. Local values support `${var.*}`, `${workspace.*}`, and `${invoke.*}` interpolation. Once evaluated, locals are available in all step templates as `${local.*}`.
+The `locals` block defines variables computed once at job creation time. Local values support `${var.*}`, `${source.*}`, and `${invoke.*}` interpolation. Once evaluated, locals are available in all step templates as `${local.*}`.
 
 Locals containing shell expressions (`$(...)`) use shell-safe interpolation: variable values with `$`, backticks, or double quotes are escaped before substitution, so user-provided input won't be interpreted as shell syntax.
 
@@ -182,9 +182,9 @@ Locals containing shell expressions (`$(...)`) use shell-safe interpolation: var
 job "build" {
   vars      = ["name", "instructions"]
 
-  workspace {
-    git    = "worktree"
-    branch = "feature/${var.name}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "feature/${var.name}-${source.nonce}"
   }
 
   locals {
@@ -198,17 +198,17 @@ job "build" {
 }
 ```
 
-With `workspace { git = "worktree" }`, the engine handles git worktree creation and cleanup automatically. The `branch` field sets the worktree branch name (default: `ws-<nonce>`). The `ref` field sets the start point (default: `HEAD`). Both support `${var.*}` and `${workspace.*}` interpolation; `ref` also supports `$(...)` shell expressions. The `${workspace.branch}` variable is available in step templates for push commands.
+With `source { git = true }`, the engine handles git worktree creation and cleanup automatically. The `branch` field sets the worktree branch name (default: `ws-<nonce>`). The `ref` field sets the start point (default: `HEAD`). Both support `${var.*}` and `${source.*}` interpolation; `ref` also supports `$(...)` shell expressions. The `${source.branch}` variable is available in step templates for push commands.
 
 ```hcl
-workspace {
-  git    = "worktree"
-  branch = "fix/${var.bug.id}-${workspace.nonce}"
+source {
+  git    = true
+  branch = "fix/${var.bug.id}-${source.nonce}"
   ref    = "origin/main"
 }
 ```
 
-For jobs that need fully custom worktree management (e.g., checking out an existing remote branch), use `workspace = "folder"` with manual git worktree commands in the init step.
+For jobs that need fully custom worktree management (e.g., checking out an existing remote branch), use `source = "folder"` with manual git worktree commands in the init step.
 
 ### Steps
 
@@ -226,16 +226,16 @@ If `on_done` is omitted, the job completes when the step succeeds. Steps without
 
 ## Agent
 
-An AI agent invocation -- runs a recognized agent command in a monitored tmux session.
+An AI agent invocation -- runs a recognized agent command in a monitored coop process.
 
 ### Recognized Commands
 
 | Command | Adapter |
 |---------|---------|
-| `claude` | `ClaudeAgentAdapter` |
-| `claudeless` | `ClaudeAgentAdapter` |
+| `claude` | `LocalAdapter` |
+| `claudeless` | `LocalAdapter` |
 
-Both commands route through the same adapter. See [Claude Code](../arch/06-adapter-claude.md) for integration details.
+Both commands route through the same adapter. See [Agents](../arch/05-agents.md) for integration details.
 
 ```hcl
 agent "resolver" {
@@ -258,20 +258,18 @@ Agent fields:
 - **env**: Map of environment variables to set
 - **cwd**: Working directory (supports template interpolation)
 - **prime**: Shell commands to run at session start for context injection (string, array, or per-source map — see [Prime](#prime-context-injection) below)
-- **on_idle**: What to do when agent is waiting for input after a 60-second grace period (default: `"escalate"`)
+- **on_idle**: What to do when agent is waiting for input (default: `"escalate"` for standalone, `"done"` for job agents)
 - **on_dead**: What to do when agent process exits (default: `"escalate"`)
 - **on_prompt**: What to do when agent shows a permission/approval prompt (default: `"escalate"`)
-- **on_stop**: What to do when agent tries to exit via Stop hook (default: `"signal"` for job, `"escalate"` for standalone)
 - **on_error**: What to do on API errors (default: `"escalate"`)
 - **max_concurrency**: Maximum concurrent instances of this agent (default: unlimited)
 - **notify**: Desktop notification templates for agent lifecycle (`on_start`, `on_done`, `on_fail`)
 - **session**: Adapter-specific session configuration (see [Session Configuration](#session-configuration) below)
 
 Valid actions per trigger:
-- **on_idle**: `nudge`, `done`, `fail`, `escalate`, `gate`
+- **on_idle**: `nudge`, `done`, `fail`, `escalate`, `gate`, `auto`
 - **on_dead**: `done`, `resume`, `fail`, `escalate`, `gate`
 - **on_prompt**: `done`, `fail`, `escalate`, `gate`
-- **on_stop**: `signal`, `idle`, `escalate`
 - **on_error**: `fail`, `resume`, `escalate`, `gate`
 
 Action options:
@@ -338,7 +336,7 @@ agent "worker" {
 
 Valid sources: `startup`, `resume`, `clear`, `compact`. Each source value can be a script string or array of commands.
 
-Template variables (`${var.*}`, `${workspace}`, etc.) are interpolated before
+Template variables (`${var.*}`, `${source}`, etc.) are interpolated before
 the script is written. The prime script runs via a Claude Code `SessionStart`
 hook, so its output appears as initial context in the agent's conversation.
 
@@ -365,25 +363,7 @@ Additional parse-time checks:
 
 ### Session Configuration
 
-The `session` block configures adapter-specific session settings. Currently supports tmux:
-
-```hcl
-agent "worker" {
-  session "tmux" {
-    color = "blue"
-    title = "Worker: ${var.name}"
-    status {
-      left  = "job:${var.name}"
-      right = "queue:bugs"
-    }
-  }
-}
-```
-
-- **color**: Status bar color (`red`, `green`, `blue`, `cyan`, `magenta`, `yellow`, `white`)
-- **title**: Window title template
-- **status.left**: Left status bar template
-- **status.right**: Right status bar template
+Agents run in coop processes for persistence and observability. Session names follow the format `oj-{job}-{agent_name}-{random}`, where the `oj-` prefix is added by `LocalAdapter`, and a 4-character random suffix ensures uniqueness.
 
 ## Queue
 
@@ -453,7 +433,7 @@ Polls a queue and dispatches each item to a job for processing.
 ```hcl
 worker "merge" {
   source      = { queue = "merges" }
-  handler     = { job = "merge" }
+  run = { job = "merge" }
   concurrency = 1
 }
 ```
@@ -465,7 +445,7 @@ Worker fields:
 
 Workers are started via `oj worker start <name>`. The command is idempotent — if the worker is already running, it wakes it to poll immediately.
 
-When a worker takes an item from the queue, the item's fields are mapped into the job's first declared var as a namespace. For example, if the job declares `vars = ["mr"]` and the queue item has `{"branch": "fix-123"}`, the job receives `var.mr.branch = "fix-123"`.
+When a worker takes an item from the queue, the item's fields are mapped into the job's first declared var as a project. For example, if the job declares `vars = ["mr"]` and the queue item has `{"branch": "fix-123"}`, the job receives `var.mr.branch = "fix-123"`.
 
 ## Cron
 

@@ -20,7 +20,7 @@ The core purpose of oj is **background work dispatch** - running agents in isola
 │                                                             │
 │  1. Find project root (walk up for .oj/)                    │
 │  2. Connect to user's daemon (auto-start if needed)         │
-│  3. Send request with project_root, receive response        │
+│  3. Send request with project_path, receive response        │
 └─────────────────────────┬───────────────────────────────────┘
                           │
                           │  Unix socket: ~/.local/state/oj/daemon.sock
@@ -35,9 +35,9 @@ The core purpose of oj is **background work dispatch** - running agents in isola
 │  │                                                       │  │
 │  │  loop {                                               │  │
 │  │      select! {                                        │  │
-│  │          event = event_reader.recv() => process(event) │  │
+│  │          event = reader.recv() => process(event).     │  │
 │  │          _ = shutdown.notified() => break             │  │
-│  │          _ = sigterm/sigint => break                   │  │
+│  │          _ = sigterm/sigint => break                  │  │
 │  │          _ = interval(1s) => check_timers()           │  │
 │  │      }                                                │  │
 │  │  }                                                    │  │
@@ -46,8 +46,8 @@ The core purpose of oj is **background work dispatch** - running agents in isola
 │  └───────────────────────────────────────────────────────┘  │
 │                                                             │
 │  Owns:                                                      │
-│  - State (jobs, sessions, workspaces)                  │
-│  - Adapters (tmux, git)                                     │
+│  - State (jobs, agents, workspaces)                         │
+│  - Adapters (agent, notify)                                 │
 │  - Storage (WAL)                                            │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -77,7 +77,7 @@ One daemon serves all projects for a user:
 **Why user-level:**
 - Simpler architecture (single daemon process)
 - Cross-project visibility (one place to see all jobs)
-- CLI passes `project_root` with each `RunCommand` request
+- CLI passes `project_path` with each `RunCommand` request
 
 ## Why a Daemon?
 
@@ -100,203 +100,29 @@ The daemon solves these by being a single owner of state and the event loop.
 
 **Format:** Length-prefixed JSON (4-byte big-endian length prefix + JSON payload)
 
-```rs
-enum Request {
-    // Core operations
-    Ping                                // Health check
-    Hello { version }                   // Version handshake
-    Status                              // Detailed status
-    Event { event }                     // Deliver event to event loop
-    Query { query }                     // Read state
-    Shutdown { kill }                   // Graceful shutdown (kill: terminate sessions)
-    RunCommand { project_root, invoke_dir, namespace, command, args, named_args }
+Request categories:
+- **Core**: Ping, Hello (version handshake), Status, Event, Query, Shutdown, RunCommand
+- **Agent**: AgentSend, AgentResume, AgentPrune
+- **Job**: JobResume, JobResumeAll, JobCancel, JobPrune
+- **Workspace**: WorkspaceDrop, WorkspaceDropFailed, WorkspaceDropAll, WorkspacePrune
+- **Worker**: WorkerStart, WorkerStop, WorkerRestart, WorkerResize, WorkerWake, WorkerPrune
+- **Cron**: CronStart, CronStop, CronRestart, CronOnce, CronPrune
+- **Queue**: QueuePush, QueueDrop, QueueRetry, QueueDrain, QueueFail, QueueDone, QueuePrune
+- **Decision**: DecisionResolve
 
-    // Session operations
-    SessionSend { id, input }           // Send input to a session
-    SessionKill { id }                  // Kill a session
-    PeekSession { session_id, with_color }  // Capture tmux pane output
+Queries read state without side effects: list/get for jobs, agents, workspaces, workers, crons, queues, decisions, and overview status.
 
-    // Agent operations
-    AgentSend { agent_id, message }     // Send input to an agent
-    AgentResume { agent_id, kill, all } // Resume dead agents
-
-    // Session operations
-    SessionPrune { all, dry_run, namespace }  // Prune orphaned sessions
-
-    // Job operations
-    JobResume { id, message, vars, kill, all }  // Resume escalated job
-    JobResumeAll { kill }               // Resume all resumable jobs
-    JobCancel { ids }                   // Cancel jobs by ID
-    JobPrune { all, failed, orphans, dry_run, namespace }  // Prune terminal jobs
-
-    // Workspace operations
-    WorkspaceDrop { id }                // Delete workspace by ID
-    WorkspaceDropFailed                 // Delete failed workspaces
-    WorkspaceDropAll                    // Delete all workspaces
-    WorkspacePrune { all, dry_run, namespace }  // Prune old workspaces
-    AgentPrune { all, dry_run }         // Prune agent logs
-
-    // Worker operations
-    WorkerStart { project_root, namespace, worker_name, all }
-    WorkerStop { worker_name, namespace, project_root }
-    WorkerRestart { project_root, namespace, worker_name }
-    WorkerResize { worker_name, namespace, concurrency }
-    WorkerWake { worker_name, namespace }
-    WorkerPrune { all, dry_run, namespace }
-
-    // Cron operations
-    CronStart { project_root, namespace, cron_name, all }
-    CronStop { cron_name, namespace, project_root }
-    CronRestart { project_root, namespace, cron_name }
-    CronOnce { project_root, namespace, cron_name }
-    CronPrune { all, dry_run }
-
-    // Queue operations
-    QueuePush { project_root, namespace, queue_name, data }
-    QueueDrop { project_root, namespace, queue_name, item_id }
-    QueueRetry { project_root, namespace, queue_name, item_ids, all_dead, status }
-    QueueRetryBulk { project_root, namespace, queue_name, item_ids, all_dead, status_filter }
-    QueueDrain { project_root, namespace, queue_name }
-    QueueFail { project_root, namespace, queue_name, item_id }
-    QueueDone { project_root, namespace, queue_name, item_id }
-    QueuePrune { project_root, namespace, queue_name, all, dry_run }
-
-    // Decision operations
-    DecisionResolve { id, chosen, message }
-}
-
-enum Query {
-    // Jobs
-    ListJobs
-    GetJob { id }
-    GetJobLogs { id, lines }
-
-    // Agents
-    ListAgents { job_id, status }
-    GetAgent { agent_id }
-    GetAgentLogs { id, step, lines }
-    GetAgentSignal { agent_id }
-
-    // Sessions
-    ListSessions
-    GetSession { id }
-
-    // Workspaces
-    ListWorkspaces
-    GetWorkspace { id }
-
-    // Workers
-    ListWorkers
-    GetWorkerLogs { name, namespace, lines, project_root }
-
-    // Crons
-    ListCrons
-    GetCronLogs { name, namespace, lines, project_root }
-
-    // Queues
-    ListQueues { project_root, namespace }
-    ListQueueItems { queue_name, namespace, project_root }
-    GetQueueLogs { queue_name, namespace, lines }
-
-    // Decisions
-    ListDecisions { namespace }
-    GetDecision { id }
-
-    // Overview
-    StatusOverview
-    ListProjects
-    ListOrphans
-    DismissOrphan { id }
-}
-
-enum Response {
-    // Basic responses
-    Ok
-    Pong
-    Hello { version }
-    ShuttingDown
-    Event { accepted }
-    Error { message }
-    Status { uptime_secs, jobs_active, sessions_active, orphan_count }
-
-    // Job responses
-    Jobs { jobs }
-    Job { job }
-    JobLogs { log_path, content }
-    CommandStarted { job_id, job_name }
-    JobsCancelled { cancelled, already_terminal, not_found }
-    JobsPruned { pruned, skipped }
-
-    // Agent responses
-    Agents { agents }
-    Agent { agent }
-    AgentLogs { log_path, content, steps }
-    AgentSignal { signaled, kind, message }
-    AgentRunStarted { agent_run_id, agent_name }
-    AgentsPruned { pruned, skipped }
-    AgentResumed { resumed, skipped }
-
-    // Job resume responses
-    JobsResumed { resumed, skipped }
-
-    // Session responses
-    Sessions { sessions }
-    Session { session }
-    SessionPeek { output }
-    SessionsPruned { pruned, skipped }
-
-    // Workspace responses
-    Workspaces { workspaces }
-    Workspace { workspace }
-    WorkspacesDropped { dropped }
-    WorkspacesPruned { pruned, skipped }
-
-    // Worker responses
-    Workers { workers }
-    WorkerStarted { worker_name }
-    WorkersStarted { started, skipped }
-    WorkerResized { worker_name, old_concurrency, new_concurrency }
-    WorkerLogs { log_path, content }
-    WorkersPruned { pruned, skipped }
-
-    // Cron responses
-    Crons { crons }
-    CronStarted { cron_name }
-    CronsStarted { started, skipped }
-    CronLogs { log_path, content }
-    CronsPruned { pruned, skipped }
-
-    // Queue responses
-    Queues { queues }
-    QueueItems { items }
-    QueuePushed { queue_name, item_id }
-    QueueDropped { queue_name, item_id }
-    QueueRetried { queue_name, item_id }
-    QueueItemsRetried { queue_name, item_ids, already_retried, not_found }
-    QueueDrained { queue_name, items }
-    QueueFailed { queue_name, item_id }
-    QueueCompleted { queue_name, item_id }
-    QueueLogs { log_path, content }
-    QueuesPruned { pruned, skipped }
-
-    // Decision responses
-    Decisions { decisions }
-    Decision { decision }
-    DecisionResolved { id }
-
-    // Overview responses
-    StatusOverview { uptime_secs, namespaces, metrics_health }
-    Projects { projects }
-    Orphans { orphans }
-}
-```
+Handlers fall into three categories by blocking behavior:
+- **Event-emitting** (non-blocking): RunCommand, Event, QueuePush, WorkerStart/Stop, CronStart/Stop — write to WAL and return
+- **State-reading** (blocks on `state.lock()`): All queries, JobCancel, JobResume, DecisionResolve
+- **Subprocess-calling** (blocks on external process): AgentSend, AgentResume, WorkspacePrune — each has a purpose-specific timeout
 
 ## Event Loop
 
 The daemon runs a continuous event loop:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
+┌─────────────────────────────────────────────────────────┐
 │                     Event Sources                       │
 │                                                         │
 │  ┌─────────┐  ┌─────────────┐  ┌──────────┐             │
@@ -324,13 +150,13 @@ The daemon runs a continuous event loop:
 │      ┌───────────────┼───────────────┼──────┐           │
 │      ▼               ▼               ▼      ▼           │
 │  ┌───────┐     ┌─────────┐    ┌──────┐ ┌───────┐        │
-│  │ tmux  │     │ notify  │    │ WAL  │ │ Queue │        │
-│  │Adapter│     │ Adapter │    │      │ │(intern)│       │
+│  │ agent │     │ notify  │    │ WAL  │ │ Queue │        │
+│  │Adapter│     │ Adapter │    │      │ │       │        │
 │  └───────┘     └─────────┘    └──────┘ └───────┘        │
 │                                              │          │
 │                                              │          │
 │                      Internal events ◄───────┘          │
-│                      (ShellExited, etc.)             │
+│                      (ShellExited, etc.)                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -364,7 +190,7 @@ This ensures runbook parse errors, permission issues, etc. are visible to the us
 
 ### Shutdown
 
-By default, `oj daemon stop` preserves tmux sessions. Agents continue running
+By default, `oj daemon stop` preserves agent processes. Agents continue running
 independently — on next startup, the reconciliation flow reconnects to survivors
 and resumes job progression. This is critical for long-running agents that
 may take hours; a daemon restart (e.g., for version upgrade) should not kill work
@@ -395,8 +221,8 @@ On restart after crash (or normal restart with surviving sessions):
    - Prune orphaned sessions from terminal/missing jobs
    - Resume running workers (re-emit WorkerStarted)
    - Resume running crons (re-emit CronStarted)
-   - For standalone agent runs and jobs:
-     check tmux sessions and agent processes
+   - For crew and jobs:
+     check agent processes
 3. Reconnect watchers or trigger on_dead actions
 ```
 
@@ -514,7 +340,7 @@ flowchart LR
    - Backup rotation: `.bak` → `.bak.2` → `.bak.3` (max 3 kept)
 
 6. **Set up adapters and runtime**
-   - Create traced adapters (tmux session, claude agent) and notify adapter
+   - Create traced adapters (coop agent) and notify adapter
    - Create internal event channel for runtime-produced events
    - Spawn runtime event forwarder (internal channel → EventBus)
 
@@ -537,12 +363,12 @@ flowchart LR
     - **Sessions:** Prune orphaned sessions whose jobs are terminal or missing
     - **Workers:** Re-emit `WorkerStarted` for each running worker (resumes queue polling)
     - **Crons:** Re-emit `CronStarted` for each running cron (resumes scheduling)
-    - **Standalone agent runs:** Same 3-case check as jobs (below)
+    - **Crew:** Same 3-case check as jobs (below)
     - **Jobs:** For each non-terminal job, check agent state:
 
     | Condition | Action |
     |-----------|--------|
-    | Session alive, agent running | Reconnect file watcher |
+    | Session alive, crewning | Reconnect file watcher |
     | Session alive, agent dead | Emit `AgentExited` |
     | Session dead | Emit `AgentGone` |
 
@@ -627,7 +453,7 @@ This provides seamless UX - users don't need to think about daemon lifecycle for
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OJ_STATE_DIR` | `~/.local/state/oj` | Base directory for all daemon state (socket, PID, WAL, workspaces, logs). Falls back to `$XDG_STATE_HOME/oj`. Useful for test isolation. |
-| `OJ_NAMESPACE` | Auto-detected | Project namespace for resource isolation. Auto-detected from `.oj/config.toml [project].name` or directory basename. Propagated to agents and shell steps so nested `oj` calls inherit the parent project's namespace. |
+| `OJ_PROJECT` | Auto-detected | Project project for resource isolation. Auto-detected from `.oj/config.toml [project].name` or directory basename. Propagated to agents and shell steps so nested `oj` calls inherit the parent project's project. |
 | `OJ_DAEMON_BINARY` | Auto-detected | Path to the `ojd` binary. Auto-detected from the current executable's location. |
 | `OJ_TIMEOUT_IPC_MS` | `5000` | Timeout for IPC requests between CLI and daemon. |
 | `OJ_TIMEOUT_CONNECT_MS` | `5000` | Timeout for waiting for daemon to start when auto-starting. |

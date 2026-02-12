@@ -17,78 +17,24 @@ fn validate_str_with_config(
     validate_with_config(&ast, config)
 }
 
-// =============================================================================
-// Valid Cases
-// =============================================================================
-
-#[test]
-fn valid_simple_command() {
-    assert!(validate_str("echo hello").is_ok());
+#[yare::parameterized(
+    simple_command       = { "echo hello" },
+    command_with_args    = { "ls -la /tmp" },
+    pipeline             = { "cat file | grep pattern | wc -l" },
+    and_or_chain         = { "true && echo yes || echo no" },
+    subshell             = { "(cd /tmp && ls)" },
+    brace_group          = { "{ echo a; echo b; }" },
+    nested_subshell      = { "(echo outer; (echo inner))" },
+    command_substitution = { "echo $(date)" },
+    variable_reference   = { "echo $HOME" },
+    background_command   = { "sleep 10 &" },
+    multiple_commands    = { "echo a; echo b; echo c" },
+    empty_input          = { "" },
+    assignment           = { "FOO=bar echo $FOO" },
+)]
+fn valid_cases(input: &str) {
+    assert!(validate_str(input).is_ok());
 }
-
-#[test]
-fn valid_command_with_args() {
-    assert!(validate_str("ls -la /tmp").is_ok());
-}
-
-#[test]
-fn valid_job() {
-    assert!(validate_str("cat file | grep pattern | wc -l").is_ok());
-}
-
-#[test]
-fn valid_and_or_chain() {
-    assert!(validate_str("true && echo yes || echo no").is_ok());
-}
-
-#[test]
-fn valid_subshell() {
-    assert!(validate_str("(cd /tmp && ls)").is_ok());
-}
-
-#[test]
-fn valid_brace_group() {
-    assert!(validate_str("{ echo a; echo b; }").is_ok());
-}
-
-#[test]
-fn valid_nested_subshell() {
-    assert!(validate_str("(echo outer; (echo inner))").is_ok());
-}
-
-#[test]
-fn valid_command_substitution() {
-    assert!(validate_str("echo $(date)").is_ok());
-}
-
-#[test]
-fn valid_variable_reference() {
-    assert!(validate_str("echo $HOME").is_ok());
-}
-
-#[test]
-fn valid_background_command() {
-    assert!(validate_str("sleep 10 &").is_ok());
-}
-
-#[test]
-fn valid_multiple_commands() {
-    assert!(validate_str("echo a; echo b; echo c").is_ok());
-}
-
-#[test]
-fn valid_empty_input() {
-    assert!(validate_str("").is_ok());
-}
-
-#[test]
-fn valid_assignment_with_command() {
-    assert!(validate_str("FOO=bar echo $FOO").is_ok());
-}
-
-// =============================================================================
-// Error Cases - Empty Structures
-// =============================================================================
 
 #[test]
 fn error_empty_subshell() {
@@ -110,10 +56,6 @@ fn error_empty_subshell_nested() {
     assert_eq!(err.len(), 1);
     assert!(matches!(err[0], ValidationError::EmptySubshell { .. }));
 }
-
-// =============================================================================
-// IFS Assignment Validation
-// =============================================================================
 
 #[test]
 fn error_ifs_assignment_with_command() {
@@ -143,65 +85,37 @@ fn ok_variable_named_like_ifs_prefix() {
     assert!(validate_str("IFS_BACKUP=x echo test").is_ok());
 }
 
-// =============================================================================
-// Error Cases - Excessive Nesting
-// =============================================================================
-
 #[test]
 fn error_excessive_nesting_subshells() {
-    let config = ValidatorConfig {
-        max_nesting_depth: 3,
-        ..Default::default()
-    };
+    let config = ValidatorConfig { max_nesting_depth: 3, ..Default::default() };
     let input = "((((echo too deep))))";
     let err = validate_str_with_config(input, config).unwrap_err();
-    assert!(err.iter().any(|e| matches!(
-        e,
-        ValidationError::ExcessiveNesting {
-            depth: 4,
-            max: 3,
-            ..
-        }
-    )));
+    assert!(err
+        .iter()
+        .any(|e| matches!(e, ValidationError::ExcessiveNesting { depth: 4, max: 3, .. })));
 }
 
 #[test]
 fn error_excessive_nesting_brace_groups() {
-    let config = ValidatorConfig {
-        max_nesting_depth: 2,
-        ..Default::default()
-    };
+    let config = ValidatorConfig { max_nesting_depth: 2, ..Default::default() };
     let input = "{ { { echo deep; }; }; }";
     let err = validate_str_with_config(input, config).unwrap_err();
-    assert!(err.iter().any(|e| matches!(
-        e,
-        ValidationError::ExcessiveNesting {
-            depth: 3,
-            max: 2,
-            ..
-        }
-    )));
+    assert!(err
+        .iter()
+        .any(|e| matches!(e, ValidationError::ExcessiveNesting { depth: 3, max: 2, .. })));
 }
 
 #[test]
 fn error_excessive_nesting_mixed() {
-    let config = ValidatorConfig {
-        max_nesting_depth: 2,
-        ..Default::default()
-    };
+    let config = ValidatorConfig { max_nesting_depth: 2, ..Default::default() };
     let input = "({ { echo deep; }; })";
     let err = validate_str_with_config(input, config).unwrap_err();
-    assert!(err
-        .iter()
-        .any(|e| matches!(e, ValidationError::ExcessiveNesting { .. })));
+    assert!(err.iter().any(|e| matches!(e, ValidationError::ExcessiveNesting { .. })));
 }
 
 #[test]
 fn ok_at_max_nesting_depth() {
-    let config = ValidatorConfig {
-        max_nesting_depth: 3,
-        ..Default::default()
-    };
+    let config = ValidatorConfig { max_nesting_depth: 3, ..Default::default() };
     // Exactly 3 levels should be OK
     let input = "(((echo ok)))";
     assert!(validate_str_with_config(input, config).is_ok());
@@ -217,34 +131,20 @@ fn unlimited_nesting_when_zero() {
     assert!(validate_str_with_config(input, config).is_ok());
 }
 
-// =============================================================================
-// Multiple Errors
-// =============================================================================
-
 #[test]
 fn collects_multiple_errors() {
     let err = validate_str("( ); { }").unwrap_err();
     assert_eq!(err.len(), 2);
-    assert!(err
-        .iter()
-        .any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
-    assert!(err
-        .iter()
-        .any(|e| matches!(e, ValidationError::EmptyBraceGroup { .. })));
+    assert!(err.iter().any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
+    assert!(err.iter().any(|e| matches!(e, ValidationError::EmptyBraceGroup { .. })));
 }
 
 #[test]
 fn collects_errors_at_different_depths() {
     let err = validate_str("(( ); echo ok)").unwrap_err();
     assert!(!err.is_empty());
-    assert!(err
-        .iter()
-        .any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
+    assert!(err.iter().any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
 }
-
-// =============================================================================
-// Error Span Verification
-// =============================================================================
 
 #[test]
 fn error_span_points_to_subshell() {
@@ -266,10 +166,6 @@ fn error_span_points_to_brace_group() {
     assert_eq!(slice, "{ }");
 }
 
-// =============================================================================
-// Error Context
-// =============================================================================
-
 #[test]
 fn error_context_shows_location() {
     let input = "echo hello; ( )";
@@ -279,22 +175,12 @@ fn error_context_shows_location() {
     assert!(ctx.contains("^^^"));
 }
 
-// =============================================================================
-// Command Substitution Validation
-// =============================================================================
-
 #[test]
 fn validates_inside_command_substitution() {
     let input = "echo $(( ))";
     let err = validate_str(input).unwrap_err();
-    assert!(err
-        .iter()
-        .any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
+    assert!(err.iter().any(|e| matches!(e, ValidationError::EmptySubshell { .. })));
 }
-
-// =============================================================================
-// Property-Based Tests
-// =============================================================================
 
 #[cfg(test)]
 mod proptests {

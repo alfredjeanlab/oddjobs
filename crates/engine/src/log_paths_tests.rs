@@ -3,80 +3,22 @@
 
 use super::*;
 
-#[test]
-fn job_log_path_builds_expected_path() {
-    let result = job_log_path(Path::new("/state/logs"), "job-001");
-    assert_eq!(result, PathBuf::from("/state/logs/job/job-001.log"));
-}
-
-#[test]
-fn agent_log_path_builds_expected_path() {
-    let result = agent_log_path(Path::new("/state/logs"), "abc-123-def");
-    assert_eq!(result, PathBuf::from("/state/logs/agent/abc-123-def.log"));
-}
-
-#[test]
-fn agent_session_log_dir_builds_expected_path() {
-    let result = agent_session_log_dir(Path::new("/state/logs"), "abc-123-def");
-    assert_eq!(result, PathBuf::from("/state/logs/agent/abc-123-def"));
-}
-
-#[test]
-fn cron_log_path_builds_expected_path() {
-    let result = cron_log_path(Path::new("/state/logs"), "nightly-deploy");
-    assert_eq!(result, PathBuf::from("/state/logs/cron/nightly-deploy.log"));
-}
-
-#[test]
-fn cron_log_path_with_namespace() {
-    let result = cron_log_path(Path::new("/state/logs"), "myproject/nightly-deploy");
+#[yare::parameterized(
+    job_log          = { job_log_path,          "job-001",                   "job/job-001.log" },
+    agent_log        = { agent_log_path,        "abc-123-def",               "agent/abc-123-def.log" },
+    agent_session    = { agent_session_log_dir, "abc-123-def",               "agent/abc-123-def" },
+    cron_log         = { cron_log_path,         "nightly-deploy",            "cron/nightly-deploy.log" },
+    cron_namespaced  = { cron_log_path,         "myproject/nightly-deploy",  "cron/myproject/nightly-deploy.log" },
+    worker_log       = { worker_log_path,       "my-worker",                 "worker/my-worker.log" },
+    worker_namespaced = { worker_log_path,      "myproject/my-worker",       "worker/myproject/my-worker.log" },
+    queue_log        = { queue_log_path,        "build-queue",               "queue/build-queue.log" },
+    queue_namespaced = { queue_log_path,        "myproject/build-queue",     "queue/myproject/build-queue.log" },
+    agent_capture    = { agent_capture_path,    "abc-123-def",               "agent/abc-123-def/capture.latest.txt" },
+    breadcrumb       = { breadcrumb_path,       "job-001",                   "job-001.crumb.json" },
+)]
+fn path_builds_expected(func: fn(&Path, &str) -> PathBuf, id: &str, expected_suffix: &str) {
     assert_eq!(
-        result,
-        PathBuf::from("/state/logs/cron/myproject/nightly-deploy.log")
+        func(Path::new("/state/logs"), id),
+        PathBuf::from(format!("/state/logs/{}", expected_suffix))
     );
-}
-
-#[test]
-fn worker_log_path_builds_expected_path() {
-    let result = worker_log_path(Path::new("/state/logs"), "my-worker");
-    assert_eq!(result, PathBuf::from("/state/logs/worker/my-worker.log"));
-}
-
-#[test]
-fn worker_log_path_with_namespace() {
-    let result = worker_log_path(Path::new("/state/logs"), "myproject/my-worker");
-    assert_eq!(
-        result,
-        PathBuf::from("/state/logs/worker/myproject/my-worker.log")
-    );
-}
-
-#[test]
-fn queue_log_path_builds_expected_path() {
-    let result = queue_log_path(Path::new("/state/logs"), "build-queue");
-    assert_eq!(result, PathBuf::from("/state/logs/queue/build-queue.log"));
-}
-
-#[test]
-fn queue_log_path_with_namespace() {
-    let result = queue_log_path(Path::new("/state/logs"), "myproject/build-queue");
-    assert_eq!(
-        result,
-        PathBuf::from("/state/logs/queue/myproject/build-queue.log")
-    );
-}
-
-#[test]
-fn agent_capture_path_builds_expected_path() {
-    let result = agent_capture_path(Path::new("/state/logs"), "abc-123-def");
-    assert_eq!(
-        result,
-        PathBuf::from("/state/logs/agent/abc-123-def/capture.latest.txt")
-    );
-}
-
-#[test]
-fn breadcrumb_path_builds_expected_path() {
-    let result = breadcrumb_path(Path::new("/state/logs"), "job-001");
-    assert_eq!(result, PathBuf::from("/state/logs/job-001.crumb.json"));
 }

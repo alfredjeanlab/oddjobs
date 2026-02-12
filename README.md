@@ -15,10 +15,10 @@ Odd jobs coordinates multiple AI coding agents with runbook-defined workflows, t
 │  │  Engine: Load state, execute effects,    │  │
 │  │          persist new state               │  │
 │  └──────────────────────────────────────────┘  │
-│  ┌─────────┬─────────┬─────────┬─────────┐     │
-│  │  tmux   │   git   │ claude  │   wk    │     │
-│  │ Adapter │ Adapter │ Adapter │ Adapter │     │
-│  └─────────┴─────────┴─────────┴─────────┘     │
+│  ┌─────────┬─────────┬─────────┐                │
+│  │  Agent  │   git   │ Notify  │                │
+│  │ (coop)  │ Adapter │ Adapter │                │
+│  └─────────┴─────────┴─────────┘                │
 └────────────────────────────────────────────────┘
                        │
 ┌──────────────────────┼─────────────────────────┐

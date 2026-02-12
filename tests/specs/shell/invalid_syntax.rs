@@ -23,10 +23,7 @@ run = "echo 'unterminated"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unterminated");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unterminated");
 }
 
 /// Unterminated double quote
@@ -48,10 +45,7 @@ run = "echo \"unterminated"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unterminated");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unterminated");
 }
 
 /// Unterminated subshell
@@ -73,10 +67,7 @@ run = "(echo hello"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("expected"); // Expected ')' or similar
+    temp.oj().args(&["run", "test"]).fails().stderr_has("expected"); // Expected ')' or similar
 }
 
 /// Unterminated brace group
@@ -98,10 +89,7 @@ run = "{ echo hello"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("expected"); // Expected '}' or similar
+    temp.oj().args(&["run", "test"]).fails().stderr_has("expected"); // Expected '}' or similar
 }
 
 /// Dangling pipe
@@ -123,10 +111,7 @@ run = "echo hello |"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unexpected"); // Unexpected EOF or similar
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unexpected"); // Unexpected EOF or similar
 }
 
 /// Dangling && operator
@@ -148,10 +133,7 @@ run = "echo hello &&"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unexpected");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unexpected");
 }
 
 /// Dangling || operator
@@ -173,10 +155,7 @@ run = "echo hello ||"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unexpected");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unexpected");
 }
 
 /// Invalid redirection (no target)
@@ -198,10 +177,7 @@ run = "echo hello >"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unexpected");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unexpected");
 }
 
 /// Unterminated command substitution
@@ -223,10 +199,7 @@ run = "echo $(date"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("unterminated");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("unterminated");
 }
 
 /// Empty subshell (semantic validation)
@@ -292,8 +265,5 @@ run = "echo 'unterminated"
 "#,
     );
     temp.oj().args(&["daemon", "start"]).passes();
-    temp.oj()
-        .args(&["run", "test"])
-        .fails()
-        .stderr_has("my_broken_step");
+    temp.oj().args(&["run", "test"]).fails().stderr_has("my_broken_step");
 }

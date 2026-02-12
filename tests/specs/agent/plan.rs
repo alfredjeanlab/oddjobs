@@ -9,39 +9,28 @@
 
 use crate::prelude::*;
 
-// =============================================================================
-// Scenarios
-// =============================================================================
-
 /// Agent calls ExitPlanMode with plan content. No auto-approve, so it waits.
 fn scenario_exit_plan_mode() -> &'static str {
     r##"
-name = "plan-approval"
-
 [[responses]]
-pattern = { type = "any" }
+on = "*"
+max = 1
+say = "I'll create a plan for implementing the feature."
 
-[responses.response]
-text = "I'll create a plan for implementing the feature."
+[[responses.tools]]
+call = "ExitPlanMode"
 
-[[responses.response.tool_calls]]
-tool = "ExitPlanMode"
-
-[responses.response.tool_calls.input]
+[responses.tools.input]
 plan = "# Test Plan\n\n## Steps\n1. Add auth module\n2. Write tests"
 
 [[responses]]
-pattern = { type = "any" }
-response = "Plan approved, proceeding."
+on = "*"
+say = "Plan approved, proceeding."
 
-[tool_execution]
+[tools]
 mode = "live"
 "##
 }
-
-// =============================================================================
-// Runbooks
-// =============================================================================
 
 /// Runbook for plan tests where agent proceeds after approval and completes via
 /// on_idle = "done". Used for Accept resolution tests.
@@ -91,10 +80,6 @@ prompt = "Create a plan for the feature."
     )
 }
 
-// =============================================================================
-// Tests: Decision Creation
-// =============================================================================
-
 /// Tests that ExitPlanMode creates a decision with "plan" source and plan content.
 #[test]
 fn exit_plan_mode_creates_plan_decision() {
@@ -111,11 +96,7 @@ fn exit_plan_mode_creates_plan_decision() {
 
     // Wait for decision to be created with "plan" source
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("plan")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("plan")
     });
     assert!(
         has_decision,
@@ -140,11 +121,7 @@ fn plan_decision_shows_plan_content() {
     temp.oj().args(&["run", "build", "test"]).passes();
 
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("plan")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("plan")
     });
     assert!(
         has_decision,
@@ -157,11 +134,7 @@ fn plan_decision_shows_plan_content() {
     let decision_id = extract_decision_id(&list_output)
         .expect("should be able to extract decision ID from list output");
 
-    let show_output = temp
-        .oj()
-        .args(&["decision", "show", &decision_id])
-        .passes()
-        .stdout();
+    let show_output = temp.oj().args(&["decision", "show", &decision_id]).passes().stdout();
 
     // Verify plan content appears in context
     assert!(
@@ -192,11 +165,7 @@ fn plan_decision_shows_five_options() {
     temp.oj().args(&["run", "build", "test"]).passes();
 
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("plan")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("plan")
     });
     assert!(
         has_decision,
@@ -208,32 +177,16 @@ fn plan_decision_shows_five_options() {
     let list_output = temp.oj().args(&["decision", "list"]).passes().stdout();
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
-    let show_output = temp
-        .oj()
-        .args(&["decision", "show", &decision_id])
-        .passes()
-        .stdout();
+    let show_output = temp.oj().args(&["decision", "show", &decision_id]).passes().stdout();
 
     assert!(
         show_output.contains("Accept (clear context)"),
         "should show Accept (clear context) option, got:\n{}",
         show_output
     );
-    assert!(
-        show_output.contains("Revise"),
-        "should show Revise option, got:\n{}",
-        show_output
-    );
-    assert!(
-        show_output.contains("Cancel"),
-        "should show Cancel option, got:\n{}",
-        show_output
-    );
+    assert!(show_output.contains("Revise"), "should show Revise option, got:\n{}", show_output);
+    assert!(show_output.contains("Cancel"), "should show Cancel option, got:\n{}", show_output);
 }
-
-// =============================================================================
-// Tests: Decision Resolution
-// =============================================================================
 
 /// Tests that resolving with Cancel (option 5) cancels the job.
 #[test]
@@ -250,11 +203,7 @@ fn resolve_plan_with_cancel_cancels_job() {
     temp.oj().args(&["run", "build", "test"]).passes();
 
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("plan")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("plan")
     });
     assert!(
         has_decision,
@@ -267,17 +216,11 @@ fn resolve_plan_with_cancel_cancels_job() {
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
     // Option 5 = Cancel
-    temp.oj()
-        .args(&["decision", "resolve", &decision_id, "5"])
-        .passes();
+    temp.oj().args(&["decision", "resolve", &decision_id, "5"]).passes();
 
     // Job should be cancelled
     let cancelled = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("cancelled")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("cancelled")
     });
     assert!(
         cancelled,
@@ -287,11 +230,11 @@ fn resolve_plan_with_cancel_cancels_job() {
     );
 }
 
-/// Tests that resolving a plan decision with Accept (option 1) sends key
-/// presses to the agent session, causing it to proceed and complete the job.
+/// Tests that resolving a plan decision with Accept (option 1) sends a
+/// response to the agent, causing it to proceed and complete the job.
 ///
 /// Lifecycle: agent calls ExitPlanMode → decision created with source='plan' →
-/// resolve with Accept (option 1) → daemon sends "Enter" to tmux session →
+/// resolve with Accept (option 1) → daemon responds to agent via coop API →
 /// claudeless receives input, responds → agent idles → on_idle=done → job
 /// completes.
 #[test]
@@ -309,11 +252,7 @@ fn resolve_plan_with_accept_completes_job() {
 
     // Wait for plan decision to be created
     let has_decision = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["decision", "list"])
-            .passes()
-            .stdout()
-            .contains("plan")
+        temp.oj().args(&["decision", "list"]).passes().stdout().contains("plan")
     });
     assert!(
         has_decision,
@@ -326,17 +265,11 @@ fn resolve_plan_with_accept_completes_job() {
     let decision_id = extract_decision_id(&list_output).expect("should extract decision ID");
 
     // Option 1 = Accept (clear context) — sends "Enter" to session
-    temp.oj()
-        .args(&["decision", "resolve", &decision_id, "1"])
-        .passes();
+    temp.oj().args(&["decision", "resolve", &decision_id, "1"]).passes();
 
     // Agent should proceed after Accept and eventually complete via on_idle=done
     let completed = wait_for(SPEC_WAIT_MAX_MS * 5, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         completed,
@@ -345,10 +278,6 @@ fn resolve_plan_with_accept_completes_job() {
         temp.daemon_log()
     );
 }
-
-// =============================================================================
-// Helpers
-// =============================================================================
 
 /// Extract the first decision ID from `oj decision list` output.
 fn extract_decision_id(output: &str) -> Option<String> {

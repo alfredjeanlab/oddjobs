@@ -10,10 +10,6 @@
 use crate::lexer::Lexer;
 use crate::token::TokenKind;
 
-// =============================================================================
-// Basic Assignment-like Words
-// =============================================================================
-
 lex_tests! {
     simple_assignment: "FOO=bar" => [
         TokenKind::Word("FOO=bar".into())
@@ -41,10 +37,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Value Edge Cases
-// =============================================================================
-
 lex_tests! {
     path_value: "PATH=/usr/bin:/bin" => [
         TokenKind::Word("PATH=/usr/bin:/bin".into())
@@ -63,10 +55,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Non-Assignments (Remain as Word - unchanged behavior)
-// =============================================================================
-
 lex_tests! {
     leading_digit: "123=foo" => [TokenKind::Word("123=foo".into())],
     no_name: "=value" => [TokenKind::Word("=value".into())],
@@ -82,10 +70,6 @@ lex_tests! {
         TokenKind::Word("bar".into()),
     ],
 }
-
-// =============================================================================
-// Multiple Assignment-like Words with Command
-// =============================================================================
 
 lex_tests! {
     two_assignments_cmd: "A=1 B=2 cmd" => [
@@ -111,10 +95,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Assignment-like Words with Operators
-// =============================================================================
-
 lex_tests! {
     assignment_with_pipe: "FOO=bar cmd | other" => [
         TokenKind::Word("FOO=bar".into()),
@@ -136,9 +116,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Quoted Values - Now Separate Tokens
-// =============================================================================
 //
 // Since assignment detection moved to parser, quoted values after `=` become
 // separate tokens. The parser handles concatenation at command-start position.
@@ -177,10 +154,6 @@ lex_tests! {
         TokenKind::SingleQuoted("".into())
     ],
 }
-
-// =============================================================================
-// Span Accuracy Tests
-// =============================================================================
 
 span_tests! {
     assignment_span: "FOO=bar" => [(0, 7)],

@@ -13,12 +13,12 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Imperative Shell                          │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐            │
-│  │  CLI    │  │  Agent  │  │ Session │  │ Notify  │            │
-│  │         │  │ Adapter │  │ Adapter │  │ Adapter │            │
-│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘            │
-│       │            │            │            │                  │
-│  ┌────┴────────────┴────────────┴────────────┴──────────────┐  │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐                        │
+│  │  CLI    │  │  Agent  │  │ Notify  │                        │
+│  │         │  │ Adapter │  │ Adapter │                        │
+│  └────┬────┘  └────┬────┘  └────┬────┘                        │
+│       │            │            │                              │
+│  ┌────┴────────────┴────────────┴──────────────────────────┐  │
 │  │                   Effect Execution Layer                  │  │
 │  └─────────────────────────┬─────────────────────────────────┘  │
 └────────────────────────────┼────────────────────────────────────┘
@@ -33,8 +33,8 @@
 │  ┌─────────┬───────────┘                                │
 │  │         │                                            │
 │  ▼         ▼                                            │
-│ Job  Worker                                        │
-│ (pure)    (pure)                                        │
+│ Job    Worker   Crew   Cron   Queue   Decision │
+│ (pure)                                                  │
 │                                                         │
 │  Each module: State + Event → (NewState, Effects)       │
 └─────────────────────────────────────────────────────────┘
@@ -77,7 +77,7 @@
 | **cli** | `oj` | Parse args, format output, IPC to daemon | stdin/stdout, Unix socket |
 | **daemon** | `oj-daemon` | Daemon lifecycle, Unix socket listener, event bus | Unix socket, file I/O |
 | **engine** | `oj-engine` | Execute effects, schedule work, runtime handlers | Calls adapters |
-| **adapters** | `oj-adapters` | Wrap external tools (claude, tmux, notify) | Subprocess I/O |
+| **adapters** | `oj-adapters` | Wrap external tools (claude, coop, notify) | Subprocess I/O |
 | **storage** | `oj-storage` | WAL, snapshots, state materialization | File I/O |
 | **runbook** | `oj-runbook` | Parse HCL/TOML, validate, load templates | File read |
 | **core** | `oj-core` | Pure state machines, effect generation | None |
@@ -109,11 +109,10 @@ External integrations go through trait abstractions with production and fake imp
 
 | Trait | Production | Test |
 |-------|-----------|------|
-| `SessionAdapter` | `TmuxAdapter` | `FakeSessionAdapter` / `NoOpSessionAdapter` |
-| `AgentAdapter` | `ClaudeAgentAdapter` | `FakeAgentAdapter` |
-| `NotifyAdapter` | `DesktopNotifyAdapter` | `FakeNotifyAdapter` / `NoOpNotifyAdapter` |
+| `AgentAdapter` | `LocalAdapter` | `FakeAgentAdapter` |
+| `NotifyAdapter` | `DesktopNotifyAdapter` | `FakeNotifyAdapter` |
 
-Production adapters are wrapped with `TracedSession`, `TracedAgent` decorators for observability.
+Production adapters include built-in tracing instrumentation (spans, timing, result logging).
 
 ### 3. Event-Driven Architecture
 
@@ -122,8 +121,6 @@ Components communicate via events rather than direct calls, enabling loose coupl
 ### 4. Explicit State Machines
 
 Each primitive has a pure transition function: `(state, event) → (new_state, effects)`
-
-Job and Worker are implemented.
 
 ### 5. Injectable Dependencies
 
@@ -160,4 +157,5 @@ CLI ──parse──▶ Request ──IPC──▶ Daemon (Unix socket)
 - [Daemon](01-daemon.md) - Process architecture (oj + ojd)
 - [Effects](02-effects.md) - Effect types and execution
 - [Storage](04-storage.md) - WAL and state persistence
-- [Adapters](05-adapters.md) - Integration adapters
+- [Agents](05-agents.md) - Agent adapter and coop integration
+- [Notifications](06-notify.md) - Desktop notification adapter

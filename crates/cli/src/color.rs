@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::fmt::Write;
 use std::io::IsTerminal;
 
 pub mod codes {
@@ -54,24 +55,17 @@ pub struct HelpPrinter {
 
 impl HelpPrinter {
     pub fn new() -> Self {
-        Self {
-            buf: String::new(),
-            colorize: should_colorize(),
-        }
+        Self { buf: String::new(), colorize: should_colorize() }
     }
 
     /// Create a printer that never emits color codes (for tests).
     #[cfg(test)]
     pub fn uncolored() -> Self {
-        Self {
-            buf: String::new(),
-            colorize: false,
-        }
+        Self { buf: String::new(), colorize: false }
     }
 
     /// "Usage: <rest>" — header-colored label, plain rest.
     pub fn usage(&mut self, rest: &str) {
-        use std::fmt::Write;
         if self.colorize {
             let _ = writeln!(self.buf, "{}Usage:{} {rest}", fg256(codes::HEADER), RESET,);
         } else {
@@ -81,7 +75,6 @@ impl HelpPrinter {
 
     /// Section header (e.g. "Available Commands:").
     pub fn header(&mut self, label: &str) {
-        use std::fmt::Write;
         if self.colorize {
             let _ = writeln!(self.buf, "{}{label}{}", fg256(codes::HEADER), RESET);
         } else {
@@ -91,7 +84,6 @@ impl HelpPrinter {
 
     /// Two-column entry: literal-colored name padded to `width`, optional description.
     pub fn entry(&mut self, name: &str, width: usize, desc: Option<&str>) {
-        use std::fmt::Write;
         if self.colorize {
             if let Some(desc) = desc {
                 let _ = writeln!(
@@ -112,7 +104,6 @@ impl HelpPrinter {
 
     /// Hint / footer line in context color.
     pub fn hint(&mut self, text: &str) {
-        use std::fmt::Write;
         if self.colorize {
             let _ = writeln!(self.buf, "{}{text}{}", fg256(codes::CONTEXT), RESET);
         } else {
@@ -122,7 +113,6 @@ impl HelpPrinter {
 
     /// Plain text line (no color).
     pub fn plain(&mut self, text: &str) {
-        use std::fmt::Write;
         let _ = writeln!(self.buf, "{text}");
     }
 
@@ -210,10 +200,7 @@ pub fn status(text: &str) -> String {
 /// Apply status color unconditionally (caller decides whether to use this).
 pub(crate) fn apply_status(text: &str) -> String {
     let lower = text.trim_start().to_lowercase();
-    let first_word = lower
-        .split(|c: char| !c.is_alphabetic())
-        .next()
-        .unwrap_or("");
+    let first_word = lower.split(|c: char| !c.is_alphabetic()).next().unwrap_or("");
     let code = match first_word {
         "completed" | "done" | "running" | "started" | "ready" | "on" => "\x1b[32m",
         "waiting" | "escalated" | "pending" | "idle" | "orphaned" | "suspended" | "stopping"

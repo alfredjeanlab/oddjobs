@@ -3,64 +3,39 @@
 
 use super::{
     build_multi_question_resume_message, build_question_resume_message, build_resume_message,
-    map_decision_to_agent_run_action, map_decision_to_job_action, resolve_decision_action,
+    map_decision_to_crew_action, map_decision_to_job_action, resolve_decision_action,
     DecisionResolveCtx, ResolvedAction,
 };
-use oj_core::{AgentRunId, AgentRunStatus, DecisionOption, DecisionSource, Event};
+use oj_core::{CrewId, CrewStatus, DecisionOption, DecisionSource, Event};
 
 /// Build a `DecisionResolveCtx` with sensible defaults for tests.
 /// Override fields as needed after construction.
 fn ctx<'a>(source: &'a DecisionSource, decision_id: &'a str) -> DecisionResolveCtx<'a> {
     DecisionResolveCtx {
         source,
-        chosen: None,
         choices: &[],
         message: None,
         decision_id,
         options: &[],
-        question_data: None,
+        questions: None,
     }
 }
 
 #[test]
 fn idle_dismiss_returns_no_action() {
-    let c = DecisionResolveCtx {
-        chosen: Some(4),
-        ..ctx(&DecisionSource::Idle, "dec-123")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let c = DecisionResolveCtx { choices: &[4], ..ctx(&DecisionSource::Idle, "dec-123") };
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
     assert!(result.is_empty());
 }
 
-#[test]
-fn build_resume_message_with_choice_only() {
-    let c = DecisionResolveCtx {
-        chosen: Some(2),
-        ..ctx(&DecisionSource::Idle, "dec-123")
-    };
-    let msg = build_resume_message(&c);
-    assert_eq!(msg, "Please continue with the task.");
-}
-
-#[test]
-fn build_resume_message_with_message_only() {
-    let c = DecisionResolveCtx {
-        message: Some("looks good"),
-        ..ctx(&DecisionSource::Idle, "dec-123")
-    };
-    let msg = build_resume_message(&c);
-    assert_eq!(msg, "looks good");
-}
-
-#[test]
-fn build_resume_message_with_both() {
-    let c = DecisionResolveCtx {
-        chosen: Some(1),
-        message: Some("approved"),
-        ..ctx(&DecisionSource::Idle, "dec-123")
-    };
-    let msg = build_resume_message(&c);
-    assert_eq!(msg, "approved");
+#[yare::parameterized(
+    choice_only  = { &[2],  None,              "Please continue with the task." },
+    message_only = { &[],   Some("looks good"), "looks good" },
+    both         = { &[1],  Some("approved"),   "approved" },
+)]
+fn build_resume_msg(choices: &[usize], message: Option<&str>, expected: &str) {
+    let c = DecisionResolveCtx { choices, message, ..ctx(&DecisionSource::Idle, "dec-123") };
+    assert_eq!(build_resume_message(&c), expected);
 }
 
 fn make_question_options() -> Vec<DecisionOption> {
@@ -73,26 +48,27 @@ fn make_question_options() -> Vec<DecisionOption> {
     ]
 }
 
-#[test]
-fn question_other_sends_freeform_resume() {
+#[yare::parameterized(
+    other_freeform = { &[3],  Some("install from git repo"), &["install from git repo"] as &[&str] },
+    choice_label   = { &[1],  None,                          &["Option A", "option 1"] as &[&str] },
+    freeform_only  = { &[],   Some("custom answer"),         &["custom answer"] as &[&str] },
+)]
+fn question_job_resume(choices: &[usize], message: Option<&str>, expected_contains: &[&str]) {
     let options = make_question_options();
-    // Other is option 3 (third-to-last)
     let c = DecisionResolveCtx {
-        chosen: Some(3),
-        message: Some("install from git repo"),
+        choices,
+        message,
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
     assert_eq!(result.len(), 1);
     match &result[0] {
         Event::JobResume { message, .. } => {
             let msg = message.as_ref().unwrap();
-            assert!(
-                msg.contains("install from git repo"),
-                "expected freeform message, got: {}",
-                msg
-            );
+            for expected in expected_contains {
+                assert!(msg.contains(expected), "expected '{}' in message, got: {}", expected, msg);
+            }
         }
         other => panic!("expected JobResume, got {:?}", other),
     }
@@ -103,11 +79,11 @@ fn question_cancel_is_second_to_last_option() {
     let options = make_question_options();
     // Cancel is option 4 (second-to-last, before Dismiss)
     let c = DecisionResolveCtx {
-        chosen: Some(4),
+        choices: &[4],
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
     assert_eq!(result.len(), 1);
     match &result[0] {
         Event::JobCancel { .. } => {}
@@ -120,327 +96,204 @@ fn question_dismiss_is_last_option() {
     let options = make_question_options();
     // Dismiss is option 5 (last)
     let c = DecisionResolveCtx {
-        chosen: Some(5),
+        choices: &[5],
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
     assert!(result.is_empty(), "Dismiss should produce no action events");
-}
-
-#[test]
-fn question_non_cancel_choice_resumes_with_label() {
-    let options = make_question_options();
-    let c = DecisionResolveCtx {
-        chosen: Some(1),
-        options: &options,
-        ..ctx(&DecisionSource::Question, "dec-q1")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Event::JobResume { message, .. } => {
-            let msg = message.as_ref().unwrap();
-            assert!(msg.contains("Option A"), "expected label, got: {}", msg);
-            assert!(
-                msg.contains("option 1"),
-                "expected option number, got: {}",
-                msg
-            );
-        }
-        other => panic!("expected JobResume, got {:?}", other),
-    }
-}
-
-#[test]
-fn question_freeform_message_only() {
-    let options = make_question_options();
-    let c = DecisionResolveCtx {
-        message: Some("custom answer"),
-        options: &options,
-        ..ctx(&DecisionSource::Question, "dec-q1")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
-    assert_eq!(result.len(), 1);
-    match &result[0] {
-        Event::JobResume { message, .. } => {
-            let msg = message.as_ref().unwrap();
-            assert!(
-                msg.contains("custom answer"),
-                "expected freeform message, got: {}",
-                msg
-            );
-        }
-        other => panic!("expected JobResume, got {:?}", other),
-    }
 }
 
 #[test]
 fn question_choice_with_message() {
     let options = make_question_options();
     let c = DecisionResolveCtx {
-        chosen: Some(2),
+        choices: &[2],
         message: Some("extra context"),
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
     let msg = build_question_resume_message(&c);
     assert!(msg.contains("Option B"), "expected label, got: {}", msg);
-    assert!(
-        msg.contains("extra context"),
-        "expected message, got: {}",
-        msg
-    );
+    assert!(msg.contains("extra context"), "expected message, got: {}", msg);
 }
 
-// ===================== Tests for agent run action mapping =====================
+// ===================== Tests for crew action mapping =====================
 
-#[test]
-fn agent_run_idle_nudge_emits_resume() {
-    let ar_id = AgentRunId::new("ar-123");
-    let c = DecisionResolveCtx {
-        chosen: Some(1), // Nudge
-        message: Some("please continue"),
-        ..ctx(&DecisionSource::Idle, "dec-ar1")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-abc"));
+#[derive(Debug)]
+enum ExpectedAgentAction {
+    Resume { kill: bool },
+    Status(CrewStatus),
+    Empty,
+}
+
+#[yare::parameterized(
+    idle_nudge   = { DecisionSource::Idle,  &[1], Some("please continue"), ExpectedAgentAction::Resume { kill: false } },
+    idle_done    = { DecisionSource::Idle,  &[2], None,                    ExpectedAgentAction::Status(CrewStatus::Completed) },
+    idle_cancel  = { DecisionSource::Idle,  &[3], None,                    ExpectedAgentAction::Status(CrewStatus::Failed) },
+    idle_dismiss = { DecisionSource::Idle,  &[4], None,                    ExpectedAgentAction::Empty },
+    error_retry  = { DecisionSource::Error, &[1], None,                    ExpectedAgentAction::Resume { kill: true } },
+    error_skip   = { DecisionSource::Error, &[2], None,                    ExpectedAgentAction::Status(CrewStatus::Completed) },
+    dead_dismiss = { DecisionSource::Dead,  &[4], None,                    ExpectedAgentAction::Empty },
+)]
+fn crew_action(
+    source: DecisionSource,
+    choices: &[usize],
+    message: Option<&str>,
+    expected: ExpectedAgentAction,
+) {
+    let run_id = CrewId::new("run-test");
+    let c = DecisionResolveCtx { choices, message, ..ctx(&source, "dec-test") };
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-test"));
+
+    match expected {
+        ExpectedAgentAction::Resume { kill } => {
+            assert_eq!(events.len(), 1);
+            match &events[0] {
+                Event::CrewResume { id, message: m, kill: k } => {
+                    assert_eq!(id.as_str(), "run-test");
+                    assert_eq!(*k, kill);
+                    if let Some(msg) = message {
+                        assert_eq!(m.as_deref(), Some(msg));
+                    } else {
+                        assert!(m.is_some(), "expected auto-generated message");
+                    }
+                }
+                other => panic!("expected CrewResume, got {:?}", other),
+            }
+        }
+        ExpectedAgentAction::Status(status) => {
+            assert_eq!(events.len(), 1);
+            match &events[0] {
+                Event::CrewUpdated { id, status: s, .. } => {
+                    assert_eq!(id.as_str(), "run-test");
+                    assert_eq!(*s, status);
+                }
+                other => panic!("expected CrewUpdated, got {:?}", other),
+            }
+        }
+        ExpectedAgentAction::Empty => {
+            assert!(events.is_empty());
+        }
+    }
+}
+
+#[yare::parameterized(
+    approve = { &[1], "y\n" },
+    deny    = { &[2], "n\n" },
+)]
+fn crew_approval(choices: &[usize], expected_input: &str) {
+    let run_id = CrewId::new("run-approval");
+    let c = DecisionResolveCtx { choices, ..ctx(&DecisionSource::Approval, "dec-approval") };
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-approval"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::AgentRunResume { id, message, kill } => {
-            assert_eq!(id.as_str(), "ar-123");
-            assert_eq!(message.as_deref(), Some("please continue"));
-            assert!(!kill);
+        Event::AgentInput { id, input } => {
+            assert_eq!(id.as_str(), "agent-approval");
+            assert_eq!(input, expected_input);
         }
-        other => panic!("expected AgentRunResume, got {:?}", other),
+        other => panic!("expected AgentInput({}), got {:?}", expected_input, other),
     }
 }
 
 #[test]
-fn agent_run_idle_done_marks_completed() {
-    let ar_id = AgentRunId::new("ar-456");
-    let c = DecisionResolveCtx {
-        chosen: Some(2), // Done
-        ..ctx(&DecisionSource::Idle, "dec-ar2")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-xyz"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::AgentRunStatusChanged { id, status, .. } => {
-            assert_eq!(id.as_str(), "ar-456");
-            assert_eq!(*status, AgentRunStatus::Completed);
-        }
-        other => panic!("expected AgentRunStatusChanged, got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_idle_cancel_marks_failed() {
-    let ar_id = AgentRunId::new("ar-789");
-    let c = DecisionResolveCtx {
-        chosen: Some(3), // Cancel
-        ..ctx(&DecisionSource::Idle, "dec-ar3")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-123"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::AgentRunStatusChanged { id, status, reason } => {
-            assert_eq!(id.as_str(), "ar-789");
-            assert_eq!(*status, AgentRunStatus::Failed);
-            assert!(reason.as_ref().unwrap().contains("cancelled"));
-        }
-        other => panic!("expected AgentRunStatusChanged(Failed), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_idle_dismiss_returns_empty() {
-    let ar_id = AgentRunId::new("ar-000");
-    let c = DecisionResolveCtx {
-        chosen: Some(4), // Dismiss
-        ..ctx(&DecisionSource::Idle, "dec-ar4")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-456"));
-
-    assert!(events.is_empty());
-}
-
-#[test]
-fn agent_run_error_retry_emits_resume_with_kill() {
-    let ar_id = AgentRunId::new("ar-err1");
-    let c = DecisionResolveCtx {
-        chosen: Some(1), // Retry
-        ..ctx(&DecisionSource::Error, "dec-err1")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-err"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::AgentRunResume { id, message, kill } => {
-            assert_eq!(id.as_str(), "ar-err1");
-            assert!(message.is_some());
-            assert!(*kill);
-        }
-        other => panic!("expected AgentRunResume(kill=true), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_error_skip_marks_completed() {
-    let ar_id = AgentRunId::new("ar-err2");
-    let c = DecisionResolveCtx {
-        chosen: Some(2), // Skip
-        ..ctx(&DecisionSource::Error, "dec-err2")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-err2"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::AgentRunStatusChanged { id, status, .. } => {
-            assert_eq!(id.as_str(), "ar-err2");
-            assert_eq!(*status, AgentRunStatus::Completed);
-        }
-        other => panic!("expected AgentRunStatusChanged(Completed), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_approval_approve_sends_y() {
-    let ar_id = AgentRunId::new("ar-approve");
-    let c = DecisionResolveCtx {
-        chosen: Some(1), // Approve
-        ..ctx(&DecisionSource::Approval, "dec-approve")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-approve"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-approve");
-            assert_eq!(input, "y\n");
-        }
-        other => panic!("expected SessionInput(y), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_approval_deny_sends_n() {
-    let ar_id = AgentRunId::new("ar-deny");
-    let c = DecisionResolveCtx {
-        chosen: Some(2), // Deny
-        ..ctx(&DecisionSource::Approval, "dec-deny")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-deny"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-deny");
-            assert_eq!(input, "n\n");
-        }
-        other => panic!("expected SessionInput(n), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_question_sends_option_number() {
-    let ar_id = AgentRunId::new("ar-q1");
+fn crew_question_sends_option_number() {
+    let run_id = CrewId::new("run-q1");
     let options = make_question_options();
     let c = DecisionResolveCtx {
-        chosen: Some(2), // Option B
+        choices: &[2], // Option B
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-q1")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-q1"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-q1"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-q1");
+        Event::AgentInput { id: agent_id, input } => {
+            assert_eq!(agent_id.as_str(), "agent-q1");
             assert_eq!(input, "2\n");
         }
-        other => panic!("expected SessionInput(2), got {:?}", other),
+        other => panic!("expected AgentInput(2), got {:?}", other),
     }
 }
 
 #[test]
-fn agent_run_question_other_sends_custom_text() {
-    let ar_id = AgentRunId::new("ar-qother");
+fn crew_question_other_sends_custom_text() {
+    let run_id = CrewId::new("run-qother");
     let options = make_question_options(); // 5 options, Other is third-to-last
     let c = DecisionResolveCtx {
-        chosen: Some(3), // Other (third-to-last option)
+        choices: &[3], // Other (third-to-last option)
         message: Some("install from git repo"),
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-qother")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-qother"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-qother"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-qother");
+        Event::AgentInput { id: agent_id, input } => {
+            assert_eq!(agent_id.as_str(), "agent-qother");
             assert_eq!(input, "install from git repo\n");
         }
-        other => panic!("expected SessionInput, got {:?}", other),
+        other => panic!("expected AgentInput, got {:?}", other),
     }
 }
 
 #[test]
-fn agent_run_question_cancel_marks_failed() {
-    let ar_id = AgentRunId::new("ar-qcancel");
+fn crew_question_cancel_marks_failed() {
+    let run_id = CrewId::new("run-qcancel");
     let options = make_question_options(); // 5 options, Cancel is second-to-last
     let c = DecisionResolveCtx {
-        chosen: Some(4), // Cancel (second-to-last option)
+        choices: &[4], // Cancel (second-to-last option)
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-qcancel")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-qcancel"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-qcancel"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::AgentRunStatusChanged { id, status, .. } => {
-            assert_eq!(id.as_str(), "ar-qcancel");
-            assert_eq!(*status, AgentRunStatus::Failed);
+        Event::CrewUpdated { id, status, .. } => {
+            assert_eq!(id.as_str(), "run-qcancel");
+            assert_eq!(*status, CrewStatus::Failed);
         }
-        other => panic!("expected AgentRunStatusChanged(Failed), got {:?}", other),
+        other => panic!("expected CrewUpdated(Failed), got {:?}", other),
     }
 }
 
 #[test]
-fn agent_run_question_dismiss_returns_empty() {
-    let ar_id = AgentRunId::new("ar-qdismiss");
+fn crew_question_dismiss_returns_empty() {
+    let run_id = CrewId::new("run-qdismiss");
     let options = make_question_options(); // 5 options, Dismiss is last
     let c = DecisionResolveCtx {
-        chosen: Some(5), // Dismiss (last option)
+        choices: &[5], // Dismiss (last option)
         options: &options,
         ..ctx(&DecisionSource::Question, "dec-qdismiss")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-qdismiss"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-qdismiss"));
     assert!(events.is_empty());
 }
 
 #[test]
-fn agent_run_no_session_nudge_still_emits_resume() {
-    let ar_id = AgentRunId::new("ar-nosession");
+fn crew_no_session_nudge_still_emits_resume() {
+    let run_id = CrewId::new("run-nosession");
     let c = DecisionResolveCtx {
-        chosen: Some(1), // Nudge
+        choices: &[1], // Nudge
         message: Some("continue"),
         ..ctx(&DecisionSource::Idle, "dec-nosession")
     };
-    // No session — AgentRunResume handles liveness check in engine
-    let events = map_decision_to_agent_run_action(&c, &ar_id, None);
+    // No session — CrewResume handles liveness check in engine
+    let events = map_decision_to_crew_action(&c, &run_id, None);
 
-    // AgentRunResume is emitted regardless of session; the engine handles liveness
+    // CrewResume is emitted regardless of session; the engine handles liveness
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::AgentRunResume { id, message, kill } => {
-            assert_eq!(id.as_str(), "ar-nosession");
+        Event::CrewResume { id, message, kill } => {
+            assert_eq!(id.as_str(), "run-nosession");
             assert_eq!(message.as_deref(), Some("continue"));
             assert!(!kill);
         }
-        other => panic!("expected AgentRunResume, got {:?}", other),
+        other => panic!("expected CrewResume, got {:?}", other),
     }
 }
 
@@ -467,23 +320,9 @@ fn resolve_fixed_source(source: DecisionSource, choice: Option<usize>, expected:
 
 #[test]
 fn error_dismiss_returns_no_action() {
-    let c = DecisionResolveCtx {
-        chosen: Some(4),
-        ..ctx(&DecisionSource::Error, "dec-err-dismiss")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let c = DecisionResolveCtx { choices: &[4], ..ctx(&DecisionSource::Error, "dec-err-dismiss") };
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
     assert!(result.is_empty());
-}
-
-#[test]
-fn agent_run_dead_dismiss_returns_empty() {
-    let ar_id = AgentRunId::new("ar-dead-dismiss");
-    let c = DecisionResolveCtx {
-        chosen: Some(4), // Dismiss
-        ..ctx(&DecisionSource::Dead, "dec-dead-dismiss")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-dead"));
-    assert!(events.is_empty());
 }
 
 #[yare::parameterized(
@@ -515,10 +354,7 @@ fn resolve_gate_and_approval(
 fn resolve_question_choices(choice: Option<usize>, expected: ResolvedAction) {
     // 5 options: A, B, Other, Cancel, Dismiss
     let options = make_question_options();
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Question, choice, &options),
-        expected
-    );
+    assert_eq!(resolve_decision_action(&DecisionSource::Question, choice, &options), expected);
 }
 
 #[test]
@@ -555,21 +391,15 @@ fn resolve_question_dynamic_positions_with_more_options() {
 
 use oj_core::{QuestionData, QuestionEntry, QuestionOption};
 
-fn make_multi_question_data() -> QuestionData {
+fn make_multi_questions() -> QuestionData {
     QuestionData {
         questions: vec![
             QuestionEntry {
                 question: "Which framework?".to_string(),
                 header: Some("Framework".to_string()),
                 options: vec![
-                    QuestionOption {
-                        label: "React".to_string(),
-                        description: None,
-                    },
-                    QuestionOption {
-                        label: "Vue".to_string(),
-                        description: None,
-                    },
+                    QuestionOption { label: "React".to_string(), description: None },
+                    QuestionOption { label: "Vue".to_string(), description: None },
                 ],
                 multi_select: false,
             },
@@ -577,14 +407,8 @@ fn make_multi_question_data() -> QuestionData {
                 question: "Which database?".to_string(),
                 header: Some("Database".to_string()),
                 options: vec![
-                    QuestionOption {
-                        label: "PostgreSQL".to_string(),
-                        description: None,
-                    },
-                    QuestionOption {
-                        label: "MySQL".to_string(),
-                        description: None,
-                    },
+                    QuestionOption { label: "PostgreSQL".to_string(), description: None },
+                    QuestionOption { label: "MySQL".to_string(), description: None },
                 ],
                 multi_select: false,
             },
@@ -593,38 +417,38 @@ fn make_multi_question_data() -> QuestionData {
 }
 
 #[test]
-fn multi_question_agent_run_sends_concatenated_digits() {
-    let ar_id = AgentRunId::new("ar-multi");
-    let qd = make_multi_question_data();
+fn multi_question_crew_sends_concatenated_digits() {
+    let run_id = CrewId::new("run-multi");
+    let qd = make_multi_questions();
     let choices = [1, 2]; // Q1: React, Q2: MySQL
     let c = DecisionResolveCtx {
         choices: &choices,
-        question_data: Some(&qd),
+        questions: Some(&qd),
         ..ctx(&DecisionSource::Question, "dec-multi")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-multi"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-multi"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-multi");
+        Event::AgentInput { id: agent_id, input } => {
+            assert_eq!(agent_id.as_str(), "agent-multi");
             // Concatenated digits: "12\n"
             assert_eq!(input, "12\n");
         }
-        other => panic!("expected SessionInput, got {:?}", other),
+        other => panic!("expected AgentInput, got {:?}", other),
     }
 }
 
 #[test]
 fn multi_question_job_sends_resume_with_labels() {
-    let qd = make_multi_question_data();
+    let qd = make_multi_questions();
     let choices = [1, 2];
     let c = DecisionResolveCtx {
         choices: &choices,
-        question_data: Some(&qd),
+        questions: Some(&qd),
         ..ctx(&DecisionSource::Question, "dec-multi")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
 
     assert_eq!(result.len(), 1);
     match &result[0] {
@@ -639,11 +463,11 @@ fn multi_question_job_sends_resume_with_labels() {
 
 #[test]
 fn build_multi_question_resume_message_with_data() {
-    let qd = make_multi_question_data();
+    let qd = make_multi_questions();
     let choices = [1, 2];
     let c = DecisionResolveCtx {
         choices: &choices,
-        question_data: Some(&qd),
+        questions: Some(&qd),
         ..ctx(&DecisionSource::Question, "dec-1")
     };
     let msg = build_multi_question_resume_message(&c);
@@ -654,10 +478,7 @@ fn build_multi_question_resume_message_with_data() {
 #[test]
 fn build_multi_question_resume_message_without_data() {
     let choices = [1, 2];
-    let c = DecisionResolveCtx {
-        choices: &choices,
-        ..ctx(&DecisionSource::Question, "dec-1")
-    };
+    let c = DecisionResolveCtx { choices: &choices, ..ctx(&DecisionSource::Question, "dec-1") };
     let msg = build_multi_question_resume_message(&c);
     assert_eq!(msg, "Selected: choices [1, 2]");
 }
@@ -673,222 +494,142 @@ fn build_multi_question_resume_message_without_data() {
     freeform_no_choice   = { None,    ResolvedAction::Freeform },
 )]
 fn resolve_plan_choices(choice: Option<usize>, expected: ResolvedAction) {
-    assert_eq!(
-        resolve_decision_action(&DecisionSource::Plan, choice, &[]),
-        expected
-    );
+    assert_eq!(resolve_decision_action(&DecisionSource::Plan, choice, &[]), expected);
 }
 
-#[test]
-fn agent_run_plan_accept_sends_enter() {
-    let ar_id = AgentRunId::new("ar-plan1");
-    let c = DecisionResolveCtx {
-        chosen: Some(1), // Accept (clear context) — already selected, just Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan1")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-plan"));
+#[yare::parameterized(
+    option1 = { &[1], 1 },
+    option2 = { &[2], 2 },
+    option3 = { &[3], 3 },
+)]
+fn crew_plan_accept(choices: &[usize], expected_option: u32) {
+    let run_id = CrewId::new("run-plan");
+    let c = DecisionResolveCtx { choices, ..ctx(&DecisionSource::Plan, "dec-plan") };
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-plan"));
 
     assert_eq!(events.len(), 1);
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            // Option 1 is already selected, so just "Enter"
-            assert_eq!(input, "Enter");
+        Event::AgentRespond { id, response } => {
+            assert_eq!(id.as_str(), "agent-plan");
+            assert_eq!(response.option, Some(expected_option));
         }
-        other => panic!("expected SessionInput(Enter), got {:?}", other),
+        other => panic!("expected AgentRespond with option {}, got {:?}", expected_option, other),
     }
 }
 
 #[test]
-fn agent_run_plan_accept_option2_sends_down_enter() {
-    let ar_id = AgentRunId::new("ar-plan2");
+fn crew_plan_revise_sends_respond_then_resume() {
+    let run_id = CrewId::new("run-plan-rev");
     let c = DecisionResolveCtx {
-        chosen: Some(2), // Accept (auto edits) — 1 Down + Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan2")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-plan"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Down Enter");
-        }
-        other => panic!("expected SessionInput(Down Enter), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_plan_accept_option3_sends_down_down_enter() {
-    let ar_id = AgentRunId::new("ar-plan3");
-    let c = DecisionResolveCtx {
-        chosen: Some(3), // Accept (manual edits) — 2 Downs + Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan3")
-    };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-plan"));
-
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Down Down Enter");
-        }
-        other => panic!("expected SessionInput(Down Down Enter), got {:?}", other),
-    }
-}
-
-#[test]
-fn agent_run_plan_revise_sends_escape_then_resume() {
-    let ar_id = AgentRunId::new("ar-plan-rev");
-    let c = DecisionResolveCtx {
-        chosen: Some(4), // Revise
+        choices: &[4], // Revise
         message: Some("Please also add rate limiting"),
         ..ctx(&DecisionSource::Plan, "dec-plan-rev")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-plan"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-plan"));
 
     assert_eq!(events.len(), 2);
-    // First: Escape to cancel the plan dialog
+    // First: AgentRespond with revision text
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Escape");
+        Event::AgentRespond { id: agent_id, response } => {
+            assert_eq!(agent_id.as_str(), "agent-plan");
+            assert_eq!(response.text.as_deref(), Some("Please also add rate limiting"));
         }
-        other => panic!("expected SessionInput(Escape), got {:?}", other),
+        other => panic!("expected AgentRespond with text, got {:?}", other),
     }
-    // Second: AgentRunResume with revision feedback
+    // Second: CrewResume with revision feedback
     match &events[1] {
-        Event::AgentRunResume { id, message, kill } => {
-            assert_eq!(id.as_str(), "ar-plan-rev");
+        Event::CrewResume { id, message, kill } => {
+            assert_eq!(id.as_str(), "run-plan-rev");
             assert_eq!(message.as_deref(), Some("Please also add rate limiting"));
             assert!(!kill);
         }
-        other => panic!("expected AgentRunResume, got {:?}", other),
+        other => panic!("expected CrewResume, got {:?}", other),
     }
 }
 
 #[test]
-fn agent_run_plan_cancel_sends_escape_then_fail() {
-    let ar_id = AgentRunId::new("ar-plan-cancel");
+fn crew_plan_cancel_sends_reject_then_fail() {
+    let run_id = CrewId::new("run-plan-cancel");
     let c = DecisionResolveCtx {
-        chosen: Some(5), // Cancel
+        choices: &[5], // Cancel
         ..ctx(&DecisionSource::Plan, "dec-plan-cancel")
     };
-    let events = map_decision_to_agent_run_action(&c, &ar_id, Some("session-plan"));
+    let events = map_decision_to_crew_action(&c, &run_id, Some("agent-plan"));
 
     assert_eq!(events.len(), 2);
-    // First: Escape to cancel the plan dialog
+    // First: AgentRespond with accept=false to reject the plan
     match &events[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Escape");
+        Event::AgentRespond { id: agent_id, response } => {
+            assert_eq!(agent_id.as_str(), "agent-plan");
+            assert_eq!(response.accept, Some(false));
         }
-        other => panic!("expected SessionInput(Escape), got {:?}", other),
+        other => panic!("expected AgentRespond with accept=false, got {:?}", other),
     }
-    // Second: Fail the agent run
+    // Second: Fail the crew
     match &events[1] {
-        Event::AgentRunStatusChanged { id, status, reason } => {
-            assert_eq!(id.as_str(), "ar-plan-cancel");
-            assert_eq!(*status, AgentRunStatus::Failed);
+        Event::CrewUpdated { id, status, reason } => {
+            assert_eq!(id.as_str(), "run-plan-cancel");
+            assert_eq!(*status, CrewStatus::Failed);
             assert!(reason.as_ref().unwrap().contains("plan rejected"));
         }
-        other => panic!("expected AgentRunStatusChanged(Failed), got {:?}", other),
+        other => panic!("expected CrewUpdated(Failed), got {:?}", other),
     }
 }
 
-#[test]
-fn plan_job_accept_sends_enter() {
-    let c = DecisionResolveCtx {
-        chosen: Some(1), // Accept (clear context) — already selected, just Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan-job")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
+#[yare::parameterized(
+    option1 = { &[1], 1 },
+    option2 = { &[2], 2 },
+    option3 = { &[3], 3 },
+)]
+fn plan_job_accept(choices: &[usize], expected_option: u32) {
+    let c = DecisionResolveCtx { choices, ..ctx(&DecisionSource::Plan, "dec-plan-job") };
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), Some("agent-plan"));
 
     assert_eq!(result.len(), 2);
-    // First: StepStarted to transition from Waiting → Running
     assert!(
-        matches!(&result[0], Event::StepStarted { job_id, step, .. } if job_id.as_str() == "pipe-1" && step == "step-1"),
+        matches!(&result[0], Event::StepStarted { job_id, step, .. } if job_id.as_str() == "job-1" && step == "step-1"),
         "expected StepStarted, got {:?}",
         result[0]
     );
-    // Then: Enter to approve the plan
     match &result[1] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Enter");
+        Event::AgentRespond { id, response } => {
+            assert_eq!(id.as_str(), "agent-plan");
+            assert_eq!(response.option, Some(expected_option));
         }
-        other => panic!("expected SessionInput(Enter), got {:?}", other),
-    }
-}
-
-#[test]
-fn plan_job_accept_option2_sends_down_enter() {
-    let c = DecisionResolveCtx {
-        chosen: Some(2), // Accept (auto edits) — 1 Down + Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan-job")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
-
-    assert_eq!(result.len(), 2);
-    assert!(matches!(&result[0], Event::StepStarted { .. }));
-    match &result[1] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Down Enter");
-        }
-        other => panic!("expected SessionInput(Down Enter), got {:?}", other),
-    }
-}
-
-#[test]
-fn plan_job_accept_option3_sends_down_down_enter() {
-    let c = DecisionResolveCtx {
-        chosen: Some(3), // Accept (manual edits) — 2 Downs + Enter
-        ..ctx(&DecisionSource::Plan, "dec-plan-job")
-    };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
-
-    assert_eq!(result.len(), 2);
-    assert!(matches!(&result[0], Event::StepStarted { .. }));
-    match &result[1] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Down Down Enter");
-        }
-        other => panic!("expected SessionInput(Down Down Enter), got {:?}", other),
+        other => panic!("expected AgentRespond with option {}, got {:?}", expected_option, other),
     }
 }
 
 #[test]
 fn plan_job_accept_no_session_emits_nothing() {
     let c = DecisionResolveCtx {
-        chosen: Some(1), // Accept
+        choices: &[1], // Accept
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), None);
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), None);
 
-    // Without a session, we can't send key presses — but StepStarted still emitted
+    // Without an agent, we can't send key presses — but StepStarted still emitted
     assert_eq!(result.len(), 1);
     assert!(matches!(&result[0], Event::StepStarted { .. }));
 }
 
 #[test]
-fn plan_job_revise_sends_escape_then_resume() {
+fn plan_job_revise_sends_respond_then_resume() {
     let c = DecisionResolveCtx {
-        chosen: Some(4), // Revise
+        choices: &[4], // Revise
         message: Some("Add error handling"),
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), Some("agent-plan"));
 
     assert_eq!(result.len(), 2);
-    // First: Escape to cancel the plan dialog
+    // First: AgentRespond with revision text
     match &result[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Escape");
+        Event::AgentRespond { id: agent_id, response } => {
+            assert_eq!(agent_id.as_str(), "agent-plan");
+            assert_eq!(response.text.as_deref(), Some("Add error handling"));
         }
-        other => panic!("expected SessionInput(Escape), got {:?}", other),
+        other => panic!("expected AgentRespond with text, got {:?}", other),
     }
     // Second: JobResume with revision feedback (user message only, no decision ID)
     match &result[1] {
@@ -900,21 +641,21 @@ fn plan_job_revise_sends_escape_then_resume() {
 }
 
 #[test]
-fn plan_job_cancel_sends_escape_then_cancel() {
+fn plan_job_cancel_sends_reject_then_cancel() {
     let c = DecisionResolveCtx {
-        chosen: Some(5), // Cancel
+        choices: &[5], // Cancel
         ..ctx(&DecisionSource::Plan, "dec-plan-job")
     };
-    let result = map_decision_to_job_action(&c, "pipe-1", Some("step-1"), Some("session-plan"));
+    let result = map_decision_to_job_action(&c, "job-1", Some("step-1"), Some("agent-plan"));
 
     assert_eq!(result.len(), 2);
-    // First: Escape to cancel the plan dialog
+    // First: AgentRespond with accept=false to reject the plan
     match &result[0] {
-        Event::SessionInput { id, input } => {
-            assert_eq!(id.as_str(), "session-plan");
-            assert_eq!(input, "Escape");
+        Event::AgentRespond { id: agent_id, response } => {
+            assert_eq!(agent_id.as_str(), "agent-plan");
+            assert_eq!(response.accept, Some(false));
         }
-        other => panic!("expected SessionInput(Escape), got {:?}", other),
+        other => panic!("expected AgentRespond with accept=false, got {:?}", other),
     }
     // Second: JobCancel
     match &result[1] {

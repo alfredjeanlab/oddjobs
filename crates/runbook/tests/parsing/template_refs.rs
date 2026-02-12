@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
-//! Template variable namespace validation in command.run.
+//! Template variable project validation in command.run.
 
 use oj_runbook::parse_runbook;
-
-// ============================================================================
-// Rejected Namespaces in command.run
-// ============================================================================
 
 #[test]
 fn error_command_run_rejects_var_namespace() {
@@ -42,10 +38,10 @@ fn error_command_run_rejects_step_namespace() {
 }
 
 #[test]
-fn error_command_run_rejects_dotted_workspace_namespace() {
+fn error_command_run_rejects_dotted_source_namespace() {
     super::assert_toml_err(
-        "[command.build]\nargs = \"<name>\"\nrun = \"echo ${workspace.root}\"",
-        &["workspace.root", "${workspace}"],
+        "[command.build]\nargs = \"<name>\"\nrun = \"echo ${source.root}\"",
+        &["source.root", "${source.*}"],
     );
 }
 
@@ -56,10 +52,6 @@ fn hcl_command_run_rejects_var_namespace() {
         &["var.name"],
     );
 }
-
-// ============================================================================
-// Allowed Namespaces in command.run
-// ============================================================================
 
 #[yare::parameterized(
     args_namespace   = { "echo ${args.name}" },

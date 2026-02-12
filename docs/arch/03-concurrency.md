@@ -13,9 +13,8 @@ OS Threads
 ──────────────────────────────────────────────────────────
   tokio workers       N (= CPU cores, default)
   tokio blocking      transient (checkpoint wait, desktop notify)
-  notify crate        1 shared (kqueue/inotify internal)
 ──────────────────────────────────────────────────────────
-  Typical total       N + 1   (+ transient blocking threads)
+  Typical total       N   (+ transient blocking threads)
 ```
 
 ## Task Topology
@@ -41,6 +40,7 @@ daemon process
 ├─ agent watcher task
 ├─ ...
 │
+├─ deferred effect task ─ per-effect background I/O (workspace, agent, session)
 ├─ shell task ────────── fire-and-forget bash execution (per Shell effect)
 ├─ queue poll task ───── fire-and-forget queue list command
 ├─ agent log writer ──── mpsc → append-only log files
@@ -75,15 +75,17 @@ The daemon's core loop in `daemon/src/main.rs` multiplexes five sources with
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The loop processes **one event at a time**. While `process_event()` is
-awaiting, no other branch runs — timers, signals, and subsequent events wait
-until the current event completes.
+The loop processes **one event at a time**. Each `process_event()` iteration
+completes in <10ms because all heavy I/O effects are deferred to background
+tasks (see Effect Execution Model below). Timer resolution stays at the
+configured interval (default 1s).
 
 ## Effect Execution Model
 
 Effects are executed by `executor.execute_all()` in a **sequential for-loop**.
-Each effect in a batch is awaited before the next begins. Effects fall into
-two categories:
+Each effect in a batch is awaited before the next begins. Effects are split
+into **immediate** (executed inline, <10ms) and **deferred** (spawned as
+background `tokio::spawn` tasks):
 
 ```diagram
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -94,48 +96,50 @@ two categories:
 │  }                                                                       │
 │                                                                          │
 │  ┌─────────────────────────────┐  ┌────────────────────────────────────┐ │
-│  │  Inline (awaited)           │  │  Background (spawned)              │ │
+│  │  Immediate (<10ms)          │  │  Deferred (tokio::spawn)           │ │
 │  │                             │  │                                    │ │
-│  │  Emit          ~µs          │  │  Shell           tokio::spawn      │ │
-│  │  SetTimer      ~µs          │  │  PollQueue       tokio::spawn      │ │
-│  │  CancelTimer   ~µs          │  │  TakeQueueItem   tokio::spawn      │ │
-│  │  Notify        ~1ms  [1]    │  │  CreateWorkspace tokio::spawn      │ │
-│  │                             │  │  DeleteWorkspace tokio::spawn      │ │
-│  │  [1] fire-and-forget via    │  │  SpawnAgent      tokio::spawn      │ │
-│  │      spawn_blocking         │  │  SendToAgent     tokio::spawn  [2] │ │
-│  │                             │  │  KillAgent       tokio::spawn  [2] │ │
-│  └─────────────────────────────┘  │  SendToSession   tokio::spawn  [2] │ │
-│                                   │  KillSession     tokio::spawn  [2] │ │
+│  │  Emit          ~µs          │  │  CreateWorkspace  → WorkspaceReady │ │
+│  │  SetTimer      ~µs          │  │  DeleteWorkspace  → WorkspaceDeleted│ │
+│  │  CancelTimer   ~µs          │  │  SpawnAgent       → AgentSpawned   │ │
+│  │  Notify        ~1ms  [1]    │  │  SendToAgent      (fire-and-forget)│ │
+│  │                             │  │  KillAgent        (fire-and-forget)│ │
+│  │  [1] fire-and-forget via    │  │                                    │ │
+│  │      spawn_blocking         │  │                                    │ │
+│  │                             │  │  Shell            → ShellExited    │ │
+│  └─────────────────────────────┘  │  PollQueue        → WorkerPolled│
+│                                   │  TakeQueueItem    → WorkerTook│
 │                                   │                                    │ │
 │                                   │  Result events emitted via         │ │
 │                                   │  mpsc → EventBus on completion     │ │
-│                                   │                                    │ │
-│                                   │  [2] fire-and-forget (no result    │ │
-│                                   │      event; errors logged)         │ │
 │                                   └────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-All subprocess and I/O effects are spawned as background tasks. Inline effects
-complete in microseconds and never block the event loop. A `CommandRun` event
-that creates a workspace and spawns an agent now returns in ~µs, with the
-actual work proceeding asynchronously:
+Deferred effects return immediately after spawning the background task. The
+event loop never blocks on I/O-heavy operations like git worktree creation,
+agent spawning, or agent communication.
+
+Sequential dependencies are handled via event-driven chaining. A `CommandRun`
+event that creates a workspace and spawns an agent progresses through multiple
+event iterations, each completing in <10ms:
 
 ```diagram
 process_event(CommandRun)
-  └─ handle_command()
-       ├─ load runbook from disk               ~100ms   (blocking file I/O)
-       ├─ evaluate workspace.ref expression     ~50-500ms (bash subprocess)
-       ├─ CreateWorkspace effect                ~µs (spawns background task)
-       ├─ SetTimer effect                       ~µs
-       └─ Notify effect                         ~1ms
+  └─ handler emits JobCreated + dispatches CreateWorkspace (deferred)
+     └─ returns immediately
 
-Background: CreateWorkspace task      ~1-30s   (git worktree add)
-  ──► emits WorkspaceReady → SpawnAgent task   ~1-9s    (tmux + prompt polls)
-  ──► emits SessionCreated → timer setup       ~µs
+process_event(WorkspaceReady)        ◄── emitted by background task
+  └─ handler calls start_step() → dispatches SpawnAgent (deferred)
+     └─ returns immediately
+
+process_event(AgentSpawned)          ◄── emitted by background task
+  └─ handler sets up monitoring, timers
+     └─ returns immediately
 ```
 
-The event loop remains responsive throughout.
+The total wall-clock time for workspace creation + agent spawn is the same,
+but the event loop remains responsive throughout — timers fire, other events
+process, and IPC queries respond without delay.
 
 ## Listener and IPC
 
@@ -159,14 +163,18 @@ Handlers fall into three categories by blocking behavior:
 — write to WAL and return. Never contend with the engine.
 
 **State-reading** (blocks on `state.lock()`):
-All `Query::*` variants, `JobCancel`, `JobResume`, `SessionSend`,
+All `Query::*` variants, `JobCancel`, `JobResume`, `AgentSend`,
 `DecisionResolve` — acquire the shared `Mutex<MaterializedState>`. Blocked
 whenever `process_event()` holds the lock.
 
-**Subprocess-calling** (blocks on external process):
-`SessionKill`, `PeekSession`, `AgentSend`, `AgentResume`, `WorkspacePrune`
-— run tmux or git subprocesses. Can block for seconds even when the engine
-is idle.
+**Subprocess-calling** (blocks on external process, with timeouts):
+`AgentSend`, `AgentResume`, `WorkspacePrune`
+— run agent or git subprocesses. Each has a purpose-specific timeout:
+
+| Handler | Timeout | Operation |
+|---------|---------|-----------|
+| `AgentResume` | 5s per agent | agent process kills |
+| `WorkspacePrune` | 30s per workspace | git worktree operations |
 
 ## Synchronization Primitives
 
@@ -183,13 +191,12 @@ Runtime.agent_owners                Mutex<HashMap<..>>        No
 Runtime.runbook_cache               Mutex<HashMap<..>>        No
 Runtime.worker_states               Mutex<HashMap<..>>        No
 Runtime.cron_states                 Mutex<HashMap<..>>        No
-ClaudeAgentAdapter.agents           Arc<Mutex<HashMap<..>>>   No
+LocalAdapter.agents             Arc<Mutex<HashMap<..>>>   No
 Vec<Breadcrumb> (orphans)           Arc<Mutex<Vec<..>>>       No
 ```
 
 Locks are always acquired in scoped blocks and released before any `.await`.
-No nested locking occurs. The parking_lot reentrancy test in
-`lifecycle_tests.rs` validates this discipline.
+No nested locking occurs.
 
 **Channels:**
 
@@ -201,7 +208,6 @@ EventBus → EventReader              tokio::sync::mpsc     1          wake sign
 Agent log entries                   tokio::sync::mpsc     256        log job
 Watcher shutdown                    tokio::sync::oneshot  —          per-agent
 Daemon shutdown                     tokio::sync::Notify   —          broadcast
-Watcher file events                 tokio::sync::mpsc     32         per-agent
 CLI output streaming                tokio::sync::mpsc     16         CLI display
 ```
 
@@ -216,9 +222,7 @@ All other blocking file I/O runs directly on tokio worker threads:
 
 | Location | Operation |
 |----------|-----------|
-| `agent/claude.rs` `prepare_workspace()` | `fs::create_dir_all`, `fs::copy` |
-| `agent/claude.rs` `session_log_size()` | `tokio::fs::metadata` (async) |
-| `agent/watcher.rs` `parse_session_log()` | `File::open`, `BufReader::lines` |
+| `agent/coop/spawn.rs` `prepare_workspace()` | `fs::create_dir_all`, `fs::write` |
 | `listener/query.rs` (multiple handlers) | `fs::read_to_string` for logs |
 | `storage/snapshot.rs` `save()` | `File::create`, `serde_json::to_writer`, `sync_all` |
 | `storage/wal.rs` `flush()` | `write_all`, `sync_all` |
@@ -226,25 +230,24 @@ All other blocking file I/O runs directly on tokio worker threads:
 
 ## Agent Watcher Model
 
-Each running agent gets one tokio task that monitors Claude's JSONL session
-log via the `notify` crate (OS-level file events) with a fallback polling
-loop:
+Each running agent gets a tokio task that monitors agent state via coop's
+WebSocket event bridge. The `LocalAdapter` subscribes to the agent's Unix
+socket at `/ws?subscribe=state` and translates coop state events into engine
+events (`AgentWorking`, `AgentIdle`, `AgentPrompt`, `AgentFailed`, `AgentGone`).
 
 ```diagram
-agent watcher task
+agent watcher task (per agent)
 │
-├─ wait for session log to appear    (polls at OJ_SESSION_POLL_MS, max 30s)
-├─ create notify::RecommendedWatcher (kqueue/inotify, shared thread)
+├─ connect to coop WebSocket (Unix socket)
 │
-└─ select! loop
-     ├─ file_rx.recv()               parse log → emit AgentState event
-     ├─ sleep(OJ_WATCHER_POLL_MS)    liveness check (default 5s)
+└─ event loop
+     ├─ ws_message.recv()            translate coop state → emit Event
+     ├─ liveness poll (periodic)     check agent process health
      └─ shutdown_rx                  oneshot from agent kill
 ```
 
-The `notify` crate runs a single internal thread shared across all watchers.
-File change callbacks use `blocking_send()` to cross the sync-to-async
-boundary.
+Coop monitors the agent process directly and reports exit events with the
+exit code over the WebSocket connection.
 
 ## Known Blocking Paths
 
@@ -262,37 +265,19 @@ milliseconds.
 
 The state lock is **not** held across long `.await` points — it is acquired
 and released in brief scoped blocks (during `apply_event()` in
-`process_event()`, and again at several points within `execute_inner()`).
-Query handlers can interleave between these brief acquisitions.
+`process_event()`). Query handlers can interleave between these brief
+acquisitions. In practice, lock contention is low.
 
-In practice, lock contention is low: the real issue is that subprocess-calling
-IPC handlers (`PeekSession`, `WorkspacePrune`, `AgentResume`) block their
-connection task on external process I/O for seconds, with no timeout.
+### Subprocess-calling IPC handlers
 
-### Cascading event chains
-
-A single `CommandRun` produces result events (`WorkspaceReady`,
-`SessionCreated`) that feed back through the WAL. Each result event triggers
-another `process_event()` iteration. Because all I/O effects are deferred,
-each iteration completes in microseconds:
-
-```diagram
-CommandRun ─► CreateWorkspace (spawned) ─► returns ~µs
-WorkspaceReady ─► SpawnAgent (spawned) ─► returns ~µs
-SessionCreated ─► SetTimer (~µs)
-```
-
-The actual work (git worktree, tmux spawn) runs concurrently in background
-tasks. The event loop remains available for timers and other events throughout.
-
-### Timer resolution
-
-With all I/O effects deferred, the `tokio::select!` timer branch fires at
-the configured interval (default 1s) without degradation.
+IPC handlers that call subprocesses (`WorkspacePrune`,
+`AgentResume`) block their connection task on external process I/O. Each has
+a purpose-specific timeout to bound the blocking duration (see Listener and
+IPC section above).
 
 ## See Also
 
 - [Daemon](01-daemon.md) - Process architecture, lifecycle, IPC protocol
 - [Effects](02-effects.md) - Effect types and execution
 - [Storage](04-storage.md) - WAL and snapshot persistence
-- [Adapters](05-adapters.md) - Integration adapters
+- [Agents](05-agents.md) - Agent adapter and coop integration

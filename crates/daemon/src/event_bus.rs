@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 /// This provides durability with group commit for performance.
 #[derive(Clone)]
 pub(crate) struct EventBus {
-    wal: Arc<Mutex<Wal>>,
+    pub(crate) wal: Arc<Mutex<Wal>>,
     wake_tx: mpsc::Sender<()>,
 }
 
@@ -28,7 +28,7 @@ pub(crate) struct EventBus {
 ///
 /// Used by the engine loop to process events from WAL.
 pub(crate) struct EventReader {
-    wal: Arc<Mutex<Wal>>,
+    pub(crate) wal: Arc<Mutex<Wal>>,
     wake_rx: mpsc::Receiver<()>,
 }
 
@@ -40,13 +40,7 @@ impl EventBus {
         let wal = Arc::new(Mutex::new(wal));
         let (wake_tx, wake_rx) = mpsc::channel(1);
 
-        (
-            Self {
-                wal: Arc::clone(&wal),
-                wake_tx,
-            },
-            EventReader { wal, wake_rx },
-        )
+        (Self { wal: Arc::clone(&wal), wake_tx }, EventReader { wal, wake_rx })
     }
 
     /// Append event to WAL (buffered, not yet durable).
@@ -60,26 +54,6 @@ impl EventBus {
         // Non-blocking wake - if channel is full, engine is already awake
         let _ = self.wake_tx.try_send(());
         Ok(seq)
-    }
-
-    /// Flush WAL to disk with single fsync.
-    ///
-    /// This is the durability point for all buffered events.
-    pub fn flush(&self) -> Result<(), WalError> {
-        let mut wal = self.wal.lock();
-        wal.flush()
-    }
-
-    /// Check if WAL needs flushing (interval elapsed or buffer full).
-    pub fn needs_flush(&self) -> bool {
-        let wal = self.wal.lock();
-        wal.needs_flush()
-    }
-
-    /// Return the last processed WAL sequence number.
-    pub fn processed_seq(&self) -> u64 {
-        let wal = self.wal.lock();
-        wal.processed_seq()
     }
 }
 
@@ -103,19 +77,5 @@ impl EventReader {
                 return Ok(None);
             }
         }
-    }
-
-    /// Mark an entry as processed.
-    ///
-    /// This updates the in-memory processed_seq. Actual persistence
-    /// happens via snapshots.
-    pub fn mark_processed(&self, seq: u64) {
-        let mut wal = self.wal.lock();
-        wal.mark_processed(seq);
-    }
-
-    /// Get a clone of the WAL Arc for sharing.
-    pub fn wal(&self) -> Arc<Mutex<Wal>> {
-        Arc::clone(&self.wal)
     }
 }

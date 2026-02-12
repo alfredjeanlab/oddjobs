@@ -11,101 +11,75 @@ use super::MaterializedState;
 pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
     match event {
         Event::WorkerStarted {
-            worker_name,
-            project_root,
+            worker,
+            project_path,
             runbook_hash,
-            queue_name,
+            queue,
             concurrency,
-            namespace,
+            project,
         } => {
-            let key = scoped_name(namespace, worker_name);
-            // Preserve active_job_ids and item_job_map from before restart
-            let (existing_job_ids, existing_item_job_map) = state
+            let key = scoped_name(project, worker);
+            // Preserve active_job_ids and item_owners from before restart
+            let (existing_job_ids, existing_item_owners) = state
                 .workers
                 .get(&key)
-                .map(|w| (w.active_job_ids.clone(), w.item_job_map.clone()))
+                .map(|w| (w.active.clone(), w.owners.clone()))
                 .unwrap_or_default();
 
-            if !namespace.is_empty() {
-                state
-                    .project_roots
-                    .insert(namespace.clone(), project_root.clone());
+            if !project.is_empty() {
+                state.project_paths.insert(project.clone(), project_path.clone());
             }
             state.workers.insert(
                 key,
                 WorkerRecord {
-                    name: worker_name.clone(),
-                    namespace: namespace.clone(),
-                    project_root: project_root.clone(),
+                    name: worker.clone(),
+                    project: project.clone(),
+                    project_path: project_path.clone(),
                     runbook_hash: runbook_hash.clone(),
                     status: "running".to_string(),
-                    active_job_ids: existing_job_ids,
-                    queue_name: queue_name.clone(),
+                    active: existing_job_ids,
+                    queue: queue.clone(),
                     concurrency: *concurrency,
-                    item_job_map: existing_item_job_map,
+                    owners: existing_item_owners,
                 },
             );
         }
 
-        Event::WorkerItemDispatched {
-            worker_name,
-            item_id,
-            job_id,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, worker_name);
+        Event::WorkerDispatched { worker, item_id, owner, project } => {
+            let key = scoped_name(project, worker);
             if let Some(record) = state.workers.get_mut(&key) {
-                let pid = job_id.to_string();
-                if !record.active_job_ids.contains(&pid) {
-                    record.active_job_ids.push(pid.clone());
+                let pid = owner.to_string();
+                if !record.active.contains(&pid) {
+                    record.active.push(pid.clone());
                 }
-                record.item_job_map.insert(pid, item_id.clone());
+                record.owners.insert(pid, item_id.clone());
             }
         }
 
-        Event::WorkerStopped {
-            worker_name,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, worker_name);
+        Event::WorkerStopped { worker, project } => {
+            let key = scoped_name(project, worker);
             if let Some(record) = state.workers.get_mut(&key) {
                 record.status = "stopped".to_string();
             }
         }
 
-        Event::WorkerResized {
-            worker_name,
-            concurrency,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, worker_name);
+        Event::WorkerResized { worker, concurrency, project } => {
+            let key = scoped_name(project, worker);
             if let Some(record) = state.workers.get_mut(&key) {
                 record.concurrency = *concurrency;
             }
         }
 
-        Event::WorkerDeleted {
-            worker_name,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, worker_name);
+        Event::WorkerDeleted { worker, project } => {
+            let key = scoped_name(project, worker);
             state.workers.remove(&key);
         }
 
-        Event::CronStarted {
-            cron_name,
-            project_root,
-            runbook_hash,
-            interval,
-            run_target,
-            namespace,
-        } => {
-            if !namespace.is_empty() {
-                state
-                    .project_roots
-                    .insert(namespace.clone(), project_root.clone());
+        Event::CronStarted { cron, project, project_path, runbook_hash, interval, target } => {
+            if !project.is_empty() {
+                state.project_paths.insert(project.clone(), project_path.clone());
             }
-            let key = scoped_name(namespace, cron_name);
+            let key = scoped_name(project, cron);
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -115,35 +89,28 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             state.crons.insert(
                 key,
                 CronRecord {
-                    name: cron_name.clone(),
-                    namespace: namespace.clone(),
-                    project_root: project_root.clone(),
+                    name: cron.clone(),
+                    project: project.clone(),
+                    project_path: project_path.clone(),
                     runbook_hash: runbook_hash.clone(),
                     status: "running".to_string(),
                     interval: interval.clone(),
-                    run_target: run_target.clone(),
+                    target: target.clone(),
                     started_at_ms: now_ms,
                     last_fired_at_ms,
                 },
             );
         }
 
-        Event::CronStopped {
-            cron_name,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, cron_name);
+        Event::CronStopped { cron, project } => {
+            let key = scoped_name(project, cron);
             if let Some(record) = state.crons.get_mut(&key) {
                 record.status = "stopped".to_string();
             }
         }
 
-        Event::CronFired {
-            cron_name,
-            namespace,
-            ..
-        } => {
-            let key = scoped_name(namespace, cron_name);
+        Event::CronFired { cron, project, .. } => {
+            let key = scoped_name(project, cron);
             if let Some(record) = state.crons.get_mut(&key) {
                 let now_ms = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -153,11 +120,8 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             }
         }
 
-        Event::CronDeleted {
-            cron_name,
-            namespace,
-        } => {
-            let key = scoped_name(namespace, cron_name);
+        Event::CronDeleted { cron, project } => {
+            let key = scoped_name(project, cron);
             state.crons.remove(&key);
         }
 

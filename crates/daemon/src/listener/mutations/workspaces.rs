@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use oj_adapters::subprocess::{run_with_timeout, WORKSPACE_PRUNE_TIMEOUT};
 use oj_core::{Event, WorkspaceId};
@@ -27,22 +28,13 @@ pub(crate) async fn handle_workspace_drop(
 
         if let Some(id) = id {
             // Find workspace by exact match or prefix
-            let matches: Vec<_> = state
-                .workspaces
-                .iter()
-                .filter(|(k, _)| *k == id || k.starts_with(id))
-                .collect();
+            let matches: Vec<_> =
+                state.workspaces.iter().filter(|(k, _)| *k == id || k.starts_with(id)).collect();
 
             if matches.len() == 1 {
-                vec![(
-                    matches[0].0.clone(),
-                    matches[0].1.path.clone(),
-                    matches[0].1.branch.clone(),
-                )]
+                vec![(matches[0].0.clone(), matches[0].1.path.clone(), matches[0].1.branch.clone())]
             } else if matches.is_empty() {
-                return Ok(Response::Error {
-                    message: format!("workspace not found: {}", id),
-                });
+                return Ok(Response::Error { message: format!("workspace not found: {}", id) });
             } else {
                 return Ok(Response::Error {
                     message: format!("ambiguous workspace ID '{}': {} matches", id, matches.len()),
@@ -79,12 +71,7 @@ pub(crate) async fn handle_workspace_drop(
 
     // Emit delete events for each workspace
     for (id, _path, _branch) in workspaces_to_drop {
-        emit(
-            &ctx.event_bus,
-            Event::WorkspaceDrop {
-                id: WorkspaceId::new(id),
-            },
-        )?;
+        emit(&ctx.event_bus, Event::WorkspaceDrop { id: WorkspaceId::new(id) })?;
     }
 
     Ok(Response::WorkspacesDropped { dropped })
@@ -103,10 +90,11 @@ pub(crate) async fn handle_workspace_drop(
 pub(crate) async fn handle_workspace_prune(
     ctx: &ListenCtx,
     flags: &PruneFlags<'_>,
+    cancel: &CancellationToken,
 ) -> Result<Response, ConnectionError> {
     let state_dir = crate::env::state_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let workspaces_dir = state_dir.join("workspaces");
-    workspace_prune_inner(&ctx.state, &ctx.event_bus, flags, &workspaces_dir).await
+    workspace_prune_inner(&ctx.state, &ctx.event_bus, flags, &workspaces_dir, cancel).await
 }
 
 /// Inner implementation of workspace prune, parameterized by workspaces directory
@@ -116,30 +104,29 @@ pub(crate) async fn workspace_prune_inner(
     event_bus: &EventBus,
     flags: &PruneFlags<'_>,
     workspaces_dir: &std::path::Path,
+    cancel: &CancellationToken,
 ) -> Result<Response, ConnectionError> {
-    // When filtering by namespace, build a set of workspace IDs that match.
+    // When filtering by project, build a set of workspace IDs that match.
     // Namespace is derived from the workspace's owner (job or worker).
-    // Workspaces with no determinable namespace (no owner, or owner not in state)
+    // Workspaces with no determinable project (no owner, or owner not in state)
     // are included when the owner is missing (truly orphaned).
-    let namespace_filter: Option<std::collections::HashSet<String>> = flags.namespace.map(|ns| {
+    let namespace_filter: Option<std::collections::HashSet<String>> = flags.project.map(|ns| {
         let state_guard = state.lock();
         state_guard
             .workspaces
             .iter()
             .filter(|(_, w)| {
-                let workspace_ns = w.owner.as_ref().and_then(|owner| match owner {
-                    oj_core::OwnerId::Job(job_id) => state_guard
-                        .jobs
-                        .get(job_id.as_str())
-                        .map(|p| p.namespace.as_str()),
-                    oj_core::OwnerId::AgentRun(ar_id) => state_guard
-                        .agent_runs
-                        .get(ar_id.as_str())
-                        .map(|ar| ar.namespace.as_str()),
-                });
-                // Include if namespace matches OR if owner is not resolvable (orphaned)
-                match workspace_ns {
-                    Some(workspace_ns) => workspace_ns == ns,
+                let workspace_project = match &w.owner {
+                    oj_core::OwnerId::Job(job_id) => {
+                        state_guard.jobs.get(job_id.as_str()).map(|p| p.project.as_str())
+                    }
+                    oj_core::OwnerId::Crew(run_id) => {
+                        state_guard.crew.get(run_id.as_str()).map(|run| run.project.as_str())
+                    }
+                };
+                // Include if project matches OR if owner is not resolvable (orphaned)
+                match workspace_project {
+                    Some(p) => p == ns,
                     None => true,
                 }
             })
@@ -153,14 +140,11 @@ pub(crate) async fn workspace_prune_inner(
         state_guard
             .workspaces
             .iter()
-            .filter(|(_, ws)| {
-                ws.owner.as_ref().is_some_and(|owner| match owner {
-                    oj_core::OwnerId::Job(job_id) => state_guard
-                        .jobs
-                        .get(job_id.as_str())
-                        .is_some_and(|j| j.is_suspended()),
-                    _ => false,
-                })
+            .filter(|(_, ws)| match &ws.owner {
+                oj_core::OwnerId::Job(job_id) => {
+                    state_guard.jobs.get(job_id.as_str()).is_some_and(|j| j.is_suspended())
+                }
+                _ => false,
             })
             .map(|(id, _)| id.clone())
             .collect()
@@ -174,10 +158,7 @@ pub(crate) async fn workspace_prune_inner(
         Ok(entries) => entries,
         Err(_) => {
             // Directory doesn't exist or isn't readable — nothing to prune
-            return Ok(Response::WorkspacesPruned {
-                pruned: Vec::new(),
-                skipped: 0,
-            });
+            return Ok(Response::WorkspacesPruned { pruned: Vec::new(), skipped: 0 });
         }
     };
 
@@ -193,7 +174,7 @@ pub(crate) async fn workspace_prune_inner(
 
         let id = entry.file_name().to_string_lossy().to_string();
 
-        // Filter by namespace when --project is specified
+        // Filter by project when --project is specified
         if let Some(ref allowed_ids) = namespace_filter {
             if !allowed_ids.contains(&id) {
                 continue;
@@ -220,11 +201,7 @@ pub(crate) async fn workspace_prune_inner(
             }
         }
 
-        to_prune.push(WorkspaceEntry {
-            id,
-            path,
-            branch: None,
-        });
+        to_prune.push(WorkspaceEntry { id, path, branch: None });
     }
 
     // Phase 2: Find orphaned state entries (in daemon state but directory missing)
@@ -241,7 +218,7 @@ pub(crate) async fn workspace_prune_inner(
                 if fs_pruned_ids.contains(id.as_str()) {
                     return false;
                 }
-                // Apply namespace filter
+                // Apply project filter
                 if let Some(ref allowed_ids) = namespace_filter {
                     if !allowed_ids.contains(id.as_str()) {
                         return false;
@@ -250,25 +227,24 @@ pub(crate) async fn workspace_prune_inner(
                 // Include if the directory no longer exists
                 !ws.path.is_dir()
             })
-            .map(|(id, ws)| WorkspaceEntry {
-                id: id.clone(),
-                path: ws.path.clone(),
-                branch: ws.branch.clone(),
-            })
+            .map(|(_, ws)| WorkspaceEntry::from(ws))
             .collect()
     };
     to_prune.extend(orphaned);
 
     if !flags.dry_run {
         for ws in &to_prune {
+            if cancel.is_cancelled() {
+                return Ok(Response::Error {
+                    message: "cancelled: client disconnected".to_string(),
+                });
+            }
+
             // If the directory exists, clean it up
             if ws.path.is_dir() {
                 // If the directory has a .git file (not directory), it's a git worktree
                 let dot_git = ws.path.join(".git");
-                if tokio::fs::symlink_metadata(&dot_git)
-                    .await
-                    .map(|m| m.is_file())
-                    .unwrap_or(false)
+                if tokio::fs::symlink_metadata(&dot_git).await.map(|m| m.is_file()).unwrap_or(false)
                 {
                     // Best-effort git worktree remove (ignore failures).
                     // Run from within the worktree so git can locate the parent repo.
@@ -287,19 +263,11 @@ pub(crate) async fn workspace_prune_inner(
             }
 
             // Emit WorkspaceDeleted to remove from daemon state
-            emit(
-                event_bus,
-                Event::WorkspaceDeleted {
-                    id: WorkspaceId::new(&ws.id),
-                },
-            )?;
+            emit(event_bus, Event::WorkspaceDeleted { id: WorkspaceId::new(&ws.id) })?;
         }
     }
 
-    Ok(Response::WorkspacesPruned {
-        pruned: to_prune,
-        skipped,
-    })
+    Ok(Response::WorkspacesPruned { pruned: to_prune, skipped })
 }
 
 #[cfg(test)]

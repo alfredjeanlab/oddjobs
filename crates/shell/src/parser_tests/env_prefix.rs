@@ -8,10 +8,6 @@ use crate::ast::WordPart;
 use crate::parser::Parser;
 use crate::token::Span;
 
-// =============================================================================
-// Basic Prefix Parsing
-// =============================================================================
-
 #[test]
 fn test_single_env_prefix() {
     let result = Parser::parse("FOO=bar echo hello").unwrap();
@@ -68,15 +64,8 @@ fn test_path_value_prefix() {
 
     assert_eq!(cmd.env.len(), 1);
     assert_eq!(cmd.env[0].name, "PATH");
-    assert_eq!(
-        cmd.env[0].value.parts,
-        vec![WordPart::literal("/usr/bin:/bin")]
-    );
+    assert_eq!(cmd.env[0].value.parts, vec![WordPart::literal("/usr/bin:/bin")]);
 }
-
-// =============================================================================
-// Prefix with Job
-// =============================================================================
 
 #[test]
 fn test_env_prefix_in_job() {
@@ -108,10 +97,6 @@ fn test_env_prefix_second_cmd_job() {
     assert_eq!(job.commands[1].env[0].name, "FOO");
     assert_eq!(cmd_name(&job.commands[1]), "cmd2");
 }
-
-// =============================================================================
-// Prefix with Logical Operators
-// =============================================================================
 
 #[test]
 fn test_env_prefix_with_and() {
@@ -148,10 +133,6 @@ fn test_env_prefix_with_semicolon() {
     assert_eq!(cmd_name(cmd2), "cmd2");
 }
 
-// =============================================================================
-// Error Cases
-// =============================================================================
-
 #[test]
 fn test_assignment_only() {
     // Standalone assignments are allowed (bash compatibility)
@@ -174,10 +155,6 @@ fn test_multiple_assignment_only() {
     assert_eq!(cmd.env[1].name, "B");
     assert!(cmd.name.parts.is_empty());
 }
-
-// =============================================================================
-// Span Accuracy
-// =============================================================================
 
 #[test]
 fn test_env_prefix_assignment_span() {
@@ -206,10 +183,6 @@ fn test_multiple_prefix_spans() {
     assert_eq!(cmd.span, Span::new(0, 11));
 }
 
-// =============================================================================
-// Real-World Examples
-// =============================================================================
-
 #[test]
 fn test_env_prefix_real_world_make() {
     let result = Parser::parse("CC=clang CFLAGS=-O2 make build").unwrap();
@@ -232,10 +205,7 @@ fn test_env_prefix_real_world_node() {
 
     assert_eq!(cmd.env.len(), 1);
     assert_eq!(cmd.env[0].name, "NODE_ENV");
-    assert_eq!(
-        cmd.env[0].value.parts,
-        vec![WordPart::literal("production")]
-    );
+    assert_eq!(cmd.env[0].value.parts, vec![WordPart::literal("production")]);
     assert_literal(&cmd.name, "npm");
 }
 
@@ -250,10 +220,6 @@ fn test_env_prefix_real_world_debug() {
     assert_literal(&cmd.name, "cargo");
 }
 
-// =============================================================================
-// Value Concatenation (Issue oj-95be21eb)
-// =============================================================================
-
 #[test]
 fn test_env_prefix_value_with_variable() {
     // VAR=hello$world cmd → value should be Word([Lit("hello"), Var("world")])
@@ -266,10 +232,7 @@ fn test_env_prefix_value_with_variable() {
         cmd.env[0].value.parts,
         vec![
             WordPart::literal("hello"),
-            WordPart::Variable {
-                name: "SUFFIX".into(),
-                modifier: None
-            }
+            WordPart::Variable { name: "SUFFIX".into(), modifier: None }
         ]
     );
     assert_literal(&cmd.name, "cmd");
@@ -285,10 +248,7 @@ fn test_env_prefix_value_variable_only() {
     assert_eq!(cmd.env[0].name, "VAR");
     assert_eq!(
         cmd.env[0].value.parts,
-        vec![WordPart::Variable {
-            name: "OTHER".into(),
-            modifier: None
-        }]
+        vec![WordPart::Variable { name: "OTHER".into(), modifier: None }]
     );
 }
 
@@ -302,10 +262,7 @@ fn test_env_prefix_value_with_command_substitution() {
     assert_eq!(cmd.env[0].name, "VAR");
     assert_eq!(cmd.env[0].value.parts.len(), 2);
     assert_eq!(cmd.env[0].value.parts[0], WordPart::literal("prefix"));
-    assert!(matches!(
-        &cmd.env[0].value.parts[1],
-        WordPart::CommandSubstitution { .. }
-    ));
+    assert!(matches!(&cmd.env[0].value.parts[1], WordPart::CommandSubstitution { .. }));
 }
 
 #[test]
@@ -319,10 +276,7 @@ fn test_env_prefix_value_path_with_variable() {
     assert_eq!(
         cmd.env[0].value.parts,
         vec![
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: None },
             WordPart::literal("/bin:/usr/bin")
         ]
     );

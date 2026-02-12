@@ -12,9 +12,7 @@ fn append_creates_agent_directory_and_file() {
 
     let entries = vec![AgentLogEntry {
         timestamp: "2026-01-30T08:17:05Z".to_string(),
-        kind: EntryKind::FileRead {
-            path: "/src/main.rs".to_string(),
-        },
+        kind: EntryKind::FileRead { path: "/src/main.rs".to_string() },
     }];
 
     // agent_id is a UUID
@@ -22,9 +20,7 @@ fn append_creates_agent_directory_and_file() {
     logger.append_entries(agent_id, &entries);
 
     // Structure: agent/{agent_id}.log
-    let log_path = dir
-        .path()
-        .join("agent/8cf5e1df-a434-4029-a369-c95af9c374c9.log");
+    let log_path = dir.path().join("agent/8cf5e1df-a434-4029-a369-c95af9c374c9.log");
     assert!(log_path.exists());
 
     let content = std::fs::read_to_string(&log_path).unwrap();
@@ -39,24 +35,15 @@ fn append_multiple_entries() {
     let entries = vec![
         AgentLogEntry {
             timestamp: "2026-01-30T08:17:05Z".to_string(),
-            kind: EntryKind::FileRead {
-                path: "/src/main.rs".to_string(),
-            },
+            kind: EntryKind::FileRead { path: "/src/main.rs".to_string() },
         },
         AgentLogEntry {
             timestamp: "2026-01-30T08:17:12Z".to_string(),
-            kind: EntryKind::FileWrite {
-                path: "/src/lib.rs".to_string(),
-                new: true,
-                lines: 15,
-            },
+            kind: EntryKind::FileWrite { path: "/src/lib.rs".to_string(), new: true, lines: 15 },
         },
         AgentLogEntry {
             timestamp: "2026-01-30T08:17:30Z".to_string(),
-            kind: EntryKind::BashCommand {
-                command: "cargo build".to_string(),
-                exit_code: Some(0),
-            },
+            kind: EntryKind::BashCommand { command: "cargo build".to_string(), exit_code: Some(0) },
         },
     ];
 
@@ -67,10 +54,7 @@ fn append_multiple_entries() {
     let lines: Vec<&str> = content.lines().collect();
     assert_eq!(lines.len(), 3);
     assert_eq!(lines[0], "2026-01-30T08:17:05Z read: /src/main.rs");
-    assert_eq!(
-        lines[1],
-        "2026-01-30T08:17:12Z wrote: /src/lib.rs (new, 15 lines)"
-    );
+    assert_eq!(lines[1], "2026-01-30T08:17:12Z wrote: /src/lib.rs (new, 15 lines)");
     assert_eq!(lines[2], "2026-01-30T08:17:30Z bash: cargo build (exit 0)");
 }
 
@@ -83,17 +67,13 @@ fn append_is_incremental() {
 
     let entries1 = vec![AgentLogEntry {
         timestamp: "2026-01-30T08:17:05Z".to_string(),
-        kind: EntryKind::FileRead {
-            path: "/a.rs".to_string(),
-        },
+        kind: EntryKind::FileRead { path: "/a.rs".to_string() },
     }];
     logger.append_entries(agent_id, &entries1);
 
     let entries2 = vec![AgentLogEntry {
         timestamp: "2026-01-30T08:17:10Z".to_string(),
-        kind: EntryKind::FileRead {
-            path: "/b.rs".to_string(),
-        },
+        kind: EntryKind::FileRead { path: "/b.rs".to_string() },
     }];
     logger.append_entries(agent_id, &entries2);
 
@@ -112,14 +92,4 @@ fn append_empty_entries_is_noop() {
 
     // Directory should not be created for empty entries
     assert!(!dir.path().join("agent").exists());
-}
-
-#[test]
-fn log_path_returns_expected_path() {
-    let logger = AgentLogger::new(PathBuf::from("/state/logs"));
-    // agent_id is a UUID
-    assert_eq!(
-        logger.log_path("8cf5e1df-a434-4029-a369-c95af9c374c9"),
-        PathBuf::from("/state/logs/agent/8cf5e1df-a434-4029-a369-c95af9c374c9.log")
-    );
 }

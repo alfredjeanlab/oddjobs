@@ -3,21 +3,100 @@
 
 //! Cron request handlers.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use oj_core::{Event, IdGen, JobId, OwnerId, RunTarget, UuidIdGen};
+use oj_storage::MaterializedState;
 use parking_lot::Mutex;
 
-use oj_core::{Event, IdGen, JobId, UuidIdGen};
-use oj_storage::MaterializedState;
-
-use crate::protocol::Response;
-
-use super::mutations::emit;
+use super::lifecycle::{self, Stoppable};
+use super::mutations::{emit, PruneFlags};
 use super::suggest;
 use super::workers::hash_and_emit_runbook;
-use super::ConnectionError;
-use super::ListenCtx;
+use super::{ConnectionError, ListenCtx};
+use crate::protocol::{CronEntry, Response};
+
+pub(super) struct Cron;
+
+impl Stoppable for Cron {
+    const TYPE_NAME: &'static str = "cron";
+    const APPLY_STOP: bool = true;
+    fn exists(state: &MaterializedState, scoped_name: &str) -> bool {
+        state.crons.contains_key(scoped_name)
+    }
+    fn running_names(state: &MaterializedState, project: &str) -> Vec<String> {
+        state
+            .crons
+            .values()
+            .filter(|c| c.project == project && c.status == "running")
+            .map(|c| c.name.clone())
+            .collect()
+    }
+    fn stopped_event(name: &str, project: &str) -> Event {
+        Event::CronStopped { cron: name.to_string(), project: project.to_string() }
+    }
+}
+
+/// Validated cron definition with resolved run target.
+struct ValidatedCron {
+    cron_def: oj_runbook::CronDef,
+    target: RunTarget,
+    project_path: PathBuf,
+    runbook_hash: String,
+}
+
+/// Load a cron's runbook, validate the cron definition, and return validated results.
+fn load_and_validate_cron(
+    ctx: &ListenCtx,
+    project_path: &Path,
+    project: &str,
+    cron_name: &str,
+    suggest_command: &str,
+) -> Result<ValidatedCron, Response> {
+    let (runbook, effective_root) = super::load_runbook_with_fallback(
+        project_path,
+        project,
+        &ctx.state,
+        |root| load_runbook_for_cron(root, cron_name),
+        || suggest_for_cron(Some(project_path), cron_name, project, suggest_command, &ctx.state),
+    )?;
+    let cron_def = runbook
+        .get_cron(cron_name)
+        .ok_or_else(|| Response::Error { message: format!("unknown cron: {}", cron_name) })?
+        .clone();
+    let target = validate_cron_run_target(&runbook, cron_name, &cron_def)?;
+    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)
+        .map_err(|_| Response::Error { message: "WAL write error".to_string() })?;
+    Ok(ValidatedCron { cron_def, target, project_path: effective_root, runbook_hash })
+}
+
+/// Validate cron run target references.
+fn validate_cron_run_target(
+    runbook: &oj_runbook::Runbook,
+    cron_name: &str,
+    cron_def: &oj_runbook::CronDef,
+) -> Result<RunTarget, Response> {
+    let target = RunTarget::from(&cron_def.run);
+    match &cron_def.run {
+        oj_runbook::RunDirective::Job { job } => {
+            if runbook.get_job(job).is_none() {
+                return Err(Response::Error {
+                    message: format!("cron '{}' references unknown job '{}'", cron_name, job),
+                });
+            }
+        }
+        oj_runbook::RunDirective::Agent { agent, .. } => {
+            if runbook.get_agent(agent).is_none() {
+                return Err(Response::Error {
+                    message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
+                });
+            }
+        }
+        oj_runbook::RunDirective::Shell(_) => {}
+    }
+    Ok(target)
+}
 
 /// Handle a CronStart request.
 ///
@@ -26,371 +105,176 @@ use super::ListenCtx;
 /// serve to update the interval if the runbook changed.
 pub(super) fn handle_cron_start(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    cron_name: &str,
+    project_path: &Path,
+    project: &str,
+    cron: &str,
     all: bool,
 ) -> Result<Response, ConnectionError> {
     if all {
-        return handle_cron_start_all(ctx, project_root, namespace);
+        let (started, skipped) = lifecycle::handle_start_all(
+            ctx,
+            project_path,
+            project,
+            |dir| {
+                oj_runbook::collect_all_crons(dir)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect()
+            },
+            |name| handle_cron_start(ctx, project_path, project, name, false),
+            |resp| match resp {
+                Response::CronStarted { cron } => Some(cron.clone()),
+                _ => None,
+            },
+        )?;
+        return Ok(Response::CronsStarted { started, skipped });
     }
 
-    // Load runbook to validate cron exists.
-    let (runbook, effective_root) = match super::load_runbook_with_fallback(
-        project_root,
-        namespace,
-        &ctx.state,
-        |root| load_runbook_for_cron(root, cron_name),
-        || {
-            suggest_for_cron(
-                Some(project_root),
-                cron_name,
-                namespace,
-                "oj cron start",
-                &ctx.state,
-            )
-        },
-    ) {
-        Ok(result) => result,
+    let v = match load_and_validate_cron(ctx, project_path, project, cron, "oj cron start") {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
-    let project_root = &effective_root;
 
-    // Validate cron definition exists
-    let cron_def = match runbook.get_cron(cron_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown cron: {}", cron_name),
-            })
-        }
-    };
-
-    // Validate run target references
-    let run_target = match &cron_def.run {
-        oj_runbook::RunDirective::Job { job } => {
-            if runbook.get_job(job).is_none() {
-                return Ok(Response::Error {
-                    message: format!("cron '{}' references unknown job '{}'", cron_name, job),
-                });
-            }
-            format!("job:{}", job)
-        }
-        oj_runbook::RunDirective::Agent { agent, .. } => {
-            if runbook.get_agent(agent).is_none() {
-                return Ok(Response::Error {
-                    message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
-                });
-            }
-            format!("agent:{}", agent)
-        }
-        oj_runbook::RunDirective::Shell(cmd) => {
-            format!("shell:{}", cmd)
-        }
-    };
-
-    // Hash runbook and emit RunbookLoaded for WAL persistence
-    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
-
-    // Emit CronStarted event
     let event = Event::CronStarted {
-        cron_name: cron_name.to_string(),
-        project_root: project_root.to_path_buf(),
-        runbook_hash,
-        interval: cron_def.interval.clone(),
-        run_target,
-        namespace: namespace.to_string(),
+        cron: cron.to_string(),
+        project_path: v.project_path.clone(),
+        runbook_hash: v.runbook_hash,
+        interval: v.cron_def.interval.clone(),
+        target: v.target,
+        project: project.to_string(),
     };
-
     emit(&ctx.event_bus, event.clone())?;
 
-    // Apply to materialized state before responding so queries see it
-    // immediately. apply_event is idempotent so the second apply when the
-    // main loop processes this event from the WAL is harmless.
     {
         let mut state = ctx.state.lock();
         state.apply_event(&event);
     }
 
-    Ok(Response::CronStarted {
-        cron_name: cron_name.to_string(),
-    })
-}
-
-/// Handle starting all crons defined in runbooks.
-fn handle_cron_start_all(
-    ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-) -> Result<Response, ConnectionError> {
-    let runbook_dir = project_root.join(".oj/runbooks");
-    let names = oj_runbook::collect_all_crons(&runbook_dir)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(name, _)| name);
-
-    let (started, skipped) = super::collect_start_results(
-        names,
-        |name| handle_cron_start(ctx, project_root, namespace, name, false),
-        |resp| match resp {
-            Response::CronStarted { cron_name } => Some(cron_name.clone()),
-            _ => None,
-        },
-    )?;
-
-    Ok(Response::CronsStarted { started, skipped })
+    Ok(Response::CronStarted { cron: cron.to_string() })
 }
 
 /// Handle a CronStop request.
 pub(super) fn handle_cron_stop(
     ctx: &ListenCtx,
     cron_name: &str,
-    namespace: &str,
-    project_root: Option<&Path>,
+    project: &str,
+    project_path: Option<&Path>,
     all: bool,
 ) -> Result<Response, ConnectionError> {
-    if all {
-        return handle_cron_stop_all(ctx, namespace);
-    }
-
-    // Check if cron exists in state
-    if let Err(resp) = super::require_scoped_resource(
-        &ctx.state,
-        namespace,
+    lifecycle::handle_stop::<Cron>(
+        ctx,
         cron_name,
-        "cron",
-        |s, k| s.crons.contains_key(k),
-        || {
-            suggest_for_cron(
-                project_root,
-                cron_name,
-                namespace,
-                "oj cron stop",
-                &ctx.state,
-            )
-        },
-    ) {
-        return Ok(resp);
-    }
-
-    let event = Event::CronStopped {
-        cron_name: cron_name.to_string(),
-        namespace: namespace.to_string(),
-    };
-
-    emit(&ctx.event_bus, event.clone())?;
-
-    // Apply to materialized state before responding so queries see it
-    // immediately. apply_event is idempotent.
-    {
-        let mut state = ctx.state.lock();
-        state.apply_event(&event);
-    }
-
-    Ok(Response::Ok)
-}
-
-/// Handle stopping all running crons in a namespace.
-fn handle_cron_stop_all(ctx: &ListenCtx, namespace: &str) -> Result<Response, ConnectionError> {
-    let running_crons: Vec<String> = {
-        let state = ctx.state.lock();
-        state
-            .crons
-            .values()
-            .filter(|c| c.namespace == namespace && c.status == "running")
-            .map(|c| c.name.clone())
-            .collect()
-    };
-
-    let mut stopped = Vec::new();
-    let mut skipped = Vec::new();
-
-    for name in running_crons {
-        let event = Event::CronStopped {
-            cron_name: name.clone(),
-            namespace: namespace.to_string(),
-        };
-        match emit(&ctx.event_bus, event.clone()) {
-            Ok(()) => {
-                let mut state = ctx.state.lock();
-                state.apply_event(&event);
-                stopped.push(name);
-            }
-            Err(e) => skipped.push((name, e.to_string())),
-        }
-    }
-
-    Ok(Response::CronsStopped { stopped, skipped })
+        project,
+        all,
+        || suggest_for_cron(project_path, cron_name, project, "oj cron stop", &ctx.state),
+        |stopped, skipped| Response::CronsStopped { stopped, skipped },
+    )
 }
 
 /// Handle a CronOnce request — run the cron's job once immediately.
 pub(super) async fn handle_cron_once(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
-    cron_name: &str,
+    project_path: &Path,
+    project: &str,
+    cron: &str,
 ) -> Result<Response, ConnectionError> {
-    // Load runbook to validate cron exists.
-    let (runbook, effective_root) = match super::load_runbook_with_fallback(
-        project_root,
-        namespace,
-        &ctx.state,
-        |root| load_runbook_for_cron(root, cron_name),
-        || {
-            suggest_for_cron(
-                Some(project_root),
-                cron_name,
-                namespace,
-                "oj cron once",
-                &ctx.state,
-            )
-        },
-    ) {
-        Ok(result) => result,
+    let v = match load_and_validate_cron(ctx, project_path, project, cron, "oj cron once") {
+        Ok(v) => v,
         Err(resp) => return Ok(resp),
     };
-    let project_root = &effective_root;
 
-    // Validate cron definition exists
-    let cron_def = match runbook.get_cron(cron_name) {
-        Some(def) => def,
-        None => {
-            return Ok(Response::Error {
-                message: format!("unknown cron: {}", cron_name),
-            })
+    let (owner, resp_id, resp_name) = match &v.target {
+        RunTarget::Agent(name) => {
+            let run_id = UuidIdGen.next();
+            let resp_name = format!("agent:{}", name);
+            let owner: OwnerId = oj_core::CrewId::new(&run_id).into();
+            (owner, run_id, resp_name)
+        }
+        RunTarget::Job(job_kind) => {
+            let jid = JobId::new(UuidIdGen.next());
+            let jname = oj_runbook::job_display_name(job_kind, jid.short(8), project);
+            let rid = jid.to_string();
+            let owner: OwnerId = jid.into();
+            (owner, rid, jname)
+        }
+        RunTarget::Shell(_) => {
+            let jid = JobId::new(UuidIdGen.next());
+            let jname = oj_runbook::job_display_name(cron, jid.short(8), project);
+            let rid = jid.to_string();
+            let owner: OwnerId = jid.into();
+            (owner, rid, jname)
         }
     };
 
-    // Validate run target references and build event
-    let (job_kind, run_target) = match &cron_def.run {
-        oj_runbook::RunDirective::Job { job } => {
-            if runbook.get_job(job).is_none() {
-                return Ok(Response::Error {
-                    message: format!("cron '{}' references unknown job '{}'", cron_name, job),
-                });
-            }
-            (job.clone(), format!("job:{}", job))
-        }
-        oj_runbook::RunDirective::Agent { agent, .. } => {
-            if runbook.get_agent(agent).is_none() {
-                return Ok(Response::Error {
-                    message: format!("cron '{}' references unknown agent '{}'", cron_name, agent),
-                });
-            }
-            (String::new(), format!("agent:{}", agent))
-        }
-        oj_runbook::RunDirective::Shell(cmd) => (cron_name.to_string(), format!("shell:{}", cmd)),
-    };
+    emit(
+        &ctx.event_bus,
+        Event::CronOnce {
+            cron: cron.to_string(),
+            owner,
+            project_path: v.project_path,
+            runbook_hash: v.runbook_hash,
+            target: v.target,
+            project: project.to_string(),
+        },
+    )?;
 
-    // Hash runbook and emit RunbookLoaded for WAL persistence
-    let runbook_hash = hash_and_emit_runbook(&ctx.event_bus, &runbook)?;
-
-    let is_agent = run_target.starts_with("agent:");
-
-    if is_agent {
-        let agent_name = run_target.strip_prefix("agent:").unwrap_or("").to_string();
-        let agent_run_id = UuidIdGen.next();
-
-        let event = Event::CronOnce {
-            cron_name: cron_name.to_string(),
-            job_id: JobId::new(""),
-            job_name: String::new(),
-            job_kind: String::new(),
-            agent_run_id: Some(agent_run_id.clone()),
-            agent_name: Some(agent_name.clone()),
-            project_root: project_root.to_path_buf(),
-            runbook_hash: runbook_hash.clone(),
-            run_target,
-            namespace: namespace.to_string(),
-        };
-
-        emit(&ctx.event_bus, event)?;
-
-        Ok(Response::CommandStarted {
-            job_id: agent_run_id,
-            job_name: format!("agent:{}", agent_name),
-        })
-    } else {
-        // Generate job ID
-        let job_id = JobId::new(UuidIdGen.next());
-        let job_display_name = oj_runbook::job_display_name(&job_kind, job_id.short(8), namespace);
-
-        // Emit CronOnce event to create job via the cron code path
-        let event = Event::CronOnce {
-            cron_name: cron_name.to_string(),
-            job_id: job_id.clone(),
-            job_name: job_display_name.clone(),
-            job_kind: job_kind.clone(),
-            agent_run_id: None,
-            agent_name: None,
-            project_root: project_root.to_path_buf(),
-            runbook_hash: runbook_hash.clone(),
-            run_target,
-            namespace: namespace.to_string(),
-        };
-
-        emit(&ctx.event_bus, event)?;
-
-        Ok(Response::CommandStarted {
-            job_id: job_id.to_string(),
-            job_name: job_display_name,
-        })
-    }
+    Ok(Response::JobStarted { job_id: resp_id, job_name: resp_name })
 }
 
 /// Handle a CronRestart request: stop (if running), reload runbook, start.
 pub(super) fn handle_cron_restart(
     ctx: &ListenCtx,
-    project_root: &Path,
-    namespace: &str,
+    project_path: &Path,
+    project: &str,
     cron_name: &str,
 ) -> Result<Response, ConnectionError> {
-    // Stop cron if it exists in state
-    if super::scoped_exists(&ctx.state, namespace, cron_name, |s, k| {
-        s.crons.contains_key(k)
-    }) {
-        emit(
-            &ctx.event_bus,
-            Event::CronStopped {
-                cron_name: cron_name.to_string(),
-                namespace: namespace.to_string(),
-            },
-        )?;
-    }
-
-    // Start with fresh runbook
-    handle_cron_start(ctx, project_root, namespace, cron_name, false)
+    lifecycle::handle_restart::<Cron>(ctx, project, cron_name, || {
+        handle_cron_start(ctx, project_path, project, cron_name, false)
+    })
 }
 
-#[cfg(test)]
-#[path = "crons_tests.rs"]
-mod tests;
-
-/// Load a runbook that contains the given cron name.
-fn load_runbook_for_cron(
-    project_root: &Path,
-    cron_name: &str,
-) -> Result<oj_runbook::Runbook, String> {
-    let runbook_dir = project_root.join(".oj/runbooks");
-    oj_runbook::find_runbook_by_cron(&runbook_dir, cron_name)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("no runbook found containing cron '{}'", cron_name))
+/// Handle a CronPrune request.
+pub(super) fn handle_cron_prune(
+    ctx: &ListenCtx,
+    flags: &PruneFlags<'_>,
+) -> Result<Response, ConnectionError> {
+    lifecycle::handle_prune(
+        ctx,
+        flags,
+        |s, ns| {
+            let mut entries = Vec::new();
+            let mut skipped = 0;
+            for c in s.crons.values() {
+                if ns.is_some_and(|n| c.project != n) {
+                    continue;
+                }
+                if c.status != "stopped" {
+                    skipped += 1;
+                    continue;
+                }
+                entries.push(CronEntry::from(c));
+            }
+            (entries, skipped)
+        },
+        |e| Event::CronDeleted { cron: e.name.clone(), project: e.project.clone() },
+        |pruned, skipped| Response::CronsPruned { pruned, skipped },
+    )
 }
 
-/// Generate a "did you mean" suggestion for a cron name.
 fn suggest_for_cron(
-    project_root: Option<&Path>,
-    cron_name: &str,
-    namespace: &str,
-    command_prefix: &str,
+    root: Option<&Path>,
+    name: &str,
+    ns: &str,
+    cmd: &str,
     state: &Arc<Mutex<MaterializedState>>,
 ) -> String {
-    let ns = namespace.to_string();
-    let root = project_root.map(|r| r.to_path_buf());
+    let ns_owned = ns.to_string();
+    let root = root.map(|r| r.to_path_buf());
     suggest::suggest_for_resource(
-        cron_name,
-        namespace,
-        command_prefix,
+        name,
+        ns,
+        cmd,
         state,
         suggest::ResourceType::Cron,
         || {
@@ -398,18 +282,27 @@ fn suggest_for_cron(
                 oj_runbook::collect_all_crons(&r.join(".oj/runbooks"))
                     .unwrap_or_default()
                     .into_iter()
-                    .map(|(name, _)| name)
+                    .map(|(n, _)| n)
                     .collect()
             })
             .unwrap_or_default()
         },
-        |state| {
-            state
-                .crons
-                .values()
-                .filter(|c| c.namespace == ns)
-                .map(|c| c.name.clone())
-                .collect()
+        move |s| {
+            s.crons.values().filter(|c| c.project == ns_owned).map(|c| c.name.clone()).collect()
         },
     )
 }
+
+fn load_runbook_for_cron(
+    project_path: &Path,
+    cron_name: &str,
+) -> Result<oj_runbook::Runbook, String> {
+    let runbook_dir = project_path.join(".oj/runbooks");
+    oj_runbook::find_runbook_by_cron(&runbook_dir, cron_name)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("no runbook found containing cron '{}'", cron_name))
+}
+
+#[cfg(test)]
+#[path = "crons_tests.rs"]
+mod tests;

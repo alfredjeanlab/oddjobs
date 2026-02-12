@@ -10,6 +10,7 @@
 
 mod agent;
 mod command;
+mod container;
 mod cron;
 mod find;
 mod help;
@@ -24,13 +25,13 @@ mod worker;
 
 pub use agent::{
     ActionConfig, ActionTrigger, AgentAction, AgentDef, Attempts, ErrorActionConfig, ErrorMatch,
-    ErrorType, PrimeDef, SessionStatusConfig, StopAction, StopActionConfig, TmuxSessionConfig,
-    VALID_PRIME_SOURCES, VALID_SESSION_COLORS,
+    ErrorType, PrimeDef, VALID_PRIME_SOURCES,
 };
 pub use command::{
     parse_arg_spec, ArgDef, ArgSpec, ArgSpecError, ArgValidationError, CommandDef, FlagDef,
     OptionDef, RunDirective, VariadicDef,
 };
+pub use container::ContainerConfig;
 pub use cron::CronDef;
 pub use find::{
     collect_all_commands, collect_all_crons, collect_all_queues, collect_all_workers,

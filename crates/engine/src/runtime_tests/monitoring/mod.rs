@@ -6,72 +6,56 @@
 mod agent_state;
 mod auto_resume;
 mod dedup;
-mod grace_timer;
+mod lifecycle_guards;
 mod session_cleanup;
 mod timers;
 
 use super::*;
-use oj_adapters::SessionCall;
-use oj_core::{AgentRunId, AgentSignalKind, JobId, OwnerId, StepStatus, TimerId};
+use oj_adapters::AgentCall;
+use oj_core::{CrewId, JobId, OwnerId, StepStatus, TimerId};
 
 /// Helper: create a job and advance it to the "plan" agent step.
 ///
-/// Returns (job_id, session_id, agent_id).
-async fn setup_job_at_agent_step(ctx: &mut TestContext) -> (String, String, AgentId) {
+/// Returns (job_id, agent_id).
+async fn setup_job_at_agent_step(ctx: &mut TestContext) -> (String, AgentId) {
     let job_id = create_job(ctx).await;
 
     // Advance past init (shell) to plan (agent)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
-    // SpawnAgent is now deferred; drain background events to apply SessionCreated
+    // SpawnAgent is now deferred; drain background events to apply AgentSpawned
     ctx.process_background_events().await;
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
 
-    let session_id = job.session_id.clone().unwrap();
     let agent_id = get_agent_id(ctx, &job_id).unwrap();
 
-    (job_id, session_id, agent_id)
+    (job_id, agent_id)
 }
 
-/// Helper: spawn a standalone agent and return (agent_run_id, session_id, agent_id)
-async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, String, AgentId) {
+/// Helper: spawn a standalone agent and return (crew_id, agent_id)
+async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, AgentId) {
     handle_event_chain(
         ctx,
-        command_event(
-            "pipe-1",
-            "build",
+        crew_command_event(
+            "job-1",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ),
     )
     .await;
 
-    // SpawnAgent is now deferred; drain background events to apply SessionCreated
+    // SpawnAgent is now deferred; drain background events to apply AgentSpawned
     ctx.process_background_events().await;
 
-    let agent_run_id = "pipe-1".to_string();
-    let agent_run = ctx
-        .runtime
-        .lock_state(|s| s.agent_runs.get("pipe-1").cloned())
-        .unwrap();
-    let agent_id = AgentId::new(agent_run.agent_id.as_ref().unwrap());
-    let session_id = agent_run.session_id.clone().unwrap();
+    let crew_id = "job-1".to_string();
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+    let agent_id = AgentId::new(crew.agent_id.as_ref().unwrap());
 
-    (agent_run_id, session_id, agent_id)
+    (crew_id, agent_id)
 }
 
 /// Runbook with agent on_idle = done, on_dead = done, on_error = "fail"
@@ -86,12 +70,12 @@ input  = ["name", "prompt"]
 [[job.build.step]]
 name = "init"
 run = "echo init"
-on_done = "plan"
+on_done = { step = "plan" }
 
 [[job.build.step]]
 name = "plan"
 run = { agent = "planner" }
-on_done = "done"
+on_done = { step = "done" }
 
 [[job.build.step]]
 name = "done"
@@ -102,84 +86,4 @@ run = "claude --print"
 on_idle = "done"
 on_dead = "done"
 on_error = "fail"
-"#;
-
-/// Runbook with on_idle = gate (failing command)
-const RUNBOOK_GATE_IDLE_FAIL: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = { agent = "worker" }
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[agent.worker]
-run = 'claude'
-prompt = "Test"
-on_idle = { action = "gate", run = "false" }
-"#;
-
-/// Runbook with standalone agent command, on_idle = escalate
-const RUNBOOK_AGENT_ESCALATE: &str = r#"
-[command.agent_cmd]
-args = "<name>"
-run = { agent = "worker" }
-
-[agent.worker]
-run = 'claude'
-prompt = "Do the work"
-on_idle = "escalate"
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
-/// Runbook with job agent that escalates on idle
-const RUNBOOK_JOB_ESCALATE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input = ["name"]
-
-[[job.build.step]]
-name = "work"
-run = { agent = "worker" }
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[agent.worker]
-run = 'claude'
-prompt = "Do the work"
-on_idle = "escalate"
-"#;
-
-/// Runbook with a standalone agent command and on_idle = "done"
-const RUNBOOK_STANDALONE_AGENT: &str = r#"
-[command.agent_cmd]
-args = "<name>"
-run = { agent = "worker" }
-
-[agent.worker]
-run = 'claude'
-prompt = "Hello"
-on_idle = "done"
-on_dead = "done"
 "#;

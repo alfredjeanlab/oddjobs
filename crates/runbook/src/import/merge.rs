@@ -4,6 +4,7 @@
 //! Import merge logic — prefix names, rename cross-references, merge entity maps.
 
 use crate::parser::{ParseError, Runbook};
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use super::types::ImportWarning;
@@ -29,48 +30,12 @@ pub fn merge_runbook(
     }
 
     // Merge each entity type
-    merge_map(
-        &mut target.commands,
-        source.commands,
-        "command",
-        import_source,
-        &mut warnings,
-    )?;
-    merge_map(
-        &mut target.jobs,
-        source.jobs,
-        "job",
-        import_source,
-        &mut warnings,
-    )?;
-    merge_map(
-        &mut target.agents,
-        source.agents,
-        "agent",
-        import_source,
-        &mut warnings,
-    )?;
-    merge_map(
-        &mut target.queues,
-        source.queues,
-        "queue",
-        import_source,
-        &mut warnings,
-    )?;
-    merge_map(
-        &mut target.workers,
-        source.workers,
-        "worker",
-        import_source,
-        &mut warnings,
-    )?;
-    merge_map(
-        &mut target.crons,
-        source.crons,
-        "cron",
-        import_source,
-        &mut warnings,
-    )?;
+    merge_map(&mut target.commands, source.commands, "command", import_source, &mut warnings)?;
+    merge_map(&mut target.jobs, source.jobs, "job", import_source, &mut warnings)?;
+    merge_map(&mut target.agents, source.agents, "agent", import_source, &mut warnings)?;
+    merge_map(&mut target.queues, source.queues, "queue", import_source, &mut warnings)?;
+    merge_map(&mut target.workers, source.workers, "worker", import_source, &mut warnings)?;
+    merge_map(&mut target.crons, source.crons, "cron", import_source, &mut warnings)?;
 
     Ok(warnings)
 }
@@ -84,7 +49,6 @@ fn merge_map<V>(
     warnings: &mut Vec<ImportWarning>,
 ) -> Result<(), ParseError> {
     for (name, value) in source {
-        use std::collections::hash_map::Entry;
         match target.entry(name) {
             Entry::Occupied(e) => {
                 // Local wins — emit warning
@@ -158,8 +122,8 @@ fn prefix_names(runbook: &mut Runbook, prefix: &str) {
         if let Some(new) = queue_renames.get(&worker.source.queue) {
             worker.source.queue = new.clone();
         }
-        if let Some(new) = job_renames.get(&worker.handler.job) {
-            worker.handler.job = new.clone();
+        if let Some(new) = job_renames.get(&worker.run.job) {
+            worker.run.job = new.clone();
         }
     }
 

@@ -102,10 +102,6 @@ fn error_cron_unknown_job() {
     );
 }
 
-// ============================================================================
-// Agent Max Concurrency (co-located with cron since cron agents use it)
-// ============================================================================
-
 #[test]
 fn agent_max_concurrency() {
     let hcl = r#"
@@ -116,10 +112,7 @@ agent "doctor" {
   prompt          = "Run diagnostics..."
 }
 "#;
-    assert_eq!(
-        super::parse_hcl(hcl).agents["doctor"].max_concurrency,
-        Some(1)
-    );
+    assert_eq!(super::parse_hcl(hcl).agents["doctor"].max_concurrency, Some(1));
 }
 
 #[test]

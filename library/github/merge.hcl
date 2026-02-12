@@ -45,19 +45,19 @@ queue "cicd" {
 
 worker "cicd" {
   source      = { queue = "cicd" }
-  handler     = { job = "cicd" }
+  run = { job = "cicd" }
   concurrency = 1
 }
 
 job "cicd" {
   name      = "Resolve PR #${var.pr.number}: ${var.pr.title}"
   vars      = ["pr"]
-  workspace = "folder"
+  source = "folder"
   on_cancel = { step = "cleanup" }
 
   locals {
     repo   = "$(git -C ${invoke.dir} rev-parse --show-toplevel)"
-    branch = "merge-pr-${var.pr.number}-${workspace.nonce}"
+    branch = "merge-pr-${var.pr.number}-${source.nonce}"
   }
 
   notify {
@@ -68,11 +68,11 @@ job "cicd" {
 
   step "init" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
       git -C "${local.repo}" fetch origin main
       git -C "${local.repo}" fetch origin pull/${var.pr.number}/head:${local.branch}
-      git -C "${local.repo}" worktree add "${workspace.root}" ${local.branch}
+      git -C "${local.repo}" worktree add "${source.root}" ${local.branch}
     SHELL
     on_done = { step = "resolve" }
   }
@@ -93,7 +93,7 @@ job "cicd" {
 
   step "cleanup" {
     run = <<-SHELL
-      git -C "${local.repo}" worktree remove --force "${workspace.root}" 2>/dev/null || true
+      git -C "${local.repo}" worktree remove --force "${source.root}" 2>/dev/null || true
       git -C "${local.repo}" branch -D "${local.branch}" 2>/dev/null || true
     SHELL
   }

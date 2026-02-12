@@ -13,34 +13,13 @@ use oj_core::StepStatusKind;
 use oj_engine::breadcrumb::Breadcrumb;
 
 use crate::protocol::{
-    AgentSummary, JobDetail, JobStatusEntry, JobSummary, OrphanAgent, OrphanSummary, Response,
+    AgentSummary, JobDetail, JobStatusEntry, JobSummary, OrphanSummary, Response,
 };
 
 /// Handle ListOrphans query by converting breadcrumbs to OrphanSummary.
 pub(super) fn handle_list_orphans(orphans: &Arc<Mutex<Vec<Breadcrumb>>>) -> Response {
     let orphans = orphans.lock();
-    let summaries = orphans
-        .iter()
-        .map(|bc| OrphanSummary {
-            job_id: bc.job_id.clone(),
-            project: bc.project.clone(),
-            kind: bc.kind.clone(),
-            name: bc.name.clone(),
-            current_step: bc.current_step.clone(),
-            step_status: parse_step_status_kind(&bc.step_status),
-            workspace_root: bc.workspace_root.clone(),
-            agents: bc
-                .agents
-                .iter()
-                .map(|a| OrphanAgent {
-                    agent_id: a.agent_id.clone(),
-                    session_name: a.session_name.clone(),
-                    log_path: a.log_path.clone(),
-                })
-                .collect(),
-            updated_at: bc.updated_at.clone(),
-        })
-        .collect();
+    let summaries = orphans.iter().map(OrphanSummary::from).collect();
     Response::Orphans { orphans: summaries }
 }
 
@@ -53,9 +32,7 @@ pub(super) fn handle_dismiss_orphan(
     let mut orphans = orphans.lock();
 
     // Find by exact match or prefix
-    let idx = orphans
-        .iter()
-        .position(|bc| bc.job_id == id || bc.job_id.starts_with(id));
+    let idx = orphans.iter().position(|bc| bc.job_id == id || bc.job_id.starts_with(id));
 
     match idx {
         Some(i) => {
@@ -74,9 +51,7 @@ pub(super) fn handle_dismiss_orphan(
             }
             Response::Ok
         }
-        None => Response::Error {
-            message: format!("orphan not found: {}", id),
-        },
+        None => Response::Error { message: format!("orphan not found: {}", id) },
     }
 }
 
@@ -96,8 +71,8 @@ pub(super) fn append_orphan_summaries(
             step_status: StepStatusKind::Orphaned,
             created_at_ms: updated_at_ms,
             updated_at_ms,
-            namespace: bc.project.clone(),
-            retry_count: 0,
+            project: bc.project.clone(),
+            retries: 0,
         });
     }
 }
@@ -108,41 +83,38 @@ pub(super) fn find_orphan_detail(
     id: &str,
 ) -> Option<Box<JobDetail>> {
     let orphans = orphans.lock();
-    orphans
-        .iter()
-        .find(|bc| bc.job_id == id || bc.job_id.starts_with(id))
-        .map(|bc| {
-            Box::new(JobDetail {
-                id: bc.job_id.clone(),
-                name: bc.name.clone(),
-                kind: bc.kind.clone(),
-                step: bc.current_step.clone(),
-                step_status: StepStatusKind::Orphaned,
-                vars: bc.vars.clone(),
-                workspace_path: bc.workspace_root.clone(),
-                session_id: bc.agents.iter().find_map(|a| a.session_name.clone()),
-                error: Some("Job was not recovered from WAL/snapshot".to_string()),
-                steps: Vec::new(),
-                agents: bc
-                    .agents
-                    .iter()
-                    .map(|a| AgentSummary {
-                        job_id: bc.job_id.clone(),
-                        step_name: bc.current_step.clone(),
-                        agent_id: a.agent_id.clone(),
-                        agent_name: None,
-                        namespace: Some(bc.project.clone()),
-                        status: "orphaned".to_string(),
-                        files_read: 0,
-                        files_written: 0,
-                        commands_run: 0,
-                        exit_reason: None,
-                        updated_at_ms: 0,
-                    })
-                    .collect(),
-                namespace: bc.project.clone(),
-            })
+    orphans.iter().find(|bc| bc.job_id == id || bc.job_id.starts_with(id)).map(|bc| {
+        Box::new(JobDetail {
+            id: bc.job_id.clone(),
+            name: bc.name.clone(),
+            kind: bc.kind.clone(),
+            step: bc.current_step.clone(),
+            step_status: StepStatusKind::Orphaned,
+            vars: bc.vars.clone(),
+            workspace_path: bc.workspace_root.clone(),
+            error: Some("Job was not recovered from WAL/snapshot".to_string()),
+            steps: Vec::new(),
+            agents: bc
+                .agents
+                .iter()
+                .map(|a| AgentSummary {
+                    job_id: bc.job_id.clone(),
+                    crew_id: String::new(),
+                    step_name: bc.current_step.clone(),
+                    agent_id: a.agent_id.clone(),
+                    agent_name: None,
+                    project: bc.project.clone(),
+                    status: "orphaned".to_string(),
+                    files_read: 0,
+                    files_written: 0,
+                    commands_run: 0,
+                    exit_reason: None,
+                    updated_at_ms: 0,
+                })
+                .collect(),
+            project: bc.project.clone(),
         })
+    })
 }
 
 /// Resolve an orphan job ID by exact match or prefix, returning the full ID.
@@ -154,7 +126,7 @@ pub(super) fn find_orphan_id(orphans: &Arc<Mutex<Vec<Breadcrumb>>>, id: &str) ->
         .map(|bc| bc.job_id.clone())
 }
 
-/// Collect orphaned jobs grouped by namespace for status overview.
+/// Collect orphaned jobs grouped by project for status overview.
 pub(super) fn collect_orphan_status_entries(
     orphans: &Arc<Mutex<Vec<Breadcrumb>>>,
     now_ms: u64,
@@ -164,34 +136,19 @@ pub(super) fn collect_orphan_status_entries(
     for bc in orphans.iter() {
         let updated_at_ms = parse_rfc3339_to_epoch_ms(&bc.updated_at);
         let elapsed_ms = now_ms.saturating_sub(updated_at_ms);
-        ns_orphaned
-            .entry(bc.project.clone())
-            .or_default()
-            .push(JobStatusEntry {
-                id: bc.job_id.clone(),
-                name: bc.name.clone(),
-                kind: bc.kind.clone(),
-                step: bc.current_step.clone(),
-                step_status: StepStatusKind::Orphaned,
-                elapsed_ms,
-                last_activity_ms: updated_at_ms,
-                waiting_reason: None,
-                escalate_source: None,
-            });
+        ns_orphaned.entry(bc.project.clone()).or_default().push(JobStatusEntry {
+            id: bc.job_id.clone(),
+            name: bc.name.clone(),
+            kind: bc.kind.clone(),
+            step: bc.current_step.clone(),
+            step_status: StepStatusKind::Orphaned,
+            elapsed_ms,
+            last_activity_ms: updated_at_ms,
+            waiting_reason: None,
+            escalate_source: None,
+        });
     }
     ns_orphaned
-}
-
-/// Parse a step status string from a breadcrumb into a `StepStatusKind`.
-fn parse_step_status_kind(s: &str) -> StepStatusKind {
-    match s {
-        "pending" => StepStatusKind::Pending,
-        "running" => StepStatusKind::Running,
-        "waiting" => StepStatusKind::Waiting,
-        "completed" => StepStatusKind::Completed,
-        "failed" => StepStatusKind::Failed,
-        _ => StepStatusKind::Orphaned,
-    }
 }
 
 /// Parse an RFC 3339 UTC timestamp (e.g. "2026-01-15T10:30:00Z") to epoch milliseconds.

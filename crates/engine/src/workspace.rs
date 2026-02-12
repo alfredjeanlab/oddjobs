@@ -24,7 +24,7 @@ pub(crate) async fn create(
     event_tx: &mpsc::Sender<Event>,
     workspace_id: oj_core::WorkspaceId,
     path: PathBuf,
-    owner: Option<oj_core::OwnerId>,
+    owner: oj_core::OwnerId,
     workspace_type: Option<String>,
     repo_root: Option<PathBuf>,
     branch: Option<String>,
@@ -56,10 +56,7 @@ pub(crate) async fn create(
 
         let event = match result {
             Ok(()) => Event::WorkspaceReady { id: workspace_id },
-            Err(reason) => Event::WorkspaceFailed {
-                id: workspace_id,
-                reason,
-            },
+            Err(reason) => Event::WorkspaceFailed { id: workspace_id, reason },
         };
 
         if let Err(e) = event_tx.send(event).await {
@@ -105,9 +102,7 @@ pub(crate) async fn delete(
     tokio::spawn(async move {
         delete_workspace_files(&workspace_path, &workspace_branch).await;
 
-        let event = Event::WorkspaceDeleted {
-            id: workspace_id.clone(),
-        };
+        let event = Event::WorkspaceDeleted { id: workspace_id.clone() };
 
         if let Err(e) = event_tx.send(event).await {
             tracing::error!("failed to send WorkspaceDeleted: {}", e);
@@ -127,11 +122,7 @@ async fn delete_workspace_files(
 ) {
     // If the workspace is a git worktree, unregister it first
     let dot_git = workspace_path.join(".git");
-    if tokio::fs::symlink_metadata(&dot_git)
-        .await
-        .map(|m| m.is_file())
-        .unwrap_or(false)
-    {
+    if tokio::fs::symlink_metadata(&dot_git).await.map(|m| m.is_file()).unwrap_or(false) {
         // Best-effort: git worktree remove --force
         // Run from within the worktree so git can locate the parent repo.
         let mut cmd = tokio::process::Command::new("git");
@@ -155,21 +146,13 @@ async fn delete_workspace_files(
                 if let Some(gitdir) = contents.trim().strip_prefix("gitdir: ") {
                     // Navigate up from .git/worktrees/<name> to .git, then parent
                     let gitdir_path = std::path::Path::new(gitdir);
-                    if let Some(repo_root) = gitdir_path
-                        .parent()
-                        .and_then(|p| p.parent())
-                        .and_then(|p| p.parent())
+                    if let Some(repo_root) =
+                        gitdir_path.parent().and_then(|p| p.parent()).and_then(|p| p.parent())
                     {
                         let mut cmd = tokio::process::Command::new("git");
-                        cmd.args([
-                            "-C",
-                            &repo_root.display().to_string(),
-                            "branch",
-                            "-D",
-                            branch,
-                        ])
-                        .env_remove("GIT_DIR")
-                        .env_remove("GIT_WORK_TREE");
+                        cmd.args(["-C", &repo_root.display().to_string(), "branch", "-D", branch])
+                            .env_remove("GIT_DIR")
+                            .env_remove("GIT_WORK_TREE");
                         let _ = oj_adapters::subprocess::run_with_timeout(
                             cmd,
                             oj_adapters::subprocess::GIT_WORKTREE_TIMEOUT,

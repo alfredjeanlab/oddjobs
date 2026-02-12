@@ -118,7 +118,7 @@ queue "plans" {
 
 worker "plan" {
   source      = { queue = "plans" }
-  handler     = { job = "plan" }
+  run = { job = "plan" }
   concurrency = 3
 }
 
@@ -165,7 +165,7 @@ queue "epics" {
 
 worker "epic" {
   source      = { queue = "epics" }
-  handler     = { job = "epic" }
+  run = { job = "epic" }
   concurrency = 2
 }
 
@@ -175,9 +175,9 @@ job "epic" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "epic/${var.epic.id}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "epic/${var.epic.id}-${source.nonce}"
   }
 
   locals {
@@ -195,7 +195,7 @@ job "epic" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        branch="${workspace.branch}" title="${local.title}"
+        branch="${source.branch}" title="${local.title}"
         git push origin "$branch"
         wok done ${var.epic.id}
         %{ if const.submit != "" }
@@ -230,7 +230,7 @@ queue "drafts" {
 
 worker "draft" {
   source      = { queue = "drafts" }
-  handler     = { job = "draft" }
+  run = { job = "draft" }
   concurrency = 2
 }
 
@@ -240,9 +240,9 @@ job "draft" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "epic/${var.epic.id}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "epic/${var.epic.id}-${source.nonce}"
   }
 
   locals {
@@ -259,7 +259,7 @@ job "draft" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/main)" -gt 0; then
-        git push origin "${workspace.branch}"
+        git push origin "${source.branch}"
         wok done ${var.epic.id}
       else
         echo "No changes" >&2
@@ -288,12 +288,6 @@ job "draft" {
 agent "plan" {
   run = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_dead = { action = "resume", attempts = 1 }
-
-  session "tmux" {
-    color = "blue"
-    title = "Plan: ${var.epic.id}"
-    status { left = "${var.epic.id}: ${var.epic.title}" }
-  }
 
   prime = [
     "wok show ${var.epic.id}",
@@ -328,15 +322,6 @@ agent "implement" {
       Follow the plan, implement, test, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Epic: ${var.epic.id}"
-    status {
-      left  = "${var.epic.id}: ${var.epic.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [
@@ -379,15 +364,6 @@ agent "draft" {
       Follow the plan, implement, test, then commit your changes.
 %{ endif }
     MSG
-  }
-
-  session "tmux" {
-    color = "blue"
-    title = "Draft: ${var.epic.id}"
-    status {
-      left  = "${var.epic.id}: ${var.epic.title}"
-      right = "${workspace.branch}"
-    }
   }
 
   prime = [

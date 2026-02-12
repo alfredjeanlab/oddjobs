@@ -4,10 +4,10 @@
 //! Effects represent side effects the system needs to perform
 
 use crate::agent::AgentId;
+use crate::container::ContainerConfig;
 use crate::event::Event;
 use crate::owner::OwnerId;
 
-use crate::session::SessionId;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
 use serde::{Deserialize, Serialize};
@@ -27,7 +27,7 @@ pub enum Effect {
     SpawnAgent {
         agent_id: AgentId,
         agent_name: String,
-        /// Owner of this agent (job or agent_run)
+        /// Owner of this agent (job or crew)
         owner: OwnerId,
         workspace_path: PathBuf,
         input: HashMap<String, String>,
@@ -38,36 +38,34 @@ pub enum Effect {
         /// Working directory override
         cwd: Option<PathBuf>,
         /// Environment variables to explicitly unset in the spawned session
-        /// (prevents inheritance of stale values from the tmux server environment)
+        /// (prevents inheritance of stale values from the parent environment)
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         unset_env: Vec<String>,
-        /// Adapter-specific session configuration (provider -> config as JSON)
-        #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-        session_config: HashMap<String, serde_json::Value>,
+        /// Whether to resume a previous session (coop handles session discovery)
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        resume: bool,
+        /// Container config — when present, the agent runs in a container instead of as a local coop process.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container: Option<ContainerConfig>,
     },
 
     /// Send input to an agent
     SendToAgent { agent_id: AgentId, input: String },
 
+    /// Send a structured prompt response to an agent.
+    ///
+    /// Uses coop's `/api/v1/agent/respond` endpoint instead of raw keyboard input.
+    RespondToAgent { agent_id: AgentId, response: crate::agent::PromptResponse },
+
     /// Kill an agent
     KillAgent { agent_id: AgentId },
-
-    // === Session-level effects (low-level, used by AgentAdapter) ===
-    /// Send input to an existing session (low-level)
-    SendToSession {
-        session_id: SessionId,
-        input: String,
-    },
-
-    /// Kill a session (low-level)
-    KillSession { session_id: SessionId },
 
     // === Workspace effects ===
     /// Create a managed workspace (creates directory and tracks lifecycle)
     CreateWorkspace {
         workspace_id: WorkspaceId,
         path: PathBuf,
-        owner: Option<OwnerId>,
+        owner: OwnerId,
         /// "folder" or "worktree" (replaces old "mode" field)
         #[serde(default, alias = "mode")]
         workspace_type: Option<String>,
@@ -99,7 +97,7 @@ pub enum Effect {
     // === Shell effects ===
     /// Execute a shell command
     Shell {
-        /// Owner of this shell command (job or agent_run). None for legacy events.
+        /// Owner of this shell command (job or crew).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         owner: Option<OwnerId>,
         /// Step name
@@ -110,19 +108,20 @@ pub enum Effect {
         cwd: PathBuf,
         /// Environment variables
         env: HashMap<String, String>,
+        /// Container config — when present, the shell step runs inside
+        /// the job's container via `docker exec` or `kubectl exec`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        container: Option<ContainerConfig>,
     },
 
     // === Worker effects ===
     /// Run the queue's list command to get available items
-    PollQueue {
-        worker_name: String,
-        list_command: String,
-        cwd: PathBuf,
-    },
+    PollQueue { worker_name: String, project: String, list_command: String, cwd: PathBuf },
 
     /// Run the queue's take command to claim an item
     TakeQueueItem {
         worker_name: String,
+        project: String,
         take_command: String,
         cwd: PathBuf,
         /// ID of the item being taken (passed through to the completion event)
@@ -148,9 +147,8 @@ impl Effect {
             Effect::Emit { .. } => "emit",
             Effect::SpawnAgent { .. } => "spawn_agent",
             Effect::SendToAgent { .. } => "send_to_agent",
+            Effect::RespondToAgent { .. } => "respond_to_agent",
             Effect::KillAgent { .. } => "kill_agent",
-            Effect::SendToSession { .. } => "send_to_session",
-            Effect::KillSession { .. } => "kill_session",
             Effect::CreateWorkspace { .. } => "create_workspace",
             Effect::DeleteWorkspace { .. } => "delete_workspace",
             Effect::SetTimer { .. } => "set_timer",
@@ -177,33 +175,19 @@ impl Effect {
                 cwd,
                 ..
             } => {
-                let owner_str = match owner {
-                    OwnerId::Job(id) => format!("job:{}", id),
-                    OwnerId::AgentRun(id) => format!("agent_run:{}", id),
-                };
                 vec![
                     ("agent_id", agent_id.to_string()),
                     ("agent_name", agent_name.clone()),
-                    ("owner", owner_str),
+                    ("owner", owner.to_string()),
                     ("workspace_path", workspace_path.display().to_string()),
                     ("command", command.clone()),
-                    (
-                        "cwd",
-                        cwd.as_ref()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_default(),
-                    ),
+                    ("cwd", cwd.as_ref().map(|p| p.display().to_string()).unwrap_or_default()),
                 ]
             }
             Effect::SendToAgent { agent_id, .. } => vec![("agent_id", agent_id.to_string())],
+            Effect::RespondToAgent { agent_id, .. } => vec![("agent_id", agent_id.to_string())],
             Effect::KillAgent { agent_id } => vec![("agent_id", agent_id.to_string())],
-            Effect::SendToSession { session_id, .. } => {
-                vec![("session_id", session_id.to_string())]
-            }
-            Effect::KillSession { session_id } => vec![("session_id", session_id.to_string())],
-            Effect::CreateWorkspace {
-                workspace_id, path, ..
-            } => vec![
+            Effect::CreateWorkspace { workspace_id, path, .. } => vec![
                 ("workspace_id", workspace_id.to_string()),
                 ("path", path.display().to_string()),
             ],
@@ -215,31 +199,17 @@ impl Effect {
                 ("duration_ms", duration.as_millis().to_string()),
             ],
             Effect::CancelTimer { id } => vec![("timer_id", id.to_string())],
-            Effect::Shell {
-                owner, step, cwd, ..
-            } => {
+            Effect::Shell { owner, step, cwd, .. } => {
                 let mut fields = vec![("step", step.clone()), ("cwd", cwd.display().to_string())];
                 if let Some(ref o) = owner {
-                    let owner_str = match o {
-                        OwnerId::Job(id) => format!("job:{}", id),
-                        OwnerId::AgentRun(id) => format!("agent_run:{}", id),
-                    };
-                    fields.insert(0, ("owner", owner_str));
+                    fields.insert(0, ("owner", o.to_string()));
                 }
                 fields
             }
-            Effect::PollQueue {
-                worker_name, cwd, ..
-            } => vec![
-                ("worker", worker_name.clone()),
-                ("cwd", cwd.display().to_string()),
-            ],
-            Effect::TakeQueueItem {
-                worker_name,
-                cwd,
-                item_id,
-                ..
-            } => vec![
+            Effect::PollQueue { worker_name, cwd, .. } => {
+                vec![("worker", worker_name.clone()), ("cwd", cwd.display().to_string())]
+            }
+            Effect::TakeQueueItem { worker_name, cwd, item_id, .. } => vec![
                 ("worker", worker_name.clone()),
                 ("cwd", cwd.display().to_string()),
                 ("item_id", item_id.clone()),

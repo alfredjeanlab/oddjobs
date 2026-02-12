@@ -11,10 +11,7 @@ use crate::client::ClientError;
 // --- Duration helper (private) ---
 
 fn parse_duration_ms(var: &str) -> Option<Duration> {
-    std::env::var(var)
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .map(Duration::from_millis)
+    std::env::var(var).ok().and_then(|s| s.parse::<u64>().ok()).map(Duration::from_millis)
 }
 
 // --- State directory ---
@@ -38,8 +35,8 @@ pub fn state_dir_raw() -> Option<String> {
 
 // --- Namespace ---
 
-pub fn namespace() -> Option<String> {
-    std::env::var("OJ_NAMESPACE").ok().filter(|s| !s.is_empty())
+pub fn project() -> Option<String> {
+    std::env::var("OJ_PROJECT").ok().filter(|s| !s.is_empty())
 }
 
 // --- Color ---
@@ -50,6 +47,19 @@ pub fn no_color() -> bool {
 
 pub fn force_color() -> bool {
     std::env::var("COLOR").is_ok_and(|v| v == "1")
+}
+
+// --- Daemon connection ---
+
+/// Remote daemon URL (e.g. `tcp://host:7777`). When set, CLI connects via TCP
+/// instead of the local Unix socket.
+pub fn daemon_url() -> Option<String> {
+    std::env::var("OJ_DAEMON_URL").ok().filter(|s| !s.is_empty())
+}
+
+/// Auth token for TCP connections to the daemon.
+pub fn auth_token() -> Option<String> {
+    std::env::var("OJ_AUTH_TOKEN").ok().filter(|s| !s.is_empty())
 }
 
 // --- Daemon binary ---

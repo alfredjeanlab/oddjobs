@@ -43,7 +43,7 @@ queue "bugs" {
 
 worker "bug" {
   source      = { queue = "bugs" }
-  handler     = { job = "bug" }
+  run = { job = "bug" }
   concurrency = 3
 }
 
@@ -53,9 +53,9 @@ job "bug" {
   on_fail   = { step = "reopen" }
   on_cancel = { step = "cancel" }
 
-  workspace {
-    git    = "worktree"
-    branch = "fix/${var.bug.number}-${workspace.nonce}"
+  source {
+    git    = true
+    branch = "fix/${var.bug.number}-${source.nonce}"
   }
 
   locals {
@@ -84,10 +84,10 @@ job "bug" {
       git add -A
       git diff --cached --quiet || git commit -m "${local.title}"
       if test "$(git rev-list --count HEAD ^origin/${local.base})" -gt 0; then
-        branch="${workspace.branch}"
+        branch="${source.branch}"
         git push origin "$branch"
         gh pr create --title "${local.title}" --body "Closes #${var.bug.number}" --head "$branch" --label merge:auto
-        gh pr merge --squash --delete-branch --auto
+        gh pr merge --squash --delete-branch --auto || echo "auto-merge unavailable; merge cron will handle"
       elif gh issue view ${var.bug.number} --json state -q '.state' | grep -q 'CLOSED'; then
         echo "Issue already resolved, no changes needed"
       else

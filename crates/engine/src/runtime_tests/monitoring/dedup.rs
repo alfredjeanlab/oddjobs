@@ -5,79 +5,30 @@
 
 use super::*;
 
-// =============================================================================
-// Duplicate idle/prompt decision prevention
-// =============================================================================
-
 #[tokio::test]
 async fn duplicate_idle_creates_only_one_decision() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "done",
+        "run = 'claude'\nprompt = \"Do the work\"\non_idle = \"escalate\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
+
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Set agent state so grace timer check confirms idle
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
-
-    // First idle -> sets grace timer (no immediate action)
-    ctx.runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
-
-    // Fire the grace timer -> escalate -> creates decision, sets step to Waiting
-    ctx.runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
-        })
-        .await
-        .unwrap();
+    // First stop:blocked → escalate → creates decision, sets step to Waiting
+    ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert!(
-        job.step_status.is_waiting(),
-        "step should be waiting after first idle"
-    );
+    assert!(job.step_status.is_waiting(), "step should be waiting after first idle");
     let decisions_after_first = ctx.runtime.lock_state(|s| s.decisions.len());
-    assert_eq!(
-        decisions_after_first, 1,
-        "should have exactly 1 decision after first idle"
-    );
+    assert_eq!(decisions_after_first, 1, "should have exactly 1 decision after first idle");
 
-    // Second idle -> should be dropped (step already waiting, grace timer handler
-    // checks job.step_status.is_waiting())
-    ctx.runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
-
-    // Even if grace timer fires again, it should be no-op
-    let result = ctx
-        .runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
-        })
-        .await
-        .unwrap();
+    // Second stop:blocked → should be dropped (step already waiting)
+    let result =
+        ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
     assert!(result.is_empty(), "second idle should produce no events");
     let decisions_after_second = ctx.runtime.lock_state(|s| s.decisions.len());
@@ -94,44 +45,19 @@ async fn duplicate_idle_creates_only_one_decision() {
 
 #[tokio::test]
 async fn prompt_hook_noop_when_step_already_waiting() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "done",
+        "run = 'claude'\nprompt = \"Do the work\"\non_idle = \"escalate\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
+
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
-    // Set agent state so grace timer check confirms idle
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
-
-    // First idle -> sets grace timer
-    ctx.runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
-
-    // Fire the grace timer -> escalate -> step waiting
-    ctx.runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace(&JobId::new(job_id.clone())),
-        })
-        .await
-        .unwrap();
+    // First stop:blocked → escalate → step waiting
+    ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert!(job.step_status.is_waiting());
@@ -140,194 +66,125 @@ async fn prompt_hook_noop_when_step_already_waiting() {
     let result = ctx
         .runtime
         .handle_event(Event::AgentPrompt {
-            agent_id: agent_id.clone(),
+            id: agent_id.clone(),
             prompt_type: oj_core::PromptType::Permission,
-            question_data: None,
-            assistant_context: None,
+            questions: None,
+            last_message: None,
         })
         .await
         .unwrap();
 
-    assert!(
-        result.is_empty(),
-        "prompt should be dropped when step is already waiting"
-    );
+    assert!(result.is_empty(), "prompt should be dropped when step is already waiting");
     let decisions = ctx.runtime.lock_state(|s| s.decisions.len());
     assert_eq!(decisions, 1, "no additional decision should be created");
 }
 
 #[tokio::test]
 async fn standalone_duplicate_idle_creates_only_one_escalation() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
+    let ctx = setup_with_runbook(&test_runbook_agent("on_idle = \"escalate\"")).await;
 
     handle_event_chain(
         &ctx,
-        command_event(
+        crew_command_event(
             "run-1",
-            "build",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ),
     )
     .await;
 
-    let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
-        let ar = state.agent_runs.values().next().unwrap();
-        (ar.id.clone(), AgentId::new(ar.agent_id.clone().unwrap()))
+    let (_crew_id, agent_id) = ctx.runtime.lock_state(|state| {
+        let run = state.crew.values().next().unwrap();
+        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
     });
 
-    // Set agent state so grace timer check confirms idle
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    // First stop:blocked → escalated
+    ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
-    // First idle -> sets grace timer
-    ctx.runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("run-1").cloned().unwrap());
+    assert_eq!(crew.status, oj_core::CrewStatus::Escalated);
 
-    // Fire the grace timer -> escalated
-    ctx.runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace_agent_run(&AgentRunId::new(&agent_run_id)),
-        })
-        .await
-        .unwrap();
+    // Second stop:blocked → should be dropped (already escalated)
+    let result =
+        ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
-    let agent_run = ctx
-        .runtime
-        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
-    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
-
-    // Second idle -> should be dropped (already escalated)
-    let result = ctx
-        .runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
-
-    assert!(
-        result.is_empty(),
-        "second idle should produce no events for escalated agent"
-    );
+    assert!(result.is_empty(), "second idle should produce no events for escalated agent");
 
     // Status should still be Escalated (not double-escalated)
-    let agent_run = ctx
-        .runtime
-        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
-    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("run-1").cloned().unwrap());
+    assert_eq!(crew.status, oj_core::CrewStatus::Escalated);
 }
 
 #[tokio::test]
 async fn standalone_prompt_noop_when_agent_escalated() {
-    let ctx = setup_with_runbook(RUNBOOK_AGENT_ESCALATE).await;
+    let ctx = setup_with_runbook(&test_runbook_agent("on_idle = \"escalate\"")).await;
 
     handle_event_chain(
         &ctx,
-        command_event(
+        crew_command_event(
             "run-1",
-            "build",
+            "worker",
             "agent_cmd",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ),
     )
     .await;
 
-    let (agent_run_id, agent_id) = ctx.runtime.lock_state(|state| {
-        let ar = state.agent_runs.values().next().unwrap();
-        (ar.id.clone(), AgentId::new(ar.agent_id.clone().unwrap()))
+    let (_crew_id, agent_id) = ctx.runtime.lock_state(|state| {
+        let run = state.crew.values().next().unwrap();
+        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
     });
 
-    // Set agent state so grace timer check confirms idle
-    ctx.agents
-        .set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
+    // First stop:blocked → escalated
+    ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
-    // First idle -> sets grace timer
-    ctx.runtime
-        .handle_event(Event::AgentIdle {
-            agent_id: agent_id.clone(),
-        })
-        .await
-        .unwrap();
-
-    // Fire the grace timer -> escalated
-    ctx.runtime
-        .handle_event(Event::TimerStart {
-            id: TimerId::idle_grace_agent_run(&AgentRunId::new(&agent_run_id)),
-        })
-        .await
-        .unwrap();
-
-    let agent_run = ctx
-        .runtime
-        .lock_state(|s| s.agent_runs.get(&agent_run_id).cloned().unwrap());
-    assert_eq!(agent_run.status, oj_core::AgentRunStatus::Escalated);
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("run-1").cloned().unwrap());
+    assert_eq!(crew.status, oj_core::CrewStatus::Escalated);
 
     // Prompt while escalated -> should be dropped
     let result = ctx
         .runtime
         .handle_event(Event::AgentPrompt {
-            agent_id: agent_id.clone(),
+            id: agent_id.clone(),
             prompt_type: oj_core::PromptType::Permission,
-            question_data: None,
-            assistant_context: None,
+            questions: None,
+            last_message: None,
         })
         .await
         .unwrap();
 
-    assert!(
-        result.is_empty(),
-        "prompt should be dropped when agent is escalated"
-    );
+    assert!(result.is_empty(), "prompt should be dropped when agent is escalated");
 }
 
 #[tokio::test]
 async fn prompt_fires_without_exhaustion_after_resolution() {
-    let ctx = setup_with_runbook(RUNBOOK_JOB_ESCALATE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook(
+        "work",
+        "done",
+        "run = 'claude'\nprompt = \"Do the work\"\non_idle = \"escalate\"",
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
+
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
 
     // First prompt -> escalate -> creates decision, step Waiting
     ctx.runtime
         .handle_event(Event::AgentPrompt {
-            agent_id: agent_id.clone(),
+            id: agent_id.clone(),
             prompt_type: oj_core::PromptType::PlanApproval,
-            question_data: None,
-            assistant_context: None,
+            questions: None,
+            last_message: None,
         })
         .await
         .unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert!(
-        job.step_status.is_waiting(),
-        "step should be waiting after first prompt"
-    );
+    assert!(job.step_status.is_waiting(), "step should be waiting after first prompt");
     let decisions_after_first = ctx.runtime.lock_state(|s| s.decisions.len());
     assert_eq!(decisions_after_first, 1);
 
@@ -342,10 +199,10 @@ async fn prompt_fires_without_exhaustion_after_resolution() {
     let result = ctx
         .runtime
         .handle_event(Event::AgentPrompt {
-            agent_id: agent_id.clone(),
+            id: agent_id.clone(),
             prompt_type: oj_core::PromptType::PlanApproval,
-            question_data: None,
-            assistant_context: None,
+            questions: None,
+            last_message: None,
         })
         .await
         .unwrap();
@@ -353,20 +210,10 @@ async fn prompt_fires_without_exhaustion_after_resolution() {
     assert!(!result.is_empty(), "second prompt should produce events");
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert!(
-        job.step_status.is_waiting(),
-        "step should be waiting after second prompt"
-    );
+    assert!(job.step_status.is_waiting(), "step should be waiting after second prompt");
     let decisions_after_second = ctx.runtime.lock_state(|s| s.decisions.len());
-    assert_eq!(
-        decisions_after_second, 2,
-        "should have 2 decisions (one per prompt occurrence)"
-    );
+    assert_eq!(decisions_after_second, 2, "should have 2 decisions (one per prompt occurrence)");
 }
-
-// =============================================================================
-// Stale agent event filtering
-// =============================================================================
 
 #[tokio::test]
 async fn stale_agent_event_dropped_after_job_advances() {
@@ -375,16 +222,7 @@ async fn stale_agent_event_dropped_after_job_advances() {
     let job_id = create_job(&ctx).await;
 
     // Advance past init (shell) to plan (agent)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -404,62 +242,13 @@ async fn stale_agent_event_dropped_after_job_advances() {
     // Send a stale AgentWaiting event from the OLD agent — should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::AgentWaiting {
-            agent_id: old_agent_id.clone(),
-            owner: OwnerId::Job(JobId::new(&job_id)),
-        })
+        .handle_event(agent_waiting(old_agent_id.clone(), JobId::new(&job_id).into()))
         .await
         .unwrap();
 
     assert!(result.is_empty());
 
     // Job should still be at "execute", not affected by the stale event
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "execute");
-}
-
-#[tokio::test]
-async fn stale_agent_signal_dropped_after_job_advances() {
-    let ctx = setup().await;
-    let job_id = create_job(&ctx).await;
-
-    // Advance past init (shell) to plan (agent)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
-
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "plan");
-
-    let old_agent_id = get_agent_id(&ctx, &job_id).unwrap();
-
-    // Advance from plan to execute
-    ctx.runtime.advance_job(&job).await.unwrap();
-
-    let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(job.step, "execute");
-
-    // Send a stale AgentSignal::Complete from the OLD agent — should be a no-op
-    let result = ctx
-        .runtime
-        .handle_event(Event::AgentSignal {
-            agent_id: old_agent_id.clone(),
-            kind: AgentSignalKind::Complete,
-            message: None,
-        })
-        .await
-        .unwrap();
-
-    assert!(result.is_empty());
-
-    // Job should still be at "execute"
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "execute");
 }

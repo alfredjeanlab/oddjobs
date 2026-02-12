@@ -13,7 +13,6 @@ command "doctor" {
 agent "doctor" {
   run     = "claude --model opus --dangerously-skip-permissions --disallowed-tools EnterPlanMode,ExitPlanMode"
   on_idle = { action = "nudge", message = "Resolve any current issues, or continue monitoring. Use AskUserQuestion if you need guidance.", attempts = 3 }
-  on_stop = { action = "signal" }
   on_dead = { action = "fail" }
 
   prime = <<-SHELL

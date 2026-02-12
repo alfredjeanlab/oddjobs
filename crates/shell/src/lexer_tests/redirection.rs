@@ -6,10 +6,6 @@
 use crate::lexer::{Lexer, LexerError};
 use crate::token::{DupTarget, TokenKind};
 
-// =============================================================================
-// Output Redirection
-// =============================================================================
-
 lex_tests! {
     redirect_out: "echo hello > file.txt" => [
         TokenKind::Word("echo".into()),
@@ -69,10 +65,6 @@ span_tests! {
     redirect_stderr_span: "a 2>>b" => [(0, 1), (2, 5), (5, 6)],
 }
 
-// =============================================================================
-// Input Redirection
-// =============================================================================
-
 lex_tests! {
     redirect_in: "cat < input.txt" => [
         TokenKind::Word("cat".into()),
@@ -85,10 +77,6 @@ lex_tests! {
         TokenKind::Word("input.txt".into()),
     ],
 }
-
-// =============================================================================
-// Here-strings
-// =============================================================================
 
 // Here-documents with body capture are tested in heredoc.rs.
 // Here-strings (<<<) don't have multi-line bodies and are tested here.
@@ -110,10 +98,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Combined Redirection (&> and &>>)
-// =============================================================================
-
 lex_tests! {
     redirect_both: "cmd &>output.txt" => [
         TokenKind::Word("cmd".into()),
@@ -131,10 +115,6 @@ lex_tests! {
         TokenKind::Word("/dev/null".into()),
     ],
 }
-
-// =============================================================================
-// File Descriptor Duplication
-// =============================================================================
 
 lex_tests! {
     dup_stderr_to_stdout: "cmd 2>&1" => [
@@ -201,10 +181,6 @@ span_tests! {
     herestring_span: "<<<word" => [(0, 3), (3, 7)],
 }
 
-// =============================================================================
-// Number vs File Descriptor Disambiguation
-// =============================================================================
-
 lex_tests! {
     number_alone_is_word: "echo 2" => [
         TokenKind::Word("echo".into()),
@@ -223,10 +199,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Redirects with Variables
-// =============================================================================
-
 #[test]
 fn redirect_with_variable() {
     let tokens = Lexer::tokenize("echo > $FILE").unwrap();
@@ -234,10 +206,6 @@ fn redirect_with_variable() {
     assert_eq!(tokens[1].kind, TokenKind::RedirectOut { fd: None });
     assert!(matches!(tokens[2].kind, TokenKind::Variable { .. }));
 }
-
-// =============================================================================
-// Complex Redirection Scenarios
-// =============================================================================
 
 lex_tests! {
     multiple_redirects: "cmd <in >out 2>&1" => [
@@ -330,10 +298,6 @@ lex_tests! {
         },
     ],
 }
-
-// =============================================================================
-// Redirection Error Cases
-// =============================================================================
 
 lex_error_tests! {
     error_dup_missing_target: "cmd >&" => LexerError::InvalidRedirection { .. },

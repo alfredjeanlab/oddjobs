@@ -1,32 +1,20 @@
-//! Agent on_stop lifecycle handler specs.
+//! Agent on_idle → coop stop mode mapping specs.
 //!
-//! Verify that the on_stop config is written at spawn time and that
-//! the correct default is applied based on context (job vs standalone).
+//! Verify that the on_idle action is written to agent-config.json at spawn
+//! time and that the correct coop stop mode is applied.
 
 use crate::prelude::*;
-
-// =============================================================================
-// Scenarios
-// =============================================================================
 
 /// Agent stops at end_turn (no tool calls) — triggers on_idle
 fn scenario_end_turn() -> &'static str {
     r#"
-name = "end-turn"
-
 [[responses]]
-pattern = { type = "any" }
-
-[responses.response]
-text = "I've analyzed the task and here's my response."
+on = "*"
+say = "I've analyzed the task and here's my response."
 "#
 }
 
-// =============================================================================
-// Runbooks
-// =============================================================================
-
-fn runbook_default_on_stop(scenario_path: &std::path::Path) -> String {
+fn runbook_on_idle_done(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
@@ -49,7 +37,7 @@ on_idle = "done"
     )
 }
 
-fn runbook_explicit_on_stop_idle(scenario_path: &std::path::Path) -> String {
+fn runbook_on_idle_escalate(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
@@ -66,14 +54,13 @@ run = {{ agent = "worker" }}
 [agent.worker]
 run = "claudeless --scenario {}"
 prompt = "Do the task."
-on_stop = "idle"
-on_idle = "done"
+on_idle = "escalate"
 "#,
         scenario_path.display()
     )
 }
 
-fn runbook_explicit_on_stop_escalate(scenario_path: &std::path::Path) -> String {
+fn runbook_on_idle_nudge(scenario_path: &std::path::Path) -> String {
     format!(
         r#"
 [command.build]
@@ -90,14 +77,13 @@ run = {{ agent = "worker" }}
 [agent.worker]
 run = "claudeless --scenario {}"
 prompt = "Do the task."
-on_stop = "escalate"
-on_idle = "done"
+on_idle = "nudge"
 "#,
         scenario_path.display()
     )
 }
 
-/// Find the first config.json under {state_dir}/agents/ and return its contents.
+/// Find the first agent-config.json under {state_dir}/agents/ and return its contents.
 fn read_agent_config(temp: &Project) -> Option<String> {
     let agents_dir = temp.state_path().join("agents");
     if !agents_dir.exists() {
@@ -105,7 +91,7 @@ fn read_agent_config(temp: &Project) -> Option<String> {
     }
     for entry in std::fs::read_dir(&agents_dir).ok()? {
         let entry = entry.ok()?;
-        let config_path = entry.path().join("config.json");
+        let config_path = entry.path().join("agent-config.json");
         if config_path.exists() {
             return std::fs::read_to_string(&config_path).ok();
         }
@@ -113,54 +99,44 @@ fn read_agent_config(temp: &Project) -> Option<String> {
     None
 }
 
-// =============================================================================
-// Tests: config.json written at spawn time
-// =============================================================================
-
-/// Job agent with no explicit on_stop should default to "signal".
+/// Job agent with on_idle=done should use coop allow mode (no interception).
 #[test]
-fn job_agent_default_on_stop_is_signal() {
+fn job_agent_on_idle_done_is_allow() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
 
     let scenario_path = temp.path().join(".oj/scenarios/test.toml");
-    temp.file(
-        ".oj/runbooks/build.toml",
-        &runbook_default_on_stop(&scenario_path),
-    );
+    temp.file(".oj/runbooks/build.toml", &runbook_on_idle_done(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    // config.json is written at agent spawn time — wait for it directly
+    // agent-config.json is written at agent spawn time — wait for it directly
     let config_found = wait_for(SPEC_WAIT_MAX_MS * 4, || read_agent_config(&temp).is_some());
     assert!(
         config_found,
-        "config.json should be written at spawn time\ndaemon log:\n{}",
+        "agent-config.json should be written at spawn time\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
     let config = read_agent_config(&temp).unwrap();
     assert!(
-        config.contains("\"on_stop\":\"signal\""),
-        "job agent should default to on_stop=signal, got: {}",
+        config.contains("\"mode\": \"allow\""),
+        "on_idle=done should map to stop.mode=allow, got: {}",
         config
     );
 }
 
-/// Job agent with explicit on_stop = "idle" should write idle to config.
+/// Job agent with on_idle=escalate should use coop gate mode.
 #[test]
-fn job_agent_explicit_on_stop_idle() {
+fn job_agent_on_idle_escalate_is_gate() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
 
     let scenario_path = temp.path().join(".oj/scenarios/test.toml");
-    temp.file(
-        ".oj/runbooks/build.toml",
-        &runbook_explicit_on_stop_idle(&scenario_path),
-    );
+    temp.file(".oj/runbooks/build.toml", &runbook_on_idle_escalate(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
@@ -168,30 +144,27 @@ fn job_agent_explicit_on_stop_idle() {
     let config_found = wait_for(SPEC_WAIT_MAX_MS * 4, || read_agent_config(&temp).is_some());
     assert!(
         config_found,
-        "config.json should be written at spawn time\ndaemon log:\n{}",
+        "agent-config.json should be written at spawn time\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
     let config = read_agent_config(&temp).unwrap();
     assert!(
-        config.contains("\"on_stop\":\"idle\""),
-        "explicit on_stop=idle should be written to config, got: {}",
+        config.contains("\"mode\": \"gate\""),
+        "on_idle=escalate should map to stop.mode=gate, got: {}",
         config
     );
 }
 
-/// Job agent with explicit on_stop = "escalate" should write escalate to config.
+/// Job agent with on_idle=nudge should use coop gate mode.
 #[test]
-fn job_agent_explicit_on_stop_escalate() {
+fn job_agent_on_idle_nudge_is_gate() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
 
     let scenario_path = temp.path().join(".oj/scenarios/test.toml");
-    temp.file(
-        ".oj/runbooks/build.toml",
-        &runbook_explicit_on_stop_escalate(&scenario_path),
-    );
+    temp.file(".oj/runbooks/build.toml", &runbook_on_idle_nudge(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
@@ -199,46 +172,37 @@ fn job_agent_explicit_on_stop_escalate() {
     let config_found = wait_for(SPEC_WAIT_MAX_MS * 4, || read_agent_config(&temp).is_some());
     assert!(
         config_found,
-        "config.json should be written at spawn time\ndaemon log:\n{}",
+        "agent-config.json should be written at spawn time\ndaemon log:\n{}",
         temp.daemon_log()
     );
 
     let config = read_agent_config(&temp).unwrap();
     assert!(
-        config.contains("\"on_stop\":\"escalate\""),
-        "explicit on_stop=escalate should be written to config, got: {}",
+        config.contains("\"mode\": \"gate\""),
+        "on_idle=nudge should map to stop.mode=gate, got: {}",
         config
     );
 }
 
-/// on_stop = idle with on_idle = done should still allow the job to
-/// complete via normal idle detection (the on_stop config only affects the
-/// Claude Code Stop hook, which doesn't fire in claudeless).
+/// Job with on_idle=done should complete normally via coop's allow mode.
 #[test]
-fn on_stop_idle_does_not_interfere_with_on_idle() {
+fn on_idle_done_completes_job() {
     let temp = Project::empty();
     temp.git_init();
     temp.file(".oj/scenarios/test.toml", scenario_end_turn());
 
     let scenario_path = temp.path().join(".oj/scenarios/test.toml");
-    temp.file(
-        ".oj/runbooks/build.toml",
-        &runbook_explicit_on_stop_idle(&scenario_path),
-    );
+    temp.file(".oj/runbooks/build.toml", &runbook_on_idle_done(&scenario_path));
 
     temp.oj().args(&["daemon", "start"]).passes();
     temp.oj().args(&["run", "build", "test"]).passes();
 
-    let done = wait_for(SPEC_WAIT_MAX_MS * 3, || {
-        temp.oj()
-            .args(&["job", "list"])
-            .passes()
-            .stdout()
-            .contains("completed")
+    let done = wait_for(SPEC_AGENT_WAIT_MS, || {
+        temp.oj().args(&["job", "list"]).passes().stdout().contains("completed")
     });
     assert!(
         done,
-        "job should complete via on_idle=done (on_stop=idle should not interfere)\njob list:\n{}\ndaemon log:\n{}",
+        "job should complete via on_idle=done\njob list:\n{}\ndaemon log:\n{}",
         temp.oj().args(&["job", "list"]).passes().stdout(),
         temp.daemon_log()
     );

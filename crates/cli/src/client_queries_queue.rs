@@ -15,25 +15,21 @@ impl DaemonClient {
     /// Push an item to a queue
     pub async fn queue_push(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         data: serde_json::Value,
     ) -> Result<QueuePushResult, ClientError> {
         let request = Request::QueuePush {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             data,
         };
         match self.send(&request).await? {
-            Response::QueuePushed {
-                queue_name,
-                item_id,
-            } => Ok(QueuePushResult::Pushed {
-                queue_name,
-                item_id,
-            }),
+            Response::QueuePushed { queue, item_id } => {
+                Ok(QueuePushResult::Pushed { queue, item_id })
+            }
             Response::Ok => Ok(QueuePushResult::Refreshed),
             other => Self::reject(other),
         }
@@ -42,22 +38,19 @@ impl DaemonClient {
     /// Drop an item from a queue
     pub async fn queue_drop(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         item_id: &str,
     ) -> Result<(String, String), ClientError> {
         let request = Request::QueueDrop {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             item_id: item_id.to_string(),
         };
         match self.send(&request).await? {
-            Response::QueueDropped {
-                queue_name,
-                item_id,
-            } => Ok((queue_name, item_id)),
+            Response::QueueDropped { queue, item_id } => Ok((queue, item_id)),
             other => Self::reject(other),
         }
     }
@@ -65,40 +58,25 @@ impl DaemonClient {
     /// Retry dead or failed queue items
     pub async fn queue_retry(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         item_ids: Vec<String>,
         all_dead: bool,
         status: Option<String>,
     ) -> Result<QueueRetryResult, ClientError> {
         let request = Request::QueueRetry {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             item_ids,
             all_dead,
             status,
         };
         match self.send(&request).await? {
-            Response::QueueRetried {
-                queue_name,
-                item_id,
-            } => Ok(QueueRetryResult::Single {
-                queue_name,
-                item_id,
-            }),
-            Response::QueueItemsRetried {
-                queue_name,
-                item_ids,
-                already_retried,
-                not_found,
-            } => Ok(QueueRetryResult::Bulk {
-                queue_name,
-                item_ids,
-                already_retried,
-                not_found,
-            }),
+            Response::QueueRetried { queue, item_ids, already_retried, not_found } => {
+                Ok(QueueRetryResult { queue, item_ids, already_retried, not_found })
+            }
             other => Self::reject(other),
         }
     }
@@ -106,22 +84,19 @@ impl DaemonClient {
     /// Force-fail an active queue item
     pub async fn queue_fail(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         item_id: &str,
     ) -> Result<(String, String), ClientError> {
         let request = Request::QueueFail {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             item_id: item_id.to_string(),
         };
         match self.send(&request).await? {
-            Response::QueueFailed {
-                queue_name,
-                item_id,
-            } => Ok((queue_name, item_id)),
+            Response::QueueFailed { queue, item_id } => Ok((queue, item_id)),
             other => Self::reject(other),
         }
     }
@@ -129,22 +104,19 @@ impl DaemonClient {
     /// Force-complete an active queue item
     pub async fn queue_done(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         item_id: &str,
     ) -> Result<(String, String), ClientError> {
         let request = Request::QueueDone {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             item_id: item_id.to_string(),
         };
         match self.send(&request).await? {
-            Response::QueueCompleted {
-                queue_name,
-                item_id,
-            } => Ok((queue_name, item_id)),
+            Response::QueueCompleted { queue, item_id } => Ok((queue, item_id)),
             other => Self::reject(other),
         }
     }
@@ -152,17 +124,17 @@ impl DaemonClient {
     /// Drain all pending items from a queue
     pub async fn queue_drain(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
     ) -> Result<(String, Vec<oj_daemon::QueueItemSummary>), ClientError> {
         let request = Request::QueueDrain {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
         };
         match self.send(&request).await? {
-            Response::QueueDrained { queue_name, items } => Ok((queue_name, items)),
+            Response::QueueDrained { queue, items } => Ok((queue, items)),
             other => Self::reject(other),
         }
     }
@@ -170,13 +142,13 @@ impl DaemonClient {
     /// List all queues in a project
     pub async fn list_queues(
         &self,
-        project_root: &Path,
-        namespace: &str,
+        project_path: &Path,
+        project: &str,
     ) -> Result<Vec<oj_daemon::QueueSummary>, ClientError> {
         let request = Request::Query {
             query: Query::ListQueues {
-                project_root: project_root.to_path_buf(),
-                namespace: namespace.to_string(),
+                project_path: project_path.to_path_buf(),
+                project: project.to_string(),
             },
         };
         match self.send(&request).await? {
@@ -188,15 +160,15 @@ impl DaemonClient {
     /// List items in a specific queue
     pub async fn list_queue_items(
         &self,
-        queue_name: &str,
-        namespace: &str,
-        project_root: Option<&Path>,
+        queue: &str,
+        project: &str,
+        project_path: Option<&Path>,
     ) -> Result<Vec<oj_daemon::QueueItemSummary>, ClientError> {
         let request = Request::Query {
             query: Query::ListQueueItems {
-                queue_name: queue_name.to_string(),
-                namespace: namespace.to_string(),
-                project_root: project_root.map(|p| p.to_path_buf()),
+                queue: queue.to_string(),
+                project: project.to_string(),
+                project_path: project_path.map(|p| p.to_path_buf()),
             },
         };
         match self.send(&request).await? {
@@ -208,16 +180,16 @@ impl DaemonClient {
     /// Prune completed/dead items from a queue
     pub async fn queue_prune(
         &self,
-        project_root: &Path,
-        namespace: &str,
-        queue_name: &str,
+        project_path: &Path,
+        project: &str,
+        queue: &str,
         all: bool,
         dry_run: bool,
     ) -> Result<(Vec<oj_daemon::QueueItemEntry>, usize), ClientError> {
         let req = Request::QueuePrune {
-            project_root: project_root.to_path_buf(),
-            namespace: namespace.to_string(),
-            queue_name: queue_name.to_string(),
+            project_path: project_path.to_path_buf(),
+            project: project.to_string(),
+            queue: queue.to_string(),
             all,
             dry_run,
         };
@@ -230,19 +202,21 @@ impl DaemonClient {
     /// Get queue activity logs
     pub async fn get_queue_logs(
         &self,
-        queue_name: &str,
-        namespace: &str,
+        queue: &str,
+        project: &str,
         lines: usize,
-    ) -> Result<(PathBuf, String), ClientError> {
+        offset: u64,
+    ) -> Result<(PathBuf, String, u64), ClientError> {
         let request = Request::Query {
             query: Query::GetQueueLogs {
-                queue_name: queue_name.to_string(),
-                namespace: namespace.to_string(),
+                queue: queue.to_string(),
+                project: project.to_string(),
                 lines,
+                offset,
             },
         };
         match self.send(&request).await? {
-            Response::QueueLogs { log_path, content } => Ok((log_path, content)),
+            Response::QueueLogs { log_path, content, offset } => Ok((log_path, content, offset)),
             other => Self::reject(other),
         }
     }
@@ -252,13 +226,10 @@ impl DaemonClient {
     /// List pending decisions
     pub async fn list_decisions(
         &self,
-        namespace: &str,
+        project: &str,
     ) -> Result<Vec<oj_daemon::protocol::DecisionSummary>, ClientError> {
-        let request = Request::Query {
-            query: Query::ListDecisions {
-                namespace: namespace.to_string(),
-            },
-        };
+        let request =
+            Request::Query { query: Query::ListDecisions { project: project.to_string() } };
         match self.send(&request).await? {
             Response::Decisions { decisions } => Ok(decisions),
             other => Self::reject(other),
@@ -270,9 +241,7 @@ impl DaemonClient {
         &self,
         id: &str,
     ) -> Result<Option<oj_daemon::protocol::DecisionDetail>, ClientError> {
-        let request = Request::Query {
-            query: Query::GetDecision { id: id.to_string() },
-        };
+        let request = Request::Query { query: Query::GetDecision { id: id.to_string() } };
         match self.send(&request).await? {
             Response::Decision { decision } => Ok(decision.map(|b| *b)),
             other => Self::reject(other),
@@ -283,16 +252,10 @@ impl DaemonClient {
     pub async fn decision_resolve(
         &self,
         id: &str,
-        chosen: Option<usize>,
         choices: Vec<usize>,
         message: Option<String>,
     ) -> Result<String, ClientError> {
-        let request = Request::DecisionResolve {
-            id: id.to_string(),
-            chosen,
-            choices,
-            message,
-        };
+        let request = Request::DecisionResolve { id: id.to_string(), choices, message };
         match self.send(&request).await? {
             Response::DecisionResolved { id } => Ok(id),
             other => Self::reject(other),
@@ -302,20 +265,14 @@ impl DaemonClient {
 
 /// Result from queue push operation
 pub enum QueuePushResult {
-    Pushed { queue_name: String, item_id: String },
+    Pushed { queue: String, item_id: String },
     Refreshed,
 }
 
 /// Result from queue retry operation
-pub enum QueueRetryResult {
-    Single {
-        queue_name: String,
-        item_id: String,
-    },
-    Bulk {
-        queue_name: String,
-        item_ids: Vec<String>,
-        already_retried: Vec<String>,
-        not_found: Vec<String>,
-    },
+pub struct QueueRetryResult {
+    pub queue: String,
+    pub item_ids: Vec<String>,
+    pub already_retried: Vec<String>,
+    pub not_found: Vec<String>,
 }

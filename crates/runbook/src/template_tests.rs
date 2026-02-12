@@ -3,187 +3,64 @@
 
 use super::*;
 
-// =============================================================================
-// escape_for_shell tests
-// =============================================================================
-
-#[test]
-fn escape_for_shell_no_special_chars() {
-    assert_eq!(escape_for_shell("hello world"), "hello world");
+fn vars(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
 }
 
-#[test]
-fn escape_for_shell_escapes_backslash() {
-    assert_eq!(escape_for_shell(r"path\to\file"), r"path\\to\\file");
+#[yare::parameterized(
+    no_special_chars       = { "hello world",                                     "hello world" },
+    escapes_backslash      = { r"path\to\file",                                   r"path\\to\\file" },
+    escapes_dollar_sign    = { "$HOME",                                            "\\$HOME" },
+    escapes_backtick       = { "Write to `file.txt`",                             "Write to \\`file.txt\\`" },
+    escapes_double_quote   = { r#"say "hello""#,                                  r#"say \"hello\""# },
+    escapes_all_special    = { r#"$VAR `cmd` "quote" \slash"#,                    r#"\$VAR \`cmd\` \"quote\" \\slash"# },
+    empty_string           = { "",                                                 "" },
+    preserves_single_quote = { "it's a test",                                     "it's a test" },
+    preserves_whitespace   = { "Normal text with newlines\nand tabs\t",           "Normal text with newlines\nand tabs\t" },
+)]
+fn escape_for_shell_cases(input: &str, expected: &str) {
+    assert_eq!(escape_for_shell(input), expected);
 }
 
-#[test]
-fn escape_for_shell_escapes_dollar_sign() {
-    assert_eq!(escape_for_shell("$HOME"), "\\$HOME");
-}
-
-#[test]
-fn escape_for_shell_escapes_backtick() {
-    assert_eq!(
-        escape_for_shell("Write to `file.txt`"),
-        "Write to \\`file.txt\\`"
-    );
-}
-
-#[test]
-fn escape_for_shell_escapes_double_quote() {
-    assert_eq!(escape_for_shell(r#"say "hello""#), r#"say \"hello\""#);
-}
-
-#[test]
-fn escape_for_shell_escapes_all_special_chars() {
-    assert_eq!(
-        escape_for_shell(r#"$VAR `cmd` "quote" \slash"#),
-        r#"\$VAR \`cmd\` \"quote\" \\slash"#
-    );
-}
-
-#[test]
-fn escape_for_shell_empty_string() {
-    assert_eq!(escape_for_shell(""), "");
-}
-
-#[test]
-fn escape_for_shell_preserves_single_quotes() {
-    // Single quotes have no special meaning inside double quotes
-    assert_eq!(escape_for_shell("it's a test"), "it's a test");
-}
-
-#[test]
-fn escape_for_shell_preserves_spaces_and_newlines() {
-    assert_eq!(
-        escape_for_shell("Normal text with newlines\nand tabs\t"),
-        "Normal text with newlines\nand tabs\t"
-    );
-}
-
-// =============================================================================
-// interpolate_shell tests
-// =============================================================================
-
-#[test]
-fn interpolate_shell_escapes_special_chars_in_double_quotes() {
-    let vars: HashMap<String, String> = [(
-        "title".to_string(),
-        r#"fix: handle "$HOME" path"#.to_string(),
-    )]
-    .into_iter()
-    .collect();
-    assert_eq!(
-        interpolate_shell(r#"git commit -m "${title}""#, &vars),
-        r#"git commit -m "fix: handle \"\$HOME\" path""#
-    );
-}
-
-#[test]
-fn interpolate_shell_escapes_backticks() {
-    let vars: HashMap<String, String> =
-        [("title".to_string(), "fix: update `config.rs`".to_string())]
-            .into_iter()
-            .collect();
-    assert_eq!(
-        interpolate_shell(r#"git commit -m "${title}""#, &vars),
-        r#"git commit -m "fix: update \`config.rs\`""#
-    );
-}
-
-#[test]
-fn interpolate_shell_preserves_single_quotes_in_value() {
-    let vars: HashMap<String, String> = [("msg".to_string(), "it's a test".to_string())]
-        .into_iter()
-        .collect();
-    // Single quotes in a value are harmless inside double-quoted shell context
-    assert_eq!(
-        interpolate_shell(r#"echo "${msg}""#, &vars),
-        r#"echo "it's a test""#
-    );
-}
-
-#[test]
-fn interpolate_shell_unknown_left_alone() {
-    let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(
-        interpolate_shell("echo '${unknown}'", &vars),
-        "echo '${unknown}'"
-    );
+#[yare::parameterized(
+    escapes_special_chars = { r#"git commit -m "${title}""#,  &[("title", r#"fix: handle "$HOME" path"#)],  r#"git commit -m "fix: handle \"\$HOME\" path""# },
+    escapes_backticks     = { r#"git commit -m "${title}""#,  &[("title", "fix: update `config.rs`")],      r#"git commit -m "fix: update \`config.rs\`""# },
+    preserves_single_quotes = { r#"echo "${msg}""#,           &[("msg", "it's a test")],                    r#"echo "it's a test""# },
+    unknown_left_alone    = { "echo '${unknown}'",            &[],                                          "echo '${unknown}'" },
+)]
+fn interpolate_shell_cases(template: &str, var_pairs: &[(&str, &str)], expected: &str) {
+    assert_eq!(interpolate_shell(template, &vars(var_pairs)), expected);
 }
 
 #[test]
 fn interpolate_plain_does_not_escape() {
-    let vars: HashMap<String, String> = [("msg".to_string(), r#"$HOME `pwd` "hello""#.to_string())]
-        .into_iter()
-        .collect();
-    // Regular interpolate should NOT escape
-    assert_eq!(interpolate("${msg}", &vars), r#"$HOME `pwd` "hello""#);
+    let v = vars(&[("msg", r#"$HOME `pwd` "hello""#)]);
+    assert_eq!(interpolate("${msg}", &v), r#"$HOME `pwd` "hello""#);
 }
 
 #[test]
 fn interpolate_shell_realistic_submit_step() {
-    // Simulate a submit step where local.title contains user-provided text
-    let vars: HashMap<String, String> = [
-        (
-            "local.title".to_string(),
-            "fix: handle `$PATH` and \"quotes\"".to_string(),
-        ),
-        ("local.branch".to_string(), "fix/bug-123".to_string()),
-    ]
-    .into_iter()
-    .collect();
+    let v = vars(&[
+        ("local.title", "fix: handle `$PATH` and \"quotes\""),
+        ("local.branch", "fix/bug-123"),
+    ]);
     let template = r#"git commit -m "${local.title}" && git push origin "${local.branch}""#;
-    let result = interpolate_shell(template, &vars);
     assert_eq!(
-        result,
+        interpolate_shell(template, &v),
         r#"git commit -m "fix: handle \`\$PATH\` and \"quotes\"" && git push origin "fix/bug-123""#
     );
 }
 
-// =============================================================================
-// interpolate tests
-// =============================================================================
-
-#[test]
-fn interpolate_simple() {
-    let vars: HashMap<String, String> = [("name".to_string(), "test".to_string())]
-        .into_iter()
-        .collect();
-    assert_eq!(interpolate("Hello ${name}!", &vars), "Hello test!");
-}
-
-#[test]
-fn interpolate_multiple() {
-    let vars: HashMap<String, String> = [
-        ("a".to_string(), "1".to_string()),
-        ("b".to_string(), "2".to_string()),
-    ]
-    .into_iter()
-    .collect();
-    assert_eq!(interpolate("${a} + ${b} = ${a}${b}", &vars), "1 + 2 = 12");
-}
-
-#[test]
-fn interpolate_unknown_left_alone() {
-    let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(interpolate("Hello ${unknown}!", &vars), "Hello ${unknown}!");
-}
-
-#[test]
-fn interpolate_no_vars() {
-    let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(interpolate("No variables here", &vars), "No variables here");
-}
-
-#[test]
-fn interpolate_empty_braces_not_matched() {
-    let vars: HashMap<String, String> = HashMap::new();
-    // Empty ${} should not match the template var pattern and pass through unchanged
-    assert_eq!(interpolate("${}", &vars), "${}");
-    // Incomplete ${ should also pass through unchanged
-    assert_eq!(interpolate("${", &vars), "${");
+#[yare::parameterized(
+    simple          = { "Hello ${name}!",             &[("name", "test")],         "Hello test!" },
+    multiple        = { "${a} + ${b} = ${a}${b}",     &[("a", "1"), ("b", "2")],   "1 + 2 = 12" },
+    unknown         = { "Hello ${unknown}!",          &[],                          "Hello ${unknown}!" },
+    no_vars         = { "No variables here",          &[],                          "No variables here" },
+    empty_braces    = { "${}",                        &[],                          "${}" },
+    incomplete      = { "${",                         &[],                          "${" },
+)]
+fn interpolate_basic(template: &str, var_pairs: &[(&str, &str)], expected: &str) {
+    assert_eq!(interpolate(template, &vars(var_pairs)), expected);
 }
 
 #[test]
@@ -191,10 +68,7 @@ fn interpolate_env_var_with_default_uses_env() {
     // Set an env var for this test
     std::env::set_var("TEMPLATE_TEST_VAR", "from_env");
     let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(
-        interpolate("${TEMPLATE_TEST_VAR:-default}", &vars),
-        "from_env"
-    );
+    assert_eq!(interpolate("${TEMPLATE_TEST_VAR:-default}", &vars), "from_env");
     std::env::remove_var("TEMPLATE_TEST_VAR");
 }
 
@@ -203,18 +77,14 @@ fn interpolate_env_var_with_default_uses_default() {
     // Ensure env var is not set
     std::env::remove_var("TEMPLATE_UNSET_VAR");
     let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(
-        interpolate("${TEMPLATE_UNSET_VAR:-fallback}", &vars),
-        "fallback"
-    );
+    assert_eq!(interpolate("${TEMPLATE_UNSET_VAR:-fallback}", &vars), "fallback");
 }
 
 #[test]
 fn interpolate_env_and_template_vars() {
     std::env::set_var("TEMPLATE_CMD_VAR", "custom_cmd");
-    let vars: HashMap<String, String> = [("name".to_string(), "test".to_string())]
-        .into_iter()
-        .collect();
+    let vars: HashMap<String, String> =
+        [("name".to_string(), "test".to_string())].into_iter().collect();
     assert_eq!(
         interpolate("${TEMPLATE_CMD_VAR:-default} --name ${name}", &vars),
         "custom_cmd --name test"
@@ -222,116 +92,30 @@ fn interpolate_env_and_template_vars() {
     std::env::remove_var("TEMPLATE_CMD_VAR");
 }
 
-#[test]
-fn interpolate_dotted_key() {
-    let vars: HashMap<String, String> = [
-        ("input.name".to_string(), "my-feature".to_string()),
-        ("input.prompt".to_string(), "Add tests".to_string()),
-    ]
-    .into_iter()
-    .collect();
-    assert_eq!(
-        interpolate("Feature: ${input.name}, Task: ${input.prompt}", &vars),
-        "Feature: my-feature, Task: Add tests"
-    );
+#[yare::parameterized(
+    dotted_key    = { "Feature: ${input.name}, Task: ${input.prompt}", &[("input.name", "my-feature"), ("input.prompt", "Add tests")], "Feature: my-feature, Task: Add tests" },
+    dotted_hyphen = { "Testing ${input.feature-name}",                 &[("input.feature-name", "auth")],                              "Testing auth" },
+    mixed         = { "Command: ${prompt}, Input: ${input.prompt}",    &[("prompt", "rendered prompt text"), ("input.prompt", "user input")], "Command: rendered prompt text, Input: user input" },
+)]
+fn interpolate_dotted(template: &str, var_pairs: &[(&str, &str)], expected: &str) {
+    assert_eq!(interpolate(template, &vars(var_pairs)), expected);
 }
 
-#[test]
-fn interpolate_dotted_key_with_hyphen() {
-    let vars: HashMap<String, String> = [("input.feature-name".to_string(), "auth".to_string())]
-        .into_iter()
-        .collect();
-    assert_eq!(
-        interpolate("Testing ${input.feature-name}", &vars),
-        "Testing auth"
-    );
-}
-
-#[test]
-fn interpolate_mixed_simple_and_dotted() {
-    let vars: HashMap<String, String> = [
-        ("prompt".to_string(), "rendered prompt text".to_string()),
-        ("input.prompt".to_string(), "user input".to_string()),
-    ]
-    .into_iter()
-    .collect();
-    assert_eq!(
-        interpolate("Command: ${prompt}, Input: ${input.prompt}", &vars),
-        "Command: rendered prompt text, Input: user input"
-    );
-}
-
-// =============================================================================
-// substring extraction tests (${var:offset:length})
-// =============================================================================
-
-#[test]
-fn interpolate_substring_offset_and_length() {
-    let vars: HashMap<String, String> = [("name".to_string(), "hello world".to_string())]
-        .into_iter()
-        .collect();
-    assert_eq!(interpolate("${name:0:5}", &vars), "hello");
-}
-
-#[test]
-fn interpolate_substring_offset_only() {
-    let vars: HashMap<String, String> = [("name".to_string(), "hello world".to_string())]
-        .into_iter()
-        .collect();
-    assert_eq!(interpolate("${name:6}", &vars), "world");
-}
-
-#[test]
-fn interpolate_substring_no_slice_unchanged() {
-    let vars: HashMap<String, String> = [("name".to_string(), "hello world".to_string())]
-        .into_iter()
-        .collect();
-    assert_eq!(interpolate("${name}", &vars), "hello world");
+#[yare::parameterized(
+    offset_and_length = { "${name:0:5}",                  &[("name", "hello world")],                                  "hello" },
+    offset_only       = { "${name:6}",                    &[("name", "hello world")],                                  "world" },
+    no_slice          = { "${name}",                      &[("name", "hello world")],                                  "hello world" },
+    unknown_var       = { "${unknown:0:5}",               &[],                                                         "${unknown:0:5}" },
+    beyond_length     = { "${name:0:100}",                &[("name", "short")],                                        "short" },
+    dotted_key        = { "feat: ${var.instructions:0:20}", &[("var.instructions", "Add feature for handling long descriptions")], "feat: Add feature for hand" },
+    unicode           = { "${name:0:5}",                  &[("name", "héllo wörld")],                                  "héllo" },
+)]
+fn interpolate_substring(template: &str, var_pairs: &[(&str, &str)], expected: &str) {
+    assert_eq!(interpolate(template, &vars(var_pairs)), expected);
 }
 
 #[test]
 fn interpolate_substring_shell_escaping_after_truncation() {
-    let vars: HashMap<String, String> = [("msg".to_string(), "safe $dollar `tick`".to_string())]
-        .into_iter()
-        .collect();
-    // Truncate to "safe $dol" then shell-escape
-    assert_eq!(interpolate_shell("${msg:0:9}", &vars), "safe \\$dol");
-}
-
-#[test]
-fn interpolate_substring_unknown_var_left_as_is() {
-    let vars: HashMap<String, String> = HashMap::new();
-    assert_eq!(interpolate("${unknown:0:5}", &vars), "${unknown:0:5}");
-}
-
-#[test]
-fn interpolate_substring_beyond_length() {
-    let vars: HashMap<String, String> = [("name".to_string(), "short".to_string())]
-        .into_iter()
-        .collect();
-    // Length exceeds string — returns entire string from offset
-    assert_eq!(interpolate("${name:0:100}", &vars), "short");
-}
-
-#[test]
-fn interpolate_substring_with_dotted_key() {
-    let vars: HashMap<String, String> = [(
-        "var.instructions".to_string(),
-        "Add feature for handling long descriptions".to_string(),
-    )]
-    .into_iter()
-    .collect();
-    assert_eq!(
-        interpolate("feat: ${var.instructions:0:20}", &vars),
-        "feat: Add feature for hand"
-    );
-}
-
-#[test]
-fn interpolate_substring_unicode() {
-    let vars: HashMap<String, String> = [("name".to_string(), "héllo wörld".to_string())]
-        .into_iter()
-        .collect();
-    // Substring operates on chars, not bytes
-    assert_eq!(interpolate("${name:0:5}", &vars), "héllo");
+    let v = vars(&[("msg", "safe $dollar `tick`")]);
+    assert_eq!(interpolate_shell("${msg:0:9}", &v), "safe \\$dol");
 }

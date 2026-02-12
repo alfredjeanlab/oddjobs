@@ -5,57 +5,6 @@
 
 use super::*;
 
-const WORKER_RUNBOOK: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[queue.bugs]
-list = "echo '[]'"
-take = "echo taken"
-
-[worker.fixer]
-source = { queue = "bugs" }
-handler = { job = "build" }
-concurrency = 1
-"#;
-
-/// Runbook with a persisted queue and concurrency = 2
-pub(super) const CONCURRENT_WORKER_RUNBOOK: &str = r#"
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-
-[queue.bugs]
-type = "persisted"
-vars = ["title"]
-
-[worker.fixer]
-source = { queue = "bugs" }
-handler = { job = "build" }
-concurrency = 2
-"#;
-
 pub(super) use crate::test_helpers::load_runbook_hash;
 
 /// Helper: push N items to a persisted queue via MaterializedState events.
@@ -63,34 +12,27 @@ pub(super) fn push_persisted_items(ctx: &TestContext, queue: &str, count: usize)
     ctx.runtime.lock_state_mut(|state| {
         for i in 1..=count {
             state.apply_event(&Event::QueuePushed {
-                queue_name: queue.to_string(),
+                queue: queue.to_string(),
                 item_id: format!("item-{}", i),
-                data: {
-                    let mut m = HashMap::new();
-                    m.insert("title".to_string(), format!("bug {}", i));
-                    m
-                },
-                pushed_at_epoch_ms: 1000 + i as u64,
-                namespace: String::new(),
+                data: vars!("title" => format!("bug {}", i)),
+                pushed_at_ms: 1000 + i as u64,
+                project: String::new(),
             });
         }
     });
 }
 
-/// Count WorkerItemDispatched events in a list.
+/// Count WorkerDispatched events in a list.
 pub(super) fn count_dispatched(events: &[Event]) -> usize {
-    events
-        .iter()
-        .filter(|e| matches!(e, Event::WorkerItemDispatched { .. }))
-        .count()
+    events.iter().filter(|e| matches!(e, Event::WorkerDispatched { .. })).count()
 }
 
-/// Collect job IDs from WorkerItemDispatched events.
+/// Collect job IDs from WorkerDispatched events.
 pub(super) fn dispatched_job_ids(events: &[Event]) -> Vec<JobId> {
     events
         .iter()
         .filter_map(|e| match e {
-            Event::WorkerItemDispatched { job_id, .. } => Some(job_id.clone()),
+            Event::WorkerDispatched { owner, .. } => owner.as_job().cloned(),
             _ => None,
         })
         .collect()
@@ -107,14 +49,14 @@ pub(super) async fn start_worker_and_poll(
 
     let start_events = ctx
         .runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: worker_name.to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
+        .handle_event(worker_started(
+            worker_name,
+            &ctx.project_path,
+            &hash,
+            "bugs",
             concurrency,
-            namespace: String::new(),
-        })
+            "",
+        ))
         .await
         .unwrap();
 
@@ -148,10 +90,11 @@ pub(super) fn queue_item_status(
 /// populate the in-process cache so that WorkerStarted can find the runbook.
 #[tokio::test]
 async fn runbook_loaded_event_populates_cache_for_worker_started() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
     // Parse and serialize the runbook (mimics what the listener does)
-    let (runbook_json, runbook_hash) = hash_runbook(WORKER_RUNBOOK);
+    let (runbook_json, runbook_hash) = hash_runbook(&runbook);
 
     // Step 1: Process RunbookLoaded event (as WAL replay would)
     let events = ctx
@@ -178,59 +121,40 @@ async fn runbook_loaded_event_populates_cache_for_worker_started() {
     // This should succeed because the cache was populated by RunbookLoaded
     let result = ctx
         .runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: runbook_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &runbook_hash, "bugs", 1, ""))
         .await;
 
-    assert!(
-        result.is_ok(),
-        "WorkerStarted should succeed after RunbookLoaded: {:?}",
-        result.err()
-    );
+    assert!(result.is_ok(), "WorkerStarted should succeed after RunbookLoaded: {:?}", result.err());
 
     // Verify worker state was established
     let workers = ctx.runtime.worker_states.lock();
-    assert!(
-        workers.contains_key("fixer"),
-        "Worker state should be registered"
-    );
+    assert!(workers.contains_key("fixer"), "Worker state should be registered");
 }
 
 /// After daemon restart, WorkerStarted must restore active_jobs from
 /// MaterializedState so concurrency limits are enforced.
 #[tokio::test]
 async fn worker_restart_restores_active_jobs_from_persisted_state() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
-    let (runbook_json, runbook_hash) = hash_runbook(WORKER_RUNBOOK);
+    let (runbook_json, runbook_hash) = hash_runbook(&runbook);
 
     // Populate MaterializedState as if WAL replay already ran:
     // a worker with one active job dispatched before restart.
+    let ws = worker_started("fixer", &ctx.project_path, &runbook_hash, "bugs", 1, "");
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::RunbookLoaded {
             hash: runbook_hash.clone(),
             version: 1,
             runbook: runbook_json.clone(),
         });
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: runbook_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
+        state.apply_event(&ws);
+        state.apply_event(&Event::WorkerDispatched {
+            worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            job_id: oj_core::JobId::new("pipe-running"),
-            namespace: String::new(),
+            owner: oj_core::JobId::new("job-running").into(),
+            project: String::new(),
         });
     });
 
@@ -246,66 +170,48 @@ async fn worker_restart_restores_active_jobs_from_persisted_state() {
 
     // Now simulate the daemon re-processing WorkerStarted after restart
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: runbook_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &runbook_hash, "bugs", 1, ""))
         .await
         .unwrap();
 
     // Verify in-memory WorkerState has the active job restored
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").expect("worker state should exist");
-    assert_eq!(
-        state.active_jobs.len(),
-        1,
-        "active_jobs should be restored from persisted state"
-    );
+    assert_eq!(state.active.len(), 1, "active_jobs should be restored from persisted state");
     assert!(
-        state
-            .active_jobs
-            .contains(&oj_core::JobId::new("pipe-running")),
+        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::new("job-running"))),
         "should contain the job that was running before restart"
     );
 }
 
 /// After daemon restart with a namespaced worker, WorkerStarted must restore
-/// active_jobs using the scoped key (namespace/worker_name) from
+/// active_jobs using the scoped key (project/worker_name) from
 /// MaterializedState. Regression test for queue items stuck in Active status
-/// when namespace scoping was missing from the persisted state lookup.
+/// when project scoping was missing from the persisted state lookup.
 #[tokio::test]
 async fn worker_restart_restores_active_jobs_with_namespace() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
-    let (runbook_json, runbook_hash) = hash_runbook(WORKER_RUNBOOK);
+    let (runbook_json, runbook_hash) = hash_runbook(&runbook);
 
-    let namespace = "myproject";
+    let project = "myproject";
 
     // Populate MaterializedState as if WAL replay already ran:
     // a namespaced worker with one active job dispatched before restart.
+    let ws = worker_started("fixer", &ctx.project_path, &runbook_hash, "bugs", 1, project);
     ctx.runtime.lock_state_mut(|state| {
         state.apply_event(&Event::RunbookLoaded {
             hash: runbook_hash.clone(),
             version: 1,
             runbook: runbook_json.clone(),
         });
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: runbook_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: namespace.to_string(),
-        });
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
+        state.apply_event(&ws);
+        state.apply_event(&Event::WorkerDispatched {
+            worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            job_id: oj_core::JobId::new("pipe-running"),
-            namespace: namespace.to_string(),
+            owner: oj_core::JobId::new("job-running").into(),
+            project: project.to_string(),
         });
     });
 
@@ -321,32 +227,21 @@ async fn worker_restart_restores_active_jobs_with_namespace() {
 
     // Now simulate the daemon re-processing WorkerStarted after restart
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: runbook_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: namespace.to_string(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &runbook_hash, "bugs", 1, project))
         .await
         .unwrap();
 
     // Verify in-memory WorkerState has the active job restored
     // (key is now scoped: "myproject/fixer")
     let workers = ctx.runtime.worker_states.lock();
-    let state = workers
-        .get("myproject/fixer")
-        .expect("worker state should exist");
+    let state = workers.get("myproject/fixer").expect("worker state should exist");
     assert_eq!(
-        state.active_jobs.len(),
+        state.active.len(),
         1,
-        "active_jobs should be restored from persisted state with namespace"
+        "active_jobs should be restored from persisted state with project"
     );
     assert!(
-        state
-            .active_jobs
-            .contains(&oj_core::JobId::new("pipe-running")),
+        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::new("job-running"))),
         "should contain the job that was running before restart"
     );
 }
@@ -355,10 +250,11 @@ async fn worker_restart_restores_active_jobs_with_namespace() {
 /// on the next poll, not use the stale cached version.
 #[tokio::test]
 async fn worker_picks_up_runbook_edits_on_poll() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
     // Parse, serialize and hash the original runbook
-    let (runbook_json, original_hash) = hash_runbook(WORKER_RUNBOOK);
+    let (runbook_json, original_hash) = hash_runbook(&runbook);
 
     // Simulate RunbookLoaded + WorkerStarted (as daemon does)
     ctx.runtime
@@ -371,14 +267,7 @@ async fn worker_picks_up_runbook_edits_on_poll() {
         .unwrap();
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: original_hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &original_hash, "bugs", 1, ""))
         .await
         .unwrap();
 
@@ -389,34 +278,30 @@ async fn worker_picks_up_runbook_edits_on_poll() {
     }
 
     // Edit the runbook on disk (change the init step command)
-    let updated_runbook = WORKER_RUNBOOK.replace("echo init", "echo updated-init");
-    let runbook_path = ctx.project_root.join(".oj/runbooks/test.toml");
+    let updated_runbook = runbook.replace("echo init", "echo updated-init");
+    let runbook_path = ctx.project_path.join(".oj/runbooks/test.toml");
     std::fs::write(&runbook_path, &updated_runbook).unwrap();
 
     // Compute the expected new hash
     let (_, expected_new_hash) = hash_runbook(&updated_runbook);
-    assert_ne!(
-        original_hash, expected_new_hash,
-        "hashes should differ after edit"
-    );
+    assert_ne!(original_hash, expected_new_hash, "hashes should differ after edit");
 
     // Trigger a poll with an empty item list (still triggers refresh)
     let events = ctx
         .runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![],
         })
         .await
         .unwrap();
 
     // The refresh should have emitted a RunbookLoaded event
-    let has_runbook_loaded = events
-        .iter()
-        .any(|e| matches!(e, Event::RunbookLoaded { .. }));
+    let has_runbook_loaded = events.iter().any(|e| matches!(e, Event::RunbookLoaded { .. }));
     assert!(
         has_runbook_loaded,
-        "WorkerPollComplete should emit RunbookLoaded when runbook changed on disk"
+        "WorkerPolled should emit RunbookLoaded when runbook changed on disk"
     );
 
     // Worker state should now have the new hash
@@ -431,10 +316,7 @@ async fn worker_picks_up_runbook_edits_on_poll() {
     // The new runbook should be in the cache
     {
         let cache = ctx.runtime.runbook_cache.lock();
-        assert!(
-            cache.contains_key(&expected_new_hash),
-            "new runbook should be in cache"
-        );
+        assert!(cache.contains_key(&expected_new_hash), "new runbook should be in cache");
     }
 }
 
@@ -442,29 +324,24 @@ async fn worker_picks_up_runbook_edits_on_poll() {
 /// should restore both and not dispatch new items.
 #[tokio::test]
 async fn worker_restart_restores_multiple_active_jobs() {
-    let ctx = setup_with_runbook(CONCURRENT_WORKER_RUNBOOK).await;
-    let hash = load_runbook_hash(&ctx, CONCURRENT_WORKER_RUNBOOK);
+    let runbook = test_runbook_worker("type = \"persisted\"\nvars = [\"title\"]", 2);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
 
+    let ws = worker_started("fixer", &ctx.project_path, &hash, "bugs", 2, "");
     ctx.runtime.lock_state_mut(|state| {
-        state.apply_event(&Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        });
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
+        state.apply_event(&ws);
+        state.apply_event(&Event::WorkerDispatched {
+            worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            job_id: JobId::new("pipe-a"),
-            namespace: String::new(),
+            owner: JobId::new("job-a").into(),
+            project: String::new(),
         });
-        state.apply_event(&Event::WorkerItemDispatched {
-            worker_name: "fixer".to_string(),
+        state.apply_event(&Event::WorkerDispatched {
+            worker: "fixer".to_string(),
             item_id: "item-2".to_string(),
-            job_id: JobId::new("pipe-b"),
-            namespace: String::new(),
+            owner: JobId::new("job-b").into(),
+            project: String::new(),
         });
     });
 
@@ -472,27 +349,16 @@ async fn worker_restart_restores_multiple_active_jobs() {
 
     let start_events = ctx
         .runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash,
-            queue_name: "bugs".to_string(),
-            concurrency: 2,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 2, ""))
         .await
         .unwrap();
 
     {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
-        assert_eq!(
-            state.active_jobs.len(),
-            2,
-            "should restore 2 active jobs from persisted state"
-        );
-        assert!(state.active_jobs.contains(&JobId::new("pipe-a")));
-        assert!(state.active_jobs.contains(&JobId::new("pipe-b")));
+        assert_eq!(state.active.len(), 2, "should restore 2 active jobs from persisted state");
+        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::new("job-a"))));
+        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::new("job-b"))));
     }
 
     let mut all_events = Vec::new();
@@ -508,12 +374,87 @@ async fn worker_restart_restores_multiple_active_jobs() {
     );
 }
 
+#[tokio::test]
+async fn started_error_worker_not_in_runbook() {
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
+
+    let result = ctx
+        .runtime
+        .handle_event(worker_started("nonexistent", &ctx.project_path, &hash, "bugs", 1, ""))
+        .await;
+
+    assert!(result.is_err(), "should error when worker not in runbook");
+}
+
+#[tokio::test]
+async fn stopped_nonexistent_worker_returns_ok() {
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+
+    let result = ctx
+        .runtime
+        .handle_event(Event::WorkerStopped { worker: "ghost".to_string(), project: String::new() })
+        .await;
+
+    assert!(result.is_ok(), "stopping unknown worker should succeed");
+}
+
+#[tokio::test]
+async fn resized_nonexistent_worker_returns_empty() {
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+
+    let events = ctx
+        .runtime
+        .handle_event(Event::WorkerResized {
+            worker: "ghost".to_string(),
+            concurrency: 5,
+            project: String::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(events.is_empty());
+}
+
+#[tokio::test]
+async fn resized_stopped_worker_returns_empty() {
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
+    let hash = load_runbook_hash(&ctx, &runbook);
+
+    // Start, then stop the worker
+    ctx.runtime
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 1, ""))
+        .await
+        .unwrap();
+    ctx.runtime
+        .handle_event(Event::WorkerStopped { worker: "fixer".to_string(), project: String::new() })
+        .await
+        .unwrap();
+
+    let events = ctx
+        .runtime
+        .handle_event(Event::WorkerResized {
+            worker: "fixer".to_string(),
+            concurrency: 5,
+            project: String::new(),
+        })
+        .await
+        .unwrap();
+
+    assert!(events.is_empty(), "resizing a stopped worker should return empty events");
+}
+
 /// When the runbook has not changed on disk, no RunbookLoaded event should be emitted.
 #[tokio::test]
 async fn worker_no_refresh_when_runbook_unchanged() {
-    let ctx = setup_with_runbook(WORKER_RUNBOOK).await;
+    let runbook = test_runbook_worker("list = \"echo '[]'\"\ntake = \"echo taken\"", 1);
+    let ctx = setup_with_runbook(&runbook).await;
 
-    let (runbook_json, hash) = hash_runbook(WORKER_RUNBOOK);
+    let (runbook_json, hash) = hash_runbook(&runbook);
 
     ctx.runtime
         .handle_event(Event::RunbookLoaded {
@@ -525,34 +466,23 @@ async fn worker_no_refresh_when_runbook_unchanged() {
         .unwrap();
 
     ctx.runtime
-        .handle_event(Event::WorkerStarted {
-            worker_name: "fixer".to_string(),
-            project_root: ctx.project_root.clone(),
-            runbook_hash: hash.clone(),
-            queue_name: "bugs".to_string(),
-            concurrency: 1,
-            namespace: String::new(),
-        })
+        .handle_event(worker_started("fixer", &ctx.project_path, &hash, "bugs", 1, ""))
         .await
         .unwrap();
 
     // Poll with empty items — runbook unchanged on disk
     let events = ctx
         .runtime
-        .handle_event(Event::WorkerPollComplete {
-            worker_name: "fixer".to_string(),
+        .handle_event(Event::WorkerPolled {
+            worker: "fixer".to_string(),
+            project: String::new(),
             items: vec![],
         })
         .await
         .unwrap();
 
-    let has_runbook_loaded = events
-        .iter()
-        .any(|e| matches!(e, Event::RunbookLoaded { .. }));
-    assert!(
-        !has_runbook_loaded,
-        "No RunbookLoaded should be emitted when runbook is unchanged"
-    );
+    let has_runbook_loaded = events.iter().any(|e| matches!(e, Event::RunbookLoaded { .. }));
+    assert!(!has_runbook_loaded, "No RunbookLoaded should be emitted when runbook is unchanged");
 
     // Hash should remain the same
     {

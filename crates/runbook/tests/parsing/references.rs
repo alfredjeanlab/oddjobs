@@ -5,10 +5,6 @@
 
 use oj_runbook::{parse_runbook, ParseError};
 
-// ============================================================================
-// Step Reference Validation
-// ============================================================================
-
 #[yare::parameterized(
     on_done   = { "on_done" },
     on_fail   = { "on_fail" },
@@ -16,7 +12,7 @@ use oj_runbook::{parse_runbook, ParseError};
 )]
 fn error_step_references_unknown_step(trigger: &str) {
     let toml = format!(
-        "[job.test]\n[[job.test.step]]\nname = \"build\"\nrun = \"echo build\"\n{trigger} = \"nonexistent\""
+        "[job.test]\n[[job.test.step]]\nname = \"build\"\nrun = \"echo build\"\n{trigger} = {{ step = \"nonexistent\" }}"
     );
     let err = parse_runbook(&toml).unwrap_err();
     assert!(matches!(err, ParseError::InvalidFormat { .. }));
@@ -30,7 +26,7 @@ fn error_step_references_unknown_step(trigger: &str) {
 )]
 fn error_job_references_unknown_step(trigger: &str) {
     let hcl = format!(
-        "job \"test\" {{\n  {trigger} = \"nonexistent\"\n  step \"build\" {{ run = \"echo build\" }}\n}}"
+        "job \"test\" {{\n  {trigger} = {{ step = \"nonexistent\" }}\n  step \"build\" {{ run = \"echo build\" }}\n}}"
     );
     crate::assert_hcl_err(&hcl, &["references unknown step 'nonexistent'", trigger]);
 }
@@ -39,17 +35,17 @@ fn error_job_references_unknown_step(trigger: &str) {
 fn valid_step_references() {
     let hcl = r#"
 job "deploy" {
-  on_fail = "cleanup"
+  on_fail = { step = "cleanup" }
 
   step "build" {
     run     = "make build"
-    on_done = "test"
+    on_done = { step = "test" }
   }
 
   step "test" {
     run     = "make test"
-    on_done = "release"
-    on_fail = "cleanup"
+    on_done = { step = "release" }
+    on_fail = { step = "cleanup" }
   }
 
   step "release" {
@@ -64,10 +60,6 @@ job "deploy" {
     assert_eq!(super::parse_hcl(hcl).jobs["deploy"].steps.len(), 4);
 }
 
-// ============================================================================
-// Agent and Job Reference Validation
-// ============================================================================
-
 #[test]
 fn error_step_references_unknown_agent() {
     let hcl = r#"
@@ -77,10 +69,7 @@ job "test" {
   }
 }
 "#;
-    super::assert_hcl_err(
-        hcl,
-        &["references unknown agent 'ghost'", "step[0](work).run"],
-    );
+    super::assert_hcl_err(hcl, &["references unknown agent 'ghost'", "step[0](work).run"]);
 }
 
 #[test]
@@ -124,10 +113,7 @@ job "test" {
   }
 }
 "#;
-    assert_eq!(
-        super::parse_hcl(hcl).jobs["test"].steps[0].agent_name(),
-        Some("planner")
-    );
+    assert_eq!(super::parse_hcl(hcl).jobs["test"].steps[0].agent_name(), Some("planner"));
 }
 
 #[test]
@@ -135,10 +121,6 @@ fn valid_job_reference_in_command() {
     let toml = "[command.build]\nrun = { job = \"build\" }\n[job.build]\n[[job.build.step]]\nname = \"run\"\nrun = \"echo build\"";
     assert!(parse_runbook(toml).is_ok());
 }
-
-// ============================================================================
-// Duplicate Step Names
-// ============================================================================
 
 #[test]
 fn error_duplicate_step_names_in_job() {
@@ -174,17 +156,13 @@ job "b" {
     assert_eq!(super::parse_hcl(hcl).jobs.len(), 2);
 }
 
-// ============================================================================
-// Unreachable Steps
-// ============================================================================
-
 #[test]
 fn unreachable_step_is_rejected() {
     let hcl = r#"
 job "test" {
   step "start" {
     run     = "echo start"
-    on_done = "finish"
+    on_done = { step = "finish" }
   }
 
   step "orphan" {
@@ -205,12 +183,12 @@ fn reachable_steps_parse_ok() {
 job "test" {
   step "start" {
     run     = "echo start"
-    on_done = "middle"
+    on_done = { step = "middle" }
   }
 
   step "middle" {
     run     = "echo middle"
-    on_done = "finish"
+    on_done = { step = "finish" }
   }
 
   step "finish" {

@@ -7,9 +7,7 @@ use std::io::Write;
 use tempfile::tempdir;
 
 fn test_event(cmd: &str) -> Event {
-    Event::TimerStart {
-        id: TimerId::new(format!("test:{}", cmd)),
-    }
+    Event::TimerStart { id: TimerId::new(format!("test:{}", cmd)) }
 }
 
 #[test]
@@ -234,10 +232,7 @@ fn test_open_corrupt_wal_creates_bak_and_preserves_valid_entries() {
         wal.flush().unwrap();
     }
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"not-valid-json\n").unwrap();
     }
 
@@ -308,10 +303,7 @@ fn test_entries_after_stops_at_corruption() {
         wal.flush().unwrap();
     }
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"corrupted-data\n").unwrap();
     }
 
@@ -320,10 +312,7 @@ fn test_entries_after_stops_at_corruption() {
 
     // Now append garbage directly to the underlying file
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"post-open-corruption\n").unwrap();
     }
 
@@ -349,10 +338,7 @@ fn test_next_unprocessed_skips_corrupt_entry() {
 
     // Append garbage directly to the file
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"corrupt-line\n").unwrap();
     }
 
@@ -401,10 +387,7 @@ fn test_open_with_valid_entries_then_binary() {
 
     // Append binary garbage after the valid entries
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"\x80\x81\x82\xff\xfe\n").unwrap();
     }
 
@@ -432,10 +415,7 @@ fn test_entries_after_stops_at_binary_data() {
 
     // Append binary garbage after valid entry
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"\x80\x81\x82\xff\xfe\n").unwrap();
     }
 
@@ -460,10 +440,7 @@ fn test_next_unprocessed_handles_binary_data() {
 
     // Append binary garbage
     {
-        let mut f = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
+        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
         f.write_all(b"\x80\x81\x82\xff\xfe\n").unwrap();
     }
 

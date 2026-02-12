@@ -3,38 +3,61 @@
 
 //! Event types for the Odd Jobs system
 
-mod agent;
-mod agent_run;
-mod core_types;
-mod cron_scheduler;
-mod decision;
-mod dispatch;
-mod job;
-mod step;
-mod worker_queue;
-mod workspace;
-
-pub use agent::{AgentSignalKind, PromptType, QuestionData, QuestionEntry, QuestionOption};
+mod methods;
 
 use crate::agent::{AgentError, AgentId};
-use crate::agent_run::{AgentRunId, AgentRunStatus};
-use crate::decision::{DecisionOption, DecisionSource};
+use crate::crew::{CrewId, CrewStatus};
+use crate::decision::{DecisionId, DecisionOption, DecisionSource};
 use crate::job::JobId;
 use crate::owner::OwnerId;
-use crate::session::SessionId;
+use crate::target::RunTarget;
 use crate::timer::TimerId;
 use crate::workspace::WorkspaceId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Returns ` ns={namespace}` when non-empty, empty string otherwise.
-fn ns_fragment(namespace: &str) -> String {
-    if namespace.is_empty() {
-        String::new()
-    } else {
-        format!(" ns={namespace}")
-    }
+/// Type of prompt the agent is showing
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptType {
+    Permission,
+    Idle,
+    PlanApproval,
+    Question,
+    Other,
+}
+
+/// Structured data from an AskUserQuestion tool call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionData {
+    pub questions: Vec<QuestionEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionEntry {
+    pub question: String,
+    #[serde(default)]
+    pub header: Option<String>,
+    #[serde(default)]
+    pub options: Vec<QuestionOption>,
+    #[serde(default, rename = "multiSelect")]
+    pub multi_select: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuestionOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+fn default_prompt_type() -> PromptType {
+    PromptType::Other
+}
+
+fn is_empty_map<K, V>(map: &HashMap<K, V>) -> bool {
+    map.is_empty()
 }
 
 /// Events that trigger state transitions in the system.
@@ -44,134 +67,164 @@ fn ns_fragment(namespace: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Event {
-    // -- agent --
-    #[serde(rename = "agent:working")]
-    AgentWorking {
-        agent_id: AgentId,
-        /// Owner of this agent (job or agent_run).
-        owner: OwnerId,
-    },
+    #[serde(rename = "system:shutdown")]
+    Shutdown,
 
-    #[serde(rename = "agent:waiting")]
-    AgentWaiting {
-        agent_id: AgentId,
-        /// Owner of this agent (job or agent_run).
-        owner: OwnerId,
-    },
+    #[serde(rename = "timer:start")]
+    TimerStart { id: TimerId },
 
-    #[serde(rename = "agent:failed")]
-    AgentFailed {
-        agent_id: AgentId,
-        error: AgentError,
-        /// Owner of this agent (job or agent_run).
-        owner: OwnerId,
-    },
+    #[serde(rename = "runbook:loaded")]
+    RunbookLoaded { hash: String, version: u32, runbook: serde_json::Value },
 
-    #[serde(rename = "agent:exited")]
-    AgentExited {
-        agent_id: AgentId,
-        exit_code: Option<i32>,
-        /// Owner of this agent (job or agent_run).
-        owner: OwnerId,
-    },
-
-    #[serde(rename = "agent:gone")]
-    AgentGone {
-        agent_id: AgentId,
-        /// Owner of this agent (job or agent_run).
-        owner: OwnerId,
-    },
-
-    /// User-initiated input to an agent
-    #[serde(rename = "agent:input")]
-    AgentInput { agent_id: AgentId, input: String },
-
-    #[serde(rename = "agent:signal")]
-    AgentSignal {
-        agent_id: AgentId,
-        /// Kind of signal: "complete" advances job, "escalate" pauses for human
-        kind: AgentSignalKind,
-        /// Optional message explaining the signal
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
-    },
-
-    /// Agent is idle (from Notification hook)
-    #[serde(rename = "agent:idle")]
-    AgentIdle { agent_id: AgentId },
-
-    /// Agent stop hook fired with on_stop=escalate (from CLI hook)
-    #[serde(rename = "agent:stop")]
-    AgentStop { agent_id: AgentId },
-
-    /// Agent is showing a prompt (from Notification hook)
-    #[serde(rename = "agent:prompt")]
-    AgentPrompt {
-        agent_id: AgentId,
-        #[serde(default = "agent::default_prompt_type")]
-        prompt_type: PromptType,
-        /// Populated when prompt_type is Question — contains the actual question and options
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        question_data: Option<QuestionData>,
-        /// Last assistant text from the session transcript, providing context for the prompt
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        assistant_context: Option<String>,
-    },
-
-    // -- command --
     #[serde(rename = "command:run")]
     CommandRun {
-        job_id: JobId,
-        job_name: String,
-        project_root: PathBuf,
+        owner: OwnerId,
+        name: String,
+        project_path: PathBuf,
         /// Directory where the CLI was invoked (cwd), exposed as {invoke.dir}
-        #[serde(default)]
         invoke_dir: PathBuf,
-        /// Project namespace
-        #[serde(default)]
-        namespace: String,
+        project: String,
         command: String,
         args: HashMap<String, String>,
     },
 
-    // -- job --
+    #[serde(rename = "agent:working")]
+    AgentWorking { id: AgentId, owner: OwnerId },
+
+    #[serde(rename = "agent:waiting")]
+    AgentWaiting { id: AgentId, owner: OwnerId },
+
+    #[serde(rename = "agent:failed")]
+    AgentFailed { id: AgentId, error: AgentError, owner: OwnerId },
+
+    #[serde(rename = "agent:exited")]
+    AgentExited {
+        id: AgentId,
+        owner: OwnerId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+    },
+
+    #[serde(rename = "agent:gone")]
+    AgentGone {
+        id: AgentId,
+        owner: OwnerId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+    },
+
+    /// User-initiated input to an agent
+    #[serde(rename = "agent:input")]
+    AgentInput { id: AgentId, input: String },
+
+    /// Structured response to an agent prompt (plan, permission).
+    #[serde(rename = "agent:respond")]
+    AgentRespond { id: AgentId, response: crate::agent::PromptResponse },
+
+    /// Agent is idle (from Notification hook)
+    #[serde(rename = "agent:idle")]
+    AgentIdle { id: AgentId },
+
+    /// Agent stop was blocked by coop's StopConfig (agent tried to exit)
+    #[serde(rename = "agent:stop:blocked")]
+    AgentStopBlocked { id: AgentId },
+
+    /// Agent stop was allowed by coop's StopConfig (turn ended naturally)
+    #[serde(rename = "agent:stop:allowed")]
+    AgentStopAllowed { id: AgentId },
+
+    /// Agent is showing a prompt (from Notification hook)
+    #[serde(rename = "agent:prompt")]
+    AgentPrompt {
+        id: AgentId,
+        #[serde(default = "default_prompt_type")]
+        prompt_type: PromptType,
+        /// Populated when prompt_type is Question — contains the actual question and options
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        questions: Option<QuestionData>,
+        /// Last assistant text from the session transcript, providing context for the prompt
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_message: Option<String>,
+    },
+
+    /// Agent spawn completed successfully (background SpawnAgent task finished)
+    #[serde(rename = "agent:spawned")]
+    AgentSpawned { id: AgentId, owner: OwnerId },
+
+    /// Agent spawn failed (background task couldn't create the session)
+    #[serde(rename = "agent:spawn:failed")]
+    AgentSpawnFailed { id: AgentId, owner: OwnerId, reason: String },
+
+    #[serde(rename = "crew:created")]
+    CrewCreated {
+        id: CrewId,
+        agent: String,
+        project: String,
+        command: String,
+        cwd: PathBuf,
+        vars: HashMap<String, String>,
+        runbook_hash: String,
+        created_at_ms: u64,
+    },
+
+    #[serde(rename = "crew:started")]
+    CrewStarted { id: CrewId, agent_id: AgentId },
+
+    #[serde(rename = "crew:updated")]
+    CrewUpdated {
+        id: CrewId,
+        status: CrewStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+
+    #[serde(rename = "crew:resume")]
+    CrewResume {
+        id: CrewId,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        kill: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+    },
+
+    #[serde(rename = "crew:deleted")]
+    CrewDeleted { id: CrewId },
+
     #[serde(rename = "job:created")]
     JobCreated {
         id: JobId,
         kind: String,
         name: String,
+        project: String,
         runbook_hash: String,
         cwd: PathBuf,
         vars: HashMap<String, String>,
         initial_step: String,
-        #[serde(default)]
-        created_at_epoch_ms: u64,
-        #[serde(default)]
-        namespace: String,
+        created_at_ms: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        cron_name: Option<String>,
+        cron: Option<String>,
     },
 
     #[serde(rename = "job:advanced")]
     JobAdvanced { id: JobId, step: String },
 
     #[serde(rename = "job:updated")]
-    JobUpdated {
-        id: JobId,
-        vars: HashMap<String, String>,
-    },
+    JobUpdated { id: JobId, vars: HashMap<String, String> },
 
     #[serde(rename = "job:resume")]
     JobResume {
         id: JobId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-        #[serde(default, skip_serializing_if = "core_types::is_empty_map")]
+        #[serde(default, skip_serializing_if = "is_empty_map")]
         vars: HashMap<String, String>,
         /// Kill the existing session and start fresh (don't use --resume)
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         kill: bool,
     },
+
+    #[serde(rename = "job:failing")]
+    JobFailing { id: JobId },
 
     #[serde(rename = "job:cancelling")]
     JobCancelling { id: JobId },
@@ -188,50 +241,6 @@ pub enum Event {
     #[serde(rename = "job:deleted")]
     JobDeleted { id: JobId },
 
-    // -- runbook --
-    #[serde(rename = "runbook:loaded")]
-    RunbookLoaded {
-        hash: String,
-        version: u32,
-        runbook: serde_json::Value,
-    },
-
-    // -- session --
-    #[serde(rename = "session:created")]
-    SessionCreated {
-        id: SessionId,
-        /// Owner of this session (job or agent_run)
-        owner: OwnerId,
-    },
-
-    /// Agent spawn failed (background task couldn't create the session)
-    #[serde(rename = "agent:spawn_failed")]
-    AgentSpawnFailed {
-        agent_id: AgentId,
-        owner: OwnerId,
-        reason: String,
-    },
-
-    #[serde(rename = "session:input")]
-    SessionInput { id: SessionId, input: String },
-
-    #[serde(rename = "session:deleted")]
-    SessionDeleted { id: SessionId },
-
-    // -- shell --
-    #[serde(rename = "shell:exited")]
-    ShellExited {
-        job_id: JobId,
-        step: String,
-        exit_code: i32,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stdout: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        stderr: Option<String>,
-    },
-
-    // -- step --
-    /// Step has started running
     #[serde(rename = "step:started")]
     StepStarted {
         job_id: JobId,
@@ -244,7 +253,6 @@ pub enum Event {
         agent_name: Option<String>,
     },
 
-    /// Step is waiting for human intervention
     #[serde(rename = "step:waiting")]
     StepWaiting {
         job_id: JobId,
@@ -257,34 +265,30 @@ pub enum Event {
         decision_id: Option<String>,
     },
 
-    /// Step completed successfully
     #[serde(rename = "step:completed")]
     StepCompleted { job_id: JobId, step: String },
 
-    /// Step failed
     #[serde(rename = "step:failed")]
-    StepFailed {
+    StepFailed { job_id: JobId, step: String, error: String },
+
+    #[serde(rename = "shell:exited")]
+    ShellExited {
         job_id: JobId,
         step: String,
-        error: String,
+        exit_code: i32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stdout: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        stderr: Option<String>,
     },
 
-    // -- system --
-    #[serde(rename = "system:shutdown")]
-    Shutdown,
-
-    // -- timer --
-    #[serde(rename = "timer:start")]
-    TimerStart { id: TimerId },
-
-    // -- workspace --
     #[serde(rename = "workspace:created")]
     WorkspaceCreated {
         id: WorkspaceId,
         path: PathBuf,
-        branch: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        owner: Option<OwnerId>,
+        branch: Option<String>,
+        owner: OwnerId,
         /// "folder" or "worktree"
         #[serde(default)]
         workspace_type: Option<String>,
@@ -302,98 +306,56 @@ pub enum Event {
     #[serde(rename = "workspace:drop")]
     WorkspaceDrop { id: WorkspaceId },
 
-    // -- cron --
     #[serde(rename = "cron:started")]
     CronStarted {
-        cron_name: String,
-        project_root: PathBuf,
+        cron: String,
+        project: String,
+        project_path: PathBuf,
         runbook_hash: String,
         interval: String,
-        /// What this cron runs: "job:name" or "agent:name"
-        run_target: String,
-        #[serde(default)]
-        namespace: String,
+        target: RunTarget,
     },
 
     #[serde(rename = "cron:stopped")]
-    CronStopped {
-        cron_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    CronStopped { cron: String, project: String },
 
     #[serde(rename = "cron:once")]
     CronOnce {
-        cron_name: String,
-        /// Set for job targets
-        #[serde(default)]
-        job_id: JobId,
-        #[serde(default)]
-        job_name: String,
-        #[serde(default)]
-        job_kind: String,
-        /// Set for agent targets
-        #[serde(default)]
-        agent_run_id: Option<String>,
-        #[serde(default)]
-        agent_name: Option<String>,
-        project_root: PathBuf,
+        cron: String,
+        project: String,
+        project_path: PathBuf,
+        owner: OwnerId,
         runbook_hash: String,
-        /// What this cron runs: "job:name" or "agent:name"
-        #[serde(default)]
-        run_target: String,
-        #[serde(default)]
-        namespace: String,
+        target: RunTarget,
     },
 
     #[serde(rename = "cron:fired")]
-    CronFired {
-        cron_name: String,
-        #[serde(default)]
-        job_id: JobId,
-        #[serde(default)]
-        agent_run_id: Option<String>,
-        #[serde(default)]
-        namespace: String,
-    },
+    CronFired { cron: String, project: String, owner: OwnerId },
 
     #[serde(rename = "cron:deleted")]
-    CronDeleted {
-        cron_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    CronDeleted { cron: String, project: String },
 
     // -- worker --
     #[serde(rename = "worker:started")]
     WorkerStarted {
-        worker_name: String,
-        project_root: PathBuf,
+        queue: String,
+        worker: String,
         runbook_hash: String,
-        #[serde(default)]
-        queue_name: String,
-        #[serde(default)]
         concurrency: u32,
-        #[serde(default)]
-        namespace: String,
+        project: String,
+        project_path: PathBuf,
     },
 
     #[serde(rename = "worker:wake")]
-    WorkerWake {
-        worker_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    WorkerWake { worker: String, project: String },
 
-    #[serde(rename = "worker:poll_complete")]
-    WorkerPollComplete {
-        worker_name: String,
-        items: Vec<serde_json::Value>,
-    },
+    #[serde(rename = "worker:polled")]
+    WorkerPolled { worker: String, project: String, items: Vec<serde_json::Value> },
 
-    #[serde(rename = "worker:take_complete")]
-    WorkerTakeComplete {
-        worker_name: String,
+    #[serde(rename = "worker:took")]
+    WorkerTook {
+        worker: String,
+        project: String,
         item_id: String,
         item: serde_json::Value,
         exit_code: i32,
@@ -401,180 +363,77 @@ pub enum Event {
         stderr: Option<String>,
     },
 
-    #[serde(rename = "worker:item_dispatched")]
-    WorkerItemDispatched {
-        worker_name: String,
-        item_id: String,
-        job_id: JobId,
-        #[serde(default)]
-        namespace: String,
-    },
+    #[serde(rename = "worker:dispatched")]
+    WorkerDispatched { worker: String, project: String, owner: OwnerId, item_id: String },
 
     #[serde(rename = "worker:stopped")]
-    WorkerStopped {
-        worker_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    WorkerStopped { worker: String, project: String },
 
     #[serde(rename = "worker:resized")]
-    WorkerResized {
-        worker_name: String,
-        concurrency: u32,
-        #[serde(default)]
-        namespace: String,
-    },
+    WorkerResized { worker: String, project: String, concurrency: u32 },
 
     #[serde(rename = "worker:deleted")]
-    WorkerDeleted {
-        worker_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    WorkerDeleted { worker: String, project: String },
 
-    // -- queue --
     #[serde(rename = "queue:pushed")]
     QueuePushed {
-        queue_name: String,
+        queue: String,
+        project: String,
         item_id: String,
         data: HashMap<String, String>,
-        pushed_at_epoch_ms: u64,
-        #[serde(default)]
-        namespace: String,
+        pushed_at_ms: u64,
     },
 
     #[serde(rename = "queue:taken")]
-    QueueTaken {
-        queue_name: String,
-        item_id: String,
-        worker_name: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    QueueTaken { queue: String, project: String, worker: String, item_id: String },
 
     #[serde(rename = "queue:completed")]
-    QueueCompleted {
-        queue_name: String,
-        item_id: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    QueueCompleted { queue: String, project: String, item_id: String },
 
     #[serde(rename = "queue:failed")]
-    QueueFailed {
-        queue_name: String,
-        item_id: String,
-        error: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    QueueFailed { queue: String, project: String, item_id: String, error: String },
 
     #[serde(rename = "queue:dropped")]
-    QueueDropped {
-        queue_name: String,
-        item_id: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    QueueDropped { queue: String, project: String, item_id: String },
 
-    #[serde(rename = "queue:item_retry")]
-    QueueItemRetry {
-        queue_name: String,
-        item_id: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    #[serde(rename = "queue:retry")]
+    QueueRetry { queue: String, project: String, item_id: String },
 
-    #[serde(rename = "queue:item_dead")]
-    QueueItemDead {
-        queue_name: String,
-        item_id: String,
-        #[serde(default)]
-        namespace: String,
-    },
+    #[serde(rename = "queue:dead")]
+    QueueDead { queue: String, project: String, item_id: String },
 
-    // -- decision --
     #[serde(rename = "decision:created")]
     DecisionCreated {
-        id: String,
-        job_id: JobId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        agent_id: Option<String>,
-        /// Owner of this decision (job or agent_run).
+        id: DecisionId,
         owner: OwnerId,
+        project: String,
+        created_at_ms: u64,
+
+        agent_id: AgentId,
+
         source: DecisionSource,
         context: String,
         #[serde(default)]
         options: Vec<DecisionOption>,
-        /// Structured question data for multi-question decisions
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        question_data: Option<QuestionData>,
-        created_at_ms: u64,
-        #[serde(default)]
-        namespace: String,
+        questions: Option<QuestionData>,
     },
 
     #[serde(rename = "decision:resolved")]
     DecisionResolved {
-        id: String,
-        /// 1-indexed choice picking a numbered option
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        chosen: Option<usize>,
+        id: DecisionId,
+        project: String,
+        resolved_at_ms: u64,
+
         /// Per-question 1-indexed answers for multi-question decisions
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         choices: Vec<usize>,
         /// Freeform text (nudge message, custom answer)
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
-        resolved_at_ms: u64,
-        #[serde(default)]
-        namespace: String,
     },
-
-    // -- agent_run --
-    #[serde(rename = "agent_run:created")]
-    AgentRunCreated {
-        id: AgentRunId,
-        agent_name: String,
-        command_name: String,
-        #[serde(default)]
-        namespace: String,
-        cwd: PathBuf,
-        runbook_hash: String,
-        #[serde(default)]
-        vars: HashMap<String, String>,
-        #[serde(default)]
-        created_at_epoch_ms: u64,
-    },
-
-    #[serde(rename = "agent_run:started")]
-    AgentRunStarted { id: AgentRunId, agent_id: AgentId },
-
-    #[serde(rename = "agent_run:status_changed")]
-    AgentRunStatusChanged {
-        id: AgentRunId,
-        status: AgentRunStatus,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-    },
-
-    #[serde(rename = "agent_run:resume")]
-    AgentRunResume {
-        id: AgentRunId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        kill: bool,
-    },
-
-    #[serde(rename = "agent_run:deleted")]
-    AgentRunDeleted { id: AgentRunId },
 
     /// Catch-all for unknown event types (extensibility)
     #[serde(other, skip_serializing)]
     Custom,
 }
-
-#[cfg(test)]
-#[path = "../event_tests/mod.rs"]
-mod tests;

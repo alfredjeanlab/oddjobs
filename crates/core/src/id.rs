@@ -6,19 +6,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Trait for truncating identifiers to a short prefix.
-pub trait ShortId {
-    /// Returns a string slice truncated to at most `n` characters.
-    fn short(&self, n: usize) -> &str;
-}
-
-impl ShortId for str {
-    fn short(&self, n: usize) -> &str {
-        if self.len() <= n {
-            self
-        } else {
-            &self[..n]
-        }
+/// Returns a string slice truncated to at most `n` characters.
+pub fn short(s: &str, n: usize) -> &str {
+    if s.len() <= n {
+        s
+    } else {
+        &s[..n]
     }
 }
 
@@ -54,6 +47,8 @@ macro_rules! define_id {
                 Self(id.into())
             }
 
+            // NOTE(compat): consistency
+            #[allow(dead_code)]
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -130,10 +125,7 @@ pub struct SequentialIdGen {
 
 impl SequentialIdGen {
     pub fn new(prefix: impl Into<String>) -> Self {
-        Self {
-            prefix: prefix.into(),
-            counter: Arc::new(AtomicU64::new(1)),
-        }
+        Self { prefix: prefix.into(), counter: Arc::new(AtomicU64::new(1)) }
     }
 }
 

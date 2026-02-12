@@ -14,14 +14,8 @@ struct FakeEntry {
 #[test]
 fn print_prune_results_json_includes_all_fields() {
     let entries = vec![
-        FakeEntry {
-            name: "a".into(),
-            detail: "d1".into(),
-        },
-        FakeEntry {
-            name: "b".into(),
-            detail: "d2".into(),
-        },
+        FakeEntry { name: "a".into(), detail: "d1".into() },
+        FakeEntry { name: "b".into(), detail: "d2".into() },
     ];
 
     // JSON path should not panic and should produce valid JSON
@@ -39,10 +33,7 @@ fn print_prune_results_json_includes_all_fields() {
 
 #[test]
 fn print_prune_results_text_dry_run() {
-    let entries = vec![FakeEntry {
-        name: "x".into(),
-        detail: "y".into(),
-    }];
+    let entries = vec![FakeEntry { name: "x".into(), detail: "y".into() }];
 
     let result = print_prune_results(
         &entries,

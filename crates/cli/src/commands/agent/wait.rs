@@ -133,7 +133,7 @@ pub(super) async fn handle_wait(
             crate::poll::Tick::Ready => {}
             crate::poll::Tick::Timeout => {
                 return Err(
-                    ExitError::new(2, format!("Timeout waiting for agent {}", agent_id)).into(),
+                    ExitError::new(2, format!("Timeout waiting for agent {}", agent_id)).into()
                 );
             }
             crate::poll::Tick::Interrupted => {

@@ -8,25 +8,25 @@ mod dispatch;
 mod lifecycle;
 mod polling;
 
-use oj_core::JobId;
+use oj_core::OwnerId;
 use oj_runbook::QueueType;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// In-memory state for a running worker
 pub(crate) struct WorkerState {
-    pub project_root: PathBuf,
+    pub project_path: PathBuf,
     pub runbook_hash: String,
     pub queue_name: String,
     pub job_kind: String,
     pub concurrency: u32,
-    pub active_jobs: HashSet<JobId>,
+    pub active: HashSet<OwnerId>,
     pub status: WorkerStatus,
     pub queue_type: QueueType,
-    /// Maps job_id -> item_id for queue item completion tracking
-    pub item_job_map: HashMap<JobId, String>,
-    /// Project namespace
-    pub namespace: String,
+    /// Maps owner_id -> item_id for queue item completion tracking
+    pub items: HashMap<OwnerId, String>,
+    /// Project project
+    pub project: String,
     /// Poll interval for external queues (None = no periodic polling)
     pub poll_interval: Option<String>,
     /// Number of in-flight take commands for external queues.

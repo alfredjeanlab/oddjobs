@@ -3,7 +3,7 @@
 
 //! Cross-entity ID resolution for convenience commands.
 //!
-//! Resolves an ID across jobs, agents, and sessions by exact or prefix match,
+//! Resolves an ID across jobs and agents by exact or prefix match,
 //! then dispatches to the appropriate typed subcommand.
 
 use anyhow::Result;
@@ -16,7 +16,6 @@ use crate::output::OutputFormat;
 pub enum EntityKind {
     Job,
     Agent,
-    Session,
 }
 
 impl EntityKind {
@@ -24,7 +23,6 @@ impl EntityKind {
         match self {
             EntityKind::Job => "job",
             EntityKind::Agent => "agent",
-            EntityKind::Session => "session",
         }
     }
 }
@@ -45,8 +43,7 @@ pub struct EntityMatch {
 pub async fn resolve_entity(client: &DaemonClient, query: &str) -> Result<Vec<EntityMatch>> {
     let jobs = client.list_jobs().await?;
     let agents = client.list_agents(None, None).await?;
-    let sessions = client.list_sessions().await?;
-    Ok(resolve_from_lists(query, &jobs, &agents, &sessions))
+    Ok(resolve_from_lists(query, &jobs, &agents))
 }
 
 /// Pure function for entity resolution — testable without async client.
@@ -54,57 +51,23 @@ pub fn resolve_from_lists(
     query: &str,
     jobs: &[oj_daemon::JobSummary],
     agents: &[oj_daemon::AgentSummary],
-    sessions: &[oj_daemon::SessionSummary],
 ) -> Vec<EntityMatch> {
     let mut exact = Vec::new();
     let mut prefix = Vec::new();
 
+    let mut check = |kind: EntityKind, id: &str, label: Option<String>| {
+        if id == query {
+            exact.push(EntityMatch { kind: kind.clone(), id: id.to_string(), label });
+        } else if id.starts_with(query) {
+            prefix.push(EntityMatch { kind, id: id.to_string(), label });
+        }
+    };
+
     for p in jobs {
-        if p.id == query {
-            exact.push(EntityMatch {
-                kind: EntityKind::Job,
-                id: p.id.clone(),
-                label: Some(p.name.clone()),
-            });
-        } else if p.id.starts_with(query) {
-            prefix.push(EntityMatch {
-                kind: EntityKind::Job,
-                id: p.id.clone(),
-                label: Some(p.name.clone()),
-            });
-        }
+        check(EntityKind::Job, &p.id, Some(p.name.clone()));
     }
-
     for a in agents {
-        if a.agent_id == query {
-            exact.push(EntityMatch {
-                kind: EntityKind::Agent,
-                id: a.agent_id.clone(),
-                label: a.agent_name.clone(),
-            });
-        } else if a.agent_id.starts_with(query) {
-            prefix.push(EntityMatch {
-                kind: EntityKind::Agent,
-                id: a.agent_id.clone(),
-                label: a.agent_name.clone(),
-            });
-        }
-    }
-
-    for s in sessions {
-        if s.id == query {
-            exact.push(EntityMatch {
-                kind: EntityKind::Session,
-                id: s.id.clone(),
-                label: None,
-            });
-        } else if s.id.starts_with(query) {
-            prefix.push(EntityMatch {
-                kind: EntityKind::Session,
-                id: s.id.clone(),
-                label: None,
-            });
-        }
+        check(EntityKind::Agent, &a.agent_id, a.agent_name.clone());
     }
 
     if exact.is_empty() {
@@ -140,13 +103,7 @@ fn print_ambiguous(query: &str, command_name: &str, matches: &[EntityMatch]) {
     eprintln!("Ambiguous ID '{}' — matches multiple entities:\n", query);
     for m in matches {
         let label = m.label.as_deref().unwrap_or("");
-        eprintln!(
-            "  oj {} {} {}  {}",
-            m.kind.as_str(),
-            command_name,
-            m.id,
-            label
-        );
+        eprintln!("  oj {} {} {}  {}", m.kind.as_str(), command_name, m.id, label);
     }
 }
 
@@ -156,27 +113,12 @@ pub async fn handle_peek(client: &DaemonClient, id: &str, format: OutputFormat) 
     let entity = resolve_one(client, id, "peek").await?;
     match entity.kind {
         EntityKind::Job => {
-            super::job::handle(
-                super::job::JobCommand::Peek { id: entity.id },
-                client,
-                None,
-                format,
-            )
-            .await
+            super::job::handle(super::job::JobCommand::Peek { id: entity.id }, client, None, format)
+                .await
         }
         EntityKind::Agent => {
             super::agent::handle(
                 super::agent::AgentCommand::Peek { id: entity.id },
-                client,
-                "",
-                None,
-                format,
-            )
-            .await
-        }
-        EntityKind::Session => {
-            super::session::handle(
-                super::session::SessionCommand::Peek { id: entity.id },
                 client,
                 "",
                 None,
@@ -209,7 +151,6 @@ pub async fn handle_attach(client: &DaemonClient, id: &str) -> Result<()> {
             )
             .await
         }
-        EntityKind::Session => super::session::attach(&entity.id),
     }
 }
 
@@ -225,11 +166,7 @@ pub async fn handle_logs(
     match entity.kind {
         EntityKind::Job => {
             super::job::handle(
-                super::job::JobCommand::Logs {
-                    id: entity.id,
-                    follow,
-                    limit,
-                },
+                super::job::JobCommand::Logs { id: entity.id, follow, limit },
                 client,
                 None,
                 format,
@@ -251,13 +188,6 @@ pub async fn handle_logs(
             )
             .await
         }
-        EntityKind::Session => {
-            eprintln!(
-                "logs are not available for sessions — use 'oj peek {}' instead",
-                entity.id
-            );
-            std::process::exit(1);
-        }
     }
 }
 
@@ -271,10 +201,7 @@ pub async fn handle_show(
     match entity.kind {
         EntityKind::Job => {
             super::job::handle(
-                super::job::JobCommand::Show {
-                    id: entity.id,
-                    verbose,
-                },
+                super::job::JobCommand::Show { id: entity.id, verbose },
                 client,
                 None,
                 format,
@@ -284,16 +211,6 @@ pub async fn handle_show(
         EntityKind::Agent => {
             super::agent::handle(
                 super::agent::AgentCommand::Show { id: entity.id },
-                client,
-                "",
-                None,
-                format,
-            )
-            .await
-        }
-        EntityKind::Session => {
-            super::session::handle(
-                super::session::SessionCommand::Show { id: entity.id },
                 client,
                 "",
                 None,

@@ -12,18 +12,18 @@ job "build" {
 
   step "init" {
     run     = "git worktree add worktrees/${name} -b feature/${name}"
-    on_done = "plan"
+    on_done = { step = "plan" }
   }
 
   step "plan" {
     run     = { agent = "planner" }
-    on_done = "execute"
+    on_done = { step = "execute" }
   }
 
   step "execute" {
     run     = { agent = "executor" }
-    on_done = "done"
-    on_fail = "failed"
+    on_done = { step = "done" }
+    on_fail = { step = "failed" }
   }
 
   step "done" {

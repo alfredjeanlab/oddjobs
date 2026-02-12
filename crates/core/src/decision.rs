@@ -5,6 +5,7 @@
 
 use crate::event::QuestionData;
 use crate::owner::OwnerId;
+use crate::AgentId;
 use serde::{Deserialize, Serialize};
 
 crate::define_id! {
@@ -23,7 +24,6 @@ pub enum DecisionSource {
     Dead,
     Idle,
     Plan,
-    Signal,
 }
 
 /// A single option the user can choose.
@@ -40,22 +40,16 @@ pub struct DecisionOption {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Decision {
     pub id: DecisionId,
-    /// Job ID (kept for backward compatibility; empty for agent runs)
-    pub job_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_id: Option<String>,
-    /// Owner of this decision (job or agent_run).
+    pub agent_id: AgentId,
     pub owner: OwnerId,
+    pub project: String,
     pub source: DecisionSource,
     pub context: String,
     #[serde(default)]
     pub options: Vec<DecisionOption>,
     /// Structured question data for multi-question decisions
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub question_data: Option<QuestionData>,
-    /// 1-indexed choice (None = unresolved or freeform-only)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chosen: Option<usize>,
+    pub questions: Option<QuestionData>,
     /// Per-question 1-indexed answers for multi-question decisions
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<usize>,
@@ -69,17 +63,11 @@ pub struct Decision {
     /// was created for the same owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub superseded_by: Option<DecisionId>,
-    #[serde(default)]
-    pub namespace: String,
 }
 
 impl DecisionOption {
     pub fn new(label: impl Into<String>) -> Self {
-        Self {
-            label: label.into(),
-            description: None,
-            recommended: false,
-        }
+        Self { label: label.into(), description: None, recommended: false }
     }
 
     pub fn description(mut self, desc: impl Into<String>) -> Self {
@@ -100,6 +88,14 @@ impl DecisionSource {
     /// For example, a `permission_prompt` notification (Approval) should not
     /// supersede an AskUserQuestion decision (Question) that was created by
     /// the more-specific PreToolUse hook.
+    /// Whether this decision was created while the agent was alive.
+    ///
+    /// Alive decisions become stale when the agent dies and should be
+    /// auto-dismissed so on_dead can fire with appropriate options.
+    pub fn is_alive_agent_source(&self) -> bool {
+        matches!(self, Self::Idle | Self::Question | Self::Plan | Self::Approval)
+    }
+
     pub fn should_supersede(&self, existing: &DecisionSource) -> bool {
         match (self, existing) {
             // Approval (generic permission prompt) cannot supersede Question or Plan
@@ -113,6 +109,10 @@ impl DecisionSource {
 impl Decision {
     pub fn is_resolved(&self) -> bool {
         self.resolved_at_ms.is_some()
+    }
+
+    pub fn chosen(&self) -> Option<usize> {
+        self.choices.first().copied()
     }
 }
 

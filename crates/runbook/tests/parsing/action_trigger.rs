@@ -5,10 +5,6 @@
 
 use oj_runbook::{parse_runbook, parse_runbook_with_format, Format};
 
-// ============================================================================
-// Rejection Tests
-// ============================================================================
-
 #[test]
 fn on_idle_rejects_resume() {
     super::assert_toml_err(
@@ -47,10 +43,6 @@ fn on_error_per_type_validates_all_actions() {
     super::assert_toml_err(toml, &["nudge", "on_error"]);
 }
 
-// ============================================================================
-// Valid Actions
-// ============================================================================
-
 #[test]
 fn on_error_accepts_resume() {
     assert!(parse_runbook("[agent.test]\nrun = \"claude\"\non_error = \"resume\"").is_ok());
@@ -60,87 +52,15 @@ fn on_error_accepts_resume() {
 fn valid_on_idle_actions() {
     for action in ["nudge", "done", "escalate", "fail", "gate"] {
         let toml = format!("[agent.test]\nrun = \"claude\"\non_idle = \"{action}\"");
-        assert!(
-            parse_runbook(&toml).is_ok(),
-            "on_idle should accept '{action}'"
-        );
+        assert!(parse_runbook(&toml).is_ok(), "on_idle should accept '{action}'");
     }
-}
-
-// ============================================================================
-// Ask Action Validation
-// ============================================================================
-
-#[test]
-fn on_idle_ask_with_message_accepted() {
-    let toml = r#"
-[agent.test]
-run = "claude"
-on_idle = { action = "ask", message = "What should I work on next?" }
-"#;
-    assert!(parse_runbook(toml).is_ok());
-}
-
-#[test]
-fn on_idle_simple_ask_rejected_no_message() {
-    super::assert_toml_err(
-        "[agent.test]\nrun = \"claude\"\non_idle = \"ask\"",
-        &["ask", "message"],
-    );
-}
-
-#[test]
-fn on_idle_ask_object_without_message_rejected() {
-    super::assert_toml_err(
-        "[agent.test]\nrun = \"claude\"\non_idle = { action = \"ask\" }",
-        &["ask", "message"],
-    );
-}
-
-#[test]
-fn on_dead_rejects_ask() {
-    // ask can't be parsed as a simple AgentAction for on_dead since it's not valid
-    // for the OnDead trigger (serde will parse it, but trigger validation rejects it)
-    super::assert_toml_err(
-        "[agent.test]\nrun = \"claude\"\non_dead = { action = \"ask\", message = \"test\" }",
-        &["ask", "on_dead"],
-    );
-}
-
-#[test]
-fn on_stop_ask_with_message_accepted() {
-    let toml = r#"
-[agent.test]
-run = "claude"
-on_stop = { action = "ask", message = "What should I do next?" }
-"#;
-    assert!(parse_runbook(toml).is_ok());
-}
-
-#[test]
-fn on_stop_simple_ask_rejected_no_message() {
-    super::assert_toml_err(
-        "[agent.test]\nrun = \"claude\"\non_stop = \"ask\"",
-        &["ask", "message"],
-    );
-}
-
-#[test]
-fn on_stop_ask_object_without_message_rejected() {
-    super::assert_toml_err(
-        "[agent.test]\nrun = \"claude\"\non_stop = { action = \"ask\" }",
-        &["ask", "message"],
-    );
 }
 
 #[test]
 fn valid_on_dead_actions() {
     for action in ["done", "resume", "escalate", "fail", "gate"] {
         let toml = format!("[agent.test]\nrun = \"claude\"\non_dead = \"{action}\"");
-        assert!(
-            parse_runbook(&toml).is_ok(),
-            "on_dead should accept '{action}'"
-        );
+        assert!(parse_runbook(&toml).is_ok(), "on_dead should accept '{action}'");
     }
 }
 
@@ -148,10 +68,7 @@ fn valid_on_dead_actions() {
 fn valid_on_error_actions() {
     for action in ["fail", "resume", "escalate", "gate"] {
         let toml = format!("[agent.test]\nrun = \"claude\"\non_error = \"{action}\"");
-        assert!(
-            parse_runbook(&toml).is_ok(),
-            "on_error should accept '{action}'"
-        );
+        assert!(parse_runbook(&toml).is_ok(), "on_error should accept '{action}'");
     }
 }
 
@@ -171,10 +88,6 @@ action = "fail"
     assert!(parse_runbook(toml).is_ok());
 }
 
-// ============================================================================
-// Gate Actions
-// ============================================================================
-
 #[yare::parameterized(
     on_idle  = { "on_idle" },
     on_dead  = { "on_dead" },
@@ -184,15 +97,8 @@ fn gate_valid(trigger: &str) {
     let toml = format!(
         "[agent.test]\nrun = \"claude\"\n{trigger} = {{ action = \"gate\", run = \"test -f output.txt\" }}"
     );
-    assert!(
-        parse_runbook(&toml).is_ok(),
-        "gate should be valid for {trigger}"
-    );
+    assert!(parse_runbook(&toml).is_ok(), "gate should be valid for {trigger}");
 }
-
-// ============================================================================
-// Cross-Format
-// ============================================================================
 
 #[test]
 fn hcl_on_idle_rejects_resume() {

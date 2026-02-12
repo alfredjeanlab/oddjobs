@@ -8,12 +8,13 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use oj_core::ShortId;
-
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
-use crate::output::{print_prune_results, OutputFormat};
-use crate::table::{project_cell, should_show_project, Column, Table};
+use crate::output::{
+    apply_limit, filter_by_project, format_or_json, handle_list_with_limit, print_prune_results,
+    OutputFormat,
+};
+use crate::table::{Column, Table};
 
 #[derive(Args)]
 pub struct WorkspaceArgs {
@@ -72,141 +73,97 @@ impl WorkspaceCommand {
 pub async fn handle(
     command: WorkspaceCommand,
     client: &DaemonClient,
-    namespace: &str,
+    project: &str,
     project_filter: Option<&str>,
     format: OutputFormat,
 ) -> Result<()> {
     match command {
         WorkspaceCommand::List { limit, no_limit } => {
             let mut workspaces = client.list_workspaces().await?;
-
-            // Filter by explicit --project flag (OJ_NAMESPACE is NOT used for filtering)
-            if let Some(proj) = project_filter {
-                workspaces.retain(|w| w.namespace == proj);
-            }
-
-            // Sort by recency (most recent first)
+            filter_by_project(&mut workspaces, project_filter, |w| &w.project);
             workspaces.sort_by(|a, b| b.created_at_ms.cmp(&a.created_at_ms));
+            let truncation = apply_limit(&mut workspaces, limit, no_limit);
 
-            // Limit
-            let total = workspaces.len();
-            let effective_limit = if no_limit { total } else { limit };
-            let truncated = total > effective_limit;
-            if truncated {
-                workspaces.truncate(effective_limit);
-            }
-
-            match format {
-                OutputFormat::Text => {
-                    if workspaces.is_empty() {
-                        println!("No workspaces");
-                    } else {
-                        let show_project =
-                            should_show_project(workspaces.iter().map(|w| w.namespace.as_str()));
-
-                        let mut cols = vec![Column::muted("ID").with_max(8)];
-                        if show_project {
-                            cols.push(Column::left("PROJECT"));
-                        }
-                        cols.extend([
-                            Column::left("PATH").with_max(60),
-                            Column::left("BRANCH"),
-                            Column::status("STATUS"),
-                        ]);
-                        let mut table = Table::new(cols);
-
-                        for w in &workspaces {
-                            let mut cells = vec![w.id.short(8).to_string()];
-                            if show_project {
-                                cells.push(project_cell(&w.namespace));
-                            }
-                            cells.extend([
-                                w.path.display().to_string(),
-                                w.branch.as_deref().unwrap_or("-").to_string(),
-                                w.status.clone(),
-                            ]);
-                            table.row(cells);
-                        }
-                        table.render(&mut std::io::stdout());
+            handle_list_with_limit(
+                format,
+                &workspaces,
+                "No workspaces",
+                truncation,
+                |items, out| {
+                    let cols = vec![
+                        Column::muted("ID").with_max(8),
+                        Column::left("PROJECT"),
+                        Column::left("PATH").with_max(60),
+                        Column::left("BRANCH"),
+                        Column::status("STATUS"),
+                    ];
+                    let mut table = Table::new(cols);
+                    for w in items {
+                        let ns = if w.project.is_empty() { "-" } else { &w.project };
+                        let cells = vec![
+                            oj_core::short(&w.id, 8).to_string(),
+                            ns.to_string(),
+                            w.path.display().to_string(),
+                            w.branch.as_deref().unwrap_or("-").to_string(),
+                            w.status.clone(),
+                        ];
+                        table.row(cells);
                     }
-
-                    if truncated {
-                        let remaining = total - effective_limit;
-                        println!(
-                            "\n... {} more not shown. Use --no-limit or --limit N to see more.",
-                            remaining
-                        );
-                    }
-                }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&workspaces)?);
-                }
-            }
+                    table.render(out);
+                },
+            )?;
         }
         WorkspaceCommand::Show { id } => {
             let workspace = client.get_workspace(&id).await?;
-
-            match format {
-                OutputFormat::Text => {
-                    if let Some(w) = workspace {
-                        println!("{} {}", color::header("Workspace:"), w.id);
-                        println!("  {} {}", color::context("Path:"), w.path.display());
-                        if let Some(branch) = &w.branch {
-                            println!("  {} {}", color::context("Branch:"), branch);
-                        }
-                        if let Some(owner) = &w.owner {
-                            println!("  {} {}", color::context("Owner:"), owner);
-                        }
-                        println!(
-                            "  {} {}",
-                            color::context("Status:"),
-                            color::status(&w.status)
-                        );
-                    } else {
-                        println!("Workspace not found: {}", id);
+            format_or_json(format, &workspace, || {
+                if let Some(w) = &workspace {
+                    println!("{} {}", color::header("Workspace:"), w.id);
+                    println!("  {} {}", color::context("Path:"), w.path.display());
+                    if let Some(branch) = &w.branch {
+                        println!("  {} {}", color::context("Branch:"), branch);
                     }
+                    println!("  {} {}", color::context("Owner:"), w.owner);
+                    println!("  {} {}", color::context("Status:"), color::status(&w.status));
+                } else {
+                    println!("Workspace not found: {}", id);
                 }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&workspace)?);
-                }
-            }
+            })?;
         }
         WorkspaceCommand::Drop { id, failed, all } => {
-            let dropped = if all {
-                client.workspace_drop_all().await?
+            let request = if all {
+                oj_daemon::Request::WorkspaceDropAll
             } else if failed {
-                client.workspace_drop_failed().await?
+                oj_daemon::Request::WorkspaceDropFailed
             } else if let Some(id) = id {
-                client.workspace_drop(&id).await?
+                oj_daemon::Request::WorkspaceDrop { id: id.to_string() }
             } else {
                 anyhow::bail!("specify a workspace ID, --failed, or --all");
             };
+            let dropped = client.workspace_drop(request).await?;
 
-            match format {
-                OutputFormat::Text => {
-                    if dropped.is_empty() {
-                        println!("No workspaces deleted");
-                        return Ok(());
-                    }
-
-                    for ws in &dropped {
-                        println!(
-                            "Dropping {} ({})",
-                            ws.branch.as_deref().unwrap_or(ws.id.short(8)),
-                            ws.path.display()
-                        );
-                    }
-
-                    let ids: Vec<&str> = dropped.iter().map(|ws| ws.id.as_str()).collect();
-                    poll_workspace_removal(client, &ids).await;
+            format_or_json(format, &dropped, || {
+                if dropped.is_empty() {
+                    println!("No workspaces deleted");
+                    return;
                 }
-                OutputFormat::Json => {
-                    println!("{}", serde_json::to_string_pretty(&dropped)?);
+
+                for ws in &dropped {
+                    println!(
+                        "Dropping {} ({})",
+                        ws.branch.as_deref().unwrap_or(oj_core::short(&ws.id, 8)),
+                        ws.path.display()
+                    );
                 }
+            })?;
+
+            // Poll for removal in text mode (after format_or_json prints JSON or text)
+            if matches!(format, OutputFormat::Text) && !dropped.is_empty() {
+                let ids: Vec<&str> = dropped.iter().map(|ws| ws.id.as_str()).collect();
+                poll_workspace_removal(client, &ids).await;
             }
         }
         WorkspaceCommand::Prune { all, dry_run } => {
-            let ns = oj_core::namespace_to_option(namespace);
+            let ns = oj_core::namespace_to_option(project);
             let (pruned, skipped) = client.workspace_prune(all, dry_run, ns).await?;
 
             print_prune_results(
@@ -219,7 +176,7 @@ pub async fn handle(
                 |ws| {
                     format!(
                         "{} ({})",
-                        ws.branch.as_deref().unwrap_or(ws.id.short(8)),
+                        ws.branch.as_deref().unwrap_or(oj_core::short(&ws.id, 8)),
                         ws.path.display()
                     )
                 },

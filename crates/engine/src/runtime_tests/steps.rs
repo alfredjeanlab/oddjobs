@@ -4,7 +4,8 @@
 //! Step transition tests
 
 use super::*;
-use oj_core::JobId;
+use oj_core::{JobId, TimerId};
+use std::time::Duration;
 
 #[tokio::test]
 async fn shell_failure_fails_job() {
@@ -12,16 +13,7 @@ async fn shell_failure_fails_job() {
     let job_id = create_job(&ctx).await;
 
     // Simulate shell failure
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "failed");
@@ -33,16 +25,7 @@ async fn agent_error_fails_job() {
     let job_id = create_job(&ctx).await;
 
     // Advance to plan step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     // Simulate agent failure via fail_job (orchestrator-driven)
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -59,16 +42,7 @@ async fn on_fail_transition_executes() {
 
     // Advance to merge step (which has on_fail = "cleanup")
     // init -> plan -> execute -> merge
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     // Advance through agent steps (plan -> execute -> merge)
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -81,24 +55,11 @@ async fn on_fail_transition_executes() {
     assert_eq!(job.step, "merge");
 
     // Simulate merge failure - should transition to cleanup (custom step)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "merge".to_string(),
-            exit_code: 1,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_fail(&job_id, "merge")).await.unwrap();
 
     // With string-based steps, custom steps like "cleanup" now work correctly
     let job = ctx.runtime.get_job(&job_id).unwrap();
-    assert_eq!(
-        job.step, "cleanup",
-        "Expected cleanup step, got {}",
-        job.step
-    );
+    assert_eq!(job.step, "cleanup", "Expected cleanup step, got {}", job.step);
 }
 
 #[tokio::test]
@@ -108,16 +69,7 @@ async fn final_step_completes_job() {
 
     // Advance through all steps to done
     // init -> plan -> execute -> merge -> done
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     // Advance through agent steps (plan -> execute -> merge)
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -126,16 +78,7 @@ async fn final_step_completes_job() {
     let job = ctx.runtime.get_job(&job_id).unwrap();
     ctx.runtime.advance_job(&job).await.unwrap();
 
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "merge".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "merge")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
@@ -147,16 +90,7 @@ async fn done_step_run_command_executes() {
     let job_id = create_job(&ctx).await;
 
     // Advance through all steps: init -> plan -> execute -> merge -> done
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     // Advance through agent steps (plan -> execute -> merge)
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -165,16 +99,7 @@ async fn done_step_run_command_executes() {
     let job = ctx.runtime.get_job(&job_id).unwrap();
     ctx.runtime.advance_job(&job).await.unwrap();
 
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "merge".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "merge")).await.unwrap();
 
     // At this point, job should be in Done step with Running status
     // (because the "done" step's run command is executing)
@@ -183,16 +108,7 @@ async fn done_step_run_command_executes() {
     assert_eq!(job.step_status, StepStatus::Running);
 
     // Complete the "done" step's shell command
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "done".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "done")).await.unwrap();
 
     // Now job should be Done with Completed status
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -207,13 +123,7 @@ async fn wrong_step_shell_completed_ignored() {
 
     // Try to complete a step we're not in
     ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "merge".to_string(), // We're in init, not merge
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
+        .handle_event(shell_ok(&job_id, "merge")) // We're in init, not merge
         .await
         .unwrap();
 
@@ -223,199 +133,70 @@ async fn wrong_step_shell_completed_ignored() {
 }
 
 /// Runbook without explicit on_done - step should complete the job
-const RUNBOOK_NO_ON_DONE: &str = r#"
-[command.simple]
-args = "<name>"
-run = { job = "simple" }
-
-[job.simple]
-input  = ["name"]
-
-[[job.simple.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn step_without_on_done_completes_job() {
-    let ctx = setup_with_runbook(RUNBOOK_NO_ON_DONE).await;
+    let ctx = setup_with_runbook(&test_runbook_shell("simple", "")).await;
 
     // Create job
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "simple",
-            "simple",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
-    .await;
-
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "simple", &[]).await;
 
     // Complete init - no on_done means job should complete, not advance sequentially
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
     assert_eq!(job.step_status, StepStatus::Completed);
 }
 
-/// Runbook with explicit next step transitions
-const RUNBOOK_EXPLICIT_NEXT: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "custom"
-
-[[job.build.step]]
-name = "custom"
-run = "echo custom"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "echo done"
-"#;
-
 #[tokio::test]
 async fn explicit_next_step_is_followed() {
-    let ctx = setup_with_runbook(RUNBOOK_EXPLICIT_NEXT).await;
-
-    // Create job
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[
+            ("init", "echo init", "on_done = { step = \"custom\" }"),
+            ("custom", "echo custom", "on_done = { step = \"done\" }"),
+            ("done", "echo done", ""),
+        ],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    // Create job
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
 
     // Complete init - should go to custom (not second step in order)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "custom");
 
     // Complete custom - should go to done (from explicit next)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "custom".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "custom")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
 }
 
-/// Runbook where done step has no run command (implicit completion)
-const RUNBOOK_IMPLICIT_DONE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-on_done = "done"
-
-[[job.build.step]]
-name = "done"
-run = "true"
-"#;
-
 #[tokio::test]
 async fn implicit_done_step_completes_immediately() {
-    let ctx = setup_with_runbook(RUNBOOK_IMPLICIT_DONE).await;
-
-    handle_event_chain(
-        &ctx,
-        command_event(
-            "pipe-1",
-            "build",
-            "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
-        ),
-    )
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[("init", "echo init", "on_done = { step = \"done\" }"), ("done", "true", "")],
+    ))
     .await;
 
-    let job_id = ctx.runtime.jobs().keys().next().unwrap().clone();
+    let job_id = create_job_for_runbook(&ctx, "build", &[]).await;
 
     // Complete init - should advance to done step
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
     assert_eq!(job.step_status, StepStatus::Running);
 
     // Complete done step - job should complete
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "done".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "done")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "done");
@@ -431,16 +212,7 @@ async fn step_runs_with_fallback_workspace_path() {
     assert_eq!(job.step, "init");
 
     // Shell completion should work even if workspace_path might not be set
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -448,23 +220,11 @@ async fn step_runs_with_fallback_workspace_path() {
 
 #[tokio::test]
 async fn advance_job_cancels_exit_deferred_timer() {
-    use oj_core::TimerId;
-    use std::time::Duration;
-
     let ctx = setup().await;
     let job_id = create_job(&ctx).await;
 
     // Advance to plan step (agent)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");
@@ -505,23 +265,11 @@ async fn advance_job_cancels_exit_deferred_timer() {
 
 #[tokio::test]
 async fn fail_job_cancels_exit_deferred_timer() {
-    use oj_core::TimerId;
-    use std::time::Duration;
-
     let ctx = setup().await;
     let job_id = create_job(&ctx).await;
 
     // Advance to plan step (agent)
-    ctx.runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new(job_id.clone()),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await
-        .unwrap();
+    ctx.runtime.handle_event(shell_ok(&job_id, "init")).await.unwrap();
 
     let job = ctx.runtime.get_job(&job_id).unwrap();
     assert_eq!(job.step, "plan");

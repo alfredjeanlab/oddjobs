@@ -4,7 +4,6 @@
 //! Error handling tests
 
 use super::*;
-use oj_core::JobId;
 
 #[tokio::test]
 async fn command_not_found_returns_error() {
@@ -13,11 +12,11 @@ async fn command_not_found_returns_error() {
     let result = ctx
         .runtime
         .handle_event(command_event(
-            "pipe-1",
+            "job-1",
             "build",
             "nonexistent",
             HashMap::new(),
-            &ctx.project_root,
+            &ctx.project_path,
         ))
         .await;
 
@@ -29,16 +28,7 @@ async fn command_not_found_returns_error() {
 async fn shell_completed_for_unknown_job_errors() {
     let ctx = setup().await;
 
-    let result = ctx
-        .runtime
-        .handle_event(Event::ShellExited {
-            job_id: JobId::new("nonexistent"),
-            step: "init".to_string(),
-            exit_code: 0,
-            stdout: None,
-            stderr: None,
-        })
-        .await;
+    let result = ctx.runtime.handle_event(shell_ok("nonexistent", "init")).await;
 
     assert!(result.is_err());
 }
@@ -57,13 +47,11 @@ async fn command_referencing_nonexistent_job_errors() {
     let result = ctx
         .runtime
         .handle_event(command_event(
-            "pipe-1",
+            "job-1",
             "nonexistent",
             "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ))
         .await;
 
@@ -73,46 +61,27 @@ async fn command_referencing_nonexistent_job_errors() {
 }
 
 /// Runbook with workspace mode to test workspace setup failures
-const RUNBOOK_WITH_WORKSPACE: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-workspace = "folder"
-
-[[job.build.step]]
-name = "init"
-run = "echo init"
-"#;
-
 #[tokio::test]
 async fn workspace_job_creates_directory() {
     // Workspace creation is deferred: CommandRun emits JobCreated,
-    // which triggers handle_job_created → CreateWorkspace.
+    // which triggers handle_job_created -> CreateWorkspace.
     // WorkspaceReady arrives asynchronously via event_tx.
-    let mut ctx = setup_with_runbook(RUNBOOK_WITH_WORKSPACE).await;
+    let mut ctx = setup_with_runbook(&test_runbook_shell("build", "source = \"folder\"")).await;
 
     let events = ctx
         .runtime
         .handle_event(command_event(
-            "pipe-1",
+            "job-1",
             "build",
             "build",
-            [("name".to_string(), "test-ws".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test-ws"),
+            &ctx.project_path,
         ))
         .await
         .unwrap();
 
     // Job should exist with step_status=Pending (waiting for workspace)
-    let job = ctx
-        .runtime
-        .get_job("pipe-1")
-        .expect("job should exist in state");
+    let job = ctx.runtime.get_job("job-1").expect("job should exist in state");
     assert_eq!(job.step, "init");
     assert_eq!(
         job.step_status,
@@ -137,38 +106,27 @@ async fn workspace_job_creates_directory() {
     );
 
     // Workspace directory should have been created
-    let workspaces_dir = ctx.project_root.join("workspaces");
+    let workspaces_dir = ctx.project_path.join("workspaces");
     assert!(workspaces_dir.exists(), "workspaces dir should be created");
 }
 
-/// Runbook where a step references a nonexistent agent
-const RUNBOOK_MISSING_AGENT: &str = r#"
-[command.build]
-args = "<name>"
-run = { job = "build" }
-
-[job.build]
-input  = ["name"]
-
-[[job.build.step]]
-name = "init"
-run = { agent = "nonexistent" }
-"#;
-
 #[tokio::test]
 async fn step_referencing_nonexistent_agent_errors() {
-    let ctx = setup_with_runbook(RUNBOOK_MISSING_AGENT).await;
+    let ctx = setup_with_runbook(&test_runbook_steps(
+        "build",
+        "",
+        &[("init", "{ agent = \"nonexistent\" }", "")],
+    ))
+    .await;
 
     let result = ctx
         .runtime
         .handle_event(command_event(
-            "pipe-1",
+            "job-1",
             "build",
             "build",
-            [("name".to_string(), "test".to_string())]
-                .into_iter()
-                .collect(),
-            &ctx.project_root,
+            vars!("name" => "test"),
+            &ctx.project_path,
         ))
         .await;
 

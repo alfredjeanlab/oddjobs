@@ -3,16 +3,13 @@
 
 use super::*;
 use crate::MaterializedState;
+use crate::MigrationError;
 use oj_core::{Job, JobConfig, SystemClock};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
-
-// =============================================================================
-// Fake CheckpointWriter for testing
-// =============================================================================
 
 /// Records all I/O operations for verification.
 #[derive(Debug, Clone, Default)]
@@ -88,26 +85,17 @@ impl FakeCheckpointWriter {
 impl CheckpointWriter for FakeCheckpointWriter {
     fn write_tmp(&self, path: &Path, data: &[u8]) -> Result<(), CheckpointError> {
         if self.fail_write.load(Ordering::SeqCst) {
-            return Err(CheckpointError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected write failure",
-            )));
+            return Err(CheckpointError::Io(std::io::Error::other("injected write failure")));
         }
         let mut log = self.log.lock().unwrap();
         log.writes.push((path.to_owned(), data.len()));
-        self.written_data
-            .lock()
-            .unwrap()
-            .insert(path.to_owned(), data.to_vec());
+        self.written_data.lock().unwrap().insert(path.to_owned(), data.to_vec());
         Ok(())
     }
 
     fn fsync_file(&self, path: &Path) -> Result<(), CheckpointError> {
         if self.fail_fsync_file.load(Ordering::SeqCst) {
-            return Err(CheckpointError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected fsync failure",
-            )));
+            return Err(CheckpointError::Io(std::io::Error::other("injected fsync failure")));
         }
         self.fsync_file_count.fetch_add(1, Ordering::SeqCst);
         let mut log = self.log.lock().unwrap();
@@ -117,10 +105,7 @@ impl CheckpointWriter for FakeCheckpointWriter {
 
     fn rename(&self, from: &Path, to: &Path) -> Result<(), CheckpointError> {
         if self.fail_rename.load(Ordering::SeqCst) {
-            return Err(CheckpointError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected rename failure",
-            )));
+            return Err(CheckpointError::Io(std::io::Error::other("injected rename failure")));
         }
         // Move data from tmp to final path
         let data = self.written_data.lock().unwrap().remove(from);
@@ -134,10 +119,7 @@ impl CheckpointWriter for FakeCheckpointWriter {
 
     fn fsync_dir(&self, path: &Path) -> Result<(), CheckpointError> {
         if self.fail_fsync_dir.load(Ordering::SeqCst) {
-            return Err(CheckpointError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected fsync_dir failure",
-            )));
+            return Err(CheckpointError::Io(std::io::Error::other("injected fsync_dir failure")));
         }
         self.fsync_dir_count.fetch_add(1, Ordering::SeqCst);
         let mut log = self.log.lock().unwrap();
@@ -151,10 +133,6 @@ impl CheckpointWriter for FakeCheckpointWriter {
     }
 }
 
-// =============================================================================
-// Test helpers
-// =============================================================================
-
 fn test_config(id: &str, name: &str) -> JobConfig {
     JobConfig::builder(id, "feature", "init")
         .name(name)
@@ -166,18 +144,11 @@ fn test_config(id: &str, name: &str) -> JobConfig {
 fn create_test_state(num_jobs: usize) -> MaterializedState {
     let mut state = MaterializedState::default();
     for i in 0..num_jobs {
-        let job = Job::new(
-            test_config(&format!("pipe-{i}"), &format!("test-{i}")),
-            &SystemClock,
-        );
-        state.jobs.insert(format!("pipe-{i}"), job);
+        let job = Job::new(test_config(&format!("job-{i}"), &format!("test-{i}")), &SystemClock);
+        state.jobs.insert(format!("job-{i}"), job);
     }
     state
 }
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[test]
 fn test_checkpoint_basic_flow() {
@@ -260,11 +231,7 @@ fn test_checkpoint_produces_compressed_output() {
 
     // Verify zstd magic number
     assert!(data.len() >= 4);
-    assert_eq!(
-        &data[0..4],
-        &[0x28, 0xB5, 0x2F, 0xFD],
-        "should be zstd format"
-    );
+    assert_eq!(&data[0..4], &[0x28, 0xB5, 0x2F, 0xFD], "should be zstd format");
 
     // Decompress and verify content
     let decompressed = zstd::decode_all(data.as_slice()).unwrap();
@@ -273,49 +240,18 @@ fn test_checkpoint_produces_compressed_output() {
     assert_eq!(snapshot.state.jobs.len(), 10);
 }
 
-#[test]
-fn test_checkpoint_error_on_write_failure() {
+#[yare::parameterized(
+    write_failure     = { |w: &FakeCheckpointWriter| w.set_fail_write(true) },
+    fsync_failure     = { |w: &FakeCheckpointWriter| w.set_fail_fsync_file(true) },
+    dir_fsync_failure = { |w: &FakeCheckpointWriter| w.set_fail_fsync_dir(true) },
+)]
+fn test_checkpoint_error_propagation(inject: fn(&FakeCheckpointWriter)) {
     let writer = FakeCheckpointWriter::new();
-    writer.set_fail_write(true);
-
+    inject(&writer);
     let checkpointer = Checkpointer::with_writer(writer, PathBuf::from("/data/snapshot.json"));
-
     let state = create_test_state(1);
     let handle = checkpointer.start(1, &state);
-    let result = handle.wait();
-
-    assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), CheckpointError::Io(_)));
-}
-
-#[test]
-fn test_checkpoint_error_on_fsync_failure() {
-    let writer = FakeCheckpointWriter::new();
-    writer.set_fail_fsync_file(true);
-
-    let checkpointer = Checkpointer::with_writer(writer, PathBuf::from("/data/snapshot.json"));
-
-    let state = create_test_state(1);
-    let handle = checkpointer.start(1, &state);
-    let result = handle.wait();
-
-    assert!(result.is_err());
-}
-
-#[test]
-fn test_checkpoint_error_on_dir_fsync_failure() {
-    // This is critical - if dir fsync fails, checkpoint is NOT durable
-    // and WAL truncation would be unsafe
-    let writer = FakeCheckpointWriter::new();
-    writer.set_fail_fsync_dir(true);
-
-    let checkpointer = Checkpointer::with_writer(writer, PathBuf::from("/data/snapshot.json"));
-
-    let state = create_test_state(1);
-    let handle = checkpointer.start(1, &state);
-    let result = handle.wait();
-
-    assert!(result.is_err(), "dir fsync failure must propagate as error");
+    assert!(handle.wait().is_err());
 }
 
 #[test]
@@ -399,14 +335,8 @@ fn test_compression_reduces_size() {
     );
 }
 
-// =============================================================================
-// Migration Tests
-// =============================================================================
-
 #[test]
 fn test_load_zstd_snapshot_with_too_new_version_fails() {
-    use crate::MigrationError;
-
     let dir = tempdir().unwrap();
     let path = dir.path().join("snapshot.json");
 
@@ -423,7 +353,7 @@ fn test_load_zstd_snapshot_with_too_new_version_fails() {
             "queue_items": {},
             "crons": {},
             "decisions": {},
-            "agent_runs": {}
+            "crew": {}
         },
         "created_at": "2025-01-01T00:00:00Z"
     }"#;
@@ -465,7 +395,7 @@ fn test_load_zstd_snapshot_with_current_version_succeeds() {
             "queue_items": {{}},
             "crons": {{}},
             "decisions": {{}},
-            "agent_runs": {{}}
+            "crew": {{}}
         }},
         "created_at": "2025-01-01T00:00:00Z"
     }}"#,

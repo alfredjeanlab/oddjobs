@@ -13,10 +13,6 @@ fn dq(s: &str) -> TokenKind {
     TokenKind::DoubleQuoted(vec![WordPart::double_quoted(s)])
 }
 
-// =============================================================================
-// Single Quote Tests
-// =============================================================================
-
 lex_tests! {
     // Basic single quotes
     single_quote_basic: "'hello'" => [TokenKind::SingleQuoted("hello".into())],
@@ -76,10 +72,6 @@ lex_tests! {
     single_quote_with_newline: "'line1\nline2'" => [TokenKind::SingleQuoted("line1\nline2".into())],
     single_quote_with_crlf: "'line1\r\nline2'" => [TokenKind::SingleQuoted("line1\r\nline2".into())],
 }
-
-// =============================================================================
-// Double Quote Tests
-// =============================================================================
 
 lex_tests! {
     // Basic double quotes
@@ -142,10 +134,6 @@ lex_tests! {
     double_quote_with_crlf: "\"line1\r\nline2\"" => [dq("line1\r\nline2")],
 }
 
-// =============================================================================
-// Variables in Double Quotes (Parsed into Separate Parts)
-// =============================================================================
-
 #[test]
 fn double_quote_simple_variable() {
     // Boundary literals are emitted for word splitting support
@@ -155,10 +143,7 @@ fn double_quote_simple_variable() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted(""),
-            WordPart::Variable {
-                name: "VAR".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "VAR".into(), modifier: None },
             WordPart::double_quoted(""),
         ])
     );
@@ -173,10 +158,7 @@ fn double_quote_braced_variable() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted(""),
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: None },
             WordPart::double_quoted(""),
         ])
     );
@@ -191,10 +173,7 @@ fn double_quote_variable_with_modifier() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted(""),
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: Some(":-/tmp".into()),
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: Some(":-/tmp".into()) },
             WordPart::double_quoted(""),
         ])
     );
@@ -209,10 +188,7 @@ fn double_quote_variable_in_path() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted(""),
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: None },
             WordPart::double_quoted("/bin"),
         ])
     );
@@ -226,10 +202,7 @@ fn double_quote_mixed_text_and_variable() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted("hello "),
-            WordPart::Variable {
-                name: "USER".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "USER".into(), modifier: None },
             WordPart::double_quoted(", welcome"),
         ])
     );
@@ -244,15 +217,9 @@ fn double_quote_multiple_variables() {
         tokens[0].kind,
         TokenKind::DoubleQuoted(vec![
             WordPart::double_quoted(""),
-            WordPart::Variable {
-                name: "HOME".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "HOME".into(), modifier: None },
             WordPart::double_quoted("/.config/"),
-            WordPart::Variable {
-                name: "APP".into(),
-                modifier: None,
-            },
+            WordPart::Variable { name: "APP".into(), modifier: None },
             WordPart::double_quoted(""),
         ])
     );
@@ -321,10 +288,6 @@ fn double_quote_dollar_at_end() {
     );
 }
 
-// =============================================================================
-// Mixed Quote Tests
-// =============================================================================
-
 lex_tests! {
     // Adjacent quotes of different types
     single_then_double: r#"'a'"b""# => [
@@ -355,10 +318,6 @@ lex_tests! {
         dq("double"),
     ],
 }
-
-// =============================================================================
-// Integration Tests (Quotes with other tokens)
-// =============================================================================
 
 lex_tests! {
     // Quotes with operators
@@ -407,10 +366,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Span Tests
-// =============================================================================
-
 span_tests! {
     span_single_quote: "'hello'" => [(0, 7)],
     span_double_quote: r#""hello""# => [(0, 7)],
@@ -421,10 +376,6 @@ span_tests! {
     span_two_single_quotes: "'a' 'b'" => [(0, 3), (4, 7)],
     span_adjacent_quotes: "'a''b'" => [(0, 3), (3, 6)],
 }
-
-// =============================================================================
-// Error Cases
-// =============================================================================
 
 lex_error_tests! {
     // Unterminated single quote
@@ -449,10 +400,6 @@ lex_error_tests! {
     trailing_backslash_in_double: "\"hello\\" => LexerError::TrailingBackslash { .. },
     trailing_backslash_alone_in_double: "\"\\" => LexerError::TrailingBackslash { .. },
 }
-
-// =============================================================================
-// Error Span Accuracy Tests
-// =============================================================================
 
 #[test]
 fn error_span_unterminated_single_quote() {
@@ -520,10 +467,6 @@ fn error_span_unterminated_after_word() {
     }
 }
 
-// =============================================================================
-// Command Substitution Quote Tests
-// =============================================================================
-
 /// Test cases for quote handling inside command substitutions.
 /// Format: (input, expected_content)
 const QUOTE_CASES: &[(&str, &str)] = &[
@@ -548,24 +491,17 @@ const QUOTE_CASES: &[(&str, &str)] = &[
     (r#"$(echo "你好")"#, r#"echo "你好""#),
     ("$(echo '🦦')", "echo '🦦'"),
     // Real-world patterns
-    (
-        r#"$(git log --format="%H %s")"#,
-        r#"git log --format="%H %s""#,
-    ),
+    (r#"$(git log --format="%H %s")"#, r#"git log --format="%H %s""#),
     ("$(find . -name '*.rs')", "find . -name '*.rs'"),
-    (
-        r#"$(curl -H "Authorization: Bearer $TOKEN")"#,
-        r#"curl -H "Authorization: Bearer $TOKEN""#,
-    ),
+    (r#"$(curl -H "Authorization: Bearer $TOKEN")"#, r#"curl -H "Authorization: Bearer $TOKEN""#),
     (r#"$(echo "$HOME"/.config)"#, r#"echo "$HOME"/.config"#),
     // Complex escaping
     (r#"$(echo "\"")"#, r#"echo "\"""#),
     (r#"$(echo "\\n")"#, r#"echo "\\n""#),
 ];
 
-#[test]
-fn test_quote_cases() {
-    for (input, expected) in QUOTE_CASES {
+fn assert_subst_cases(cases: &[(&str, &str)]) {
+    for (input, expected) in cases {
         let result = Lexer::tokenize(input);
         match result {
             Ok(tokens) => {
@@ -578,6 +514,11 @@ fn test_quote_cases() {
             Err(e) => panic!("failed to tokenize {:?}: {}", input, e),
         }
     }
+}
+
+#[test]
+fn test_quote_cases() {
+    assert_subst_cases(QUOTE_CASES);
 }
 
 /// Test cases for quotes containing parentheses (critical for depth tracking).
@@ -593,24 +534,8 @@ const PAREN_IN_QUOTE_CASES: &[(&str, &str)] = &[
 
 #[test]
 fn test_paren_in_quote_cases() {
-    for (input, expected) in PAREN_IN_QUOTE_CASES {
-        let result = Lexer::tokenize(input);
-        match result {
-            Ok(tokens) => {
-                assert_eq!(tokens.len(), 1, "input: {}", input);
-                let TokenKind::CommandSubstitution { content, .. } = &tokens[0].kind else {
-                    panic!("expected CommandSubstitution for input: {}", input);
-                };
-                assert_eq!(content, *expected, "input: {}", input);
-            }
-            Err(e) => panic!("failed to tokenize {:?}: {}", input, e),
-        }
-    }
+    assert_subst_cases(PAREN_IN_QUOTE_CASES);
 }
-
-// =============================================================================
-// Command Substitution Integration Tests
-// =============================================================================
 
 #[test]
 fn test_quote_adjacent_to_operator() {
@@ -628,10 +553,7 @@ fn test_subst_with_quoted_operator() {
     assert_eq!(tokens.len(), 1);
     assert_eq!(
         tokens[0].kind,
-        TokenKind::CommandSubstitution {
-            content: r#"echo "a|b""#.into(),
-            backtick: false,
-        }
+        TokenKind::CommandSubstitution { content: r#"echo "a|b""#.into(), backtick: false }
     );
 }
 
@@ -640,10 +562,7 @@ fn test_subst_adjacent_to_redirection() {
     // $(cmd) > file
     let tokens = Lexer::tokenize("$(echo hi) > out.txt").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::CommandSubstitution { .. }
-    ));
+    assert!(matches!(tokens[0].kind, TokenKind::CommandSubstitution { .. }));
     assert!(matches!(tokens[1].kind, TokenKind::RedirectOut { .. }));
 }
 
@@ -653,10 +572,7 @@ fn test_variable_in_quoted_subst() {
     let tokens = Lexer::tokenize(r#"$(echo "$HOME")"#).unwrap();
     assert_eq!(
         tokens[0].kind,
-        TokenKind::CommandSubstitution {
-            content: r#"echo "$HOME""#.into(),
-            backtick: false,
-        }
+        TokenKind::CommandSubstitution { content: r#"echo "$HOME""#.into(), backtick: false }
     );
 }
 
@@ -664,13 +580,7 @@ fn test_variable_in_quoted_subst() {
 fn test_subst_before_operator() {
     let tokens = Lexer::tokenize("$(a) && $(b)").unwrap();
     assert_eq!(tokens.len(), 3);
-    assert!(matches!(
-        tokens[0].kind,
-        TokenKind::CommandSubstitution { .. }
-    ));
+    assert!(matches!(tokens[0].kind, TokenKind::CommandSubstitution { .. }));
     assert_eq!(tokens[1].kind, TokenKind::And);
-    assert!(matches!(
-        tokens[2].kind,
-        TokenKind::CommandSubstitution { .. }
-    ));
+    assert!(matches!(tokens[2].kind, TokenKind::CommandSubstitution { .. }));
 }

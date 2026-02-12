@@ -25,6 +25,8 @@ const OJ_RUN_WAIT_MS: &str = "2000";
 // Spec polling timeouts
 pub const SPEC_POLL_INTERVAL_MS: u64 = 10;
 pub const SPEC_WAIT_MAX_MS: u64 = 2000;
+/// Agent lifecycle tests need more time: coop startup (~1s) + detection + idle grace (1s).
+pub const SPEC_AGENT_WAIT_MS: u64 = 10_000;
 
 /// Returns the path to a binary, checking llvm-cov target directory first.
 /// This works with both standard builds and llvm-cov coverage runs.
@@ -120,10 +122,7 @@ impl CliBuilder {
             args: Vec::new(),
             dir: None,
             envs: vec![
-                (
-                    "OJ_DAEMON_BINARY".into(),
-                    ojd_binary().to_string_lossy().into(),
-                ),
+                ("OJ_DAEMON_BINARY".into(), ojd_binary().to_string_lossy().into()),
                 ("OJ_TIMEOUT_CONNECT_MS".into(), OJ_TIMEOUT_CONNECT_MS.into()),
                 ("OJ_TIMEOUT_EXIT_MS".into(), OJ_TIMEOUT_EXIT_MS.into()),
                 ("OJ_TIMEOUT_IPC_MS".into(), OJ_TIMEOUT_IPC_MS.into()),
@@ -151,10 +150,7 @@ impl CliBuilder {
 
     /// Set environment variable
     pub fn env(mut self, key: &str, value: impl AsRef<Path>) -> Self {
-        self.envs.push((
-            key.to_string(),
-            value.as_ref().to_string_lossy().to_string(),
-        ));
+        self.envs.push((key.to_string(), value.as_ref().to_string_lossy().to_string()));
         self
     }
 
@@ -167,10 +163,10 @@ impl CliBuilder {
             cmd.current_dir(dir);
         }
 
-        // Prevent parent OJ_NAMESPACE from leaking into tests.
-        // It overrides auto-resolved namespace, which would scope
+        // Prevent parent OJ_PROJECT from leaking into tests.
+        // It overrides auto-resolved project, which would scope
         // operations (e.g. job run) to the wrong project.
-        cmd.env_remove("OJ_NAMESPACE");
+        cmd.env_remove("OJ_PROJECT");
 
         for (key, value) in self.envs {
             cmd.env(key, value);
@@ -288,10 +284,6 @@ impl RunAssert {
     }
 }
 
-// =============================================================================
-// Polling
-// =============================================================================
-
 /// Poll a condition until it returns true or timeout is reached.
 /// Uses aggressive polling for fast tests.
 pub fn wait_for<F>(timeout_ms: u64, mut condition: F) -> bool
@@ -311,10 +303,6 @@ where
     false
 }
 
-// =============================================================================
-// Project
-// =============================================================================
-
 /// Temporary test project directory with helper methods.
 pub struct Project {
     dir: tempfile::TempDir,
@@ -326,13 +314,7 @@ impl Project {
     /// Create an empty project
     pub fn empty() -> Self {
         let state_dir = tempfile::tempdir().unwrap();
-        // Isolate tmux sessions per test so leaked sessions don't pollute
-        // the user's global tmux server (and appear as ghosts to the daemon).
-        std::fs::create_dir_all(state_dir.path().join("tmux")).unwrap();
-        Self {
-            dir: tempfile::tempdir().unwrap(),
-            state_dir,
-        }
+        Self { dir: tempfile::tempdir().unwrap(), state_dir }
     }
 
     /// Get the project path
@@ -370,8 +352,6 @@ impl Project {
         cli()
             .pwd(self.path())
             .env("OJ_STATE_DIR", self.state_path())
-            // Isolate tmux sessions per test project
-            .env("TMUX_TMPDIR", self.state_path().join("tmux"))
             // Set CLAUDE_CONFIG_DIR so claudeless writes JSONL where the watcher
             // expects it. Without this, claudeless defaults to a temp dir while
             // the watcher defaults to ~/.claude, and they never find each other.
@@ -411,10 +391,9 @@ impl Project {
 impl Drop for Project {
     fn drop(&mut self) {
         // Always try to stop daemon (no-op if not running).
-        // --kill terminates any tmux sessions the test daemon spawned.
+        // --kill terminates any coop agent processes the test daemon spawned.
         let mut cmd = self.oj().args(&["daemon", "stop", "--kill"]).command();
-        cmd.stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
         let _ = cmd.status();
     }
 }

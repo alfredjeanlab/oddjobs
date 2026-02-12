@@ -20,10 +20,6 @@
 use crate::lexer::Lexer;
 use crate::token::TokenKind;
 
-// =============================================================================
-// Basic Assignment Patterns
-// =============================================================================
-
 lex_tests! {
     assignment_single: "VAR=value" => [
         TokenKind::Word("VAR=value".into()),
@@ -46,10 +42,6 @@ lex_tests! {
         TokenKind::Word("VAR=value".into()),
     ],
 }
-
-// =============================================================================
-// Edge Cases
-// =============================================================================
 
 lex_tests! {
     equals_in_value: "VAR=a=b" => [
@@ -80,10 +72,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Interaction with Variables
-// =============================================================================
-
 lex_tests! {
     // When `$` is encountered, it triggers variable tokenization, so the
     // word ends at `=` and the variable becomes a separate token.
@@ -101,20 +89,12 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Span Accuracy
-// =============================================================================
-
 span_tests! {
     assignment_span: "VAR=value" => [(0, 9)],
     assignment_with_command_span: "VAR=value cmd" => [(0, 9), (10, 13)],
     empty_value_span: "VAR= cmd" => [(0, 4), (5, 8)],
     variable_in_assignment_span: "VAR=$OTHER" => [(0, 4), (4, 10)],
 }
-
-// =============================================================================
-// Position Independence (lexer doesn't know position)
-// =============================================================================
 
 // The lexer tokenizes words regardless of position.
 // Position-based semantics (e.g., "assignment only at start") are the parser's
@@ -135,10 +115,6 @@ lex_tests! {
     ],
 }
 
-// =============================================================================
-// Quoted Values
-// =============================================================================
-
 #[test]
 fn quoted_assignment_value() {
     // Quoted values are now separate tokens; parser concatenates them
@@ -154,9 +130,6 @@ fn single_quoted_assignment_value() {
     let tokens = Lexer::tokenize("VAR='single quoted' cmd").unwrap();
     assert_eq!(tokens.len(), 3);
     assert_eq!(tokens[0].kind, TokenKind::Word("VAR=".into()));
-    assert_eq!(
-        tokens[1].kind,
-        TokenKind::SingleQuoted("single quoted".into())
-    );
+    assert_eq!(tokens[1].kind, TokenKind::SingleQuoted("single quoted".into()));
     assert_eq!(tokens[2].kind, TokenKind::Word("cmd".into()));
 }

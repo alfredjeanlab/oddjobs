@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 // Copyright (c) 2026 Alfred Jean LLC
 
+use std::io::Write;
+
 use super::super::test_helpers::*;
 
 #[test]
@@ -11,45 +13,33 @@ fn reconcile_context_counts_non_terminal_jobs() {
 
     // Add a running job (non-terminal)
     let mut running = oj_core::Job::new(
-        JobConfig::builder("pipe-running", "test", "step")
-            .runbook_hash("hash")
-            .cwd("/tmp")
-            .build(),
+        JobConfig::builder("job-running", "test", "step").runbook_hash("hash").cwd("/tmp").build(),
         &SystemClock,
     );
     running.step_status = StepStatus::Running;
-    state.jobs.insert("pipe-running".to_string(), running);
+    state.jobs.insert("job-running".to_string(), running);
 
     // Add a completed job (terminal)
     let mut done = oj_core::Job::new(
-        JobConfig::builder("pipe-done", "test", "done")
-            .runbook_hash("hash")
-            .cwd("/tmp")
-            .build(),
+        JobConfig::builder("job-done", "test", "done").runbook_hash("hash").cwd("/tmp").build(),
         &SystemClock,
     );
     done.step_status = StepStatus::Completed;
-    state.jobs.insert("pipe-done".to_string(), done);
+    state.jobs.insert("job-done".to_string(), done);
 
     // Add a failed job (terminal)
     let mut failed = oj_core::Job::new(
-        JobConfig::builder("pipe-failed", "test", "failed")
-            .runbook_hash("hash")
-            .cwd("/tmp")
-            .build(),
+        JobConfig::builder("job-failed", "test", "failed").runbook_hash("hash").cwd("/tmp").build(),
         &SystemClock,
     );
     failed.step_status = StepStatus::Failed;
-    state.jobs.insert("pipe-failed".to_string(), failed);
+    state.jobs.insert("job-failed".to_string(), failed);
 
     // Count non-terminal jobs (same logic as startup_inner)
     let job_count = state.jobs.values().filter(|p| !p.is_terminal()).count();
 
     // Only the running job is non-terminal
-    assert_eq!(
-        job_count, 1,
-        "only running job should be counted as non-terminal"
-    );
+    assert_eq!(job_count, 1, "only running job should be counted as non-terminal");
 }
 
 #[tokio::test]
@@ -85,18 +75,9 @@ async fn startup_lock_failed_does_not_remove_existing_files() {
     }
 
     // All files must still exist
-    assert!(
-        config.socket_path.exists(),
-        "socket file must not be deleted on LockFailed"
-    );
-    assert!(
-        config.version_path.exists(),
-        "version file must not be deleted on LockFailed"
-    );
-    assert!(
-        config.lock_path.exists(),
-        "lock file must not be deleted on LockFailed"
-    );
+    assert!(config.socket_path.exists(), "socket file must not be deleted on LockFailed");
+    assert!(config.version_path.exists(), "version file must not be deleted on LockFailed");
+    assert!(config.lock_path.exists(), "lock file must not be deleted on LockFailed");
 }
 
 #[test]
@@ -115,7 +96,6 @@ fn lock_file_not_truncated_before_lock_acquired() {
         .unwrap();
     use fs2::FileExt;
     running_lock.lock_exclusive().unwrap();
-    use std::io::Write;
     let mut f = &running_lock;
     writeln!(f, "99999").unwrap();
 
@@ -129,11 +109,7 @@ fn lock_file_not_truncated_before_lock_acquired() {
 
     // PID written by the "running daemon" must still be readable
     let content = std::fs::read_to_string(&lock_path).unwrap();
-    assert_eq!(
-        content.trim(),
-        "99999",
-        "lock file content must not be truncated by another open"
-    );
+    assert_eq!(content.trim(), "99999", "lock file content must not be truncated by another open");
 }
 
 #[test]
@@ -151,18 +127,9 @@ fn cleanup_on_failure_removes_created_files() {
 
     super::cleanup_on_failure(&config);
 
-    assert!(
-        !config.socket_path.exists(),
-        "socket should be cleaned up on non-lock failure"
-    );
-    assert!(
-        !config.version_path.exists(),
-        "version file should be cleaned up on non-lock failure"
-    );
-    assert!(
-        !config.lock_path.exists(),
-        "lock file should be cleaned up on non-lock failure"
-    );
+    assert!(!config.socket_path.exists(), "socket should be cleaned up on non-lock failure");
+    assert!(!config.version_path.exists(), "version file should be cleaned up on non-lock failure");
+    assert!(!config.lock_path.exists(), "lock file should be cleaned up on non-lock failure");
 }
 
 #[test]
@@ -173,37 +140,33 @@ fn reconcile_context_counts_running_workers() {
         "ns/w1".to_string(),
         WorkerRecord {
             name: "w1".to_string(),
-            namespace: "ns".to_string(),
-            project_root: PathBuf::from("/tmp"),
+            project: "ns".to_string(),
+            project_path: PathBuf::from("/tmp"),
             runbook_hash: "hash".to_string(),
             status: "running".to_string(),
-            active_job_ids: vec![],
-            queue_name: "q".to_string(),
+            active: vec![],
+            queue: "q".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
+            owners: HashMap::new(),
         },
     );
     state.workers.insert(
         "ns/w2".to_string(),
         WorkerRecord {
             name: "w2".to_string(),
-            namespace: "ns".to_string(),
-            project_root: PathBuf::from("/tmp"),
+            project: "ns".to_string(),
+            project_path: PathBuf::from("/tmp"),
             runbook_hash: "hash".to_string(),
             status: "stopped".to_string(),
-            active_job_ids: vec![],
-            queue_name: "q".to_string(),
+            active: vec![],
+            queue: "q".to_string(),
             concurrency: 1,
-            item_job_map: HashMap::new(),
+            owners: HashMap::new(),
         },
     );
 
     // Same logic as startup_inner
-    let worker_count = state
-        .workers
-        .values()
-        .filter(|w| w.status == "running")
-        .count();
+    let worker_count = state.workers.values().filter(|w| w.status == "running").count();
 
     assert_eq!(worker_count, 1, "only running workers should be counted");
 }

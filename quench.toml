@@ -1,8 +1,5 @@
 version = 1
 
-[rust]
-cfg_test_split = "require"
-
 [check]
 cloc = { check = "error" }
 
