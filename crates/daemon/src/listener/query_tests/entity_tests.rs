@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use tempfile::tempdir;
 
+use crate::storage::QueueItemStatus;
 use oj_core::{StepOutcome, StepStatus};
-use oj_storage::QueueItemStatus;
 
 use super::{
     empty_orphans, empty_state, handle_query, make_decision, make_job, make_queue_item,
@@ -88,7 +88,7 @@ fn list_queues_includes_poll_meta() {
         );
         s.poll_meta.insert(
             "myproj/tasks".to_string(),
-            oj_storage::QueuePollMeta { last_item_count: 5, last_polled_at_ms: 1700000000000 },
+            crate::storage::QueuePollMeta { last_item_count: 5, last_polled_at_ms: 1700000000000 },
         );
     }
 

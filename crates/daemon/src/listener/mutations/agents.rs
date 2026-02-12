@@ -3,9 +3,9 @@
 
 use tokio_util::sync::CancellationToken;
 
-use oj_adapters::agent::LocalAdapter;
+use crate::adapters::agent::LocalAdapter;
+use crate::storage::MaterializedState;
 use oj_core::{AgentId, CrewId, Event, JobId};
-use oj_storage::MaterializedState;
 
 use crate::protocol::{AgentEntry, Response};
 

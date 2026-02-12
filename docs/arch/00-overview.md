@@ -109,7 +109,7 @@ External integrations go through trait abstractions with production and fake imp
 
 | Trait | Production | Test |
 |-------|-----------|------|
-| `AgentAdapter` | `LocalAdapter` | `FakeAgentAdapter` |
+| `AgentAdapter` | `RuntimeRouter` → Local / Docker / K8s | `FakeAgentAdapter` |
 | `NotifyAdapter` | `DesktopNotifyAdapter` | `FakeNotifyAdapter` |
 
 Production adapters include built-in tracing instrumentation (spans, timing, result logging).
@@ -159,3 +159,4 @@ CLI ──parse──▶ Request ──IPC──▶ Daemon (Unix socket)
 - [Storage](04-storage.md) - WAL and state persistence
 - [Agents](05-agents.md) - Agent adapter and coop integration
 - [Notifications](06-notify.md) - Desktop notification adapter
+- [Containers](07-containers.md) - Docker and Kubernetes agent execution

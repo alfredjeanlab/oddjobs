@@ -110,7 +110,7 @@ fn worker_columns_are_aligned_across_rows() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.workers.push(oj_daemon::WorkerSummary {
+    ns.workers.push(oj_wire::WorkerSummary {
         name: "a".to_string(),
         project: "myproject".to_string(),
         queue: "default".to_string(),
@@ -119,7 +119,7 @@ fn worker_columns_are_aligned_across_rows() {
         concurrency: 4,
         updated_at_ms: 0,
     });
-    ns.workers.push(oj_daemon::WorkerSummary {
+    ns.workers.push(oj_wire::WorkerSummary {
         name: "long-worker-name".to_string(),
         project: "myproject".to_string(),
         queue: "default".to_string(),
@@ -149,7 +149,7 @@ fn worker_shows_full_at_max_concurrency() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.workers.push(oj_daemon::WorkerSummary {
+    ns.workers.push(oj_wire::WorkerSummary {
         name: "busy".to_string(),
         project: "myproject".to_string(),
         queue: "default".to_string(),
@@ -173,7 +173,7 @@ fn cron_columns_are_aligned_across_rows() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.crons.push(oj_daemon::CronSummary {
+    ns.crons.push(oj_wire::CronSummary {
         name: "a".to_string(),
         project: "myproject".to_string(),
         interval: "30m".to_string(),
@@ -181,7 +181,7 @@ fn cron_columns_are_aligned_across_rows() {
         status: "running".to_string(),
         time: "in 12m".to_string(),
     });
-    ns.crons.push(oj_daemon::CronSummary {
+    ns.crons.push(oj_wire::CronSummary {
         name: "long-cron-name".to_string(),
         project: "myproject".to_string(),
         interval: "1h".to_string(),
@@ -212,7 +212,7 @@ fn crons_sorted_alphabetically() {
 
     let mut ns = empty_ns("myproject");
     for name in ["zebra", "alpha", "mid"] {
-        ns.crons.push(oj_daemon::CronSummary {
+        ns.crons.push(oj_wire::CronSummary {
             name: name.to_string(),
             project: "myproject".to_string(),
             interval: "1h".to_string(),
@@ -241,13 +241,13 @@ fn queue_columns_are_aligned_across_rows() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.queues.push(oj_daemon::QueueStatus {
+    ns.queues.push(oj_wire::QueueStatus {
         name: "tasks".to_string(),
         pending: 3,
         active: 1,
         dead: 0,
     });
-    ns.queues.push(oj_daemon::QueueStatus {
+    ns.queues.push(oj_wire::QueueStatus {
         name: "long-queue-name".to_string(),
         pending: 12,
         active: 2,
@@ -276,13 +276,13 @@ fn agent_columns_are_aligned_across_rows() {
     setup_no_color();
 
     let mut ns = empty_ns("myproject");
-    ns.active_agents.push(oj_daemon::AgentStatusEntry {
+    ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "coder".to_string(),
         command_name: "build".to_string(),
         agent_id: "agent-01".to_string(),
         status: "running".to_string(),
     });
-    ns.active_agents.push(oj_daemon::AgentStatusEntry {
+    ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "long-agent-name".to_string(),
         command_name: "deploy".to_string(),
         agent_id: "agent-02".to_string(),
@@ -335,7 +335,7 @@ fn workers_sorted_alphabetically() {
 
     let mut ns = empty_ns("myproject");
     for (name, active) in [("zebra", 1usize), ("alpha", 0), ("mid", 0)] {
-        ns.workers.push(oj_daemon::WorkerSummary {
+        ns.workers.push(oj_wire::WorkerSummary {
             name: name.to_string(),
             project: "myproject".to_string(),
             queue: "default".to_string(),

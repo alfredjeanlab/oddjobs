@@ -115,7 +115,7 @@ fn render_frame(content: &str, is_tty: bool) -> String {
 /// Connect to the daemon and fetch the status overview.
 /// Returns `Ok(None)` when the daemon is not reachable.
 async fn fetch_overview(
-) -> Result<Option<(u64, Vec<oj_daemon::ProjectStatus>, Option<oj_daemon::MetricsHealthSummary>)>> {
+) -> Result<Option<(u64, Vec<oj_wire::ProjectStatus>, Option<oj_wire::MetricsHealthSummary>)>> {
     let client = match DaemonClient::connect() {
         Ok(c) => c,
         Err(_) => return Ok(None),
@@ -162,9 +162,9 @@ async fn handle_once(
 
 fn format_text(
     uptime_secs: u64,
-    namespaces: &[oj_daemon::ProjectStatus],
+    namespaces: &[oj_wire::ProjectStatus],
     watch_interval: Option<&str>,
-    metrics_health: Option<&oj_daemon::MetricsHealthSummary>,
+    metrics_health: Option<&oj_wire::MetricsHealthSummary>,
 ) -> String {
     let mut out = String::new();
 
@@ -252,7 +252,7 @@ fn format_text(
         let escalated_jobs = sorted_by_activity(&ns.escalated_jobs);
         let suspended_jobs = sorted_by_activity(&ns.suspended_jobs);
         let orphaned_jobs = sorted_by_activity(&ns.orphaned_jobs);
-        let mut workers: Vec<&oj_daemon::WorkerSummary> = ns.workers.iter().collect();
+        let mut workers: Vec<&oj_wire::WorkerSummary> = ns.workers.iter().collect();
         workers.sort_by(|a, b| a.name.cmp(&b.name));
 
         // Active jobs
@@ -390,7 +390,7 @@ fn format_text(
 
         // Crons
         if !ns.crons.is_empty() {
-            let mut crons: Vec<&oj_daemon::CronSummary> = ns.crons.iter().collect();
+            let mut crons: Vec<&oj_wire::CronSummary> = ns.crons.iter().collect();
             crons.sort_by(|a, b| a.name.cmp(&b.name));
 
             let _ = writeln!(out, "  {}", color::header("Crons:"));
@@ -523,7 +523,7 @@ fn truncate_reason(reason: &str, max_len: usize) -> String {
     }
 }
 
-fn sorted_by_activity(jobs: &[oj_daemon::JobStatusEntry]) -> Vec<&oj_daemon::JobStatusEntry> {
+fn sorted_by_activity(jobs: &[oj_wire::JobStatusEntry]) -> Vec<&oj_wire::JobStatusEntry> {
     let mut sorted: Vec<_> = jobs.iter().collect();
     sorted.sort_by(|a, b| b.last_activity_ms.cmp(&a.last_activity_ms));
     sorted

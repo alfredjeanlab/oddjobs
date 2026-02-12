@@ -9,19 +9,19 @@ pub use std::sync::Arc;
 pub use parking_lot::Mutex;
 pub use tempfile::tempdir;
 
+pub use crate::storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
 pub use oj_core::{
     Crew, CrewId, CrewStatus, Event, Job, JobConfig, JobId, StepStatus, SystemClock,
 };
-pub use oj_storage::{load_snapshot, MaterializedState, Wal, WorkerRecord};
 
 pub use super::{Config, DaemonRuntime, DaemonState, LifecycleError, ReconcileCtx};
 pub(crate) use crate::event_bus::{EventBus, EventReader};
 
 use std::path::Path;
 
-use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_core::{StepOutcome, StepRecord};
-use oj_engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
@@ -148,7 +148,7 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
         event_bus,
         start_time: std::time::Instant::now(),
         orphans: Arc::new(Mutex::new(Vec::new())),
-        metrics_health: Arc::new(Mutex::new(oj_engine::MetricsHealth::default())),
+        metrics_health: Arc::new(Mutex::new(oj_core::MetricsHealth::default())),
     };
 
     (daemon, event_reader, wal_path)

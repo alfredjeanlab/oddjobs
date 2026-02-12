@@ -339,7 +339,7 @@ async fn run_attach_proxy(
 /// the state dir or capture file is unavailable.
 pub(crate) fn try_read_agent_capture(agent_id: &str) -> Option<String> {
     let logs_dir = crate::env::state_dir().ok()?.join("logs");
-    let path = oj_engine::log_paths::agent_capture_path(&logs_dir, agent_id);
+    let path = oj_core::log_paths::agent_capture_path(&logs_dir, agent_id);
     std::fs::read_to_string(path).ok()
 }
 

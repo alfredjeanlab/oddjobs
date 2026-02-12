@@ -9,9 +9,8 @@ workspace = true
 
 [dependencies]
 oj-core = { path = "../core" }
-oj-daemon = { path = "../daemon" }
-oj-engine = { path = "../engine" }
 oj-runbook = { path = "../runbook" }
+oj-wire = { path = "../wire" }
 anyhow = "1"
 nix.workspace = true
 clap = { version = "4", features = ["derive"] }

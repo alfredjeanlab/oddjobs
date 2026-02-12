@@ -47,12 +47,6 @@ macro_rules! define_id {
                 Self(id.into())
             }
 
-            // NOTE(compat): consistency
-            #[allow(dead_code)]
-            pub fn as_str(&self) -> &str {
-                &self.0
-            }
-
             /// Returns a string slice truncated to at most `n` characters.
             pub fn short(&self, n: usize) -> &str {
                 if self.0.len() <= n {

@@ -4,38 +4,44 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
-[lib]
-path = "src/lib.rs"
-
 [[bin]]
 name = "ojd"
 path = "src/main.rs"
 
 [dependencies]
-oj-adapters = { path = "../adapters" }
 oj-core = { path = "../core" }
-oj-engine = { path = "../engine" }
 oj-runbook = { path = "../runbook" }
-oj-storage = { path = "../storage" }
+oj-wire = { path = "../wire" }
 
 async-trait.workspace = true
-parking_lot.workspace = true
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
 fs2 = "0.4"
+futures-util = "0.3"
+k8s-openapi.workspace = true
+kube.workspace = true
+notify-rust.workspace = true
+parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2 = "0.10"
 thiserror.workspace = true
 tokio.workspace = true
+tokio-tungstenite = "0.26"
 tokio-util.workspace = true
-uuid.workspace = true
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid.workspace = true
+zstd.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6"
 
 [dev-dependencies]
-oj-adapters = { path = "../adapters", features = ["test-support"] }
 oj-core = { path = "../core", features = ["test-support"] }
 proptest.workspace = true
+serial_test.workspace = true
 tempfile.workspace = true
 yare.workspace = true
 

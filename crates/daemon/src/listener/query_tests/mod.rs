@@ -11,9 +11,9 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use oj_storage::MaterializedState;
+use crate::storage::MaterializedState;
 
-use oj_engine::breadcrumb::Breadcrumb;
+use oj_core::Breadcrumb;
 
 use crate::listener::test_fixtures::{
     make_breadcrumb_full as make_breadcrumb, make_cron, make_decision, make_job_full as make_job,
@@ -34,7 +34,7 @@ fn handle_query(
 ) -> Response {
     let ctx = ListenCtx {
         event_bus: {
-            let wal = oj_storage::Wal::open(&logs_path.join("__query_test.wal"), 0).unwrap();
+            let wal = crate::storage::Wal::open(&logs_path.join("__query_test.wal"), 0).unwrap();
             let (bus, _reader) = crate::event_bus::EventBus::new(wal);
             bus
         },

@@ -8,7 +8,7 @@
 
 use std::collections::HashSet;
 
-use oj_adapters::LocalAdapter;
+use crate::adapters::LocalAdapter;
 use oj_core::{AgentId, CrewId, CrewStatus, Event, JobId, OwnerId};
 use tracing::{info, warn};
 

@@ -14,8 +14,7 @@ use crate::daemon_process::{
     start_daemon_background, stop_daemon_sync, wrap_with_startup_error,
 };
 
-use oj_daemon::protocol::{self, ProtocolError};
-use oj_daemon::{Request, Response};
+use oj_wire::{ProtocolError, Request, Response};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpStream, UnixStream};
@@ -429,15 +428,15 @@ impl DaemonClient {
         R: tokio::io::AsyncReadExt + Unpin,
         W: tokio::io::AsyncWriteExt + Unpin,
     {
-        let data = protocol::encode(request)?;
-        tokio::time::timeout(timeout_ipc(), protocol::write_message(writer, &data))
+        let data = oj_wire::encode(request)?;
+        tokio::time::timeout(timeout_ipc(), oj_wire::write_message(writer, &data))
             .await
             .map_err(|_| ProtocolError::Timeout)??;
 
-        let response_bytes = tokio::time::timeout(timeout_ipc(), protocol::read_message(reader))
+        let response_bytes = tokio::time::timeout(timeout_ipc(), oj_wire::read_message(reader))
             .await
             .map_err(|_| ProtocolError::Timeout)??;
-        Ok(protocol::decode(&response_bytes)?)
+        Ok(oj_wire::decode(&response_bytes)?)
     }
 
     /// Interpret attach response and wrap streams if needed.
@@ -476,17 +475,17 @@ where
     W: tokio::io::AsyncWriteExt + Unpin,
 {
     // Encode and send request with write timeout
-    let data = protocol::encode(request)?;
-    tokio::time::timeout(write_timeout, protocol::write_message(writer, &data))
+    let data = oj_wire::encode(request)?;
+    tokio::time::timeout(write_timeout, oj_wire::write_message(writer, &data))
         .await
         .map_err(|_| ProtocolError::Timeout)??;
 
     // Read response with read timeout
-    let response_bytes = tokio::time::timeout(read_timeout, protocol::read_message(reader))
+    let response_bytes = tokio::time::timeout(read_timeout, oj_wire::read_message(reader))
         .await
         .map_err(|_| ProtocolError::Timeout)??;
 
-    let response: Response = protocol::decode(&response_bytes)?;
+    let response: Response = oj_wire::decode(&response_bytes)?;
     Ok(response)
 }
 

@@ -20,8 +20,8 @@ fn make_cron_record(
     status: &str,
     interval: &str,
     job_kind: &str,
-) -> oj_storage::CronRecord {
-    oj_storage::CronRecord {
+) -> crate::storage::CronRecord {
+    crate::storage::CronRecord {
         name: name.to_string(),
         project: project.to_string(),
         project_path: PathBuf::from("/fake"),
@@ -296,7 +296,7 @@ async fn once_with_wrong_project_path_falls_back_to_namespace() {
         let mut state = ctx.state.lock();
         state.crons.insert(
             "my-project/nightly".to_string(),
-            oj_storage::CronRecord {
+            crate::storage::CronRecord {
                 name: "nightly".to_string(),
                 project: "my-project".to_string(),
                 project_path: project.path().to_path_buf(),

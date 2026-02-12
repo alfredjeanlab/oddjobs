@@ -3,7 +3,7 @@
 
 use super::*;
 use oj_core::StepStatusKind;
-use oj_daemon::{AgentSummary, JobSummary};
+use oj_wire::{AgentSummary, JobSummary};
 
 fn job(id: &str, name: &str) -> JobSummary {
     JobSummary {

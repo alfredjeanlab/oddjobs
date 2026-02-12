@@ -21,5 +21,6 @@ docs/
     ├── 03-concurrency.md    # Threads, tasks, locks, blocking paths
     ├── 04-storage.md         # WAL persistence
     ├── 05-agents.md          # Agent adapter and coop integration
-    └── 06-notify.md          # Desktop notification adapter
+    ├── 06-notify.md          # Desktop notification adapter
+    └── 07-containers.md      # Docker and Kubernetes agent execution
 ```

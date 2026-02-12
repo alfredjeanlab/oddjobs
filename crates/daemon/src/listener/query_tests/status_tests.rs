@@ -5,8 +5,8 @@ use std::time::Instant;
 
 use tempfile::tempdir;
 
+use crate::storage::QueueItemStatus;
 use oj_core::{Crew, StepOutcome, StepStatus, StepStatusKind};
-use oj_storage::QueueItemStatus;
 
 use super::{
     empty_orphans, empty_state, handle_query, make_breadcrumb, make_job, make_queue_item,

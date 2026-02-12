@@ -7,8 +7,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
+use crate::storage::MaterializedState;
 use oj_core::Event;
-use oj_storage::MaterializedState;
 
 use crate::protocol::Response;
 
@@ -375,7 +375,7 @@ fn retry_with_wrong_project_path_falls_back_to_namespace() {
     let mut initial = MaterializedState::default();
     initial.workers.insert(
         "my-project/processor".to_string(),
-        oj_storage::WorkerRecord {
+        crate::storage::WorkerRecord {
             name: "processor".to_string(),
             project_path: project.path().to_path_buf(),
             runbook_hash: "fake-hash".to_string(),

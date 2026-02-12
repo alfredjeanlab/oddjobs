@@ -187,7 +187,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
         e.waiting_reason = Some("needs manual approval".to_string());
         e
     });
-    ns.workers.push(oj_daemon::WorkerSummary {
+    ns.workers.push(oj_wire::WorkerSummary {
         name: "builder".to_string(),
         project: "myproject".to_string(),
         queue: "default".to_string(),
@@ -196,13 +196,13 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
         concurrency: 4,
         updated_at_ms: 0,
     });
-    ns.queues.push(oj_daemon::QueueStatus {
+    ns.queues.push(oj_wire::QueueStatus {
         name: "tasks".to_string(),
         pending: 3,
         active: 1,
         dead: 0,
     });
-    ns.active_agents.push(oj_daemon::AgentStatusEntry {
+    ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "coder".to_string(),
         command_name: "build".to_string(),
         agent_id: "agent-01".to_string(),

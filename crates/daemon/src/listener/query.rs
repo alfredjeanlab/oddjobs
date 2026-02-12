@@ -20,12 +20,12 @@ mod query_status;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::storage::MaterializedState;
 use oj_core::{namespace_to_option, scoped_name, split_scoped_name, StepStatusKind};
-use oj_storage::MaterializedState;
 
 mod helpers {
+    use crate::storage::MaterializedState;
     use oj_core::OwnerId;
-    use oj_storage::MaterializedState;
 
     /// Get a display name for an owner by looking up the job or crew name.
     pub(super) fn owner_display_name(owner: &OwnerId, state: &MaterializedState) -> String {
@@ -312,7 +312,10 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
 }
 
 /// Derive `updated_at_ms` for a worker from its most recently active job.
-pub(super) fn worker_updated_at_ms(w: &oj_storage::WorkerRecord, state: &MaterializedState) -> u64 {
+pub(super) fn worker_updated_at_ms(
+    w: &crate::storage::WorkerRecord,
+    state: &MaterializedState,
+) -> u64 {
     w.active
         .iter()
         .filter_map(|pid| state.jobs.get(pid))

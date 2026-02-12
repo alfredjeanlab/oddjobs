@@ -197,7 +197,7 @@ pub fn parse_duration(s: &str) -> Result<Duration> {
     Ok(Duration::from_secs(total_secs))
 }
 
-pub(crate) fn format_job_list(out: &mut (impl Write + ?Sized), jobs: &[oj_daemon::JobSummary]) {
+pub(crate) fn format_job_list(out: &mut (impl Write + ?Sized), jobs: &[oj_wire::JobSummary]) {
     if jobs.is_empty() {
         let _ = writeln!(out, "No jobs");
         return;

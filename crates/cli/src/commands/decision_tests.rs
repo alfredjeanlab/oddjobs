@@ -2,9 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use clap::Parser;
-use oj_daemon::protocol::{
-    DecisionDetail, DecisionOptionDetail, DecisionSummary, QuestionGroupDetail,
-};
+use oj_wire::{DecisionDetail, DecisionOptionDetail, DecisionSummary, QuestionGroupDetail};
 
 use super::*;
 

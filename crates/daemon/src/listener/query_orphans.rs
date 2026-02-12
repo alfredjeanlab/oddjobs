@@ -9,8 +9,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::StepStatusKind;
-use oj_engine::breadcrumb::Breadcrumb;
+use oj_core::{Breadcrumb, StepStatusKind};
 
 use crate::protocol::{
     AgentSummary, JobDetail, JobStatusEntry, JobSummary, OrphanSummary, Response,
@@ -38,15 +37,15 @@ pub(super) fn handle_dismiss_orphan(
         Some(i) => {
             let removed = orphans.remove(i);
             // Clean up all associated files (breadcrumb, job log, agent files)
-            let crumb = oj_engine::log_paths::breadcrumb_path(logs_path, &removed.job_id);
+            let crumb = oj_core::log_paths::breadcrumb_path(logs_path, &removed.job_id);
             let _ = std::fs::remove_file(&crumb);
-            let log = oj_engine::log_paths::job_log_path(logs_path, &removed.job_id);
+            let log = oj_core::log_paths::job_log_path(logs_path, &removed.job_id);
             let _ = std::fs::remove_file(&log);
             for agent in &removed.agents {
-                let agent_log = oj_engine::log_paths::agent_log_path(logs_path, &agent.agent_id);
+                let agent_log = oj_core::log_paths::agent_log_path(logs_path, &agent.agent_id);
                 let _ = std::fs::remove_file(&agent_log);
                 let agent_dir =
-                    oj_engine::log_paths::agent_session_log_dir(logs_path, &agent.agent_id);
+                    oj_core::log_paths::agent_session_log_dir(logs_path, &agent.agent_id);
                 let _ = std::fs::remove_dir_all(&agent_dir);
             }
             Response::Ok

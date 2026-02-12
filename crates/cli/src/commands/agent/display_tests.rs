@@ -9,7 +9,7 @@ fn try_read_agent_capture_returns_content_when_file_exists() {
     let tmp = tempfile::tempdir().unwrap();
     let agent_id = "abc12345-dead-beef-cafe-123456789012";
     let logs_dir = tmp.path().join("logs");
-    let capture_path = oj_engine::log_paths::agent_capture_path(&logs_dir, agent_id);
+    let capture_path = oj_core::log_paths::agent_capture_path(&logs_dir, agent_id);
 
     fs::create_dir_all(capture_path.parent().unwrap()).unwrap();
     fs::write(&capture_path, "hello from terminal\n").unwrap();
@@ -25,7 +25,7 @@ fn try_read_agent_capture_returns_none_when_file_missing() {
     let tmp = tempfile::tempdir().unwrap();
     let agent_id = "nonexistent-agent-id";
     let logs_dir = tmp.path().join("logs");
-    let capture_path = oj_engine::log_paths::agent_capture_path(&logs_dir, agent_id);
+    let capture_path = oj_core::log_paths::agent_capture_path(&logs_dir, agent_id);
 
     let content = std::fs::read_to_string(&capture_path).ok();
     assert!(content.is_none());

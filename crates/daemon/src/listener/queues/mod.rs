@@ -10,8 +10,8 @@ mod workers;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::storage::QueueItemStatus;
 use oj_core::{scoped_name, Event};
-use oj_storage::QueueItemStatus;
 
 use crate::protocol::{QueueItemEntry, Response};
 
@@ -304,10 +304,10 @@ pub(super) fn handle_queue_drain(
             .map(|items| {
                 items
                     .iter()
-                    .filter(|i| i.status == oj_storage::QueueItemStatus::Pending)
+                    .filter(|i| i.status == crate::storage::QueueItemStatus::Pending)
                     .map(|i| crate::protocol::QueueItemSummary {
                         id: i.id.clone(),
-                        status: oj_storage::QueueItemStatus::Pending.to_string(),
+                        status: crate::storage::QueueItemStatus::Pending.to_string(),
                         data: i.data.clone(),
                         worker_name: i.worker.clone(),
                         pushed_at_ms: i.pushed_at_ms,

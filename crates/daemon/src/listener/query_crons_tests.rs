@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Alfred Jean LLC
 
 use crate::listener::query::query_crons::{cron_time_display, parse_interval_ms};
-use oj_storage::CronRecord;
+use crate::storage::CronRecord;
 
 fn make_cron_record(
     status: &str,

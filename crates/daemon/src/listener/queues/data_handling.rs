@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::storage::MaterializedState;
 use oj_core::scoped_name;
-use oj_storage::MaterializedState;
 
 use crate::protocol::Response;
 
@@ -82,8 +82,8 @@ pub(super) fn find_duplicate_item(
         items
             .iter()
             .find(|i| {
-                (i.status == oj_storage::QueueItemStatus::Pending
-                    || i.status == oj_storage::QueueItemStatus::Active)
+                (i.status == crate::storage::QueueItemStatus::Pending
+                    || i.status == crate::storage::QueueItemStatus::Active)
                     && i.data == *data
             })
             .map(|i| i.id.clone())

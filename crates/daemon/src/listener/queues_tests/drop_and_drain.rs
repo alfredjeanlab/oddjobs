@@ -6,8 +6,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
+use crate::storage::MaterializedState;
 use oj_core::Event;
-use oj_storage::MaterializedState;
 
 use crate::protocol::Response;
 
@@ -318,7 +318,7 @@ fn drop_with_wrong_project_path_falls_back_to_namespace() {
     let mut initial = MaterializedState::default();
     initial.crons.insert(
         "my-project/nightly".to_string(),
-        oj_storage::CronRecord {
+        crate::storage::CronRecord {
             name: "nightly".to_string(),
             project: "my-project".to_string(),
             project_path: project.path().to_path_buf(),
@@ -370,7 +370,7 @@ fn drain_with_wrong_project_path_falls_back_to_namespace() {
     let mut initial = MaterializedState::default();
     initial.crons.insert(
         "my-project/nightly".to_string(),
-        oj_storage::CronRecord {
+        crate::storage::CronRecord {
             name: "nightly".to_string(),
             project: "my-project".to_string(),
             project_path: project.path().to_path_buf(),

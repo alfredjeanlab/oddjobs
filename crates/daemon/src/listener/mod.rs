@@ -25,8 +25,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Instant;
 
+use crate::storage::MaterializedState;
 use oj_core::Event;
-use oj_storage::MaterializedState;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, UnixListener};
@@ -34,10 +34,9 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
+use crate::adapters::RuntimeRouter;
 use crate::event_bus::EventBus;
-use oj_adapters::RuntimeRouter;
-use oj_engine::breadcrumb::Breadcrumb;
-use oj_engine::MetricsHealth;
+use oj_core::{Breadcrumb, MetricsHealth};
 
 use crate::env::{ipc_timeout, PROTOCOL_VERSION};
 use crate::protocol::{self, Request, Response};
@@ -537,14 +536,16 @@ fn make_listen_ctx(event_bus: crate::event_bus::EventBus, dir: &std::path::Path)
 
 #[cfg(test)]
 pub(super) fn test_ctx(dir: &std::path::Path) -> ListenCtx {
-    let wal = oj_storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
+    let wal = crate::storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
     let (event_bus, _reader) = crate::event_bus::EventBus::new(wal);
     make_listen_ctx(event_bus, dir)
 }
 
 #[cfg(test)]
-pub(super) fn test_ctx_with_wal(dir: &std::path::Path) -> (ListenCtx, Arc<Mutex<oj_storage::Wal>>) {
-    let wal = oj_storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
+pub(super) fn test_ctx_with_wal(
+    dir: &std::path::Path,
+) -> (ListenCtx, Arc<Mutex<crate::storage::Wal>>) {
+    let wal = crate::storage::Wal::open(&dir.join("test.wal"), 0).unwrap();
     let (event_bus, reader) = crate::event_bus::EventBus::new(wal);
     let wal = Arc::clone(&reader.wal);
     (make_listen_ctx(event_bus, dir), wal)

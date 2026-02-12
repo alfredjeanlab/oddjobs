@@ -228,14 +228,48 @@ If `on_done` is omitted, the job completes when the step succeeds. Steps without
 
 An AI agent invocation -- runs a recognized agent command in a monitored coop process.
 
+### Container
+
+The `container` field on an agent or job opts into containerization. Without it,
+agents run locally. Short form takes an image directly; block form allows extras.
+
+```hcl
+# Short form
+agent "worker" {
+  container = "coop:claude"
+  run       = "claude --dangerously-skip-permissions"
+}
+
+# Block form
+job "fix" {
+  container {
+    image = "coop:claude"
+  }
+  source { git = true }
+  step "fix" { run = { agent = "worker" } }
+}
+```
+
+Agents/jobs without `container` inherit the project default from
+`.oj/config.toml` `[container].image`. If no default, only agents with explicit
+`container` are containerized.
+
+```toml
+[container]
+image = "coop:claude"
+```
+
+See [Containers](../arch/07-containers.md) for architecture details.
+
 ### Recognized Commands
 
 | Command | Adapter |
 |---------|---------|
-| `claude` | `LocalAdapter` |
+| `claude` | `LocalAdapter` / `DockerAdapter` / `KubernetesAdapter` |
 | `claudeless` | `LocalAdapter` |
 
-Both commands route through the same adapter. See [Agents](../arch/05-agents.md) for integration details.
+All commands route through the `RuntimeRouter`, which delegates to the
+appropriate adapter. See [Agents](../arch/05-agents.md) for integration details.
 
 ```hcl
 agent "resolver" {

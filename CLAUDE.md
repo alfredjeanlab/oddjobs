@@ -4,7 +4,7 @@ An automated team for your odd jobs. Orchestrate work from runbooks.
 
 ## Architecture Overview
 
-The system is a user-level daemon (`ojd`) that executes jobs defined in HCL (or TOML) runbooks (`.oj/runbooks/*.hcl`). The CLI (`oj`) communicates with the daemon over a Unix socket. Jobs have steps that run either shell commands or agents (Claude Code in coop processes). State is durably stored via a write-ahead log (WAL) with periodic snapshots, allowing recovery across daemon restarts. The architecture follows a functional core / imperative shell pattern: pure state machines in `crates/core`, effects as data, and trait-based adapters (`RepoAdapter`, `AgentAdapter`) in `crates/adapters` for testability.
+The system is a user-level daemon (`ojd`) that executes jobs defined in HCL (or TOML) runbooks (`.oj/runbooks/*.hcl`). The CLI (`oj`) communicates with the daemon over a Unix socket. Jobs have steps that run either shell commands or agents (Claude Code in coop processes). State is durably stored via a write-ahead log (WAL) with periodic snapshots, allowing recovery across daemon restarts. The architecture follows a functional core / imperative shell pattern: pure state machines in `crates/core`, effects as data, and trait-based adapters in `crates/daemon/src/adapters` for testability.
 
 Agents are interactive entities defined in runbooks. Each agent has its own configuration (command, prompt, lifecycle handlers, notifications) and runs in an isolated coop process. Some agents are short-lived, completing a single task and exiting; others are long-lived, persisting across multiple interactions. Jobs are the primary way agents are triggered today, but agent definitions are standalone — an agent's identity, lifecycle, and notify config are independent of the job that spawns it.
 
@@ -32,14 +32,15 @@ Instead:
 ```toc
 oddjobs/
 ├── crates/           # Rust workspace
-│   ├── adapters/     # Trait implementations (AgentAdapter, RepoAdapter, etc.)
 │   ├── cli/          # Command-line interface (oj)
 │   ├── core/         # Core library (state machines, effects)
 │   ├── daemon/       # User-level daemon (ojd)
-│   ├── engine/       # Job execution engine
+│   │   ├── adapters/ #   Trait implementations (AgentAdapter, RepoAdapter, etc.)
+│   │   ├── engine/   #   Job execution engine
+│   │   └── storage/  #   WAL and snapshot persistence
 │   ├── runbook/      # HCL/TOML runbook parsing
 │   ├── shell/        # Shell command execution
-│   └── storage/      # WAL and snapshot persistence
+│   └── wire/         # CLI↔daemon IPC protocol types
 ├── docs/             # Architecture documentation
 ├── plans/            # Epic implementation plans
 ├── scripts/          # Build and utility scripts

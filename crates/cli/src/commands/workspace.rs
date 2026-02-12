@@ -131,11 +131,11 @@ pub async fn handle(
         }
         WorkspaceCommand::Drop { id, failed, all } => {
             let request = if all {
-                oj_daemon::Request::WorkspaceDropAll
+                oj_wire::Request::WorkspaceDropAll
             } else if failed {
-                oj_daemon::Request::WorkspaceDropFailed
+                oj_wire::Request::WorkspaceDropFailed
             } else if let Some(id) = id {
-                oj_daemon::Request::WorkspaceDrop { id: id.to_string() }
+                oj_wire::Request::WorkspaceDrop { id: id.to_string() }
             } else {
                 anyhow::bail!("specify a workspace ID, --failed, or --all");
             };

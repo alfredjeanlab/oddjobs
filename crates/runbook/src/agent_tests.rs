@@ -696,11 +696,9 @@ fn attempts_zero_fails() {
         on_idle = { action = "nudge", attempts = 0 }
     "#;
     #[derive(Debug, Deserialize)]
-    // NOTE(lifetime): serde target for negative deserialization test
-    #[allow(dead_code)]
     struct TestConfig {
-        #[serde(default)]
-        on_idle: ActionConfig,
+        #[serde(default, rename="on_idle")]
+        _on_idle: ActionConfig,
     }
     let result: Result<TestConfig, _> = toml::from_str(toml);
     assert!(result.is_err(), "expected attempts = 0 to fail parsing");
@@ -712,11 +710,9 @@ fn attempts_invalid_string_fails() {
         on_idle = { action = "nudge", attempts = "infinite" }
     "#;
     #[derive(Debug, Deserialize)]
-    // NOTE(lifetime): serde target for negative deserialization test
-    #[allow(dead_code)]
     struct TestConfig {
-        #[serde(default)]
-        on_idle: ActionConfig,
+        #[serde(default, rename="on_idle")]
+        _on_idle: ActionConfig,
     }
     let result: Result<TestConfig, _> = toml::from_str(toml);
     assert!(result.is_err());

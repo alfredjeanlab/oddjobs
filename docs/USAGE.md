@@ -160,6 +160,13 @@ Key patterns for crew agents:
 - `source = "folder"` for plain directories with manual git worktree setup (needed for custom start points)
 - Share build cache: `.cargo/config.toml` → main repo's `target/` dir
 
+**Containers:**
+- `container = "coop:claude"` on agent or job for Docker/K8s isolation
+- Set a project default in `.oj/config.toml` under `[container].image`
+- Containerized agents use `--dangerously-skip-permissions` — the container is the sandbox
+- Code provisioned via `git clone` into volumes (not bind mounts)
+- Crew agents in containers need `coop:claude-oj` image (includes `oj` CLI)
+
 **Workers and queues:**
 - `queue` + `worker` for pull-based processing
 - Queue types: `persisted` (internal) or `external` (backed by wok, etc.)

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
-use oj_storage::{MaterializedState, Wal};
+use crate::storage::{MaterializedState, Wal};
 
 use crate::protocol::Response;
 
@@ -102,7 +102,7 @@ fn stop_error_suggestions(
         let mut state = ctx.state.lock();
         state.workers.insert(
             key.to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: name.to_string(),
                 project_path: PathBuf::from("/fake"),
                 runbook_hash: "fake-hash".to_string(),
@@ -150,7 +150,7 @@ fn restart_stops_existing_then_starts() {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "processor".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "processor".to_string(),
                 project_path: PathBuf::from("/fake"),
                 runbook_hash: "fake-hash".to_string(),
@@ -212,7 +212,7 @@ job "handle" {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "processor".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "processor".to_string(),
                 project_path: project.path().to_path_buf(),
                 runbook_hash: "old-hash".to_string(),
@@ -276,7 +276,7 @@ fn resolve_effective_project_path_uses_known_path_when_namespace_differs() {
     let mut initial_state = MaterializedState::default();
     initial_state.workers.insert(
         "wok/merge".to_string(),
-        oj_storage::WorkerRecord {
+        crate::storage::WorkerRecord {
             name: "merge".to_string(),
             project_path: project_b.path().to_path_buf(),
             runbook_hash: "hash".to_string(),
@@ -368,7 +368,7 @@ job "handle-merge" {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "wok/other-worker".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "other-worker".to_string(),
                 project_path: project_b.path().to_path_buf(),
                 runbook_hash: "hash".to_string(),
@@ -431,7 +431,7 @@ job "build" {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "fixer".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "fixer".to_string(),
                 project_path: project.path().to_path_buf(),
                 runbook_hash: "old-hash".to_string(),
@@ -478,7 +478,7 @@ fn stop_all_stops_running_workers_in_namespace() {
         let mut state = ctx.state.lock();
         state.workers.insert(
             "proj/alpha".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "alpha".to_string(),
                 project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
@@ -492,7 +492,7 @@ fn stop_all_stops_running_workers_in_namespace() {
         );
         state.workers.insert(
             "proj/beta".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "beta".to_string(),
                 project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
@@ -506,7 +506,7 @@ fn stop_all_stops_running_workers_in_namespace() {
         );
         state.workers.insert(
             "proj/gamma".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "gamma".to_string(),
                 project_path: PathBuf::from("/fake"),
                 runbook_hash: "hash".to_string(),
@@ -521,7 +521,7 @@ fn stop_all_stops_running_workers_in_namespace() {
         // Worker in a different project — should not be stopped
         state.workers.insert(
             "other/delta".to_string(),
-            oj_storage::WorkerRecord {
+            crate::storage::WorkerRecord {
                 name: "delta".to_string(),
                 project_path: PathBuf::from("/other"),
                 runbook_hash: "hash".to_string(),

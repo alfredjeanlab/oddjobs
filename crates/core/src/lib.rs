@@ -13,6 +13,7 @@ pub mod macros;
 pub mod actions;
 pub mod agent;
 pub mod agent_record;
+pub mod breadcrumb;
 pub mod clock;
 pub mod container;
 pub mod crew;
@@ -21,8 +22,11 @@ pub mod effect;
 pub mod event;
 pub mod id;
 pub mod job;
+pub mod log_paths;
+pub mod metrics;
 pub mod owner;
 pub mod project;
+pub mod records;
 pub mod target;
 pub mod time_fmt;
 pub mod timer;
@@ -35,6 +39,7 @@ pub mod test_support;
 // ActionTracker available via actions module or job re-export
 pub use agent::{agent_dir, AgentError, AgentId, AgentState, PromptResponse};
 pub use agent_record::{AgentRecord, AgentRecordStatus};
+pub use breadcrumb::{Breadcrumb, BreadcrumbAgent};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use container::ContainerConfig;
 #[cfg(any(test, feature = "test-support"))]
@@ -56,4 +61,8 @@ pub use target::RunTarget;
 pub use time_fmt::{format_elapsed, format_elapsed_ms};
 pub use timer::{TimerId, TimerKind};
 // WorkerId available via worker module if needed
+pub use metrics::MetricsHealth;
+pub use records::{
+    CronRecord, QueueItem, QueueItemStatus, QueuePollMeta, WorkerRecord, Workspace, WorkspaceType,
+};
 pub use workspace::{WorkspaceId, WorkspaceStatus};

@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use oj_daemon::{Query, Request, Response};
+use oj_wire::{Query, Request, Response};
 
 use super::super::{ClientError, DaemonClient};
 
@@ -127,7 +127,7 @@ impl DaemonClient {
         project_path: &Path,
         project: &str,
         queue: &str,
-    ) -> Result<(String, Vec<oj_daemon::QueueItemSummary>), ClientError> {
+    ) -> Result<(String, Vec<oj_wire::QueueItemSummary>), ClientError> {
         let request = Request::QueueDrain {
             project_path: project_path.to_path_buf(),
             project: project.to_string(),
@@ -144,7 +144,7 @@ impl DaemonClient {
         &self,
         project_path: &Path,
         project: &str,
-    ) -> Result<Vec<oj_daemon::QueueSummary>, ClientError> {
+    ) -> Result<Vec<oj_wire::QueueSummary>, ClientError> {
         let request = Request::Query {
             query: Query::ListQueues {
                 project_path: project_path.to_path_buf(),
@@ -163,7 +163,7 @@ impl DaemonClient {
         queue: &str,
         project: &str,
         project_path: Option<&Path>,
-    ) -> Result<Vec<oj_daemon::QueueItemSummary>, ClientError> {
+    ) -> Result<Vec<oj_wire::QueueItemSummary>, ClientError> {
         let request = Request::Query {
             query: Query::ListQueueItems {
                 queue: queue.to_string(),
@@ -185,7 +185,7 @@ impl DaemonClient {
         queue: &str,
         all: bool,
         dry_run: bool,
-    ) -> Result<(Vec<oj_daemon::QueueItemEntry>, usize), ClientError> {
+    ) -> Result<(Vec<oj_wire::QueueItemEntry>, usize), ClientError> {
         let req = Request::QueuePrune {
             project_path: project_path.to_path_buf(),
             project: project.to_string(),
@@ -227,7 +227,7 @@ impl DaemonClient {
     pub async fn list_decisions(
         &self,
         project: &str,
-    ) -> Result<Vec<oj_daemon::protocol::DecisionSummary>, ClientError> {
+    ) -> Result<Vec<oj_wire::DecisionSummary>, ClientError> {
         let request =
             Request::Query { query: Query::ListDecisions { project: project.to_string() } };
         match self.send(&request).await? {
@@ -240,7 +240,7 @@ impl DaemonClient {
     pub async fn get_decision(
         &self,
         id: &str,
-    ) -> Result<Option<oj_daemon::protocol::DecisionDetail>, ClientError> {
+    ) -> Result<Option<oj_wire::DecisionDetail>, ClientError> {
         let request = Request::Query { query: Query::GetDecision { id: id.to_string() } };
         match self.send(&request).await? {
             Response::Decision { decision } => Ok(decision.map(|b| *b)),

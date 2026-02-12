@@ -49,8 +49,8 @@ pub async fn resolve_entity(client: &DaemonClient, query: &str) -> Result<Vec<En
 /// Pure function for entity resolution — testable without async client.
 pub fn resolve_from_lists(
     query: &str,
-    jobs: &[oj_daemon::JobSummary],
-    agents: &[oj_daemon::AgentSummary],
+    jobs: &[oj_wire::JobSummary],
+    agents: &[oj_wire::AgentSummary],
 ) -> Vec<EntityMatch> {
     let mut exact = Vec::new();
     let mut prefix = Vec::new();

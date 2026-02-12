@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
+use crate::storage::MaterializedState;
 use oj_core::Event;
-use oj_storage::MaterializedState;
 
 use super::mutations::{emit, PruneFlags};
 use super::{ConnectionError, ListenCtx};

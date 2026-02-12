@@ -198,6 +198,37 @@ A single daemon serves all projects. Resources (jobs, workers, queues) are scope
 
 When multiple namespaces are present, `oj job list` shows a `PROJECT` column. `oj job show` includes a `Project:` line when the project is set.
 
+## Environment Variables
+
+### Daemon Connection
+
+| Variable | Purpose |
+|----------|---------|
+| `OJ_DAEMON_URL` | Remote daemon endpoint (`tcp://host:port`). Unset = Unix socket. |
+| `OJ_AUTH_TOKEN` | Bearer token for TCP auth (required when `OJ_DAEMON_URL` is set) |
+| `OJ_PROJECT` | Project scope override (auto-set for nested `oj` calls from agents) |
+
+### Container Configuration
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OJ_DOCKER_IMAGE` | Default container image (Docker) | `coop:claude` |
+| `OJ_DOCKER_BASE_PORT` | Starting port for container port mapping | `9100` |
+| `OJ_K8S_NAMESPACE` | Kubernetes namespace for agent pods | `default` |
+| `OJ_K8S_IMAGE` | Container image for K8s agents | `coop:claude` |
+| `OJ_K8S_CREDENTIAL_SECRET` | K8s Secret name for API keys | (optional) |
+| `OJ_K8S_SSH_SECRET` | K8s Secret name for deploy keys | (optional) |
+| `OJ_K8S_COOP_PORT` | Coop port inside agent containers | `8080` |
+
+### Daemon Configuration
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `OJ_STATE_DIR` | State directory (WAL, snapshots, logs) | `~/.local/state/oj` |
+| `OJ_TCP_PORT` | Enable TCP listener on this port | (disabled) |
+| `OJ_IPC_TIMEOUT_MS` | IPC timeout in milliseconds | `5000` |
+| `OJ_TIMER_CHECK_MS` | Timer resolution in milliseconds | `1000` |
+
 ## JSON Output
 
 Most commands support `-o json` / `--output json` for programmatic use:

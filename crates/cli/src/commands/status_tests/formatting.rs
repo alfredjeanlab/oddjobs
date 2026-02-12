@@ -183,7 +183,7 @@ fn namespace_with_only_empty_queues_is_hidden() {
     setup_no_color();
 
     let mut ns = empty_ns("empty-project");
-    ns.queues.push(oj_daemon::QueueStatus {
+    ns.queues.push(oj_wire::QueueStatus {
         name: "tasks".to_string(),
         pending: 0,
         active: 0,
@@ -204,7 +204,7 @@ fn namespace_with_non_empty_queue_is_shown() {
     setup_no_color();
 
     let mut ns = empty_ns("active-project");
-    ns.queues.push(oj_daemon::QueueStatus {
+    ns.queues.push(oj_wire::QueueStatus {
         name: "tasks".to_string(),
         pending: 1,
         active: 0,

@@ -15,11 +15,10 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Instant;
 
-use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
-use oj_core::{Event, SystemClock};
-use oj_engine::breadcrumb::Breadcrumb;
-use oj_engine::{MetricsHealth, Runtime};
-use oj_storage::{Checkpointer, MaterializedState};
+use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::engine::Runtime;
+use crate::storage::{Checkpointer, MaterializedState};
+use oj_core::{Breadcrumb, Event, MetricsHealth, SystemClock};
 use thiserror::Error;
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
@@ -257,10 +256,10 @@ pub enum LifecycleError {
     BindFailed(PathBuf, std::io::Error),
 
     #[error("WAL error: {0}")]
-    Wal(#[from] oj_storage::WalError),
+    Wal(#[from] crate::storage::WalError),
 
     #[error("Snapshot error: {0}")]
-    Snapshot(#[from] oj_storage::SnapshotError),
+    Snapshot(#[from] crate::storage::SnapshotError),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

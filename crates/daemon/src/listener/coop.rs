@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_adapters::agent::LocalAdapter;
-use oj_storage::MaterializedState;
+use crate::adapters::agent::LocalAdapter;
+use crate::storage::MaterializedState;
 
 /// Kill agent processes tracked by this daemon instance, concurrently.
 ///

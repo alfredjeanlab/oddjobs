@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::storage::MaterializedState;
 use oj_core::StepOutcome;
-use oj_storage::MaterializedState;
 
 use crate::protocol::{ProjectSummary, Response};
 

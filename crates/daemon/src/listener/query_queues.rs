@@ -5,8 +5,8 @@
 
 use std::path::Path;
 
+use crate::storage::MaterializedState;
 use oj_core::{scoped_name, split_scoped_name};
-use oj_storage::MaterializedState;
 
 use crate::protocol::{QueueSummary, Response};
 

@@ -23,9 +23,9 @@ pub(crate) fn within_age_threshold(
 
 /// Best-effort cleanup of job log, breadcrumb, and associated agent files.
 pub(crate) fn cleanup_job_files(logs_path: &std::path::Path, job_id: &str) {
-    let log_file = oj_engine::log_paths::job_log_path(logs_path, job_id);
+    let log_file = oj_core::log_paths::job_log_path(logs_path, job_id);
     let _ = std::fs::remove_file(&log_file);
-    let crumb_file = oj_engine::log_paths::breadcrumb_path(logs_path, job_id);
+    let crumb_file = oj_core::log_paths::breadcrumb_path(logs_path, job_id);
     let _ = std::fs::remove_file(&crumb_file);
     cleanup_agent_files(logs_path, job_id);
 }

@@ -6,8 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::storage::MaterializedState;
 use oj_core::{Event, IdGen, JobId, OwnerId, RunTarget, UuidIdGen};
-use oj_storage::MaterializedState;
 use parking_lot::Mutex;
 
 use super::lifecycle::{self, Stoppable};

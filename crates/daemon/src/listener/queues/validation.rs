@@ -11,9 +11,9 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::storage::{MaterializedState, QueueItemStatus};
 use oj_core::scoped_name;
 use oj_runbook::QueueType;
-use oj_storage::{MaterializedState, QueueItemStatus};
 
 use crate::protocol::Response;
 

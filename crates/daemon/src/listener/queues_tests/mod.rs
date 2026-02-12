@@ -12,8 +12,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tempfile::tempdir;
 
+use crate::storage::{MaterializedState, Wal};
 use oj_core::Event;
-use oj_storage::{MaterializedState, Wal};
 
 use crate::event_bus::EventBus;
 

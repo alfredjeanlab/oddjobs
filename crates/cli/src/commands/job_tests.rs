@@ -7,7 +7,7 @@ use super::{
     format_job_list, format_var_value, group_vars_by_scope, is_var_truncated, parse_duration,
 };
 use oj_core::{StepOutcomeKind, StepStatusKind};
-use oj_daemon::{JobDetail, JobSummary, StepRecordDetail};
+use oj_wire::{JobDetail, JobSummary, StepRecordDetail};
 use std::collections::HashMap;
 use std::time::Duration;
 

@@ -24,7 +24,18 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
 }
 ```
 
-**Production**: `LocalAdapter` — manages agents via coop sidecars (see below).
+**Production**: `RuntimeRouter` — delegates to the appropriate adapter based on
+environment and agent config:
+
+| Adapter | When | Transport |
+|---------|------|-----------|
+| `LocalAdapter` | No container, daemon running locally | Unix socket |
+| `DockerAdapter` | `container` field set, daemon running locally | TCP |
+| `KubernetesAdapter` | Daemon running in K8s (all agents route here) | TCP |
+
+When the daemon runs inside a Kubernetes cluster, the router auto-detects via
+in-cluster config and routes all agents to `KubernetesAdapter`. Otherwise, it
+routes based on whether the agent has a `container` field.
 
 **Test**: `FakeAgentAdapter` — in-memory state, configurable responses, records all calls. Enables deterministic tests, call verification, error injection (`set_spawn_fails(true)`), and state simulation.
 
@@ -32,20 +43,25 @@ Integration tests use [claudeless](https://github.com/anthropics/claudeless) —
 
 ## Coop Architecture
 
-Agents run in **coop processes** — PTY-based sidecars that wrap Claude Code, providing session persistence, state detection, and an HTTP/WebSocket control API. The engine communicates with coop over a per-agent Unix socket.
+Agents run in **coop processes** — PTY-based sidecars that wrap Claude Code, providing session persistence, state detection, and an HTTP/WebSocket control API. The engine communicates with coop over a per-agent Unix socket (local) or TCP (Docker/K8s).
 
 ```diagram
 Engine                    Coop Sidecar                Claude Code
 ───────                   ────────────                ───────────
 Effect::SpawnAgent ─────→ coop --agent claude ──────→ claude <prompt>
                           │                           │
-HTTP API ←──────────────→ coop.sock                   │ (PTY)
+HTTP API ←──────────────→ socket / TCP :8080          │ (PTY)
 WebSocket ←───────────── state events                 │
                           │                           │
 send(input) ────────────→ /api/v1/agent/nudge ──────→ keyboard input
 respond(prompt) ────────→ /api/v1/agent/respond ────→ prompt answer
 kill() ─────────────────→ /api/v1/shutdown ──────────→ graceful exit
 ```
+
+The same HTTP/WebSocket API is used regardless of transport. For containerized
+agents, coop listens on `--port 8080` (TCP) instead of a Unix socket, and a
+per-agent bearer token (`COOP_AUTH_TOKEN`) secures each connection. See
+[Containers](07-containers.md) for Docker and Kubernetes specifics.
 
 ### Why Coop (Not Print Mode)
 
@@ -141,8 +157,9 @@ Default on_idle: `done` for job agents, `escalate` for standalone/crew agents.
 
 On daemon restart, the engine reconciles with surviving agent processes:
 
-1. Check if agent's coop socket is responsive (`/api/v1/health`)
-2. If alive: `reconnect()` — starts WebSocket bridge without spawning a new process
+1. Attempt `reconnect()` through the `RuntimeRouter` — tries available adapters
+   (K8s pod lookup, Docker container inspection, local socket probe)
+2. If alive: reconnect starts WebSocket bridge without spawning a new process
 3. If dead: emit `AgentGone` to trigger `on_dead` action
 
-This is why daemon shutdown preserves agent processes by default — the restart+reconcile flow picks up exactly where the daemon left off.
+This is why daemon shutdown preserves agent processes by default — the restart+reconcile flow picks up exactly where the daemon left off. For containerized agents, pods continue running independently and are rediscovered via the K8s API or Docker inspect.

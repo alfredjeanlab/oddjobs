@@ -1,5 +1,5 @@
 use oj_core::StepStatusKind;
-use oj_daemon::ProjectStatus;
+use oj_wire::ProjectStatus;
 
 mod formatting;
 mod frame;
@@ -25,8 +25,8 @@ pub(super) fn make_ns(name: &str) -> ProjectStatus {
 /// Create a minimal job entry with sensible defaults.
 ///
 /// `name` defaults to `id`; override fields as needed.
-pub(super) fn job_entry(id: &str, kind: &str, step: &str) -> oj_daemon::JobStatusEntry {
-    oj_daemon::JobStatusEntry {
+pub(super) fn job_entry(id: &str, kind: &str, step: &str) -> oj_wire::JobStatusEntry {
+    oj_wire::JobStatusEntry {
         id: id.to_string(),
         name: id.to_string(),
         kind: kind.to_string(),

@@ -7,8 +7,8 @@
 //! enabling crash recovery via snapshot + replay. Events are buffered in
 //! memory and periodically flushed to disk (~10ms durability window).
 
+use crate::storage::{Wal, WalEntry, WalError};
 use oj_core::Event;
-use oj_storage::{Wal, WalEntry, WalError};
 use std::sync::Arc;
 
 use parking_lot::Mutex;

@@ -27,9 +27,15 @@ A workspace provides:
 | `folder` | `source = "folder"` | Plain directory. Engine creates the directory; the init step populates it. |
 | `worktree` | `source { git = true }` | Engine-managed git worktree. The engine handles `git worktree add`, `git worktree remove`, and branch cleanup automatically. |
 
-**Storage location**: `~/.local/state/oj/workspaces/ws-<job-name>-<nonce>/`
+**Local execution**: Workspaces are stored at
+`~/.local/state/oj/workspaces/ws-<job-name>-<nonce>/`. Using XDG state directory
+keeps the project directory clean and survives `git clean` operations.
 
-Using XDG state directory keeps the project directory clean and survives `git clean` operations.
+**Containerized execution**: Code is provisioned via `git clone` into an
+`emptyDir` volume (K8s) or Docker volume. An init container clones the repo
+before the main agent container starts. The daemon resolves the repo URL and
+branch from the job's `source` block at creation time — no local checkout is
+needed. See [Containers](../arch/07-containers.md) for details.
 
 ### Workspace Setup
 
@@ -65,6 +71,14 @@ Sessions are managed through two adapter layers:
 | Layer | Adapter | Responsibility |
 |-------|---------|----------------|
 | High-level | `AgentAdapter` | Agent lifecycle, prompts, state detection, process management |
+
+The `RuntimeRouter` selects the adapter based on environment and agent config:
+
+| Environment | Adapter | Transport |
+|-------------|---------|-----------|
+| Local (no container) | `LocalAdapter` | Unix socket |
+| Local (with container) | `DockerAdapter` | TCP |
+| Kubernetes | `KubernetesAdapter` | TCP |
 
 A session provides:
 - **Isolation**: Separate process/environment
@@ -166,10 +180,10 @@ the risk of accidental misconfiguration.
                                   ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Adapters                                                   │
-│  ┌──────────────────┐                                       │
-│  │  AgentAdapter    │                                       │
-│  │  (LocalAdapter)   │                                       │
-│  └──────────────────┘                                       │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                   RuntimeRouter                        │  │
+│  │  LocalAdapter │ DockerAdapter │ KubernetesAdapter      │  │
+│  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -184,8 +198,8 @@ the risk of accidental misconfiguration.
 
 | Concept | Purpose | Implementation |
 |---------|---------|----------------|
-| **Workspace** | Isolated work directory | Empty directory, populated by init step |
-| **Session** | Where crew | Coop agent process |
-| **AgentAdapter** | Agent lifecycle management | LocalAdapter |
+| **Workspace** | Isolated work directory | Local worktree or container volume |
+| **Session** | Agent execution environment | Coop process (local or containerized) |
+| **AgentAdapter** | Agent lifecycle management | RuntimeRouter → Local / Docker / K8s |
 
 These abstractions enable the same runbook to work across different environments. The runbook defines *what* to do; the execution layer handles *where* and *how*.

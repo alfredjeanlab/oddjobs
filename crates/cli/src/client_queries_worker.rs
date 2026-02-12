@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use oj_daemon::{Query, Request, Response};
+use oj_wire::{Query, Request, Response};
 
 use super::super::{ClientError, DaemonClient};
 
@@ -101,7 +101,7 @@ impl DaemonClient {
     }
 
     /// List all workers
-    pub async fn list_workers(&self) -> Result<Vec<oj_daemon::WorkerSummary>, ClientError> {
+    pub async fn list_workers(&self) -> Result<Vec<oj_wire::WorkerSummary>, ClientError> {
         let request = Request::Query { query: Query::ListWorkers };
         match self.send(&request).await? {
             Response::Workers { workers } => Ok(workers),
@@ -115,7 +115,7 @@ impl DaemonClient {
         all: bool,
         dry_run: bool,
         project: Option<&str>,
-    ) -> Result<(Vec<oj_daemon::WorkerEntry>, usize), ClientError> {
+    ) -> Result<(Vec<oj_wire::WorkerEntry>, usize), ClientError> {
         match self
             .send(&Request::WorkerPrune { all, dry_run, project: project.map(String::from) })
             .await?
@@ -238,7 +238,7 @@ impl DaemonClient {
     }
 
     /// List all crons
-    pub async fn list_crons(&self) -> Result<Vec<oj_daemon::protocol::CronSummary>, ClientError> {
+    pub async fn list_crons(&self) -> Result<Vec<oj_wire::CronSummary>, ClientError> {
         let request = Request::Query { query: Query::ListCrons };
         match self.send(&request).await? {
             Response::Crons { crons } => Ok(crons),
@@ -251,7 +251,7 @@ impl DaemonClient {
         &self,
         all: bool,
         dry_run: bool,
-    ) -> Result<(Vec<oj_daemon::CronEntry>, usize), ClientError> {
+    ) -> Result<(Vec<oj_wire::CronEntry>, usize), ClientError> {
         match self.send(&Request::CronPrune { all, dry_run }).await? {
             Response::CronsPruned { pruned, skipped } => Ok((pruned, skipped)),
             other => Self::reject(other),

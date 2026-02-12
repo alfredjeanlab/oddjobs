@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::color;
 
-pub(crate) fn format_agent_summary(agent: &oj_daemon::AgentSummary) -> String {
+pub(crate) fn format_agent_summary(agent: &oj_wire::AgentSummary) -> String {
     let mut parts = Vec::new();
     if agent.files_read > 0 {
         parts.push(format!(

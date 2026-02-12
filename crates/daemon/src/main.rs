@@ -17,11 +17,14 @@
 use std::io::Write;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+mod adapters;
+mod engine;
 mod env;
 mod event_bus;
 mod lifecycle;
 mod listener;
 mod protocol;
+mod storage;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -29,8 +32,8 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Duration;
 
+use crate::storage::{Checkpointer, MaterializedState, Wal};
 use oj_core::{Clock, Event, JobId};
-use oj_storage::{Checkpointer, MaterializedState, Wal};
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::Notify;
 use tracing::{error, info};

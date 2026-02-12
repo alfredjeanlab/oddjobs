@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
+use crate::storage::MaterializedState;
 use oj_core::split_scoped_name;
-use oj_storage::MaterializedState;
 
 /// Levenshtein edit distance between two strings.
 pub(super) fn edit_distance(a: &str, b: &str) -> usize {

@@ -9,12 +9,12 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use oj_core::scoped_name;
-use oj_engine::breadcrumb::Breadcrumb;
-use oj_engine::log_paths::{
+use crate::storage::MaterializedState;
+use oj_core::log_paths::{
     agent_log_path, cron_log_path, job_log_path, queue_log_path, worker_log_path,
 };
-use oj_storage::MaterializedState;
+use oj_core::scoped_name;
+use oj_core::Breadcrumb;
 
 use super::super::suggest;
 use crate::protocol::Response;

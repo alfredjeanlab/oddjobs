@@ -120,7 +120,7 @@ pub async fn handle(
 
 /// Print step transitions that occurred since the last poll.
 pub(crate) fn print_step_progress(
-    detail: &oj_daemon::JobDetail,
+    detail: &oj_wire::JobDetail,
     tracker: &mut StepTracker,
     show_job_prefix: bool,
     out: &mut impl std::io::Write,

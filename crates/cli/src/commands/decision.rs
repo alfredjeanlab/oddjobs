@@ -8,7 +8,7 @@ use std::io::{BufRead, IsTerminal, Write};
 use anyhow::Result;
 use clap::{Args, Subcommand};
 
-use oj_daemon::protocol::DecisionDetail;
+use oj_wire::DecisionDetail;
 
 use crate::client::{ClientKind, DaemonClient};
 use crate::color;
@@ -362,7 +362,7 @@ pub(crate) fn parse_review_input(input: &str, option_count: usize) -> ReviewActi
 
 pub(crate) fn format_decision_list(
     out: &mut (impl Write + ?Sized),
-    decisions: &[oj_daemon::protocol::DecisionSummary],
+    decisions: &[oj_wire::DecisionSummary],
 ) {
     let cols = vec![
         Column::muted("ID").with_max(8),

@@ -3,7 +3,7 @@
 
 //! Cron time display helpers for query responses.
 
-use oj_storage::CronRecord;
+use crate::storage::CronRecord;
 
 /// Compute the human-readable time display for a cron.
 ///

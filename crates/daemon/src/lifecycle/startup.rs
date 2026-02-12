@@ -9,12 +9,12 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
+use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::engine::breadcrumb;
+use crate::engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
+use crate::storage::{load_snapshot, MaterializedState, Wal};
 use fs2::FileExt;
-use oj_adapters::{DesktopNotifyAdapter, RuntimeRouter};
 use oj_core::{Event, JobId, SystemClock};
-use oj_engine::breadcrumb;
-use oj_engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
-use oj_storage::{load_snapshot, MaterializedState, Wal};
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -143,13 +143,13 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             // Job exists in recovered state — clean up stale breadcrumbs
             // for terminal jobs (crash between terminal and breadcrumb delete)
             if job.is_terminal() {
-                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
+                let path = oj_core::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             }
         } else {
             // No matching job — check if breadcrumb is stale (> 7 days)
             let is_stale = {
-                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
+                let path = oj_core::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 match path.metadata() {
                     Ok(meta) => meta
                         .modified()
@@ -162,7 +162,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             };
             if is_stale {
                 warn!(job_id = %bc.job_id, "auto-dismissing stale orphan breadcrumb (> 7 days old)");
-                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
+                let path = oj_core::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             } else {
                 // Emit synthetic events to fail the orphaned job so it
@@ -225,7 +225,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                 info!(job_id = %bc.job_id, project = %bc.project, "failed orphaned job from breadcrumb");
 
                 // Delete breadcrumb now that the job is properly failed
-                let path = oj_engine::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
+                let path = oj_core::log_paths::breadcrumb_path(&config.logs_path, &bc.job_id);
                 let _ = std::fs::remove_file(&path);
             }
         }

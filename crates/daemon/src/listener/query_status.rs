@@ -9,10 +9,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use parking_lot::Mutex;
 
+use crate::storage::{MaterializedState, QueueItemStatus};
 use oj_core::{split_scoped_name, OwnerId, StepOutcome};
-use oj_engine::breadcrumb::Breadcrumb;
-use oj_engine::MetricsHealth;
-use oj_storage::{MaterializedState, QueueItemStatus};
+use oj_core::{Breadcrumb, MetricsHealth};
 
 use crate::protocol::{
     AgentStatusEntry, CronSummary, JobStatusEntry, MetricsHealthSummary, ProjectStatus,

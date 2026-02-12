@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use oj_daemon::{Query, Request, Response};
+use oj_wire::{Query, Request, Response};
 
 use super::super::{CancelResult, ClientError, DaemonClient, SuspendResult};
 
@@ -18,7 +18,7 @@ pub enum RunCommandResult {
 
 impl DaemonClient {
     /// Query for jobs
-    pub async fn list_jobs(&self) -> Result<Vec<oj_daemon::JobSummary>, ClientError> {
+    pub async fn list_jobs(&self) -> Result<Vec<oj_wire::JobSummary>, ClientError> {
         let query = Request::Query { query: Query::ListJobs };
         match self.send(&query).await? {
             Response::Jobs { jobs } => Ok(jobs),
@@ -27,7 +27,7 @@ impl DaemonClient {
     }
 
     /// Query for a specific job
-    pub async fn get_job(&self, id: &str) -> Result<Option<oj_daemon::JobDetail>, ClientError> {
+    pub async fn get_job(&self, id: &str) -> Result<Option<oj_wire::JobDetail>, ClientError> {
         let request = Request::Query { query: Query::GetJob { id: id.to_string() } };
         match self.send(&request).await? {
             Response::Job { job } => Ok(job.map(|b| *b)),
@@ -169,7 +169,7 @@ impl DaemonClient {
         orphans: bool,
         dry_run: bool,
         project: Option<&str>,
-    ) -> Result<(Vec<oj_daemon::JobEntry>, usize), ClientError> {
+    ) -> Result<(Vec<oj_wire::JobEntry>, usize), ClientError> {
         let req =
             Request::JobPrune { all, failed, orphans, dry_run, project: project.map(String::from) };
         match self.send(&req).await? {
@@ -182,7 +182,7 @@ impl DaemonClient {
     pub async fn status_overview(
         &self,
     ) -> Result<
-        (u64, Vec<oj_daemon::ProjectStatus>, Option<oj_daemon::MetricsHealthSummary>),
+        (u64, Vec<oj_wire::ProjectStatus>, Option<oj_wire::MetricsHealthSummary>),
         ClientError,
     > {
         let query = Request::Query { query: Query::StatusOverview };
@@ -195,7 +195,7 @@ impl DaemonClient {
     }
 
     /// List orphaned jobs detected at startup
-    pub async fn list_orphans(&self) -> Result<Vec<oj_daemon::OrphanSummary>, ClientError> {
+    pub async fn list_orphans(&self) -> Result<Vec<oj_wire::OrphanSummary>, ClientError> {
         let request = Request::Query { query: Query::ListOrphans };
         match self.send(&request).await? {
             Response::Orphans { orphans } => Ok(orphans),
@@ -204,7 +204,7 @@ impl DaemonClient {
     }
 
     /// List all projects with active work
-    pub async fn list_projects(&self) -> Result<Vec<oj_daemon::ProjectSummary>, ClientError> {
+    pub async fn list_projects(&self) -> Result<Vec<oj_wire::ProjectSummary>, ClientError> {
         let req = Request::Query { query: Query::ListProjects };
         match self.send(&req).await? {
             Response::Projects { projects } => Ok(projects),

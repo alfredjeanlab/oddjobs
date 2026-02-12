@@ -6,9 +6,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 
-use oj_adapters::subprocess::{run_with_timeout, WORKSPACE_PRUNE_TIMEOUT};
+use crate::adapters::subprocess::{run_with_timeout, WORKSPACE_PRUNE_TIMEOUT};
+use crate::storage::MaterializedState;
 use oj_core::{Event, WorkspaceId};
-use oj_storage::MaterializedState;
 
 use crate::event_bus::EventBus;
 use crate::protocol::{Response, WorkspaceEntry};

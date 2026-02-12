@@ -6,9 +6,7 @@ members = [
     "crates/daemon",
     "crates/runbook",
     "crates/shell",
-    "crates/storage",
-    "crates/adapters",
-    "crates/engine",
+    "crates/wire",
 ]
 
 # Root package for workspace-level integration tests

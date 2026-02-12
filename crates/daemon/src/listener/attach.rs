@@ -68,7 +68,8 @@ where
             let resp = Response::AgentAttachReady { id: full_agent_id.clone() };
             protocol::write_response(&mut writer, &resp, super::ipc_timeout()).await?;
 
-            match oj_adapters::ws_proxy_bridge_tcp(addr, token, &mut reader, &mut writer).await {
+            match crate::adapters::ws_proxy_bridge_tcp(addr, token, &mut reader, &mut writer).await
+            {
                 Ok(()) => {
                     info!(agent_id = %full_agent_id, "attach proxy disconnected cleanly");
                 }
@@ -100,7 +101,7 @@ where
 /// Resolve an agent ID prefix to a full agent ID.
 ///
 /// Checks the unified agents map first, then falls back to crew.
-fn resolve_agent_id(prefix: &str, state: &oj_storage::MaterializedState) -> Option<String> {
+fn resolve_agent_id(prefix: &str, state: &crate::storage::MaterializedState) -> Option<String> {
     // Unified agents map
     state
         .agents

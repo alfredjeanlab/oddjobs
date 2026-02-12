@@ -11,13 +11,13 @@ fn cleanup_job_files_removes_log_and_breadcrumb() {
     let logs_path = dir.path().join("logs");
     std::fs::create_dir_all(logs_path.join("agent")).unwrap();
 
-    let log_file = oj_engine::log_paths::job_log_path(&logs_path, "job-cleanup");
+    let log_file = oj_core::log_paths::job_log_path(&logs_path, "job-cleanup");
     if let Some(parent) = log_file.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
     std::fs::write(&log_file, "log data").unwrap();
 
-    let crumb_file = oj_engine::log_paths::breadcrumb_path(&logs_path, "job-cleanup");
+    let crumb_file = oj_core::log_paths::breadcrumb_path(&logs_path, "job-cleanup");
     if let Some(parent) = crumb_file.parent() {
         std::fs::create_dir_all(parent).unwrap();
     }
