@@ -3,6 +3,7 @@
 
 //! Workspace effect execution (create/delete worktrees and folders).
 
+use crate::adapters::WorkspaceAdapter;
 use crate::engine::executor::ExecuteError;
 use crate::storage::MaterializedState;
 use oj_core::Event;
@@ -22,6 +23,7 @@ use tokio::sync::mpsc;
 pub(crate) async fn create(
     state: &Arc<Mutex<MaterializedState>>,
     event_tx: &mpsc::Sender<Event>,
+    workspace: &Arc<dyn WorkspaceAdapter>,
     workspace_id: oj_core::WorkspaceId,
     path: PathBuf,
     owner: oj_core::OwnerId,
@@ -46,34 +48,12 @@ pub(crate) async fn create(
     }
 
     // Phase 2: Spawn background task for filesystem work.
-    //
-    // When the daemon runs inside a Kubernetes pod (KUBERNETES_SERVICE_HOST is
-    // set), there is no local repo checkout — agent pods provision their own
-    // code via init containers. Skip filesystem operations and immediately
-    // emit WorkspaceReady so the job can proceed.
-    let in_k8s = std::env::var("KUBERNETES_SERVICE_HOST").is_ok();
-
     let event_tx = event_tx.clone();
+    let workspace = Arc::clone(workspace);
     tokio::spawn(async move {
-        let event = if in_k8s {
-            tracing::info!(?workspace_id, "skipping local workspace creation (in-cluster)");
-            Event::WorkspaceReady { id: workspace_id }
-        } else {
-            let result = if is_worktree {
-                create_worktree(&path, repo_root, branch, start_point).await
-            } else {
-                create_folder(&path).await
-            };
-
-            match result {
-                Ok(()) => Event::WorkspaceReady { id: workspace_id },
-                Err(reason) => Event::WorkspaceFailed { id: workspace_id, reason },
-            }
-        };
-
-        if let Err(e) = event_tx.send(event).await {
-            tracing::error!("failed to send workspace event: {}", e);
-        }
+        workspace
+            .provision(event_tx, workspace_id, path, is_worktree, repo_root, branch, start_point)
+            .await;
     });
 
     // Return WorkspaceCreated for WAL persistence (background task sends Ready/Failed)
@@ -89,6 +69,7 @@ pub(crate) async fn create(
 pub(crate) async fn delete(
     state: &Arc<Mutex<MaterializedState>>,
     event_tx: &mpsc::Sender<Event>,
+    workspace: &Arc<dyn WorkspaceAdapter>,
     workspace_id: oj_core::WorkspaceId,
 ) -> Result<Option<Event>, ExecuteError> {
     // Look up workspace path and branch (synchronous, fast)
@@ -111,135 +92,10 @@ pub(crate) async fn delete(
 
     // Spawn background task for filesystem work
     let event_tx = event_tx.clone();
+    let workspace = Arc::clone(workspace);
     tokio::spawn(async move {
-        delete_workspace_files(&workspace_path, &workspace_branch).await;
-
-        let event = Event::WorkspaceDeleted { id: workspace_id.clone() };
-
-        if let Err(e) = event_tx.send(event).await {
-            tracing::error!("failed to send WorkspaceDeleted: {}", e);
-        }
+        workspace.cleanup(event_tx, workspace_id, workspace_path, workspace_branch).await;
     });
 
     Ok(None)
-}
-
-/// Remove workspace files from disk (git worktree + directory).
-///
-/// All operations are best-effort — errors are logged but don't
-/// prevent the `WorkspaceDeleted` event from being emitted.
-async fn delete_workspace_files(
-    workspace_path: &std::path::Path,
-    workspace_branch: &Option<String>,
-) {
-    // If the workspace is a git worktree, unregister it first
-    let dot_git = workspace_path.join(".git");
-    if tokio::fs::symlink_metadata(&dot_git).await.map(|m| m.is_file()).unwrap_or(false) {
-        // Best-effort: git worktree remove --force
-        // Run from within the worktree so git can locate the parent repo.
-        let mut cmd = tokio::process::Command::new("git");
-        cmd.arg("worktree")
-            .arg("remove")
-            .arg("--force")
-            .arg(workspace_path)
-            .current_dir(workspace_path);
-        let _ = crate::adapters::subprocess::run_with_timeout(
-            cmd,
-            crate::adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-            "git worktree remove",
-        )
-        .await;
-
-        // Best-effort: clean up the branch
-        if let Some(ref branch) = workspace_branch {
-            // Find the repo root from the worktree's .git file
-            if let Ok(contents) = tokio::fs::read_to_string(&dot_git).await {
-                // .git file contains: gitdir: /path/to/repo/.git/worktrees/<name>
-                if let Some(gitdir) = contents.trim().strip_prefix("gitdir: ") {
-                    // Navigate up from .git/worktrees/<name> to .git, then parent
-                    let gitdir_path = std::path::Path::new(gitdir);
-                    if let Some(repo_root) =
-                        gitdir_path.parent().and_then(|p| p.parent()).and_then(|p| p.parent())
-                    {
-                        let mut cmd = tokio::process::Command::new("git");
-                        cmd.args(["-C", &repo_root.display().to_string(), "branch", "-D", branch])
-                            .env_remove("GIT_DIR")
-                            .env_remove("GIT_WORK_TREE");
-                        let _ = crate::adapters::subprocess::run_with_timeout(
-                            cmd,
-                            crate::adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-                            "git branch delete",
-                        )
-                        .await;
-                    }
-                }
-            }
-        }
-    }
-
-    // Remove workspace directory (in case worktree remove left remnants)
-    if workspace_path.exists() {
-        if let Err(e) = tokio::fs::remove_dir_all(workspace_path).await {
-            tracing::warn!(
-                path = %workspace_path.display(),
-                error = %e,
-                "failed to remove workspace directory (best-effort)"
-            );
-        }
-    }
-}
-
-/// Create a git worktree at the given path.
-async fn create_worktree(
-    path: &std::path::Path,
-    repo_root: Option<std::path::PathBuf>,
-    branch: Option<String>,
-    start_point: Option<String>,
-) -> Result<(), String> {
-    // Create parent directory
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| format!("failed to create workspace parent dir: {}", e))?;
-    }
-
-    let repo_root = repo_root.ok_or("repo_root required for worktree workspace")?;
-    let branch = branch.ok_or("branch required for worktree workspace")?;
-    let start_point = start_point.unwrap_or_else(|| "HEAD".to_string());
-
-    let path_str = path.display().to_string();
-    let mut cmd = tokio::process::Command::new("git");
-    cmd.args([
-        "-C",
-        &repo_root.display().to_string(),
-        "worktree",
-        "add",
-        "-b",
-        &branch,
-        &path_str,
-        &start_point,
-    ])
-    .env_remove("GIT_DIR")
-    .env_remove("GIT_WORK_TREE");
-    let output = crate::adapters::subprocess::run_with_timeout(
-        cmd,
-        crate::adapters::subprocess::GIT_WORKTREE_TIMEOUT,
-        "git worktree add",
-    )
-    .await
-    .map_err(|e| e.to_string())?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git worktree add failed: {}", stderr.trim()));
-    }
-
-    Ok(())
-}
-
-/// Create a plain directory workspace.
-async fn create_folder(path: &std::path::Path) -> Result<(), String> {
-    tokio::fs::create_dir_all(path)
-        .await
-        .map_err(|e| format!("failed to create workspace dir: {}", e))
 }

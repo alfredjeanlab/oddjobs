@@ -300,10 +300,7 @@ mod adapter {
             let addr = format!("{}:{}", pod_ip, container_port);
 
             let auth_token = config.auth_token.ok_or_else(|| {
-                AgentAdapterError::NotFound(format!(
-                    "no persisted auth token for pod {}",
-                    pod_name
-                ))
+                AgentAdapterError::NotFound(format!("no persisted auth token for pod {}", pod_name))
             })?;
 
             // Verify coop is alive
@@ -457,5 +454,4 @@ mod adapter {
             (max_attempts as u64 * poll_ms) / 1000
         )))
     }
-
 }

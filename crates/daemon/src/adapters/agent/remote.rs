@@ -76,11 +76,7 @@ impl RemoteCoopClient {
 
     /// Update the address for a registered agent (e.g., after pod IP change)
     /// and restart the WS event bridge so it connects to the new address.
-    pub(crate) fn update_addr_and_reconnect_bridge(
-        &self,
-        agent_id: &AgentId,
-        new_addr: String,
-    ) {
+    pub(crate) fn update_addr_and_reconnect_bridge(&self, agent_id: &AgentId, new_addr: String) {
         let mut agents = self.agents.lock();
         let Some(agent) = agents.get_mut(agent_id) else { return };
         agent.addr = new_addr;
@@ -124,13 +120,7 @@ impl RemoteCoopClient {
         let handle = AgentHandle::new(agent_id.clone());
         self.agents.lock().insert(
             agent_id,
-            RemoteAgent {
-                addr,
-                auth_token,
-                bridge_shutdown: Some(shutdown_tx),
-                event_tx,
-                owner,
-            },
+            RemoteAgent { addr, auth_token, bridge_shutdown: Some(shutdown_tx), event_tx, owner },
         );
         handle
     }

@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::adapters::{workspace_adapter, DesktopNotifyAdapter, RuntimeRouter};
 use crate::engine::breadcrumb;
 use crate::engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
 use crate::storage::{load_snapshot, MaterializedState, Wal};
@@ -245,11 +245,13 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     let state = Arc::new(Mutex::new(state));
 
     // 9. Create runtime (runbook loaded on-demand per project)
+    let workspace = workspace_adapter(agent_adapter.is_remote_only());
     let runtime = Arc::new(Runtime::new(
         RuntimeDeps {
             agents: agent_adapter.clone(),
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
+            workspace,
         },
         SystemClock,
         RuntimeConfig { state_dir: config.state_dir.clone(), log_dir: config.logs_path.clone() },

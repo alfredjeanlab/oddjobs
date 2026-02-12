@@ -19,7 +19,7 @@ pub(crate) use crate::event_bus::{EventBus, EventReader};
 
 use std::path::Path;
 
-use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
+use crate::adapters::{workspace_adapter, DesktopNotifyAdapter, RuntimeRouter};
 use crate::engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_core::{StepOutcome, StepRecord};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
@@ -121,6 +121,7 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
             agents: agent_adapter,
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
+            workspace: workspace_adapter(false),
         },
         SystemClock,
         RuntimeConfig { state_dir: dir_path.clone(), log_dir: dir_path.join("logs") },
@@ -181,6 +182,7 @@ pub fn setup_reconcile_runtime(dir_path: &Path) -> Arc<DaemonRuntime> {
             agents: agent_adapter,
             notifier: DesktopNotifyAdapter::new(),
             state: Arc::clone(&state),
+            workspace: workspace_adapter(false),
         },
         SystemClock,
         RuntimeConfig { state_dir: dir_path.to_path_buf(), log_dir: dir_path.join("logs") },

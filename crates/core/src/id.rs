@@ -47,6 +47,7 @@ macro_rules! define_id {
                 Self(id.into())
             }
 
+            #[allow(dead_code)] // NOTE(compact): not used by all id types
             pub fn as_str(&self) -> &str {
                 &self.0
             }

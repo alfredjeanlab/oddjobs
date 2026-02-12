@@ -4,7 +4,9 @@
 //! Effect executor
 
 use crate::adapters::subprocess::{run_with_timeout, QUEUE_COMMAND_TIMEOUT, SHELL_COMMAND_TIMEOUT};
-use crate::adapters::{AgentAdapter, AgentConfig, AgentReconnectConfig, NotifyAdapter};
+use crate::adapters::{
+    AgentAdapter, AgentConfig, AgentReconnectConfig, NotifyAdapter, WorkspaceAdapter,
+};
 use crate::engine::{scheduler::Scheduler, RuntimeDeps};
 use crate::storage::MaterializedState;
 use oj_core::{Clock, Effect, Event};
@@ -36,6 +38,8 @@ pub struct Executor<A, N, C: Clock> {
     clock: C,
     /// Channel for emitting events from agent watchers
     event_tx: mpsc::Sender<Event>,
+    /// Workspace filesystem adapter (local or noop for k8s).
+    workspace: Arc<dyn WorkspaceAdapter>,
 }
 
 impl<A, N, C> Executor<A, N, C>
@@ -54,6 +58,7 @@ where
         Self {
             agents: deps.agents,
             notifier: deps.notifier,
+            workspace: deps.workspace,
             state: deps.state,
             scheduler,
             clock,
@@ -210,6 +215,7 @@ where
                 crate::engine::workspace::create(
                     &self.state,
                     &self.event_tx,
+                    &self.workspace,
                     workspace_id,
                     path,
                     owner,
@@ -221,7 +227,13 @@ where
                 .await
             }
             Effect::DeleteWorkspace { workspace_id } => {
-                crate::engine::workspace::delete(&self.state, &self.event_tx, workspace_id).await
+                crate::engine::workspace::delete(
+                    &self.state,
+                    &self.event_tx,
+                    &self.workspace,
+                    workspace_id,
+                )
+                .await
             }
             Effect::SetTimer { id, duration } => {
                 let now = oj_core::Clock::now(&self.clock);

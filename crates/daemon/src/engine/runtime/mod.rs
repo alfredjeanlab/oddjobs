@@ -10,7 +10,7 @@ mod job;
 mod monitor;
 mod signal;
 
-use crate::adapters::{AgentAdapter, NotifyAdapter};
+use crate::adapters::{AgentAdapter, NotifyAdapter, WorkspaceAdapter};
 use crate::engine::{
     activity_logger::{JobLogger, QueueLogger, WorkerLogger},
     breadcrumb::BreadcrumbWriter,
@@ -58,6 +58,7 @@ pub struct RuntimeDeps<A, N> {
     pub agents: A,
     pub notifier: N,
     pub state: Arc<Mutex<MaterializedState>>,
+    pub workspace: Arc<dyn WorkspaceAdapter>,
 }
 
 /// Runtime that coordinates the system

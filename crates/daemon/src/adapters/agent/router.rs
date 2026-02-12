@@ -131,6 +131,43 @@ impl RuntimeRouter {
     fn remove_route(&self, agent_id: &AgentId) {
         self.routes.lock().remove(agent_id);
     }
+
+    /// Whether the daemon is running in remote-only mode (e.g. inside a k8s pod).
+    ///
+    /// When true, agent pods provision their own code — the daemon should skip
+    /// local filesystem workspace operations (worktree creation, deletion).
+    pub fn is_remote_only(&self) -> bool {
+        self.k8s.is_some()
+    }
+}
+
+/// Dispatch a method call to the adapter that owns `agent_id`.
+///
+/// Eliminates the repeated `match (route, &self.k8s)` blocks by looking up
+/// the route once and delegating to the matching adapter.
+///
+/// Variants:
+///   `dispatch!(self, agent_id, method(args..))` — returns `Result<T, AgentAdapterError>`
+///   `dispatch!(self, agent_id, method(args..) or $fallback)` — returns the fallback on miss
+macro_rules! dispatch {
+    // Result-returning: missing route → NotFound
+    ($self:ident, $id:expr, $method:ident( $($arg:expr),* $(,)? )) => {
+        match ($self.route_for($id), &$self.k8s) {
+            (Some(Route::Kubernetes), Some(k8s)) => k8s.$method($($arg),*).await,
+            (Some(Route::Docker), _) => $self.docker.$method($($arg),*).await,
+            (Some(Route::Local), _) => $self.local.$method($($arg),*).await,
+            _ => Err(AgentAdapterError::NotFound($id.to_string())),
+        }
+    };
+    // Fallback-returning: missing route → literal
+    ($self:ident, $id:expr, $method:ident( $($arg:expr),* $(,)? ) or $fallback:expr) => {
+        match ($self.route_for($id), &$self.k8s) {
+            (Some(Route::Kubernetes), Some(k8s)) => k8s.$method($($arg),*).await,
+            (Some(Route::Docker), _) => $self.docker.$method($($arg),*).await,
+            (Some(Route::Local), _) => $self.local.$method($($arg),*).await,
+            _ => $fallback,
+        }
+    };
 }
 
 #[async_trait]
@@ -207,12 +244,7 @@ impl AgentAdapter for RuntimeRouter {
     }
 
     async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.send(agent_id, input).await,
-            (Some(Route::Docker), _) => self.docker.send(agent_id, input).await,
-            (Some(Route::Local), _) => self.local.send(agent_id, input).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        }
+        dispatch!(self, agent_id, send(agent_id, input))
     }
 
     async fn respond(
@@ -220,59 +252,29 @@ impl AgentAdapter for RuntimeRouter {
         agent_id: &AgentId,
         response: &oj_core::PromptResponse,
     ) -> Result<(), AgentAdapterError> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.respond(agent_id, response).await,
-            (Some(Route::Docker), _) => self.docker.respond(agent_id, response).await,
-            (Some(Route::Local), _) => self.local.respond(agent_id, response).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        }
+        dispatch!(self, agent_id, respond(agent_id, response))
     }
 
     async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
-        let result = match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.kill(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.kill(agent_id).await,
-            (Some(Route::Local), _) => self.local.kill(agent_id).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        };
+        let result = dispatch!(self, agent_id, kill(agent_id));
         self.remove_route(agent_id);
         result
     }
 
     async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.get_state(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.get_state(agent_id).await,
-            (Some(Route::Local), _) => self.local.get_state(agent_id).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        }
+        dispatch!(self, agent_id, get_state(agent_id))
     }
 
     async fn last_message(&self, agent_id: &AgentId) -> Option<String> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.last_message(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.last_message(agent_id).await,
-            (Some(Route::Local), _) => self.local.last_message(agent_id).await,
-            _ => None,
-        }
+        dispatch!(self, agent_id, last_message(agent_id) or None)
     }
 
     async fn resolve_stop(&self, agent_id: &AgentId) {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.resolve_stop(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.resolve_stop(agent_id).await,
-            (Some(Route::Local), _) => self.local.resolve_stop(agent_id).await,
-            _ => {}
-        }
+        dispatch!(self, agent_id, resolve_stop(agent_id) or ());
     }
 
     async fn is_alive(&self, agent_id: &AgentId) -> bool {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.is_alive(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.is_alive(agent_id).await,
-            (Some(Route::Local), _) => self.local.is_alive(agent_id).await,
-            _ => false,
-        }
+        dispatch!(self, agent_id, is_alive(agent_id) or false)
     }
 
     async fn capture_output(
@@ -280,29 +282,14 @@ impl AgentAdapter for RuntimeRouter {
         agent_id: &AgentId,
         lines: u32,
     ) -> Result<String, AgentAdapterError> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.capture_output(agent_id, lines).await,
-            (Some(Route::Docker), _) => self.docker.capture_output(agent_id, lines).await,
-            (Some(Route::Local), _) => self.local.capture_output(agent_id, lines).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        }
+        dispatch!(self, agent_id, capture_output(agent_id, lines))
     }
 
     async fn fetch_transcript(&self, agent_id: &AgentId) -> Result<String, AgentAdapterError> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.fetch_transcript(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.fetch_transcript(agent_id).await,
-            (Some(Route::Local), _) => self.local.fetch_transcript(agent_id).await,
-            _ => Err(AgentAdapterError::NotFound(agent_id.to_string())),
-        }
+        dispatch!(self, agent_id, fetch_transcript(agent_id))
     }
 
     async fn fetch_usage(&self, agent_id: &AgentId) -> Option<crate::adapters::agent::UsageData> {
-        match (self.route_for(agent_id), &self.k8s) {
-            (Some(Route::Kubernetes), Some(k8s)) => k8s.fetch_usage(agent_id).await,
-            (Some(Route::Docker), _) => self.docker.fetch_usage(agent_id).await,
-            (Some(Route::Local), _) => self.local.fetch_usage(agent_id).await,
-            _ => None,
-        }
+        dispatch!(self, agent_id, fetch_usage(agent_id) or None)
     }
 }

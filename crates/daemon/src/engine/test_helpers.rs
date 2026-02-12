@@ -3,7 +3,7 @@
 
 //! Shared test helpers for the engine crate.
 
-use crate::adapters::{FakeAgentAdapter, FakeNotifyAdapter};
+use crate::adapters::{workspace_adapter, FakeAgentAdapter, FakeNotifyAdapter};
 use crate::engine::spawn::{build_spawn_effects, SpawnCtx};
 use crate::engine::{Runtime, RuntimeConfig, RuntimeDeps, RuntimeError};
 use crate::storage::MaterializedState;
@@ -49,6 +49,7 @@ pub(crate) async fn setup_with_runbook(runbook_content: &str) -> TestContext {
             agents: agents.clone(),
             notifier: notifier.clone(),
             state: Arc::new(Mutex::new(MaterializedState::default())),
+            workspace: workspace_adapter(false),
         },
         clock.clone(),
         RuntimeConfig { state_dir: dir_path.clone(), log_dir: dir_path.join("logs") },

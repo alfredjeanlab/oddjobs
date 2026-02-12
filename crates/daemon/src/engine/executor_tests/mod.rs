@@ -9,7 +9,7 @@ mod workspace;
 
 use super::*;
 use crate::adapters::{
-    AgentAdapterError, AgentReconnectConfig, FakeAgentAdapter, FakeNotifyAdapter,
+    workspace_adapter, AgentAdapterError, AgentReconnectConfig, FakeAgentAdapter, FakeNotifyAdapter,
 };
 use crate::engine::RuntimeDeps;
 use oj_core::{AgentId, CrewId, FakeClock, JobId, OwnerId, TimerId, WorkspaceId};
@@ -35,6 +35,7 @@ async fn setup() -> TestHarness {
             agents: agents.clone(),
             notifier: notifier.clone(),
             state: Arc::new(Mutex::new(MaterializedState::default())),
+            workspace: workspace_adapter(false),
         },
         Arc::new(Mutex::new(Scheduler::new())),
         FakeClock::new(),
