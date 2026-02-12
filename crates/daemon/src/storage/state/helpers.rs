@@ -66,6 +66,8 @@ pub(crate) fn create_agent_record(
         project,
         workspace_path,
         status,
+        runtime: oj_core::AgentRuntime::default(),
+        auth_token: None,
         created_at_ms: now,
         updated_at_ms: now,
     }

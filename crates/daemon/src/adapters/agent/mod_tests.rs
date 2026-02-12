@@ -5,8 +5,7 @@ use super::*;
 
 #[test]
 fn agent_handle_accessors() {
-    let handle = AgentHandle::new(AgentId::new("test-agent"), PathBuf::from("/workspace"));
+    let handle = AgentHandle::new(AgentId::new("test-agent"));
 
     assert_eq!(handle.agent_id, AgentId::new("test-agent"));
-    assert_eq!(handle.workspace_path, PathBuf::from("/workspace"));
 }

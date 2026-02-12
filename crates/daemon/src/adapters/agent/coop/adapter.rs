@@ -84,7 +84,6 @@ impl LocalAdapter {
         &self,
         agent_id: AgentId,
         socket_path: PathBuf,
-        workspace_path: PathBuf,
         event_tx: mpsc::Sender<Event>,
         owner: OwnerId,
     ) -> AgentHandle {
@@ -100,7 +99,7 @@ impl LocalAdapter {
         self.agents
             .lock()
             .insert(agent_id.clone(), CoopAgent { socket_path, shutdown_tx: Some(shutdown_tx) });
-        AgentHandle::new(agent_id, workspace_path)
+        AgentHandle::new(agent_id)
     }
 }
 
@@ -147,13 +146,7 @@ impl AgentAdapter for LocalAdapter {
                 ))
             })?;
 
-            let handle = self.register_agent(
-                config.agent_id,
-                socket_path,
-                config.workspace_path,
-                event_tx,
-                config.owner,
-            );
+            let handle = self.register_agent(config.agent_id, socket_path, event_tx, config.owner);
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
             tracing::info!(agent_id = %handle.agent_id, elapsed_ms, "agent reconnected");

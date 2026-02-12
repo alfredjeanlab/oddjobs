@@ -30,10 +30,35 @@ pub struct AgentRecord {
     pub workspace_path: PathBuf,
     /// Current status
     pub status: AgentRecordStatus,
+    /// Which adapter runtime manages this agent (local, docker, k8s).
+    ///
+    /// Set from `AgentSpawned` events. Defaults to `Local` for records
+    /// created before this field existed.
+    #[serde(default)]
+    pub runtime: AgentRuntime,
+    /// Bearer token for remote (Docker/K8s) agents.
+    ///
+    /// Persisted from `AgentSpawned` so reconnect after daemon restart can
+    /// re-establish communication without reading the token from the container.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
     /// Epoch milliseconds when created
     pub created_at_ms: u64,
     /// Epoch milliseconds of last update
     pub updated_at_ms: u64,
+}
+
+/// Which adapter runtime manages an agent.
+///
+/// Persisted in [`AgentRecord`] so reconciliation after daemon restart knows
+/// which adapter to try first without probing all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRuntime {
+    #[default]
+    Local,
+    Docker,
+    Kubernetes,
 }
 
 /// Status of an agent in the unified agent record.

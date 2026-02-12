@@ -126,10 +126,6 @@ impl CheckpointWriter for FsCheckpointWriter {
 /// The checkpoint runs in a background thread. Call `wait()` to block until
 /// completion, which must happen before WAL truncation.
 pub struct CheckpointHandle {
-    /// Sequence number being checkpointed
-    // NOTE(lifetime): read in tests
-    #[allow(dead_code)]
-    pub seq: u64,
     receiver: mpsc::Receiver<Result<CheckpointResult, CheckpointError>>,
     // NOTE(lifetime): Keep thread alive
     #[allow(dead_code)]
@@ -145,13 +141,6 @@ impl CheckpointHandle {
         self.receiver
             .recv()
             .map_err(|_| CheckpointError::Failed("checkpoint thread panicked".into()))?
-    }
-
-    /// Check if checkpoint is complete without blocking.
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
-    pub fn try_wait(&self) -> Option<Result<CheckpointResult, CheckpointError>> {
-        self.receiver.try_recv().ok()
     }
 }
 
@@ -202,7 +191,7 @@ impl<W: CheckpointWriter + Clone> Checkpointer<W> {
             let _ = tx.send(result);
         });
 
-        CheckpointHandle { seq, receiver: rx, handle }
+        CheckpointHandle { receiver: rx, handle }
     }
 
     /// Perform a synchronous checkpoint (for shutdown).

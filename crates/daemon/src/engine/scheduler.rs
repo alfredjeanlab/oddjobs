@@ -59,17 +59,14 @@ impl Scheduler {
 
         events
     }
+}
 
-    /// Get the next timer fire time
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
+#[cfg(test)]
+impl Scheduler {
     pub fn next_deadline(&self) -> Option<Instant> {
         self.timers.values().map(|t| t.fires_at).min()
     }
 
-    /// Check if there are any pending timers
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
     pub fn has_timers(&self) -> bool {
         !self.timers.is_empty()
     }

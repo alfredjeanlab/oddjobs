@@ -324,7 +324,7 @@ where
                 result_events.extend(self.handle_workspace_failed(id, reason).await?);
             }
 
-            Event::AgentSpawned { id: _, owner } => {
+            Event::AgentSpawned { owner, .. } => {
                 result_events.extend(self.handle_agent_spawned(owner).await?);
             }
 

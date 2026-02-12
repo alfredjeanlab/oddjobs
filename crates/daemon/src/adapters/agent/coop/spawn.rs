@@ -143,13 +143,7 @@ pub(super) async fn execute(
     wait_for_ready(&socket_path).await?;
 
     // Register and start state polling
-    Ok(adapter.register_agent(
-        config.agent_id,
-        socket_path,
-        config.workspace_path,
-        event_tx,
-        config.owner,
-    ))
+    Ok(adapter.register_agent(config.agent_id, socket_path, event_tx, config.owner))
 }
 
 /// Wait for coop to become ready (health check succeeds).

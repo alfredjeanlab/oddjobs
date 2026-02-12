@@ -38,7 +38,7 @@ pub mod test_support;
 
 // ActionTracker available via actions module or job re-export
 pub use agent::{agent_dir, AgentError, AgentId, AgentState, PromptResponse};
-pub use agent_record::{AgentRecord, AgentRecordStatus};
+pub use agent_record::{AgentRecord, AgentRecordStatus, AgentRuntime};
 pub use breadcrumb::{Breadcrumb, BreadcrumbAgent};
 pub use clock::{Clock, FakeClock, SystemClock};
 pub use container::ContainerConfig;

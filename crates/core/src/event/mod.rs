@@ -149,7 +149,16 @@ pub enum Event {
 
     /// Agent spawn completed successfully (background SpawnAgent task finished)
     #[serde(rename = "agent:spawned")]
-    AgentSpawned { id: AgentId, owner: OwnerId },
+    AgentSpawned {
+        id: AgentId,
+        owner: OwnerId,
+        /// Which adapter runtime manages this agent.
+        #[serde(default)]
+        runtime: crate::AgentRuntime,
+        /// Bearer token for remote (Docker/K8s) agents, persisted for reconnect.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        auth_token: Option<String>,
+    },
 
     /// Agent spawn failed (background task couldn't create the session)
     #[serde(rename = "agent:spawn:failed")]

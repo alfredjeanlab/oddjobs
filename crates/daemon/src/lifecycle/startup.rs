@@ -116,8 +116,11 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     // 5. Set up adapters
     // Set up agent log extraction channel
     let (log_entry_tx, log_entry_rx) = mpsc::channel(256);
-    let agent_adapter =
-        RuntimeRouter::new(config.state_dir.clone()).with_log_entry_tx(log_entry_tx);
+    let agent_adapter = RuntimeRouter::new(config.state_dir.clone())
+        .with_k8s()
+        .await
+        .map_err(|e| LifecycleError::Runtime(format!("K8s adapter: {}", e)))?
+        .with_log_entry_tx(log_entry_tx);
 
     // Spawn background task to write agent log entries
     AgentLogger::spawn_writer(config.logs_path.clone(), log_entry_rx);
@@ -293,7 +296,6 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             runtime,
             state_snapshot,
             event_tx: internal_tx,
-            state_dir: config.state_dir.clone(),
             job_count,
             worker_count,
             cron_count,

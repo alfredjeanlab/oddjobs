@@ -115,55 +115,65 @@ mod adapter {
                 AgentAdapterError::SpawnFailed(format!("volume create failed: {}", e))
             })?;
 
-            // Source provisioning: if workspace has a git remote, clone into the volume
-            if config.workspace_path.join(".git").exists() || !config.workspace_path.exists() {
-                // Detect repo URL from workspace or project root
-                if let Some(repo_url) =
-                    crate::adapters::agent::detect_git_remote(&config.project_path).await
-                {
-                    let branch =
-                        crate::adapters::agent::detect_git_branch(&config.workspace_path).await;
+            // Source provisioning: prefer repo/branch from job vars (resolved at
+            // creation time), falling back to local git detection.
+            let repo = if let Some(ref url) = config.repo {
+                Some(url.clone())
+            } else if config.workspace_path.join(".git").exists() || !config.workspace_path.exists()
+            {
+                crate::adapters::agent::detect_git_remote(&config.project_path).await
+            } else {
+                None
+            };
 
-                    let vol_arg = format!("{}:/workspace", volume_name);
-                    let mut clone_args = vec!["run", "--rm", "-v", &vol_arg];
-
-                    // Mount SSH keys for clone auth
-                    let ssh_dir = dirs::home_dir()
-                        .map(|h| h.join(".ssh"))
-                        .unwrap_or_else(|| PathBuf::from("/root/.ssh"));
-                    let ssh_mount = format!("{}:/root/.ssh:ro", ssh_dir.display());
-                    if ssh_dir.exists() {
-                        clone_args.extend_from_slice(&["-v", &ssh_mount]);
+            if let Some(repo) = repo {
+                let branch = match config.branch {
+                    Some(b) => Some(b),
+                    None => {
+                        crate::adapters::agent::detect_git_branch_async(&config.workspace_path)
+                            .await
                     }
+                };
 
-                    clone_args.push(&image);
+                let vol_arg = format!("{}:/workspace", volume_name);
+                let mut clone_args = vec!["run", "--rm", "-v", &vol_arg];
 
-                    // Build git clone command
-                    let mut git_cmd =
-                        format!("git clone --single-branch --depth 1 {} /workspace", repo_url);
-                    if let Some(ref branch) = branch {
-                        git_cmd = format!(
-                            "git clone --branch {} --single-branch --depth 1 {} /workspace",
-                            branch, repo_url
-                        );
-                    }
+                // Mount SSH keys for clone auth
+                let ssh_dir = dirs::home_dir()
+                    .map(|h| h.join(".ssh"))
+                    .unwrap_or_else(|| PathBuf::from("/root/.ssh"));
+                let ssh_mount = format!("{}:/root/.ssh:ro", ssh_dir.display());
+                if ssh_dir.exists() {
+                    clone_args.extend_from_slice(&["-v", &ssh_mount]);
+                }
 
-                    clone_args.extend_from_slice(&["bash", "-c", &git_cmd]);
+                clone_args.push(&image);
 
-                    tracing::info!(
-                        agent_id = %config.agent_id,
-                        %repo_url,
-                        branch = ?branch,
-                        "cloning source into Docker volume"
+                // Build git clone command
+                let mut git_cmd =
+                    format!("git clone --single-branch --depth 1 {} /workspace", repo);
+                if let Some(ref branch) = branch {
+                    git_cmd = format!(
+                        "git clone --branch {} --single-branch --depth 1 {} /workspace",
+                        branch, repo
                     );
+                }
 
-                    if let Err(e) = run_docker(&clone_args).await {
-                        tracing::warn!(
-                            agent_id = %config.agent_id,
-                            error = %e,
-                            "git clone into volume failed, continuing with empty volume"
-                        );
-                    }
+                clone_args.extend_from_slice(&["bash", "-c", &git_cmd]);
+
+                tracing::info!(
+                    agent_id = %config.agent_id,
+                    %repo,
+                    branch = ?branch,
+                    "cloning source into Docker volume"
+                );
+
+                if let Err(e) = run_docker(&clone_args).await {
+                    tracing::warn!(
+                        agent_id = %config.agent_id,
+                        error = %e,
+                        "git clone into volume failed, continuing with empty volume"
+                    );
                 }
             }
 
@@ -246,14 +256,14 @@ mod adapter {
             .await?;
 
             // Register agent and start WS bridge
-            let handle = self.remote.register(
+            let mut handle = self.remote.register(
                 config.agent_id.clone(),
                 addr,
-                auth_token,
-                config.workspace_path,
+                auth_token.clone(),
                 event_tx,
                 config.owner,
             );
+            handle.auth_token = Some(auth_token);
             self.meta.lock().insert(
                 config.agent_id,
                 DockerMeta { container_name, volume_name: Some(volume_name) },
@@ -335,25 +345,12 @@ mod adapter {
                     ))
                 })?;
 
-            // We need the auth token — read it from the container's environment
-            let env_output = tokio::process::Command::new("docker")
-                .args(["exec", &container_name, "printenv", "COOP_AUTH_TOKEN"])
-                .output()
-                .await
-                .map_err(|e| {
-                    AgentAdapterError::NotFound(format!(
-                        "could not read auth token from container {}: {}",
-                        container_name, e
-                    ))
-                })?;
-
-            let auth_token = String::from_utf8_lossy(&env_output.stdout).trim().to_string();
-            if auth_token.is_empty() {
-                return Err(AgentAdapterError::NotFound(format!(
-                    "no COOP_AUTH_TOKEN in container {}",
+            let auth_token = config.auth_token.ok_or_else(|| {
+                AgentAdapterError::NotFound(format!(
+                    "no persisted auth token for container {}",
                     container_name
-                )));
-            }
+                ))
+            })?;
 
             // Verify coop is alive
             super::http::get_authed(&addr, "/api/v1/health", &auth_token).await.map_err(|_| {
@@ -367,7 +364,6 @@ mod adapter {
                 config.agent_id.clone(),
                 addr,
                 auth_token,
-                config.workspace_path,
                 event_tx,
                 config.owner,
             );

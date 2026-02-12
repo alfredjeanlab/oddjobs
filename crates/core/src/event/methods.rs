@@ -133,8 +133,8 @@ impl Event {
             Event::AgentPrompt { id, prompt_type, .. } => {
                 format!("{t} agent={id} prompt_type={prompt_type:?}")
             }
-            Event::AgentSpawned { id, owner } => {
-                format!("{t} agent={id} owner={owner}")
+            Event::AgentSpawned { id, owner, runtime, .. } => {
+                format!("{t} agent={id} owner={owner} runtime={runtime:?}")
             }
             Event::AgentSpawnFailed { id, reason, .. } => {
                 format!("{t} agent={id} reason={reason}")

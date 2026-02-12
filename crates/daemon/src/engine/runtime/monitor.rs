@@ -4,7 +4,7 @@
 use super::Runtime;
 use crate::adapters::AgentReconnectConfig;
 use crate::adapters::{AgentAdapter, NotifyAdapter};
-use crate::engine::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
+use crate::engine::decision::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::engine::error::RuntimeError;
 use crate::engine::lifecycle::RunLifecycle;
 use crate::engine::monitor::{self, ActionEffects, MonitorState};
@@ -38,16 +38,27 @@ where
                     job.id, job.step
                 ))
             })?;
-        let agent_id = AgentId::new(agent_id_str);
-        let workspace_path = job.execution_dir().to_path_buf();
+        let agent_id = AgentId::new(&agent_id_str);
+
+        // Look up persisted runtime and auth token from agent records
+        let (runtime_hint, auth_token) = self.lock_state(|s| {
+            s.agents
+                .get(&agent_id_str)
+                .map(|r| (r.runtime, r.auth_token.clone()))
+                .unwrap_or_default()
+        });
 
         // Register agent -> job mapping
         let job_id = JobId::new(&job.id);
         self.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
 
         // Reconnect monitoring via adapter
-        let config =
-            AgentReconnectConfig { agent_id, workspace_path, owner: OwnerId::job(job_id.clone()) };
+        let config = AgentReconnectConfig {
+            agent_id,
+            owner: OwnerId::job(job_id.clone()),
+            runtime_hint,
+            auth_token,
+        };
         self.executor.reconnect_agent(config).await?;
 
         // Restore liveness timer
@@ -594,8 +605,7 @@ where
                 let mut effects = vec![Effect::Emit { event: decision_event }];
 
                 // Entity-specific status changes and timer cancellations
-                effects
-                    .extend(run.escalation_status_effects(&gate_error, Some(decision_id.as_str())));
+                effects.extend(run.escalation_effects(&gate_error, Some(decision_id.as_str())));
 
                 Ok(self.executor.execute_all(effects).await?)
             }

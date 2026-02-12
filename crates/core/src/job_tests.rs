@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::test_support::strategies::*;
-use crate::workspace::WorkspaceId;
 use crate::FakeClock;
 use proptest::prelude::*;
 
@@ -84,16 +83,6 @@ fn job_is_terminal() {
     // Terminal - cancelled
     job.step = "cancelled".to_string();
     assert!(job.is_terminal());
-}
-
-#[test]
-fn job_with_workspace() {
-    let clock = FakeClock::new();
-    let job = Job::new(test_config("job-1"), &clock)
-        .with_workspace(WorkspaceId::new("ws-1"), PathBuf::from("/work/space"));
-
-    assert_eq!(job.workspace_id, Some(WorkspaceId::new("ws-1")));
-    assert_eq!(job.workspace_path, Some(PathBuf::from("/work/space")));
 }
 
 #[test]

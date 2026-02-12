@@ -17,6 +17,8 @@
 
 mod pod;
 
+pub use adapter::KubernetesAdapter;
+
 mod adapter {
     use super::pod::{self, CrewEnv, PodParams};
     use crate::adapters::agent::docker::http;
@@ -36,7 +38,8 @@ mod adapter {
     use std::time::Duration;
     use tokio::sync::mpsc;
 
-    /// Kubernetes-specific state tracked per agent (pod name, project).
+    /// Kubernetes-specific state tracked per agent (pod name, namespace).
+    #[derive(Clone)]
     struct KubeMeta {
         pod_name: String,
         k8s_namespace: String,
@@ -110,6 +113,36 @@ mod adapter {
             std::env::var("OJ_K8S_COOP_PORT").ok().and_then(|v| v.parse().ok()).unwrap_or(8080)
         }
 
+        /// Look up the current pod IP via the K8s API and update the agent's
+        /// registered address. Returns `true` if the address was refreshed.
+        ///
+        /// Called on connection failure to handle pod rescheduling (where the
+        /// pod IP changes but the pod name stays the same).
+        async fn refresh_pod_ip(&self, agent_id: &AgentId) -> bool {
+            let meta = self.meta.lock().get(agent_id).cloned();
+            let Some(meta) = meta else { return false };
+
+            let pods: Api<Pod> = Api::namespaced(self.client.clone(), &meta.k8s_namespace);
+            let pod = match pods.get(&meta.pod_name).await {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::debug!(%agent_id, error = %e, "pod lookup failed during IP refresh");
+                    return false;
+                }
+            };
+
+            let ip = pod.status.as_ref().and_then(|s| s.pod_ip.as_ref());
+            if let Some(ip) = ip {
+                let port = Self::container_port();
+                let new_addr = format!("{}:{}", ip, port);
+                tracing::info!(%agent_id, %new_addr, "refreshed pod IP");
+                self.remote.update_addr_and_reconnect_bridge(agent_id, new_addr);
+                true
+            } else {
+                false
+            }
+        }
+
         /// Create a pod and wait for it to become ready.
         async fn k8s_spawn(
             &self,
@@ -122,20 +155,26 @@ mod adapter {
             let pod_name = format!("oj-{}", config.agent_id);
             let image = Self::image();
 
-            // Build git clone command for init container
-            let git_clone_cmd =
-                if config.workspace_path.join(".git").exists() || !config.workspace_path.exists() {
-                    crate::adapters::agent::detect_git_remote(&config.project_path).await.map(
-                        |repo_url| {
-                            let branch = crate::adapters::agent::detect_git_branch_blocking(
-                                &config.workspace_path,
-                            );
-                            pod::git_clone_command(&repo_url, branch.as_deref())
-                        },
-                    )
+            // Build git clone command for init container.
+            // Prefer repo/branch from job vars (resolved at creation time),
+            // falling back to local git detection for backwards compatibility.
+            let git_clone_cmd = {
+                let repo = if let Some(ref url) = config.repo {
+                    Some(url.clone())
+                } else if config.workspace_path.join(".git").exists()
+                    || !config.workspace_path.exists()
+                {
+                    crate::adapters::agent::detect_git_remote(&config.project_path).await
                 } else {
                     None
                 };
+                repo.map(|url| {
+                    let branch = config.branch.clone().or_else(|| {
+                        crate::adapters::agent::detect_git_branch_blocking(&config.workspace_path)
+                    });
+                    pod::git_clone_command(&url, branch.as_deref())
+                })
+            };
 
             // Determine if this is a crew agent (needs daemon URL)
             let crew_env = Self::daemon_url().and_then(|url| {
@@ -207,14 +246,14 @@ mod adapter {
             .await?;
 
             // Register agent and start WS bridge
-            let handle = self.remote.register(
+            let mut handle = self.remote.register(
                 config.agent_id.clone(),
                 addr,
-                auth_token,
-                config.workspace_path,
+                auth_token.clone(),
                 event_tx,
                 config.owner,
             );
+            handle.auth_token = Some(auth_token);
             self.meta.lock().insert(config.agent_id, KubeMeta { pod_name, k8s_namespace });
             Ok(handle)
         }
@@ -260,8 +299,12 @@ mod adapter {
 
             let addr = format!("{}:{}", pod_ip, container_port);
 
-            // Read auth token from pod env (via exec)
-            let auth_token = read_pod_env(&pods, &pod_name, "COOP_AUTH_TOKEN").await?;
+            let auth_token = config.auth_token.ok_or_else(|| {
+                AgentAdapterError::NotFound(format!(
+                    "no persisted auth token for pod {}",
+                    pod_name
+                ))
+            })?;
 
             // Verify coop is alive
             http::get_authed(&addr, "/api/v1/health", &auth_token).await.map_err(|_| {
@@ -272,7 +315,6 @@ mod adapter {
                 config.agent_id.clone(),
                 addr,
                 auth_token,
-                config.workspace_path,
                 event_tx,
                 config.owner,
             );
@@ -281,7 +323,13 @@ mod adapter {
         }
 
         async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {
-            self.remote.send(agent_id, input).await
+            match self.remote.send(agent_id, input).await {
+                Ok(v) => Ok(v),
+                Err(e) if self.refresh_pod_ip(agent_id).await => {
+                    self.remote.send(agent_id, input).await
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn respond(
@@ -289,7 +337,13 @@ mod adapter {
             agent_id: &AgentId,
             response: &oj_core::PromptResponse,
         ) -> Result<(), AgentAdapterError> {
-            self.remote.respond(agent_id, response).await
+            match self.remote.respond(agent_id, response).await {
+                Ok(v) => Ok(v),
+                Err(e) if self.refresh_pod_ip(agent_id).await => {
+                    self.remote.respond(agent_id, response).await
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn kill(&self, agent_id: &AgentId) -> Result<(), AgentAdapterError> {
@@ -314,10 +368,18 @@ mod adapter {
         }
 
         async fn get_state(&self, agent_id: &AgentId) -> Result<AgentState, AgentAdapterError> {
-            self.remote.get_state(agent_id).await
+            match self.remote.get_state(agent_id).await {
+                Ok(v) => Ok(v),
+                Err(e) if self.refresh_pod_ip(agent_id).await => {
+                    self.remote.get_state(agent_id).await
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn last_message(&self, agent_id: &AgentId) -> Option<String> {
+            // No retry: None is ambiguous (no messages yet vs network error).
+            // Pod IP refresh is handled by Result-returning methods and is_alive.
             self.remote.last_message(agent_id).await
         }
 
@@ -326,7 +388,14 @@ mod adapter {
         }
 
         async fn is_alive(&self, agent_id: &AgentId) -> bool {
-            self.remote.is_alive(agent_id).await
+            if self.remote.is_alive(agent_id).await {
+                return true;
+            }
+            // Pod may have been rescheduled — refresh IP and retry
+            if self.refresh_pod_ip(agent_id).await {
+                return self.remote.is_alive(agent_id).await;
+            }
+            false
         }
 
         async fn capture_output(
@@ -334,17 +403,30 @@ mod adapter {
             agent_id: &AgentId,
             lines: u32,
         ) -> Result<String, AgentAdapterError> {
-            self.remote.capture_output(agent_id, lines).await
+            match self.remote.capture_output(agent_id, lines).await {
+                Ok(v) => Ok(v),
+                Err(e) if self.refresh_pod_ip(agent_id).await => {
+                    self.remote.capture_output(agent_id, lines).await
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn fetch_transcript(&self, agent_id: &AgentId) -> Result<String, AgentAdapterError> {
-            self.remote.fetch_transcript(agent_id).await
+            match self.remote.fetch_transcript(agent_id).await {
+                Ok(v) => Ok(v),
+                Err(e) if self.refresh_pod_ip(agent_id).await => {
+                    self.remote.fetch_transcript(agent_id).await
+                }
+                Err(e) => Err(e),
+            }
         }
 
         async fn fetch_usage(
             &self,
             agent_id: &AgentId,
         ) -> Option<crate::adapters::agent::UsageData> {
+            // No retry: None is ambiguous (no usage data vs network error).
             self.remote.fetch_usage(agent_id).await
         }
     }
@@ -376,30 +458,4 @@ mod adapter {
         )))
     }
 
-    /// Read an env var from a running pod via kubectl exec.
-    async fn read_pod_env(
-        _pods: &Api<Pod>,
-        pod_name: &str,
-        var_name: &str,
-    ) -> Result<String, AgentAdapterError> {
-        let output = tokio::process::Command::new("kubectl")
-            .args(["exec", pod_name, "-c", "agent", "--", "printenv", var_name])
-            .output()
-            .await
-            .map_err(|e| {
-                AgentAdapterError::NotFound(format!(
-                    "could not exec in pod {} to read {}: {}",
-                    pod_name, var_name, e
-                ))
-            })?;
-
-        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if value.is_empty() || !output.status.success() {
-            return Err(AgentAdapterError::NotFound(format!(
-                "no {} in pod {}",
-                var_name, pod_name
-            )));
-        }
-        Ok(value)
-    }
 }

@@ -4,8 +4,8 @@
 //! Pod spec construction for Kubernetes agents.
 
 use k8s_openapi::api::core::v1::{
-    Container, ContainerPort, EmptyDirVolumeSource, EnvVar, EnvVarSource, ExecAction,
-    HTTPGetAction, Pod, PodSpec, Probe, SecretKeySelector, SecretVolumeSource, Volume, VolumeMount,
+    Container, ContainerPort, EmptyDirVolumeSource, EnvVar, EnvVarSource, HTTPGetAction, Pod,
+    PodSpec, Probe, SecretKeySelector, SecretVolumeSource, Volume, VolumeMount,
 };
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
@@ -165,25 +165,32 @@ pub(super) fn build_pod(params: &PodParams) -> Pod {
             ..Default::default()
         }]),
         env: Some(env),
+        startup_probe: Some(Probe {
+            http_get: Some(HTTPGetAction {
+                path: Some("/api/v1/health".to_string()),
+                port: IntOrString::Int(params.container_port),
+                ..Default::default()
+            }),
+            // 30 failures * 10s period = 300s for coop + Claude Code startup
+            failure_threshold: Some(30),
+            period_seconds: Some(10),
+            ..Default::default()
+        }),
         readiness_probe: Some(Probe {
             http_get: Some(HTTPGetAction {
                 path: Some("/api/v1/health".to_string()),
                 port: IntOrString::Int(params.container_port),
                 ..Default::default()
             }),
-            initial_delay_seconds: Some(2),
             period_seconds: Some(5),
             ..Default::default()
         }),
         liveness_probe: Some(Probe {
-            exec: Some(ExecAction {
-                command: Some(vec![
-                    "test".to_string(),
-                    "-S".to_string(),
-                    "/tmp/coop.sock".to_string(),
-                ]),
+            http_get: Some(HTTPGetAction {
+                path: Some("/api/v1/health".to_string()),
+                port: IntOrString::Int(params.container_port),
+                ..Default::default()
             }),
-            initial_delay_seconds: Some(10),
             period_seconds: Some(30),
             ..Default::default()
         }),
@@ -222,7 +229,7 @@ fn env_var(name: &str, value: &str) -> EnvVar {
 }
 
 /// Build a git clone command for the init container.
-pub(super) fn git_clone_command(repo_url: &str, branch: Option<&str>) -> Vec<String> {
+pub(super) fn git_clone_command(repo: &str, branch: Option<&str>) -> Vec<String> {
     let mut cmd = vec!["git".to_string(), "clone".to_string()];
     if let Some(b) = branch {
         cmd.extend_from_slice(&["--branch".to_string(), b.to_string()]);
@@ -231,7 +238,7 @@ pub(super) fn git_clone_command(repo_url: &str, branch: Option<&str>) -> Vec<Str
         "--single-branch".to_string(),
         "--depth".to_string(),
         "1".to_string(),
-        repo_url.to_string(),
+        repo.to_string(),
         "/workspace".to_string(),
     ]);
     cmd

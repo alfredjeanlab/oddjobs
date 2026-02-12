@@ -205,6 +205,44 @@ fn agent_failed_does_not_overwrite_terminal_job() {
     assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Exited);
 }
 
+// ── Runtime persistence ─────────────────────────────────────────────────────
+
+#[test]
+fn runtime_defaults_to_local() {
+    let state = state_with_job_agent("job-1", "agent-1");
+    assert_eq!(state.agents["agent-1"].runtime, oj_core::AgentRuntime::Local);
+}
+
+#[test]
+fn runtime_set_from_agent_spawned() {
+    let mut state = state_with_job_agent("job-1", "agent-1");
+    assert_eq!(state.agents["agent-1"].runtime, oj_core::AgentRuntime::Local);
+
+    state.apply_event(&Event::AgentSpawned {
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
+        runtime: oj_core::AgentRuntime::Kubernetes,
+        auth_token: None,
+    });
+
+    assert_eq!(state.agents["agent-1"].runtime, oj_core::AgentRuntime::Kubernetes);
+}
+
+#[test]
+fn runtime_set_docker_from_agent_spawned() {
+    let mut state = state_with_job_agent("job-1", "agent-1");
+
+    state.apply_event(&Event::AgentSpawned {
+        id: oj_core::AgentId::new("agent-1"),
+        owner: JobId::new("job-1").into(),
+        runtime: oj_core::AgentRuntime::Docker,
+        auth_token: Some("test-token".to_string()),
+    });
+
+    assert_eq!(state.agents["agent-1"].runtime, oj_core::AgentRuntime::Docker);
+    assert_eq!(state.agents["agent-1"].auth_token.as_deref(), Some("test-token"));
+}
+
 // ── Idempotency ─────────────────────────────────────────────────────────────
 
 #[test]

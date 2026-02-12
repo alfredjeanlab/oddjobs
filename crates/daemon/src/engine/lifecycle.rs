@@ -63,7 +63,7 @@ pub(crate) trait RunLifecycle {
     /// Build the entity-specific escalation effects (decision event is built
     /// by the caller). Includes status change events and timer cancellations.
     /// `decision_id` is passed so jobs can emit `StepWaiting` linking to the decision.
-    fn escalation_status_effects(&self, trigger: &str, decision_id: Option<&str>) -> Vec<Effect>;
+    fn escalation_effects(&self, trigger: &str, decision_id: Option<&str>) -> Vec<Effect>;
 
     /// Build a notification effect for on_done/on_fail using the entity's vars.
     fn build_notify_vars(&self, agent_def: &AgentDef) -> HashMap<String, String>;
@@ -150,7 +150,7 @@ impl RunLifecycle for Job {
         effects
     }
 
-    fn escalation_status_effects(&self, trigger: &str, decision_id: Option<&str>) -> Vec<Effect> {
+    fn escalation_effects(&self, trigger: &str, decision_id: Option<&str>) -> Vec<Effect> {
         let job_id = JobId::new(&self.id);
         vec![
             Effect::Emit {
@@ -251,7 +251,7 @@ impl RunLifecycle for Crew {
         effects
     }
 
-    fn escalation_status_effects(&self, trigger: &str, _decision_id: Option<&str>) -> Vec<Effect> {
+    fn escalation_effects(&self, trigger: &str, _decision_id: Option<&str>) -> Vec<Effect> {
         let crew_id = CrewId::new(&self.id);
         vec![
             Effect::Emit {

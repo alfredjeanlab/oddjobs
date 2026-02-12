@@ -120,8 +120,6 @@ pub struct ReconcileCtx {
     pub state_snapshot: MaterializedState,
     /// Channel for emitting events discovered during reconciliation
     pub event_tx: mpsc::Sender<Event>,
-    /// Root state directory for coop socket discovery
-    pub state_dir: PathBuf,
     /// Number of non-terminal jobs to reconcile
     pub job_count: usize,
     /// Number of workers with status "running" to reconcile

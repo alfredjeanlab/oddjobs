@@ -141,8 +141,8 @@ impl MaterializedState {
             | Event::WorkspaceFailed { .. }
             | Event::WorkspaceDeleted { .. } => workspaces::apply(self, event),
 
-            // AgentSpawned: no state mutation (runtime handler sets liveness timer)
-            Event::AgentSpawned { .. } => {}
+            // AgentSpawned: persist the runtime adapter type on the agent record
+            Event::AgentSpawned { .. } => agents::apply(self, event),
 
             // Workers and crons
             Event::WorkerStarted { .. }

@@ -10,6 +10,19 @@ use super::MaterializedState;
 
 pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
     match event {
+        Event::AgentSpawned { id: agent_id, runtime, auth_token, .. } => {
+            // Persist the adapter runtime and auth token on the agent record
+            // (created earlier by StepStarted or CrewStarted). The runtime
+            // allows reconciliation to route to the correct adapter after
+            // daemon restart; the auth token allows reconnect without shelling
+            // out to kubectl/docker exec.
+            if let Some(rec) = state.agents.get_mut(agent_id.as_str()) {
+                rec.runtime = *runtime;
+                rec.auth_token.clone_from(auth_token);
+                rec.updated_at_ms = helpers::epoch_ms_now();
+            }
+        }
+
         Event::AgentWorking { id: agent_id, owner, .. } => {
             // Route by owner; standalone agent status is
             // handled via CrewUpdated events.

@@ -296,5 +296,5 @@ impl EscalationDecisionBuilder {
 }
 
 #[cfg(test)]
-#[path = "decision_builder_tests.rs"]
-mod tests;
+#[path = "decision_tests.rs"]
+mod decision_tests;

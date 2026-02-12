@@ -269,22 +269,6 @@ fn test_checkpoint_sync_for_shutdown() {
 }
 
 #[test]
-fn test_checkpoint_try_wait_non_blocking() {
-    let writer = FakeCheckpointWriter::new();
-    let checkpointer = Checkpointer::with_writer(writer, PathBuf::from("/data/snapshot.json"));
-
-    let state = create_test_state(1);
-    let handle = checkpointer.start(1, &state);
-
-    // try_wait might return None if not complete yet, or Some if fast
-    // Either way, it shouldn't block
-    let _ = handle.try_wait();
-
-    // But wait() should always complete
-    // (handle is consumed by try_wait returning Some, so we need a new one)
-}
-
-#[test]
 fn test_load_snapshot_detects_compression() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("snapshot.json");
@@ -323,10 +307,10 @@ fn test_compression_reduces_size() {
     let result = checkpointer.checkpoint_sync(1, &state).unwrap();
     let compressed_size = result.size_bytes;
 
-    // Write uncompressed
-    let snapshot = Snapshot::new(1, state);
-    snapshot.save(&uncompressed_path).unwrap();
-    let uncompressed_size = std::fs::metadata(&uncompressed_path).unwrap().len();
+    // Write uncompressed (raw JSON for size comparison)
+    let uncompressed_json = serde_json::to_vec(&state).unwrap();
+    std::fs::write(&uncompressed_path, &uncompressed_json).unwrap();
+    let uncompressed_size = uncompressed_json.len() as u64;
 
     // Compressed should be significantly smaller
     assert!(

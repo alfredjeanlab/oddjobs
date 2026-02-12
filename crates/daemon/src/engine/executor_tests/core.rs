@@ -274,8 +274,9 @@ async fn reconnect_agent_delegates_to_adapter() {
 
     let config = AgentReconnectConfig {
         agent_id: AgentId::new("agent-recon"),
-        workspace_path: std::path::PathBuf::from("/tmp/ws"),
         owner: OwnerId::Job(JobId::default()),
+        runtime_hint: oj_core::AgentRuntime::Local,
+        auth_token: None,
     };
 
     let result = harness.executor.reconnect_agent(config).await;

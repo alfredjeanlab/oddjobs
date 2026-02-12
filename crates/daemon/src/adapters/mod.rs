@@ -10,7 +10,7 @@ pub mod subprocess;
 
 pub use agent::attach_proxy::ws_proxy_bridge_tcp;
 pub use agent::{
-    AgentAdapter, AgentAdapterError, AgentConfig, AgentReconnectConfig, LocalAdapter, RuntimeRouter,
+    AgentAdapter, AgentAdapterError, AgentConfig, AgentReconnectConfig, RuntimeRouter,
 };
 pub use notify::{DesktopNotifyAdapter, NotifyAdapter};
 

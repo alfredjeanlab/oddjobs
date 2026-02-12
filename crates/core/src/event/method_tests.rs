@@ -50,7 +50,12 @@ fn event_job_id_returns_id_for_job_events() {
 fn event_job_id_returns_none_for_non_job_events() {
     let events = vec![
         Event::TimerStart { id: TimerId::new("t") },
-        Event::AgentSpawned { id: AgentId::new("a1"), owner: CrewId::new("r1").into() },
+        Event::AgentSpawned {
+            id: AgentId::new("a1"),
+            owner: CrewId::new("r1").into(),
+            runtime: Default::default(),
+            auth_token: None,
+        },
         Event::Custom,
         Event::Shutdown,
     ];

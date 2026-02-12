@@ -192,7 +192,7 @@ pub fn setup_reconcile_runtime(dir_path: &Path) -> Arc<DaemonRuntime> {
 pub async fn run_reconcile(
     runtime: &Arc<DaemonRuntime>,
     state: MaterializedState,
-    state_dir: PathBuf,
+    _state_dir: PathBuf,
 ) -> Vec<Event> {
     let job_count = state.jobs.values().filter(|j| !j.is_terminal()).count();
     let worker_count = state.workers.values().filter(|w| w.status == "running").count();
@@ -204,7 +204,6 @@ pub async fn run_reconcile(
         runtime: Arc::clone(runtime),
         state_snapshot: state,
         event_tx,
-        state_dir,
         job_count,
         worker_count,
         cron_count,

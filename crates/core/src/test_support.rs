@@ -71,7 +71,12 @@ pub fn step_failed_event(job_id: &str, step: &str, error: &str) -> Event {
 }
 
 pub fn agent_spawned_event(agent_id: &str, job_id: &str) -> Event {
-    Event::AgentSpawned { id: AgentId::new(agent_id), owner: JobId::new(job_id).into() }
+    Event::AgentSpawned {
+        id: AgentId::new(agent_id),
+        owner: JobId::new(job_id).into(),
+        runtime: Default::default(),
+        auth_token: None,
+    }
 }
 
 pub fn worker_start_event(name: &str, project: &str) -> Event {

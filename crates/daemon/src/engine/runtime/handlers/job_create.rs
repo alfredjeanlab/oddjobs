@@ -201,6 +201,27 @@ where
             }
             let repo_root = String::from_utf8_lossy(&repo_root_output.stdout).trim().to_string();
             vars.insert("source.repo_root".to_string(), repo_root);
+
+            // Resolve git remote URL so container adapters don't need a local checkout
+            let mut cmd = tokio::process::Command::new("git");
+            cmd.args(["remote", "get-url", "origin"])
+                .current_dir(&invoke_dir)
+                .env_remove("GIT_DIR")
+                .env_remove("GIT_WORK_TREE");
+            if let Ok(output) = crate::adapters::subprocess::run_with_timeout(
+                cmd,
+                crate::adapters::subprocess::SHELL_EVAL_TIMEOUT,
+                "git remote get-url",
+            )
+            .await
+            {
+                if output.status.success() {
+                    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !url.is_empty() {
+                        vars.insert("source.repo".to_string(), url);
+                    }
+                }
+            }
         }
 
         // Evaluate locals: interpolate each value with current vars, then add as local.*

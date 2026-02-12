@@ -3,12 +3,13 @@
 
 //! State reconciliation after daemon restart.
 //!
-//! Checks persisted state against live coop agent processes and reconnects
+//! Checks persisted state against live agent processes and reconnects
 //! monitoring or triggers appropriate exit handling for each entity.
+//! Uses the RuntimeRouter (via recover methods) to probe the correct adapter
+//! based on persisted AgentRuntime — works for Local, Docker, and K8s agents.
 
 use std::collections::HashSet;
 
-use crate::adapters::LocalAdapter;
 use oj_core::{AgentId, CrewId, CrewStatus, Event, JobId, OwnerId};
 use tracing::{info, warn};
 
@@ -20,9 +21,10 @@ mod tests;
 
 /// Reconcile persisted state with actual world state after daemon restart.
 ///
-/// For each non-terminal job, checks whether its coop session and agent
-/// process are still alive, then either reconnects monitoring or triggers
-/// appropriate exit handling through the event channel.
+/// For each non-terminal entity, attempts to reconnect monitoring via the
+/// RuntimeRouter. The router probes the correct adapter (Local, Docker, or K8s)
+/// based on the persisted AgentRuntime hint. On failure, the agent is presumed
+/// gone and an AgentGone event is emitted to trigger exit handling.
 pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
     let state = &ctx.state_snapshot;
 
@@ -119,46 +121,39 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
             continue;
         };
 
-        let is_alive = LocalAdapter::check_alive(&ctx.state_dir, agent_id_str).await;
-
-        if is_alive {
-            info!(
-                crew_id = %run.id,
-                agent_id = agent_id_str,
-                "recovering: standalone agent still running, reconnecting"
-            );
-            if let Err(e) = ctx.runtime.recover_standalone_agent(run).await {
-                warn!(
+        // Try to reconnect monitoring via the RuntimeRouter.
+        // recover_standalone_agent registers the agent→crew mapping, then
+        // calls RuntimeRouter::reconnect which probes the correct adapter
+        // based on the persisted AgentRuntime hint.
+        match ctx.runtime.recover_standalone_agent(run).await {
+            Ok(()) => {
+                info!(
                     crew_id = %run.id,
-                    error = %e,
-                    "failed to recover standalone agent, marking failed"
+                    agent_id = agent_id_str,
+                    "recovering: standalone agent still running, reconnected"
                 );
+            }
+            Err(e) => {
+                // Reconnect failed — agent is unreachable, presumed gone.
+                // recover_standalone_agent already registered the agent→crew
+                // mapping, so AgentGone handlers can find the owner.
+                info!(
+                    crew_id = %run.id,
+                    agent_id = agent_id_str,
+                    error = %e,
+                    "recovering: standalone agent gone while daemon was down"
+                );
+                let agent_id = AgentId::new(agent_id_str);
+                let crew_id = CrewId::new(&run.id);
                 let _ = ctx
                     .event_tx
-                    .send(Event::CrewUpdated {
-                        id: CrewId::new(&run.id),
-                        status: CrewStatus::Failed,
-                        reason: Some(format!("recovery failed: {}", e)),
+                    .send(Event::AgentGone {
+                        id: agent_id,
+                        owner: OwnerId::crew(crew_id),
+                        exit_code: None,
                     })
                     .await;
             }
-        } else {
-            info!(
-                crew_id = %run.id,
-                agent_id = agent_id_str,
-                "recovering: standalone agent gone while daemon was down"
-            );
-            let agent_id = AgentId::new(agent_id_str);
-            let crew_id = CrewId::new(&run.id);
-            ctx.runtime.register_agent(agent_id.clone(), OwnerId::crew(crew_id.clone()));
-            let _ = ctx
-                .event_tx
-                .send(Event::AgentGone {
-                    id: agent_id,
-                    owner: OwnerId::crew(crew_id),
-                    exit_code: None,
-                })
-                .await;
         }
     }
 
@@ -181,17 +176,14 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
         // Waiting jobs (escalated to human) still need their monitoring reconnected
         // so that agent state changes are detected after decision resolution.
         if job.step_status.is_waiting() {
-            if let Some(ref aid) = agent_id_str {
-                let is_alive = LocalAdapter::check_alive(&ctx.state_dir, aid).await;
-                if is_alive {
-                    info!(job_id = %job.id, "reconnecting monitoring for Waiting job");
-                    if let Err(e) = ctx.runtime.recover_agent(job).await {
-                        warn!(
-                            job_id = %job.id,
-                            error = %e,
-                            "failed to reconnect monitoring for Waiting job"
-                        );
-                    }
+            if agent_id_str.is_some() {
+                info!(job_id = %job.id, "reconnecting monitoring for Waiting job");
+                if let Err(e) = ctx.runtime.recover_agent(job).await {
+                    warn!(
+                        job_id = %job.id,
+                        error = %e,
+                        "failed to reconnect monitoring for Waiting job"
+                    );
                 }
             }
             continue;
@@ -209,14 +201,19 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
             continue;
         };
 
-        // Check if coop agent process is still alive
-        let is_alive = LocalAdapter::check_alive(&ctx.state_dir, aid).await;
-
-        if is_alive {
-            // Agent still running → reconnect monitoring
-            info!(job_id = %job.id, agent_id = aid, "recovering: agent still running, reconnecting");
-            if let Err(e) = ctx.runtime.recover_agent(job).await {
-                warn!(job_id = %job.id, error = %e, "failed to recover agent, triggering exit");
+        // Try to reconnect monitoring via the RuntimeRouter.
+        // recover_agent registers the agent→job mapping, then calls
+        // RuntimeRouter::reconnect which probes the correct adapter
+        // based on the persisted AgentRuntime hint.
+        match ctx.runtime.recover_agent(job).await {
+            Ok(()) => {
+                info!(job_id = %job.id, agent_id = aid, "recovering: agent still running, reconnected");
+            }
+            Err(e) => {
+                // Reconnect failed — agent is unreachable, presumed gone.
+                // recover_agent already registered the agent→job mapping,
+                // so AgentGone handlers can find the owner.
+                info!(job_id = %job.id, agent_id = aid, error = %e, "recovering: agent gone while daemon was down");
                 let agent_id = AgentId::new(aid);
                 let job_id = JobId::new(job.id.clone());
                 let _ = ctx
@@ -228,20 +225,6 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
                     })
                     .await;
             }
-        } else {
-            // Agent gone → trigger exit handling
-            info!(job_id = %job.id, agent_id = aid, "recovering: agent gone while daemon was down");
-            let agent_id = AgentId::new(aid);
-            let job_id = JobId::new(job.id.clone());
-            ctx.runtime.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
-            let _ = ctx
-                .event_tx
-                .send(Event::AgentGone {
-                    id: agent_id,
-                    owner: OwnerId::job(job_id),
-                    exit_code: None,
-                })
-                .await;
         }
     }
 }

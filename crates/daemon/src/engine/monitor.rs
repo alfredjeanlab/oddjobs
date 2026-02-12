@@ -6,7 +6,7 @@
 //! Handles detection of agent state from session logs and triggers
 //! appropriate actions (nudge, resume, escalate, etc.).
 
-use crate::engine::decision_builder::{EscalationDecisionBuilder, EscalationTrigger};
+use crate::engine::decision::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::engine::lifecycle::RunLifecycle;
 use crate::engine::RuntimeError;
 use oj_core::{AgentError, AgentId, AgentState, Effect, Job, PromptType, QuestionData};
@@ -224,7 +224,7 @@ pub fn build_action_effects_for(
                 },
             ];
 
-            effects.extend(run.escalation_status_effects(ctx.trigger, Some(decision_id.as_str())));
+            effects.extend(run.escalation_effects(ctx.trigger, Some(decision_id.as_str())));
 
             Ok(ActionEffects::Escalate { effects })
         }

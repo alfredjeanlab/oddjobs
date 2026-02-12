@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event, OwnerId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -132,7 +131,6 @@ impl FakeAgentState {
         agent_id: AgentId,
         owner: OwnerId,
         event_tx: mpsc::Sender<Event>,
-        workspace_path: PathBuf,
     ) -> AgentHandle {
         self.agents.insert(
             agent_id.clone(),
@@ -144,7 +142,7 @@ impl FakeAgentState {
                 output: Vec::new(),
             },
         );
-        AgentHandle::new(agent_id.clone(), workspace_path)
+        AgentHandle::new(agent_id.clone())
     }
 }
 
@@ -163,7 +161,7 @@ impl AgentAdapter for FakeAgentAdapter {
         if let Some(error) = inner.spawn_error.take() {
             return Err(error);
         }
-        Ok(inner.register_agent(config.agent_id, config.owner, event_tx, config.workspace_path))
+        Ok(inner.register_agent(config.agent_id, config.owner, event_tx))
     }
 
     async fn reconnect(
@@ -176,7 +174,7 @@ impl AgentAdapter for FakeAgentAdapter {
         if let Some(error) = inner.spawn_error.take() {
             return Err(error);
         }
-        Ok(inner.register_agent(config.agent_id, config.owner, event_tx, config.workspace_path))
+        Ok(inner.register_agent(config.agent_id, config.owner, event_tx))
     }
 
     async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError> {

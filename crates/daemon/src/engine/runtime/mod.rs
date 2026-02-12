@@ -101,13 +101,6 @@ where
         }
     }
 
-    /// Get current jobs
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
-    pub fn jobs(&self) -> HashMap<String, Job> {
-        self.lock_state(|state| state.jobs.clone())
-    }
-
     /// Get a specific job by ID or unique prefix
     pub fn get_job(&self, id: &str) -> Option<Job> {
         self.lock_state(|state| state.get_job(id).cloned())
@@ -452,6 +445,18 @@ where
         }
 
         Ok(runbook)
+    }
+}
+
+#[cfg(test)]
+impl<A, N, C> Runtime<A, N, C>
+where
+    A: AgentAdapter,
+    N: NotifyAdapter,
+    C: Clock,
+{
+    pub fn jobs(&self) -> HashMap<String, Job> {
+        self.lock_state(|state| state.jobs.clone())
     }
 }
 

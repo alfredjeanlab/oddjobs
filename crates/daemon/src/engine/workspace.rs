@@ -45,18 +45,30 @@ pub(crate) async fn create(
         state.apply_event(&create_event);
     }
 
-    // Phase 2: Spawn background task for filesystem work
+    // Phase 2: Spawn background task for filesystem work.
+    //
+    // When the daemon runs inside a Kubernetes pod (KUBERNETES_SERVICE_HOST is
+    // set), there is no local repo checkout — agent pods provision their own
+    // code via init containers. Skip filesystem operations and immediately
+    // emit WorkspaceReady so the job can proceed.
+    let in_k8s = std::env::var("KUBERNETES_SERVICE_HOST").is_ok();
+
     let event_tx = event_tx.clone();
     tokio::spawn(async move {
-        let result = if is_worktree {
-            create_worktree(&path, repo_root, branch, start_point).await
+        let event = if in_k8s {
+            tracing::info!(?workspace_id, "skipping local workspace creation (in-cluster)");
+            Event::WorkspaceReady { id: workspace_id }
         } else {
-            create_folder(&path).await
-        };
+            let result = if is_worktree {
+                create_worktree(&path, repo_root, branch, start_point).await
+            } else {
+                create_folder(&path).await
+            };
 
-        let event = match result {
-            Ok(()) => Event::WorkspaceReady { id: workspace_id },
-            Err(reason) => Event::WorkspaceFailed { id: workspace_id, reason },
+            match result {
+                Ok(()) => Event::WorkspaceReady { id: workspace_id },
+                Err(reason) => Event::WorkspaceFailed { id: workspace_id, reason },
+            }
         };
 
         if let Err(e) = event_tx.send(event).await {

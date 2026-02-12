@@ -697,7 +697,7 @@ fn attempts_zero_fails() {
     "#;
     #[derive(Debug, Deserialize)]
     struct TestConfig {
-        #[serde(default, rename="on_idle")]
+        #[serde(default, rename = "on_idle")]
         _on_idle: ActionConfig,
     }
     let result: Result<TestConfig, _> = toml::from_str(toml);
@@ -711,7 +711,7 @@ fn attempts_invalid_string_fails() {
     "#;
     #[derive(Debug, Deserialize)]
     struct TestConfig {
-        #[serde(default, rename="on_idle")]
+        #[serde(default, rename = "on_idle")]
         _on_idle: ActionConfig,
     }
     let result: Result<TestConfig, _> = toml::from_str(toml);

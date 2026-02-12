@@ -378,11 +378,11 @@ mod properties {
         #[test]
         fn escalation_always_cancels_exit_deferred(trigger in arb_trigger()) {
             let job = test_job();
-            let effects = job.escalation_status_effects(&trigger, Some("d"));
+            let effects = job.escalation_effects(&trigger, Some("d"));
             let has = effects.iter().any(|e| matches!(e, Effect::CancelTimer { .. }));
             prop_assert!(has, "job escalation must cancel timer");
             let run = test_ar();
-            let effects = run.escalation_status_effects(&trigger, None);
+            let effects = run.escalation_effects(&trigger, None);
             let has = effects.iter().any(|e| matches!(e, Effect::CancelTimer { .. }));
             prop_assert!(has, "run escalation must cancel timer");
         }
@@ -390,7 +390,7 @@ mod properties {
         #[test]
         fn job_escalation_emits_step_waiting(trigger in arb_trigger()) {
             let job = test_job();
-            let effects = job.escalation_status_effects(&trigger, Some("d"));
+            let effects = job.escalation_effects(&trigger, Some("d"));
             let has = effects.iter().any(|e| matches!(e, Effect::Emit { event: Event::StepWaiting { .. } }));
             prop_assert!(has, "job escalation must emit StepWaiting");
         }
@@ -398,7 +398,7 @@ mod properties {
         #[test]
         fn ar_escalation_emits_status_change(trigger in arb_trigger()) {
             let run = test_ar();
-            let effects = run.escalation_status_effects(&trigger, None);
+            let effects = run.escalation_effects(&trigger, None);
             let has = effects.iter().any(|e| matches!(e, Effect::Emit {
                 event: Event::CrewUpdated { status: CrewStatus::Escalated, .. }
             }));

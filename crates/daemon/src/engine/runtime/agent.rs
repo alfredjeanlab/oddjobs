@@ -249,13 +249,22 @@ where
         let agent_id = AgentId::new(agent_id_str);
         let crew_id = CrewId::new(&crew.id);
 
+        // Look up persisted runtime and auth token from agent records
+        let (runtime_hint, auth_token) = self.lock_state(|s| {
+            s.agents
+                .get(agent_id_str)
+                .map(|r| (r.runtime, r.auth_token.clone()))
+                .unwrap_or_default()
+        });
+
         // Register agent → crew mapping
         self.register_agent(agent_id.clone(), OwnerId::crew(crew_id.clone()));
 
         let config = AgentReconnectConfig {
             agent_id,
-            workspace_path: crew.cwd.clone(),
             owner: OwnerId::crew(crew_id.clone()),
+            runtime_hint,
+            auth_token,
         };
         self.executor.reconnect_agent(config).await?;
 

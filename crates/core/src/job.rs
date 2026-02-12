@@ -405,6 +405,7 @@ impl Job {
     }
 
     /// Set the workspace ID and path
+    #[cfg(test)]
     pub fn with_workspace(mut self, id: WorkspaceId, path: PathBuf) -> Self {
         self.workspace_id = Some(id);
         self.workspace_path = Some(path);

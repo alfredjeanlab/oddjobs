@@ -328,8 +328,7 @@ impl Wal {
     }
 
     /// Get the current write sequence number.
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn write_seq(&self) -> u64 {
         self.write_seq
     }

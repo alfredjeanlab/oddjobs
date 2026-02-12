@@ -15,7 +15,6 @@ use crate::adapters::agent::{AgentAdapterError, AgentHandle, UsageData};
 use oj_core::{AgentId, AgentState, Event, OwnerId};
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
@@ -25,6 +24,12 @@ struct RemoteAgent {
     addr: String,
     /// Bearer token for authenticating with coop.
     auth_token: String,
+    /// Shutdown sender for the WS event bridge. Dropping this closes the bridge.
+    bridge_shutdown: Option<oneshot::Sender<()>>,
+    /// Event channel for the bridge to emit events. Stored for bridge reconnection.
+    event_tx: mpsc::Sender<Event>,
+    /// Owner of this agent. Stored for bridge reconnection.
+    owner: OwnerId,
 }
 
 /// Shared registry and API client for remote (TCP) coop agents.
@@ -69,13 +74,40 @@ impl RemoteCoopClient {
         Some((agent.addr.clone(), agent.auth_token.clone()))
     }
 
+    /// Update the address for a registered agent (e.g., after pod IP change)
+    /// and restart the WS event bridge so it connects to the new address.
+    pub(crate) fn update_addr_and_reconnect_bridge(
+        &self,
+        agent_id: &AgentId,
+        new_addr: String,
+    ) {
+        let mut agents = self.agents.lock();
+        let Some(agent) = agents.get_mut(agent_id) else { return };
+        agent.addr = new_addr;
+
+        // Shut down old bridge (dropping the sender signals the bridge to exit)
+        agent.bridge_shutdown.take();
+
+        // Spawn a new bridge connected to the updated address
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        tokio::spawn(crate::adapters::agent::docker::ws::event_bridge(
+            agent.addr.clone(),
+            agent.auth_token.clone(),
+            agent_id.clone(),
+            agent.owner.clone(),
+            agent.event_tx.clone(),
+            shutdown_rx,
+            self.log_entry_tx.clone(),
+        ));
+        agent.bridge_shutdown = Some(shutdown_tx);
+    }
+
     /// Register an agent and start its WebSocket event bridge.
     pub(crate) fn register(
         &self,
         agent_id: AgentId,
         addr: String,
         auth_token: String,
-        workspace_path: PathBuf,
         event_tx: mpsc::Sender<Event>,
         owner: OwnerId,
     ) -> AgentHandle {
@@ -84,17 +116,22 @@ impl RemoteCoopClient {
             addr.clone(),
             auth_token.clone(),
             agent_id.clone(),
-            owner,
-            event_tx,
+            owner.clone(),
+            event_tx.clone(),
             shutdown_rx,
             self.log_entry_tx.clone(),
         ));
-        let handle = AgentHandle::new(agent_id.clone(), workspace_path);
-        self.agents.lock().insert(agent_id, RemoteAgent { addr, auth_token });
-        // Store the WS bridge shutdown sender alongside the agent.
-        // (The WS bridge will also stop when the agent is deregistered
-        // and the coop process shuts down, closing the WebSocket.)
-        drop(shutdown_tx);
+        let handle = AgentHandle::new(agent_id.clone());
+        self.agents.lock().insert(
+            agent_id,
+            RemoteAgent {
+                addr,
+                auth_token,
+                bridge_shutdown: Some(shutdown_tx),
+                event_tx,
+                owner,
+            },
+        );
         handle
     }
 

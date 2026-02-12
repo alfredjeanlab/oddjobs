@@ -7,7 +7,7 @@ mod activity_logger;
 mod agent_logger;
 mod agent_setup;
 pub mod breadcrumb;
-mod decision_builder;
+mod decision;
 mod error;
 mod executor;
 pub(crate) mod lifecycle;

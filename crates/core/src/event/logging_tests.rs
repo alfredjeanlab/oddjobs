@@ -178,14 +178,24 @@ fn log_summary_runbook_loaded_empty() {
 
 #[test]
 fn log_summary_agent_spawned_job_owner() {
-    let event = Event::AgentSpawned { id: AgentId::new("a1"), owner: JobId::new("j1").into() };
-    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=job:j1");
+    let event = Event::AgentSpawned {
+        id: AgentId::new("a1"),
+        owner: JobId::new("j1").into(),
+        runtime: Default::default(),
+        auth_token: None,
+    };
+    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=job:j1 runtime=Local");
 }
 
 #[test]
 fn log_summary_agent_spawned_crew_owner() {
-    let event = Event::AgentSpawned { id: AgentId::new("a1"), owner: CrewId::new("ar1").into() };
-    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=crew:ar1");
+    let event = Event::AgentSpawned {
+        id: AgentId::new("a1"),
+        owner: CrewId::new("ar1").into(),
+        runtime: Default::default(),
+        auth_token: None,
+    };
+    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=crew:ar1 runtime=Local");
 }
 
 #[test]

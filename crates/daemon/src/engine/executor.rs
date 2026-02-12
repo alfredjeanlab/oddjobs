@@ -129,6 +129,15 @@ where
                         .job_id(job_id_str);
                 config.resume = resume;
                 config.container = container;
+                if let Some(url) = input.get("source.repo") {
+                    config.repo = Some(url.clone());
+                }
+                // Use source.ref (the start point, e.g. "main") not source.branch
+                // (the workspace branch name, e.g. "ws-abc123") — source.branch is
+                // a local-only name that doesn't exist on the remote.
+                if let Some(r) = input.get("source.ref") {
+                    config.branch = Some(r.clone());
+                }
                 if let Some(cwd) = cwd {
                     config = config.cwd(cwd);
                 }
@@ -138,7 +147,12 @@ where
                 tokio::spawn(async move {
                     match agents.spawn(config, event_tx.clone()).await {
                         Ok(handle) => {
-                            let event = Event::AgentSpawned { id: handle.agent_id, owner };
+                            let event = Event::AgentSpawned {
+                                id: handle.agent_id,
+                                owner,
+                                runtime: handle.runtime,
+                                auth_token: handle.auth_token,
+                            };
                             if let Err(e) = event_tx.send(event).await {
                                 tracing::error!("failed to send AgentSpawned: {}", e);
                             }

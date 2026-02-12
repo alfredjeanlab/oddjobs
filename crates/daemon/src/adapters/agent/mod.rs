@@ -22,8 +22,6 @@
 pub mod attach_proxy;
 pub(crate) mod coop;
 pub(crate) mod docker;
-// NOTE(compat): K8s adapter is a complete feature not yet wired into RuntimeRouter
-#[allow(dead_code)]
 pub(crate) mod k8s;
 pub mod log_entry;
 pub(crate) mod remote;
@@ -36,9 +34,18 @@ pub use router::RuntimeRouter;
 #[derive(Debug, Clone)]
 pub struct AgentReconnectConfig {
     pub agent_id: AgentId,
-    pub workspace_path: PathBuf,
     /// Owner of this agent (job or crew)
     pub owner: OwnerId,
+    /// Hint from persisted state about which adapter manages this agent.
+    ///
+    /// Used by `RuntimeRouter::reconnect` to try the correct adapter first,
+    /// falling back to probing other adapters if the hinted one fails.
+    pub runtime_hint: AgentRuntime,
+    /// Auth token persisted from spawn time.
+    ///
+    /// When available, remote adapters use this instead of shelling out to
+    /// `kubectl exec` or `docker exec` to read the token from the container.
+    pub auth_token: Option<String>,
 }
 
 // Test support - only compiled for tests or when explicitly requested
@@ -48,7 +55,7 @@ mod fake;
 pub use fake::{AgentCall, FakeAgentAdapter};
 
 use async_trait::async_trait;
-use oj_core::{AgentId, AgentState, Event, OwnerId};
+use oj_core::{AgentId, AgentRuntime, AgentState, Event, OwnerId};
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -97,6 +104,10 @@ pub struct AgentConfig {
     pub resume: bool,
     /// Container config — when present, route to the container adapter.
     pub container: Option<oj_core::ContainerConfig>,
+    /// Git remote URL resolved at job creation time (avoids needing local checkout in pods)
+    pub repo: Option<String>,
+    /// Git branch resolved at job creation time
+    pub branch: Option<String>,
 }
 
 impl AgentConfig {
@@ -121,6 +132,8 @@ impl AgentConfig {
             project_path: workspace_path,
             resume: false,
             container: None,
+            repo: None,
+            branch: None,
         }
     }
 
@@ -138,6 +151,8 @@ impl AgentConfig {
         }
         option {
             cwd: PathBuf,
+            repo: String,
+            branch: String,
         }
     }
 }
@@ -147,16 +162,23 @@ impl AgentConfig {
 pub struct AgentHandle {
     /// Public agent identifier
     pub agent_id: AgentId,
-    /// Path to the agent's workspace
-    // NOTE(lifetime): read in tests
-    #[allow(dead_code)]
-    pub workspace_path: PathBuf,
+    /// Which adapter runtime manages this agent.
+    ///
+    /// Set by the `RuntimeRouter` based on which adapter was used for spawn.
+    /// Individual adapters default to `Local`; the router overrides as needed.
+    pub runtime: oj_core::AgentRuntime,
+    /// Auth token generated at spawn time (for remote agents).
+    ///
+    /// Persisted through the WAL so reconnect after daemon restart can
+    /// re-establish communication without shelling out to `kubectl exec` or
+    /// `docker exec` to read the token from the running container.
+    pub auth_token: Option<String>,
 }
 
 impl AgentHandle {
     /// Create a new agent handle
-    pub fn new(agent_id: AgentId, workspace_path: PathBuf) -> Self {
-        Self { agent_id, workspace_path }
+    pub fn new(agent_id: AgentId) -> Self {
+        Self { agent_id, runtime: oj_core::AgentRuntime::Local, auth_token: None }
     }
 }
 
@@ -333,16 +355,18 @@ pub(crate) async fn detect_git_remote(project_path: &std::path::Path) -> Option<
     None
 }
 
-/// Detect the current git branch of a workspace directory.
-pub(crate) async fn detect_git_branch(workspace_path: &std::path::Path) -> Option<String> {
+/// Detect the current git branch of a workspace directory (blocking variant).
+///
+/// Uses `std::process::Command` — suitable for contexts where the workspace
+/// path may not exist yet and blocking is acceptable (e.g., K8s pod spec build).
+pub(crate) fn detect_git_branch_blocking(workspace_path: &std::path::Path) -> Option<String> {
     if !workspace_path.exists() {
         return None;
     }
-    let output = tokio::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(workspace_path)
         .output()
-        .await
         .ok()?;
     if output.status.success() {
         let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -353,20 +377,16 @@ pub(crate) async fn detect_git_branch(workspace_path: &std::path::Path) -> Optio
     None
 }
 
-/// Detect the current git branch of a workspace directory (blocking variant).
-///
-/// Uses `std::process::Command` — suitable for contexts where the workspace
-/// path may not exist yet and blocking is acceptable (e.g., K8s pod spec build).
-// NOTE(compat): used by k8s adapter
-#[allow(dead_code)]
-pub(crate) fn detect_git_branch_blocking(workspace_path: &std::path::Path) -> Option<String> {
+/// Detect the current git branch of a workspace directory (async variant).
+pub(crate) async fn detect_git_branch_async(workspace_path: &std::path::Path) -> Option<String> {
     if !workspace_path.exists() {
         return None;
     }
-    let output = std::process::Command::new("git")
+    let output = tokio::process::Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(workspace_path)
         .output()
+        .await
         .ok()?;
     if output.status.success() {
         let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();

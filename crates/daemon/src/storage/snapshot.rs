@@ -7,16 +7,13 @@
 //! identified by the WAL sequence number. Recovery loads the snapshot
 //! and replays WAL entries after that sequence.
 
-use crate::storage::migration::{MigrationError, MigrationRegistry};
+use crate::storage::migration::MigrationError;
 use crate::storage::MaterializedState;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::fs::{self};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use tracing::warn;
 
 /// Current snapshot schema version
 pub const CURRENT_SNAPSHOT_VERSION: u32 = 1;
@@ -44,95 +41,6 @@ pub struct Snapshot {
     pub state: MaterializedState,
     /// When this snapshot was created
     pub created_at: DateTime<Utc>,
-}
-
-impl Snapshot {
-    /// Create a new snapshot.
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
-    pub fn new(seq: u64, state: MaterializedState) -> Self {
-        Self { version: CURRENT_SNAPSHOT_VERSION, seq, state, created_at: Utc::now() }
-    }
-
-    /// Save snapshot atomically (write to .tmp, then rename).
-    ///
-    /// This ensures that a crash during save won't corrupt the snapshot file.
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
-    pub fn save(&self, path: &Path) -> Result<(), SnapshotError> {
-        // Ensure parent directory exists
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let tmp_path = path.with_extension("tmp");
-
-        // Write to temp file and sync
-        {
-            let file = File::create(&tmp_path)?;
-            let mut writer = BufWriter::new(file);
-            serde_json::to_writer(&mut writer, self)?;
-            let file = writer.into_inner().map_err(|e| e.into_error())?;
-            file.sync_all()?;
-        }
-
-        // Atomic rename
-        fs::rename(&tmp_path, path)?;
-
-        Ok(())
-    }
-
-    /// Load snapshot if it exists.
-    ///
-    /// Returns `Ok(None)` if the file doesn't exist or is corrupt.
-    /// Corrupt snapshots are moved to a `.bak` file so the daemon can
-    /// recover via WAL replay.
-    ///
-    /// Snapshots are migrated to the current version if needed.
-    // NOTE(lifetime): used in tests
-    #[allow(dead_code)]
-    pub fn load(path: &Path) -> Result<Option<Self>, SnapshotError> {
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        let file = File::open(path)?;
-        let value: Value = match serde_json::from_reader(BufReader::new(file)) {
-            Ok(v) => v,
-            Err(e) => {
-                let bak_path = rotate_bak_path(path);
-                warn!(
-                    error = %e,
-                    path = %path.display(),
-                    bak = %bak_path.display(),
-                    "Corrupt snapshot, moving to .bak and starting fresh",
-                );
-                fs::rename(path, &bak_path)?;
-                return Ok(None);
-            }
-        };
-
-        // Migrate if needed
-        let registry = MigrationRegistry::new();
-        let migrated = registry.migrate_to(value, CURRENT_SNAPSHOT_VERSION)?;
-
-        // Deserialize to typed struct
-        match serde_json::from_value(migrated) {
-            Ok(snapshot) => Ok(Some(snapshot)),
-            Err(e) => {
-                // Post-migration deser failure = bug in migration or schema mismatch
-                let bak_path = rotate_bak_path(path);
-                warn!(
-                    error = %e,
-                    path = %path.display(),
-                    bak = %bak_path.display(),
-                    "Post-migration deserialize failed, moving to .bak",
-                );
-                fs::rename(path, &bak_path)?;
-                Ok(None)
-            }
-        }
-    }
 }
 
 const MAX_BAK_FILES: u32 = 3;
@@ -166,7 +74,3 @@ pub(crate) fn rotate_bak_path(path: &Path) -> PathBuf {
 
     bak(1)
 }
-
-#[cfg(test)]
-#[path = "snapshot_tests.rs"]
-mod tests;
