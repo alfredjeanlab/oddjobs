@@ -279,13 +279,13 @@ fn agent_columns_are_aligned_across_rows() {
     ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "coder".to_string(),
         command_name: "build".to_string(),
-        agent_id: "agent-01".to_string(),
+        agent_id: oj_core::AgentId::new("agent-01"),
         status: "running".to_string(),
     });
     ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "long-agent-name".to_string(),
         command_name: "deploy".to_string(),
-        agent_id: "agent-02".to_string(),
+        agent_id: oj_core::AgentId::new("agent-02"),
         status: "idle".to_string(),
     });
 

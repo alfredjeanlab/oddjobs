@@ -152,10 +152,10 @@ impl DaemonClient {
         };
         match self.send(&request).await? {
             Response::JobStarted { job_id, job_name } => {
-                Ok(RunCommandResult::Job { job_id, job_name })
+                Ok(RunCommandResult::Job { job_id: job_id.to_string(), job_name })
             }
             Response::CrewStarted { crew_id, agent_name } => {
-                Ok(RunCommandResult::Crew { crew_id, agent_name })
+                Ok(RunCommandResult::Crew { crew_id: crew_id.to_string(), agent_name })
             }
             other => Self::reject(other),
         }

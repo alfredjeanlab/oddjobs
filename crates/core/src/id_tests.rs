@@ -4,8 +4,6 @@
 use super::*;
 use std::collections::HashMap;
 
-// --- define_id! macro tests ---
-
 crate::define_id! {
     /// Test ID type for macro verification.
     pub struct TestId;
@@ -17,8 +15,6 @@ fn define_id_hash_map_lookup() {
     map.insert(TestId::new("k"), 42);
     assert_eq!(map.get("k"), Some(&42));
 }
-
-// --- short() tests ---
 
 #[test]
 fn define_id_short_truncates() {
@@ -44,6 +40,36 @@ fn short_fn_on_str() {
     assert_eq!(short(s, 8), "abcdefgh");
     assert_eq!(short(s, 100), s);
     assert_eq!(short("abc", 8), "abc");
+}
+
+// --- Serialization tests ---
+
+#[test]
+fn id_serializes_as_bare_string() {
+    let id = TestId::new("abc-123");
+    let json = serde_json::to_string(&id).unwrap();
+    assert_eq!(json, r#""abc-123""#);
+
+    let decoded: TestId = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded, id);
+}
+
+// --- Deref tests ---
+
+#[test]
+fn id_derefs_to_str() {
+    let id = TestId::new("test-id");
+    let s: &str = &id; // Deref coercion
+    assert_eq!(s, "test-id");
+}
+
+#[test]
+fn option_id_as_deref() {
+    let id = Some(TestId::new("test-id"));
+    assert_eq!(id.as_deref(), Some("test-id"));
+
+    let empty: Option<TestId> = None;
+    assert_eq!(empty.as_deref(), None);
 }
 
 // --- IdGen tests ---

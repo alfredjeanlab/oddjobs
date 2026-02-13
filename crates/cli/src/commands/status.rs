@@ -266,7 +266,7 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: "    ".to_string(),
-                    id: oj_core::short(&p.id, 8).to_string(),
+                    id: p.id.short(8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: p.step_status.to_string(),
@@ -296,7 +296,7 @@ fn format_text(
                     let elapsed = oj_core::format_elapsed_ms(p.elapsed_ms);
                     JobRow {
                         prefix: format!("    {} ", color::yellow("⚠")),
-                        id: oj_core::short(&p.id, 8).to_string(),
+                        id: p.id.short(8).to_string(),
                         name: friendly_name_label(&p.name, &p.kind, &p.id),
                         kind_step: format!("{}/{}", p.kind, p.step),
                         status: p.step_status.to_string(),
@@ -320,7 +320,7 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: format!("    {} ", color::yellow("⚠")),
-                    id: oj_core::short(&p.id, 8).to_string(),
+                    id: p.id.short(8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: "orphaned".to_string(),
@@ -344,7 +344,7 @@ fn format_text(
                 .iter()
                 .map(|p| JobRow {
                     prefix: "    ".to_string(),
-                    id: oj_core::short(&p.id, 8).to_string(),
+                    id: p.id.short(8).to_string(),
                     name: friendly_name_label(&p.name, &p.kind, &p.id),
                     kind_step: format!("{}/{}", p.kind, p.step),
                     status: "suspended".to_string(),
@@ -445,7 +445,7 @@ fn format_text(
                 let _ = writeln!(
                     out,
                     "    {}  {:<w_name$}  {}",
-                    color::muted(oj_core::short(&a.agent_id, 8)),
+                    color::muted(a.agent_id.short(8)),
                     a.agent_name,
                     color::status(&format!("{:<w_st$}", a.status)),
                 );

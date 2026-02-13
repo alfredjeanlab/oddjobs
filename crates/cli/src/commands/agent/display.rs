@@ -17,6 +17,7 @@ use crate::output::{
     poll_log_follow, print_capture_frame, print_prune_results, OutputFormat,
 };
 use crate::table::{Column, Table};
+use oj_core::OwnerId;
 
 pub(super) async fn handle_list(
     client: &DaemonClient,
@@ -50,12 +51,12 @@ pub(super) async fn handle_list(
         for a in items {
             let name = a.agent_name.as_deref().unwrap_or("-").to_string();
             let ns = if a.project.is_empty() { "-".to_string() } else { a.project.clone() };
-            let job_col = if a.job_id.is_empty() { "-".to_string() } else { a.job_id.clone() };
+            let job_col =
+                a.owner.as_job().map(|id| id.to_string()).unwrap_or_else(|| "-".to_string());
             let step_col =
                 if a.step_name.is_empty() { "-".to_string() } else { a.step_name.clone() };
-            let id_col = if !a.crew_id.is_empty() { a.crew_id.clone() } else { a.agent_id.clone() };
-            let cells = vec![
-                id_col,
+            table.row(vec![
+                a.agent_id.to_string(),
                 name,
                 ns,
                 job_col,
@@ -64,8 +65,7 @@ pub(super) async fn handle_list(
                 a.files_read.to_string(),
                 a.files_written.to_string(),
                 a.commands_run.to_string(),
-            ];
-            table.row(cells);
+            ]);
         }
         table.render(out);
     })?;
@@ -82,17 +82,20 @@ pub(super) async fn handle_show(
         if let Some(a) = &agent {
             println!("{} {}", color::header("Agent:"), a.agent_id);
             println!("  {} {}", color::context("Name:"), a.agent_name.as_deref().unwrap_or("-"));
-            if !a.crew_id.is_empty() {
-                println!("  {} {}", color::context("Crew:"), a.crew_id);
+            if let OwnerId::Crew(id) = &a.owner {
+                println!("  {} {}", color::context("Crew:"), id);
             }
             if !a.project.is_empty() {
                 println!("  {} {}", color::context("Project:"), a.project);
             }
-            if a.job_id.is_empty() {
-                println!("  {} standalone", color::context("Source:"));
-            } else {
-                println!("  {} {} ({})", color::context("Job:"), a.job_id, a.job_name);
-                println!("  {} {}", color::context("Step:"), a.step_name);
+            match &a.owner {
+                OwnerId::Job(id) => {
+                    println!("  {} {} ({})", color::context("Job:"), id, a.job_name);
+                    println!("  {} {}", color::context("Step:"), a.step_name);
+                }
+                OwnerId::Crew(_) => {
+                    println!("  {} standalone", color::context("Source:"));
+                }
             }
             println!("  {} {}", color::context("Status:"), color::status(&a.status));
 
@@ -136,7 +139,7 @@ pub(super) async fn handle_peek(client: &DaemonClient, id: &str) -> Result<()> {
     let agent =
         client.get_agent(id).await?.ok_or_else(|| anyhow::anyhow!("Agent not found: {}", id))?;
 
-    let short_id = oj_core::short(&agent.agent_id, 8);
+    let short_id = agent.agent_id.short(8);
 
     // Try saved terminal capture
     if let Some(content) = try_read_agent_capture(&agent.agent_id) {
@@ -181,10 +184,9 @@ pub(super) async fn handle_suspend(client: &DaemonClient, id: &str) -> Result<()
     // Resolve agent to its owning job
     let agent =
         client.get_agent(id).await?.ok_or_else(|| anyhow::anyhow!("agent not found: {}", id))?;
-    if agent.job_id.is_empty() {
-        anyhow::bail!("agent {} has no owning job", id);
-    }
-    let result = client.job_suspend(std::slice::from_ref(&agent.job_id)).await?;
+    let job_id =
+        agent.owner.as_job().ok_or_else(|| anyhow::anyhow!("agent {} has no owning job", id))?;
+    let result = client.job_suspend(std::slice::from_ref(&job_id.to_string())).await?;
     for jid in &result.suspended {
         println!("Suspended job {} (via agent {})", jid, id);
     }
@@ -242,17 +244,13 @@ pub(super) async fn handle_prune(
     let (pruned, skipped) = client.agent_prune(all, dry_run).await?;
 
     print_prune_results(&pruned, skipped, dry_run, format, "agent", "job(s) skipped", |entry| {
-        if entry.job_id.is_empty() {
-            format!("agent {} ({})", oj_core::short(&entry.agent_id, 8), entry.step_name)
-        } else {
-            // Job-embedded agent
-            let short_pid = oj_core::short(&entry.job_id, 8);
-            format!(
-                "agent {} ({}, {})",
-                oj_core::short(&entry.agent_id, 8),
-                short_pid,
-                entry.step_name
-            )
+        match &entry.owner {
+            OwnerId::Crew(_) => {
+                format!("agent {} ({})", entry.agent_id.short(8), entry.step_name)
+            }
+            OwnerId::Job(id) => {
+                format!("agent {} ({}, {})", entry.agent_id.short(8), id.short(8), entry.step_name)
+            }
         }
     })?;
     Ok(())
@@ -337,9 +335,9 @@ async fn run_attach_proxy(
 
 /// Try to read a saved terminal capture for an agent. Returns `None` if
 /// the state dir or capture file is unavailable.
-pub(crate) fn try_read_agent_capture(agent_id: &str) -> Option<String> {
+pub(crate) fn try_read_agent_capture(agent_id: &oj_core::AgentId) -> Option<String> {
     let logs_dir = crate::env::state_dir().ok()?.join("logs");
-    let path = oj_core::log_paths::agent_capture_path(&logs_dir, agent_id);
+    let path = oj_core::log_paths::agent_capture_path(&logs_dir, agent_id.as_str());
     std::fs::read_to_string(path).ok()
 }
 

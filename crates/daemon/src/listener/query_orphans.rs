@@ -63,7 +63,7 @@ pub(super) fn append_orphan_summaries(
     for bc in orphans.iter() {
         let updated_at_ms = parse_rfc3339_to_epoch_ms(&bc.updated_at);
         jobs.push(JobSummary {
-            id: bc.job_id.clone(),
+            id: oj_core::JobId::new(&bc.job_id),
             name: bc.name.clone(),
             kind: bc.kind.clone(),
             step: bc.current_step.clone(),
@@ -84,7 +84,7 @@ pub(super) fn find_orphan_detail(
     let orphans = orphans.lock();
     orphans.iter().find(|bc| bc.job_id == id || bc.job_id.starts_with(id)).map(|bc| {
         Box::new(JobDetail {
-            id: bc.job_id.clone(),
+            id: oj_core::JobId::new(&bc.job_id),
             name: bc.name.clone(),
             kind: bc.kind.clone(),
             step: bc.current_step.clone(),
@@ -97,10 +97,9 @@ pub(super) fn find_orphan_detail(
                 .agents
                 .iter()
                 .map(|a| AgentSummary {
-                    job_id: bc.job_id.clone(),
-                    crew_id: String::new(),
+                    owner: oj_core::JobId::new(&bc.job_id).into(),
                     step_name: bc.current_step.clone(),
-                    agent_id: a.agent_id.clone(),
+                    agent_id: oj_core::AgentId::new(&a.agent_id),
                     agent_name: None,
                     project: bc.project.clone(),
                     status: "orphaned".to_string(),
@@ -136,7 +135,7 @@ pub(super) fn collect_orphan_status_entries(
         let updated_at_ms = parse_rfc3339_to_epoch_ms(&bc.updated_at);
         let elapsed_ms = now_ms.saturating_sub(updated_at_ms);
         ns_orphaned.entry(bc.project.clone()).or_default().push(JobStatusEntry {
-            id: bc.job_id.clone(),
+            id: oj_core::JobId::new(&bc.job_id),
             name: bc.name.clone(),
             kind: bc.kind.clone(),
             step: bc.current_step.clone(),

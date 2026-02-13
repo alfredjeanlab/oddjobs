@@ -241,7 +241,8 @@ impl DaemonClient {
         &self,
         id: &str,
     ) -> Result<Option<oj_wire::DecisionDetail>, ClientError> {
-        let request = Request::Query { query: Query::GetDecision { id: id.to_string() } };
+        let request =
+            Request::Query { query: Query::GetDecision { id: oj_core::DecisionId::new(id) } };
         match self.send(&request).await? {
             Response::Decision { decision } => Ok(decision.map(|b| *b)),
             other => Self::reject(other),
@@ -254,8 +255,9 @@ impl DaemonClient {
         id: &str,
         choices: Vec<usize>,
         message: Option<String>,
-    ) -> Result<String, ClientError> {
-        let request = Request::DecisionResolve { id: id.to_string(), choices, message };
+    ) -> Result<oj_core::DecisionId, ClientError> {
+        let request =
+            Request::DecisionResolve { id: oj_core::DecisionId::new(id), choices, message };
         match self.send(&request).await? {
             Response::DecisionResolved { id } => Ok(id),
             other => Self::reject(other),

@@ -40,6 +40,7 @@ macro_rules! define_id {
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+        #[serde(transparent)]
         pub struct $name(pub String);
 
         impl $name {
@@ -52,6 +53,11 @@ macro_rules! define_id {
                 &self.0
             }
 
+            /// Returns true if the ID is an empty string.
+            pub fn is_empty(&self) -> bool {
+                self.0.is_empty()
+            }
+
             /// Returns a string slice truncated to at most `n` characters.
             pub fn short(&self, n: usize) -> &str {
                 if self.0.len() <= n {
@@ -59,6 +65,12 @@ macro_rules! define_id {
                 } else {
                     &self.0[..n]
                 }
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self(String::new())
             }
         }
 
@@ -94,6 +106,14 @@ macro_rules! define_id {
 
         impl std::borrow::Borrow<str> for $name {
             fn borrow(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl std::ops::Deref for $name {
+            type Target = str;
+
+            fn deref(&self) -> &str {
                 &self.0
             }
         }

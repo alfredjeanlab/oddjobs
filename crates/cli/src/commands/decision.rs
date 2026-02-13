@@ -110,14 +110,14 @@ pub async fn handle(
             let mut lines = stdin.lock().lines();
 
             for (i, summary) in decisions.iter().enumerate() {
-                let detail = match client.get_decision(&summary.id).await {
+                let detail = match client.get_decision(summary.id.as_str()).await {
                     Ok(Some(d)) if d.resolved_at_ms.is_none() => d,
                     Ok(_) => {
                         skipped += 1;
                         continue;
                     }
                     Err(e) => {
-                        eprintln!("error fetching {}: {}", oj_core::short(&summary.id, 8), e);
+                        eprintln!("error fetching {}: {}", summary.id.short(8), e);
                         skipped += 1;
                         continue;
                     }
@@ -168,7 +168,7 @@ pub async fn handle(
                             None
                         };
 
-                        match client.decision_resolve(&detail.id, vec![n], message).await {
+                        match client.decision_resolve(detail.id.as_str(), vec![n], message).await {
                             Ok(_) => {
                                 let label = detail
                                     .options
@@ -176,12 +176,7 @@ pub async fn handle(
                                     .find(|o| o.number == n)
                                     .map(|o| o.label.as_str())
                                     .unwrap_or("?");
-                                println!(
-                                    "  Resolved {} -> {} ({})",
-                                    oj_core::short(&detail.id, 8),
-                                    n,
-                                    label
-                                );
+                                println!("  Resolved {} -> {} ({})", detail.id.short(8), n, label);
                                 resolved += 1;
                             }
                             Err(e) => {
@@ -210,7 +205,7 @@ pub async fn handle(
 
         DecisionCommand::Resolve { id, choice, message } => {
             let resolved_id = client.decision_resolve(&id, choice, message).await?;
-            println!("Resolved decision {}", oj_core::short(&resolved_id, 8));
+            println!("Resolved decision {}", resolved_id.short(8));
         }
     }
     Ok(())
@@ -221,7 +216,7 @@ pub(crate) fn format_decision_detail(
     d: &DecisionDetail,
     show_resolve_hint: bool,
 ) {
-    let short_id = oj_core::short(&d.id, 8);
+    let short_id = d.id.short(8);
     let owner_display = if d.owner_name.is_empty() {
         d.owner_id.clone()
     } else {
@@ -243,22 +238,14 @@ pub(crate) fn format_decision_detail(
     let _ = writeln!(out, "{} {}", color::context("Source:  "), source_display);
     let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
     if !d.agent_id.is_empty() {
-        let _ = writeln!(
-            out,
-            "{} {}",
-            color::context("Agent:  "),
-            color::muted(oj_core::short(&d.agent_id, 8))
-        );
+        let _ =
+            writeln!(out, "{} {}", color::context("Agent:  "), color::muted(d.agent_id.short(8)));
     }
 
     if let Some(ref sup_id) = d.superseded_by {
         let _ = writeln!(out, "{} {}", color::context("Status: "), color::muted("superseded"));
-        let _ = writeln!(
-            out,
-            "{} {}",
-            color::context("Superseded by:"),
-            color::muted(oj_core::short(sup_id, 8))
-        );
+        let _ =
+            writeln!(out, "{} {}", color::context("Superseded by:"), color::muted(sup_id.short(8)));
     } else if d.resolved_at_ms.is_some() {
         let _ = writeln!(out, "{} {}", color::context("Status: "), color::status("completed"));
         if let Some(&c) = d.choices.first() {
@@ -378,7 +365,7 @@ pub(crate) fn format_decision_list(
         let ns = if d.project.is_empty() { "-" } else { &d.project };
         let owner = if d.owner_name.is_empty() { &d.owner_id } else { &d.owner_name };
         let cells = vec![
-            d.id.clone(),
+            d.id.to_string(),
             ns.to_string(),
             owner.to_string(),
             format_time_ago(d.created_at_ms),

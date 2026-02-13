@@ -153,10 +153,12 @@ async fn find_agent(
 ) -> Result<Option<(String, String)>, anyhow::Error> {
     let jobs = client.list_jobs().await?;
     for summary in &jobs {
-        if let Some(detail) = client.get_job(&summary.id).await? {
+        if let Some(detail) = client.get_job(summary.id.as_str()).await? {
             for agent in &detail.agents {
-                if agent.agent_id == agent_id || agent.agent_id.starts_with(agent_id) {
-                    return Ok(Some((summary.id.clone(), agent.agent_id.clone())));
+                if agent.agent_id.as_str() == agent_id
+                    || agent.agent_id.as_str().starts_with(agent_id)
+                {
+                    return Ok(Some((summary.id.to_string(), agent.agent_id.to_string())));
                 }
             }
         }

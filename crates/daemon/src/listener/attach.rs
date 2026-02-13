@@ -115,6 +115,6 @@ fn resolve_agent_id(
                 .crew
                 .values()
                 .find(|r| r.id.starts_with(prefix))
-                .and_then(|r| r.agent_id.as_ref().map(|id| oj_core::AgentId::new(id)))
+                .and_then(|r| r.agent_id.as_ref().map(oj_core::AgentId::new))
         })
 }

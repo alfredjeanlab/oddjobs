@@ -224,7 +224,7 @@ pub(crate) fn format_job_list(out: &mut (impl Write + ?Sized), jobs: &[oj_wire::
     let mut table = Table::new(cols);
 
     for p in jobs {
-        let id = oj_core::short(&p.id, 8).to_string();
+        let id = p.id.short(8).to_string();
         let ns = if p.project.is_empty() { "-" } else { &p.project };
         let updated = format_time_ago(p.updated_at_ms);
 
@@ -323,7 +323,7 @@ pub async fn handle(
                         println!("  {}", color::header("Crew:"));
                         for agent in &p.agents {
                             let summary = format_agent_summary(agent);
-                            let short_id = truncate(&agent.agent_id, 8);
+                            let short_id = agent.agent_id.short(8);
                             if summary.is_empty() {
                                 println!(
                                     "    {:<12} {} {}",
@@ -446,7 +446,7 @@ pub async fn handle(
                 .find(|a| a.status == "running")
                 .map(|a| a.agent_id.clone())
                 .ok_or_else(|| anyhow::anyhow!("job has no active agent session"))?;
-            crate::daemon_process::coop_attach(&agent_id)?;
+            crate::daemon_process::coop_attach(agent_id.as_str())?;
         }
         JobCommand::Peek { id } => {
             let job = client
@@ -454,7 +454,7 @@ pub async fn handle(
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Job not found: {}", id))?;
 
-            let short_id = oj_core::short(&job.id, 8);
+            let short_id = job.id.short(8);
 
             // Try saved capture: find agent_id from current step, then
             // fall back to the most recent agent in the job.
@@ -462,17 +462,14 @@ pub async fn handle(
                 .agents
                 .iter()
                 .find(|a| a.status == "running")
-                .map(|a| a.agent_id.as_str())
+                .map(|a| &a.agent_id)
                 .or_else(|| {
-                    job.steps
-                        .iter()
-                        .rfind(|s| s.name == job.step)
-                        .and_then(|s| s.agent_id.as_deref())
+                    job.steps.iter().rfind(|s| s.name == job.step).and_then(|s| s.agent_id.as_ref())
                 })
-                .or_else(|| job.agents.last().map(|a| a.agent_id.as_str()));
+                .or_else(|| job.agents.last().map(|a| &a.agent_id));
             if let Some(aid) = agent_id {
                 if let Some(content) = super::agent::display::try_read_agent_capture(aid) {
-                    let label = oj_core::short(aid, 8);
+                    let label = aid.short(8);
                     print_capture_frame(label, &content);
                     return Ok(());
                 }
@@ -526,7 +523,7 @@ pub async fn handle(
                 client.job_prune(all, failed, orphans, dry_run, project).await?;
 
             print_prune_results(&pruned, skipped, dry_run, format, "job", "skipped", |entry| {
-                let short_id = oj_core::short(&entry.id, 8);
+                let short_id = entry.id.short(8);
                 format!("{} ({}, {})", entry.name, short_id, entry.step)
             })?;
         }

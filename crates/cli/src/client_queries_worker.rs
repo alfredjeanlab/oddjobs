@@ -232,7 +232,7 @@ impl DaemonClient {
             cron: name.to_string(),
         };
         match self.send(&request).await? {
-            Response::JobStarted { job_id, job_name } => Ok((job_id, job_name)),
+            Response::JobStarted { job_id, job_name } => Ok((job_id.to_string(), job_name)),
             other => Self::reject(other),
         }
     }

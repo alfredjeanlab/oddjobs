@@ -101,7 +101,7 @@ pub async fn handle(
                     for w in items {
                         let ns = if w.project.is_empty() { "-" } else { &w.project };
                         let cells = vec![
-                            oj_core::short(&w.id, 8).to_string(),
+                            w.id.short(8).to_string(),
                             ns.to_string(),
                             w.path.display().to_string(),
                             w.branch.as_deref().unwrap_or("-").to_string(),
@@ -150,7 +150,7 @@ pub async fn handle(
                 for ws in &dropped {
                     println!(
                         "Dropping {} ({})",
-                        ws.branch.as_deref().unwrap_or(oj_core::short(&ws.id, 8)),
+                        ws.branch.as_deref().unwrap_or(ws.id.short(8)),
                         ws.path.display()
                     );
                 }
@@ -176,7 +176,7 @@ pub async fn handle(
                 |ws| {
                     format!(
                         "{} ({})",
-                        ws.branch.as_deref().unwrap_or(oj_core::short(&ws.id, 8)),
+                        ws.branch.as_deref().unwrap_or(ws.id.short(8)),
                         ws.path.display()
                     )
                 },

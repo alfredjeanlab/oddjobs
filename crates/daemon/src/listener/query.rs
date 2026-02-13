@@ -84,7 +84,7 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                 let vars = filter_vars_by_scope(&p.vars);
 
                 Box::new(JobDetail {
-                    id: p.id.clone(),
+                    id: oj_core::JobId::new(&p.id),
                     name: p.name.clone(),
                     kind: p.kind.clone(),
                     step: p.step.clone(),
@@ -126,7 +126,7 @@ pub(super) fn handle_query(ctx: &ListenCtx, query: Query) -> Response {
                             .unwrap_or_default(),
                     };
                     WorkspaceSummary {
-                        id: w.id.clone(),
+                        id: oj_core::WorkspaceId::new(&w.id),
                         path: w.path.clone(),
                         branch: w.branch.clone(),
                         status: w.status.to_string(),

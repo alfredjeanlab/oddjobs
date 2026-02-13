@@ -105,11 +105,9 @@ pub(super) async fn handle_run_command(
 
     match &owner {
         OwnerId::Crew(crew_id) => {
-            Ok(Response::CrewStarted { crew_id: crew_id.to_string(), agent_name: name })
+            Ok(Response::CrewStarted { crew_id: crew_id.clone(), agent_name: name })
         }
-        OwnerId::Job(job_id) => {
-            Ok(Response::JobStarted { job_id: job_id.to_string(), job_name: name })
-        }
+        OwnerId::Job(job_id) => Ok(Response::JobStarted { job_id: job_id.clone(), job_name: name }),
     }
 }
 

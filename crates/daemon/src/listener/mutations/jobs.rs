@@ -273,8 +273,8 @@ pub(crate) fn handle_job_prune(
 
     if !flags.dry_run {
         for entry in &to_prune {
-            emit(&ctx.event_bus, Event::JobDeleted { id: JobId::new(entry.id.clone()) })?;
-            super::prune_helpers::cleanup_job_files(&ctx.logs_path, &entry.id);
+            emit(&ctx.event_bus, Event::JobDeleted { id: entry.id.clone() })?;
+            super::prune_helpers::cleanup_job_files(&ctx.logs_path, entry.id.as_str());
         }
     }
 
@@ -285,7 +285,7 @@ pub(crate) fn handle_job_prune(
         for &i in drain_indices.iter().rev() {
             let bc = &orphan_guard[i];
             to_prune.push(JobEntry {
-                id: bc.job_id.clone(),
+                id: JobId::new(&bc.job_id),
                 name: bc.name.clone(),
                 step: "orphaned".to_string(),
             });

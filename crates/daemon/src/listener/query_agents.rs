@@ -8,7 +8,7 @@ use std::path::Path;
 
 use crate::storage::MaterializedState;
 use oj_core::log_paths::agent_log_path;
-use oj_core::{namespace_to_option, OwnerId, StepOutcome, StepOutcomeKind};
+use oj_core::{namespace_to_option, JobId, OwnerId, StepOutcome, StepOutcomeKind};
 
 use crate::protocol::{AgentDetail, AgentSummary, Response, StepRecordDetail};
 
@@ -28,7 +28,7 @@ pub(super) fn handle_get_agent(
         // Find agent matching by exact ID or prefix
         let summary = summaries
             .iter()
-            .find(|a| a.agent_id == agent_id || a.agent_id.starts_with(&agent_id))?;
+            .find(|a| a.agent_id.as_str() == agent_id || a.agent_id.starts_with(&agent_id))?;
 
         // Find the matching step record for timestamps and error
         let step = steps.iter().find(|s| s.agent_id.as_deref() == Some(&summary.agent_id));
@@ -93,22 +93,19 @@ pub(super) fn handle_list_agents(
             }
         }
 
-        // Derive job_id and step_name from owner
-        let (owner_job_id, step_name) = match &record.owner {
-            OwnerId::Job(jid) => {
-                let sname = state
-                    .jobs
-                    .get(jid.as_str())
-                    .and_then(|j| {
-                        j.step_history
-                            .iter()
-                            .find(|r| r.agent_id.as_deref() == Some(&record.agent_id))
-                            .map(|r| r.name.clone())
-                    })
-                    .unwrap_or_default();
-                (jid.to_string(), sname)
-            }
-            OwnerId::Crew(_) => (String::new(), String::new()),
+        // Derive step_name from owner
+        let step_name = match &record.owner {
+            OwnerId::Job(jid) => state
+                .jobs
+                .get(jid.as_str())
+                .and_then(|j| {
+                    j.step_history
+                        .iter()
+                        .find(|r| r.agent_id.as_deref() == Some(&record.agent_id))
+                        .map(|r| r.name.clone())
+                })
+                .unwrap_or_default(),
+            OwnerId::Crew(_) => String::new(),
         };
 
         let project = record.project.clone();
@@ -136,10 +133,9 @@ pub(super) fn handle_list_agents(
         tracked_agent_ids.insert(record.agent_id.clone());
 
         agents.push(AgentSummary {
-            job_id: owner_job_id,
-            crew_id: String::new(),
+            owner: record.owner.clone(),
             step_name,
-            agent_id: record.agent_id.clone(),
+            agent_id: oj_core::AgentId::new(&record.agent_id),
             agent_name: Some(record.agent_name.clone()),
             project,
             status: status_str.to_string(),
@@ -166,7 +162,7 @@ pub(super) fn handle_list_agents(
         let mut summaries = compute_agent_summaries(&p.id, &steps, logs_path, project);
 
         // Skip agents already tracked from the agents map
-        summaries.retain(|a| !tracked_agent_ids.contains(&a.agent_id));
+        summaries.retain(|a| !tracked_agent_ids.contains(a.agent_id.as_str()));
 
         if let Some(ref s) = status {
             summaries.retain(|a| a.status == *s);
@@ -281,8 +277,7 @@ pub(super) fn compute_agent_summaries(
             let updated_at_ms = step.finished_at_ms.unwrap_or(step.started_at_ms);
 
             Some(AgentSummary {
-                job_id: job_id.to_string(),
-                crew_id: String::new(),
+                owner: JobId::new(job_id).into(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
                 agent_name: step.agent_name.clone(),

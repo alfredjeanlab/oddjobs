@@ -90,7 +90,7 @@ pub(super) fn handle_status_overview(
 
         tracked_standalone_ids.insert(record.agent_id.clone());
         ns_agents.entry(record.project.clone()).or_default().push(AgentStatusEntry {
-            agent_id: record.agent_id.clone(),
+            agent_id: oj_core::AgentId::new(&record.agent_id),
             agent_name: record.agent_name.clone(),
             command_name,
             status: format!("{}", record.status),
@@ -107,7 +107,7 @@ pub(super) fn handle_status_overview(
             continue;
         }
         ns_agents.entry(run.project.clone()).or_default().push(AgentStatusEntry {
-            agent_id,
+            agent_id: oj_core::AgentId::new(&agent_id),
             agent_name: run.agent_name.clone(),
             command_name: run.command_name.clone(),
             status: run.status.to_string(),

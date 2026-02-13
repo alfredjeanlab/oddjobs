@@ -178,7 +178,8 @@ fn get_agent_found(
         Response::Agent { agent } => {
             let a = agent.expect("agent should be found");
             assert_eq!(a.agent_id, agent_id);
-            assert_eq!(a.job_id, job_id);
+            let owner_job_id = a.owner.as_job().expect("agent should be owned by job");
+            assert_eq!(owner_job_id.as_str(), job_id);
             assert_eq!(a.job_name, job_name);
             assert_eq!(a.step_name, step);
             assert_eq!(a.status, expected_status);

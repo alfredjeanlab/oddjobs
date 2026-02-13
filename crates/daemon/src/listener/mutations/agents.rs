@@ -272,8 +272,8 @@ pub(crate) fn handle_agent_prune(
             for record in &job.step_history {
                 if let Some(agent_id) = &record.agent_id {
                     to_prune.push(AgentEntry {
-                        agent_id: agent_id.clone(),
-                        job_id: job.id.clone(),
+                        agent_id: oj_core::AgentId::new(agent_id),
+                        owner: oj_core::JobId::new(&job.id).into(),
                         step_name: record.name.clone(),
                     });
                 }
@@ -302,8 +302,8 @@ pub(crate) fn handle_agent_prune(
             let agent_id = run.agent_id.clone().unwrap_or_else(|| run.id.clone());
 
             to_prune.push(AgentEntry {
-                agent_id,
-                job_id: String::new(),
+                agent_id: oj_core::AgentId::new(&agent_id),
+                owner: oj_core::CrewId::new(&run.id).into(),
                 step_name: run.agent_name.clone(),
             });
 

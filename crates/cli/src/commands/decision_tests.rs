@@ -73,7 +73,7 @@ fn parse_resolve_with_choice_and_message() {
 
 fn make_decision(id: &str, project: &str, job: &str) -> DecisionSummary {
     DecisionSummary {
-        id: id.to_string(),
+        id: oj_core::DecisionId::new(id),
         owner_id: "job-1234567890".to_string(),
         owner_name: job.to_string(),
         source: "agent".to_string(),
@@ -85,10 +85,10 @@ fn make_decision(id: &str, project: &str, job: &str) -> DecisionSummary {
 
 fn make_detail(resolved: bool) -> DecisionDetail {
     DecisionDetail {
-        id: "abcdef1234567890".to_string(),
+        id: oj_core::DecisionId::new("abcdef1234567890"),
         owner_id: "job-1234567890".to_string(),
         owner_name: "build".to_string(),
-        agent_id: "agent-abc12345".to_string(),
+        agent_id: oj_core::AgentId::new("agent-abc12345"),
         source: "agent".to_string(),
         context: "Should we deploy?".to_string(),
         options: vec![
@@ -262,10 +262,10 @@ fn no_follow_up_message_for_terminal_options() {
 #[test]
 fn format_decision_detail_grouped_questions() {
     let d = DecisionDetail {
-        id: "abcdef1234567890".to_string(),
+        id: oj_core::DecisionId::new("abcdef1234567890"),
         owner_id: "job-1234567890".to_string(),
         owner_name: "build".to_string(),
-        agent_id: "agent-1".to_string(),
+        agent_id: oj_core::AgentId::new("agent-1"),
         source: "question".to_string(),
         context: "Agent is asking questions".to_string(),
         options: vec![], // flat options empty for multi-question
@@ -370,10 +370,10 @@ fn parse_resolve_multi_question() {
 #[test]
 fn format_plan_decision_detail() {
     let d = DecisionDetail {
-        id: "abcdef1234567890".to_string(),
+        id: oj_core::DecisionId::new("abcdef1234567890"),
         owner_id: "job-1234567890".to_string(),
         owner_name: "epic-auth".to_string(),
-        agent_id: "agent-abc12345".to_string(),
+        agent_id: oj_core::AgentId::new("agent-abc12345"),
         source: "plan".to_string(),
         context: "Agent in job \"epic-auth\" is requesting plan approval.\n\n--- Plan ---\n# Auth Plan\n\n## Steps\n1. Add JWT module\n2. Write tests".to_string(),
         options: vec![

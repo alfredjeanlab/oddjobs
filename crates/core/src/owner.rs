@@ -9,7 +9,6 @@
 
 use crate::crew::CrewId;
 use crate::job::JobId;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Owner of an agent event.
@@ -17,18 +16,34 @@ use std::fmt;
 /// Used to route agent state events (Working, Waiting, Failed, Exited, Gone)
 /// to the correct entity during WAL replay.
 ///
-/// Serializes as a tagged enum:
-/// - `{"type": "job", "id": "job-123"}`
-/// - `{"type": "crew", "id": "run-456"}`
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "type", content = "id")]
+/// Serializes as a string using Display format:
+/// - `"job:job-123"`
+/// - `"crew:run-456"`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OwnerId {
     /// Agent is owned by a job (job-embedded agent)
-    #[serde(rename = "job")]
     Job(JobId),
     /// Agent is owned by an crew (standalone agent)
-    #[serde(rename = "crew")]
     Crew(CrewId),
+}
+
+impl serde::Serialize for OwnerId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for OwnerId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(OwnerId::parse(&s))
+    }
 }
 
 impl OwnerId {
@@ -169,3 +184,7 @@ impl PartialEq<OwnerId> for JobId {
         other == self
     }
 }
+
+#[cfg(test)]
+#[path = "owner_test.rs"]
+mod tests;

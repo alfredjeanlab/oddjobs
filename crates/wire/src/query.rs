@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use oj_core::DecisionId;
 use serde::{Deserialize, Serialize};
 
 /// Query types for reading daemon state
@@ -126,6 +127,6 @@ pub enum Query {
     },
     /// Get a single decision by ID (prefix match supported)
     GetDecision {
-        id: String,
+        id: DecisionId,
     },
 }

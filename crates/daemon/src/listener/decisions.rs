@@ -104,7 +104,7 @@ pub(super) fn handle_decision_resolve(
         });
     }
 
-    let full_id = decision.id.as_str().to_string();
+    let decision_id = decision.id.clone();
     let decision_namespace = decision.project.clone();
     let decision_source = decision.source.clone();
     let decision_options = decision.options.clone();
@@ -117,12 +117,10 @@ pub(super) fn handle_decision_resolve(
     let job_step = state_guard.jobs.get(&job_id).map(|p| p.step.clone());
 
     // Get crew agent_id (prefer live crew state over decision snapshot)
-    let crew_agent_id = match &decision_owner {
-        OwnerId::Crew(run_id) => {
-            state_guard.crew.get(run_id.as_str()).and_then(|r| r.agent_id.clone())
-        }
-        OwnerId::Job(_) => None,
-    };
+    let crew_agent_id = decision_owner
+        .as_crew()
+        .and_then(|crew_id| state_guard.crew.get(crew_id.as_str()))
+        .and_then(|r| r.agent_id.clone());
 
     drop(state_guard);
 
@@ -133,7 +131,7 @@ pub(super) fn handle_decision_resolve(
         source: &decision_source,
         choices: &choices,
         message: message.as_deref(),
-        decision_id: &full_id,
+        decision_id: &decision_id,
         options: &decision_options,
         questions: decision_questions.as_ref(),
     };
@@ -145,7 +143,7 @@ pub(super) fn handle_decision_resolve(
         resolve_ctx.chosen().map(|c| vec![c]).unwrap_or_default()
     };
     let event = Event::DecisionResolved {
-        id: oj_core::DecisionId::new(full_id.clone()),
+        id: decision_id.clone(),
         choices: resolved_choices,
         message: message.clone(),
         resolved_at_ms,
@@ -172,7 +170,7 @@ pub(super) fn handle_decision_resolve(
         emit(&ctx.event_bus, event)?;
     }
 
-    Ok(Response::DecisionResolved { id: full_id })
+    Ok(Response::DecisionResolved { id: decision_id })
 }
 
 /// Intermediate representation of a resolved decision action.

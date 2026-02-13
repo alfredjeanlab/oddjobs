@@ -3,6 +3,7 @@
 
 use std::path::PathBuf;
 
+use oj_core::{CrewId, DecisionId, JobId};
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -61,10 +62,10 @@ pub enum Response {
     Error { message: String },
 
     /// Command started successfully
-    JobStarted { job_id: String, job_name: String },
+    JobStarted { job_id: JobId, job_name: String },
 
     /// Crew started successfully
-    CrewStarted { crew_id: String, agent_name: String },
+    CrewStarted { crew_id: CrewId, agent_name: String },
 
     /// Workspace(s) deleted
     WorkspacesDropped { dropped: Vec<WorkspaceEntry> },
@@ -266,7 +267,7 @@ pub enum Response {
     Decision { decision: Option<Box<DecisionDetail>> },
 
     /// Decision resolved successfully
-    DecisionResolved { id: String },
+    DecisionResolved { id: DecisionId },
 
     /// Result of agent resume
     AgentResumed {

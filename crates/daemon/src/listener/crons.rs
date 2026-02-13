@@ -184,26 +184,24 @@ pub(super) async fn handle_cron_once(
         Err(resp) => return Ok(resp),
     };
 
-    let (owner, resp_id, resp_name) = match &v.target {
+    let (owner, resp_name) = match &v.target {
         RunTarget::Agent(name) => {
             let run_id = UuidIdGen.next();
             let resp_name = format!("agent:{}", name);
             let owner: OwnerId = oj_core::CrewId::new(&run_id).into();
-            (owner, run_id, resp_name)
+            (owner, resp_name)
         }
         RunTarget::Job(job_kind) => {
             let jid = JobId::new(UuidIdGen.next());
             let jname = oj_runbook::job_display_name(job_kind, jid.short(8), project);
-            let rid = jid.to_string();
             let owner: OwnerId = jid.into();
-            (owner, rid, jname)
+            (owner, jname)
         }
         RunTarget::Shell(_) => {
             let jid = JobId::new(UuidIdGen.next());
             let jname = oj_runbook::job_display_name(cron, jid.short(8), project);
-            let rid = jid.to_string();
             let owner: OwnerId = jid.into();
-            (owner, rid, jname)
+            (owner, jname)
         }
     };
 
@@ -211,7 +209,7 @@ pub(super) async fn handle_cron_once(
         &ctx.event_bus,
         Event::CronOnce {
             cron: cron.to_string(),
-            owner,
+            owner: owner.clone(),
             project_path: v.project_path,
             runbook_hash: v.runbook_hash,
             target: v.target,
@@ -219,7 +217,10 @@ pub(super) async fn handle_cron_once(
         },
     )?;
 
-    Ok(Response::JobStarted { job_id: resp_id, job_name: resp_name })
+    match owner {
+        OwnerId::Crew(crew_id) => Ok(Response::CrewStarted { crew_id, agent_name: resp_name }),
+        OwnerId::Job(job_id) => Ok(Response::JobStarted { job_id, job_name: resp_name }),
+    }
 }
 
 /// Handle a CronRestart request: stop (if running), reload runbook, start.

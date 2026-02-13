@@ -443,7 +443,7 @@ async fn handle_request(
         }
 
         Request::DecisionResolve { id, choices, message } => {
-            decisions::handle_decision_resolve(ctx, &id, choices, message)
+            decisions::handle_decision_resolve(ctx, id.as_str(), choices, message)
         }
 
         Request::AgentResume { id, kill, all } => {

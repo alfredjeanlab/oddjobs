@@ -52,7 +52,7 @@ pub async fn handle(
                     return Err(ExitError::new(3, format!("Job not found: {}", input_id)).into());
                 }
                 Some(p) => {
-                    canonical_ids.entry(input_id.clone()).or_insert_with(|| p.id.clone());
+                    canonical_ids.entry(input_id.clone()).or_insert_with(|| p.id.to_string());
 
                     let tracker = step_trackers
                         .entry(input_id.clone())

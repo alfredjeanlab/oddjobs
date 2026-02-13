@@ -250,7 +250,7 @@ async fn orphans(format: OutputFormat) -> Result<()> {
         ]);
         for o in items {
             table.row(vec![
-                oj_core::short(&o.job_id, 8).to_string(),
+                o.job_id.short(8).to_string(),
                 o.project.clone(),
                 o.kind.clone(),
                 o.name.clone(),

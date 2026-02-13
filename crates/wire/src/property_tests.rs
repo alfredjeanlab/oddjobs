@@ -23,6 +23,14 @@ fn p() -> PathBuf {
     PathBuf::new()
 }
 
+fn jid() -> oj_core::JobId {
+    oj_core::JobId::new("")
+}
+
+fn did() -> oj_core::DecisionId {
+    oj_core::DecisionId::new("")
+}
+
 fn all_requests() -> Vec<Request> {
     vec![
         Request::Ping,
@@ -97,7 +105,7 @@ fn all_requests() -> Vec<Request> {
             all: false,
             dry_run: false,
         },
-        Request::DecisionResolve { id: s(), choices: vec![], message: None },
+        Request::DecisionResolve { id: did(), choices: vec![], message: None },
         Request::JobResumeAll { kill: false },
         Request::AgentResume { id: s(), kill: false, all: false },
         Request::AgentKill { id: s() },
@@ -120,8 +128,8 @@ fn all_responses() -> Vec<Response> {
         Response::Workspace { workspace: None },
         Response::Status { uptime_secs: 0, jobs_active: 0, orphan_count: 0 },
         Response::Error { message: s() },
-        Response::JobStarted { job_id: s(), job_name: s() },
-        Response::CrewStarted { crew_id: s(), agent_name: s() },
+        Response::JobStarted { job_id: jid(), job_name: s() },
+        Response::CrewStarted { crew_id: oj_core::CrewId::new(""), agent_name: s() },
         Response::WorkspacesDropped { dropped: vec![] },
         Response::JobLogs { log_path: p(), content: s(), offset: 0 },
         Response::AgentLogs { log_path: p(), content: s(), steps: vec![], offset: 0 },
@@ -163,7 +171,7 @@ fn all_responses() -> Vec<Response> {
         Response::QueueLogs { log_path: p(), content: s(), offset: 0 },
         Response::Decisions { decisions: vec![] },
         Response::Decision { decision: None },
-        Response::DecisionResolved { id: s() },
+        Response::DecisionResolved { id: did() },
         Response::AgentResumed { resumed: vec![], skipped: vec![] },
         Response::JobsResumed { resumed: vec![], skipped: vec![] },
         Response::AgentAttachReady { id: s() },
@@ -193,7 +201,7 @@ fn all_queries() -> Vec<Query> {
         Query::DismissOrphan { id: s() },
         Query::GetQueueLogs { queue: s(), project: s(), lines: 0, offset: 0 },
         Query::ListDecisions { project: s() },
-        Query::GetDecision { id: s() },
+        Query::GetDecision { id: did() },
     ]
 }
 

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use oj_core::Event;
+use oj_core::{DecisionId, Event};
 use serde::{Deserialize, Serialize};
 
 use super::Query;
@@ -249,7 +249,7 @@ pub enum Request {
 
     /// Resolve a pending decision
     DecisionResolve {
-        id: String,
+        id: DecisionId,
         /// 1-indexed option choices (single element for single-question, multiple for multi-question)
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         choices: Vec<usize>,

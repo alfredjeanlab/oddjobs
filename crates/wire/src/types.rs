@@ -7,15 +7,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use oj_core::{
-    Crew, Decision, DecisionOption, Job, OwnerId, QueueItem, StepOutcome, StepOutcomeKind,
-    StepRecord, StepStatusKind, WorkerRecord, Workspace,
+    AgentId, Crew, CrewId, Decision, DecisionId, DecisionOption, Job, JobId, OwnerId, QueueItem,
+    StepOutcome, StepOutcomeKind, StepRecord, StepStatusKind, WorkerRecord, Workspace, WorkspaceId,
 };
 use serde::{Deserialize, Serialize};
 
 /// Summary of a job for listing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobSummary {
-    pub id: String,
+    pub id: JobId,
     pub name: String,
     pub kind: String,
     pub step: String,
@@ -29,7 +29,7 @@ pub struct JobSummary {
 /// Detailed job information
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobDetail {
-    pub id: String,
+    pub id: JobId,
     pub name: String,
     pub kind: String,
     pub step: String,
@@ -49,7 +49,7 @@ pub struct StepRecordDetail {
     pub outcome: StepOutcomeKind,
     pub detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_id: Option<String>,
+    pub agent_id: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
     pub started_at_ms: u64,
@@ -68,7 +68,7 @@ impl From<&StepRecord> for StepRecordDetail {
                 StepOutcome::Waiting(r) => Some(r.clone()),
                 _ => None,
             },
-            agent_id: r.agent_id.clone(),
+            agent_id: r.agent_id.as_ref().map(AgentId::new),
             agent_name: r.agent_name.clone(),
         }
     }
@@ -77,11 +77,9 @@ impl From<&StepRecord> for StepRecordDetail {
 /// Detailed agent information for `oj agent show`
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentDetail {
-    pub agent_id: String,
+    pub agent_id: AgentId,
     pub agent_name: Option<String>,
-    #[serde(default)]
-    pub crew_id: String,
-    pub job_id: String,
+    pub owner: OwnerId,
     pub job_name: String,
     pub step_name: String,
     pub project: String,
@@ -100,16 +98,11 @@ pub struct AgentDetail {
 /// Summary of agent activity for a job step
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentSummary {
-    /// Job that owns this agent
-    #[serde(default)]
-    pub job_id: String,
-    /// Crew invocation ID (for standalone agents)
-    #[serde(default)]
-    pub crew_id: String,
+    pub owner: OwnerId,
     /// Step name that spawned this agent
     pub step_name: String,
     /// Agent instance ID
-    pub agent_id: String,
+    pub agent_id: AgentId,
     /// Agent name from the runbook definition
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_name: Option<String>,
@@ -134,7 +127,7 @@ pub struct AgentSummary {
 /// Summary of a workspace for listing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceSummary {
-    pub id: String,
+    pub id: WorkspaceId,
     pub path: PathBuf,
     pub branch: Option<String>,
     pub status: String,
@@ -145,7 +138,7 @@ pub struct WorkspaceSummary {
 /// Detailed workspace information
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceDetail {
-    pub id: String,
+    pub id: WorkspaceId,
     pub path: PathBuf,
     pub branch: Option<String>,
     pub owner: String,
@@ -156,7 +149,7 @@ pub struct WorkspaceDetail {
 /// Workspace entry for drop/prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkspaceEntry {
-    pub id: String,
+    pub id: WorkspaceId,
     pub path: PathBuf,
     pub branch: Option<String>,
 }
@@ -189,7 +182,7 @@ pub struct QueueSummary {
 /// Summary of a decision for listing
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionSummary {
-    pub id: String,
+    pub id: DecisionId,
     pub owner_id: String,
     pub owner_name: String,
     pub project: String,
@@ -200,11 +193,11 @@ pub struct DecisionSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DecisionDetail {
-    pub id: String,
+    pub id: DecisionId,
     pub owner_id: String,
     pub owner_name: String,
     pub project: String,
-    pub agent_id: String,
+    pub agent_id: AgentId,
     pub source: String,
     pub context: String,
     pub options: Vec<DecisionOptionDetail>,
@@ -220,7 +213,7 @@ pub struct DecisionDetail {
     pub created_at_ms: u64,
     pub resolved_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub superseded_by: Option<String>,
+    pub superseded_by: Option<DecisionId>,
 }
 
 /// A question group for multi-question decisions
@@ -260,7 +253,7 @@ impl From<&Job> for JobSummary {
         let updated_at_ms =
             p.step_history.last().map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms)).unwrap_or(0);
         JobSummary {
-            id: p.id.clone(),
+            id: JobId::new(&p.id),
             name: p.name.clone(),
             kind: p.kind.clone(),
             step: p.step.clone(),
@@ -288,7 +281,11 @@ impl From<&QueueItem> for QueueItemSummary {
 
 impl From<&Workspace> for WorkspaceEntry {
     fn from(w: &Workspace) -> Self {
-        WorkspaceEntry { id: w.id.clone(), path: w.path.clone(), branch: w.branch.clone() }
+        WorkspaceEntry {
+            id: WorkspaceId::new(&w.id),
+            path: w.path.clone(),
+            branch: w.branch.clone(),
+        }
     }
 }
 
@@ -299,7 +296,7 @@ impl From<&Workspace> for WorkspaceDetail {
             OwnerId::Crew(run_id) => run_id.to_string(),
         };
         WorkspaceDetail {
-            id: w.id.clone(),
+            id: WorkspaceId::new(&w.id),
             path: w.path.clone(),
             branch: w.branch.clone(),
             owner,
@@ -331,7 +328,7 @@ impl DecisionSummary {
             d.context.clone()
         };
         DecisionSummary {
-            id: d.id.to_string(),
+            id: d.id.clone(),
             owner_id: d.owner.to_string(),
             owner_name,
             source: format!("{:?}", d.source).to_lowercase(),
@@ -397,10 +394,10 @@ impl DecisionDetail {
             .unwrap_or_default();
 
         DecisionDetail {
-            id: d.id.to_string(),
+            id: d.id.clone(),
             owner_id: d.owner.to_string(),
             owner_name,
-            agent_id: d.agent_id.to_string(),
+            agent_id: d.agent_id.clone(),
             source: format!("{:?}", d.source).to_lowercase(),
             context: d.context.clone(),
             options,
@@ -409,7 +406,7 @@ impl DecisionDetail {
             message: d.message.clone(),
             created_at_ms: d.created_at_ms,
             resolved_at_ms: d.resolved_at_ms,
-            superseded_by: d.superseded_by.as_ref().map(|id| id.to_string()),
+            superseded_by: d.superseded_by.clone(),
             project: d.project.clone(),
         }
     }
@@ -426,8 +423,7 @@ impl AgentDetail {
         AgentDetail {
             agent_id: summary.agent_id.clone(),
             agent_name: summary.agent_name.clone(),
-            crew_id: String::new(),
-            job_id: job.id.clone(),
+            owner: summary.owner.clone(),
             job_name: job.name.clone(),
             step_name: summary.step_name.clone(),
             project: summary.project.clone(),
@@ -448,10 +444,9 @@ impl AgentDetail {
 impl From<&Crew> for AgentDetail {
     fn from(crew: &Crew) -> Self {
         AgentDetail {
-            agent_id: crew.agent_id.clone().unwrap_or_default(),
+            agent_id: crew.agent_id.as_ref().map(AgentId::new).unwrap_or_default(),
             agent_name: Some(crew.agent_name.clone()),
-            crew_id: crew.id.clone(),
-            job_id: String::new(),
+            owner: CrewId::new(&crew.id).into(),
             job_name: crew.command_name.clone(),
             step_name: String::new(),
             project: crew.project.clone(),
@@ -472,10 +467,9 @@ impl From<&Crew> for AgentDetail {
 impl From<&Crew> for AgentSummary {
     fn from(crew: &Crew) -> Self {
         AgentSummary {
-            job_id: String::new(),
-            crew_id: crew.id.clone(),
+            owner: CrewId::new(&crew.id).into(),
             step_name: String::new(),
-            agent_id: crew.agent_id.clone().unwrap_or_default(),
+            agent_id: crew.agent_id.as_ref().map(AgentId::new).unwrap_or_default(),
             agent_name: Some(crew.agent_name.clone()),
             project: crew.project.clone(),
             status: crew.status.to_string(),

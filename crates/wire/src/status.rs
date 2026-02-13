@@ -6,7 +6,8 @@
 use std::path::PathBuf;
 
 use oj_core::{
-    Breadcrumb, BreadcrumbAgent, CronRecord, Job, MetricsHealth, StepStatusKind, WorkerRecord,
+    AgentId, Breadcrumb, BreadcrumbAgent, CronRecord, Job, JobId, MetricsHealth, OwnerId,
+    StepStatusKind, WorkerRecord,
 };
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +52,7 @@ pub struct ProjectStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobStatusEntry {
-    pub id: String,
+    pub id: JobId,
     pub name: String,
     pub kind: String,
     pub step: String,
@@ -77,7 +78,7 @@ pub struct QueueStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentStatusEntry {
-    pub agent_id: String,
+    pub agent_id: AgentId,
     pub agent_name: String,
     pub command_name: String,
     pub status: String,
@@ -86,7 +87,7 @@ pub struct AgentStatusEntry {
 /// Summary of an orphaned job detected from a breadcrumb file
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrphanSummary {
-    pub job_id: String,
+    pub job_id: JobId,
     pub project: String,
     pub kind: String,
     pub name: String,
@@ -100,7 +101,7 @@ pub struct OrphanSummary {
 /// Agent info from an orphaned job's breadcrumb
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OrphanAgent {
-    pub agent_id: String,
+    pub agent_id: AgentId,
     pub session_name: Option<String>,
     pub log_path: PathBuf,
 }
@@ -108,7 +109,7 @@ pub struct OrphanAgent {
 /// Job entry for prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobEntry {
-    pub id: String,
+    pub id: JobId,
     pub name: String,
     pub step: String,
 }
@@ -116,8 +117,8 @@ pub struct JobEntry {
 /// Agent entry for prune responses
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentEntry {
-    pub agent_id: String,
-    pub job_id: String,
+    pub agent_id: AgentId,
+    pub owner: OwnerId,
     pub step_name: String,
 }
 /// Worker entry for prune responses
@@ -165,7 +166,7 @@ pub struct ProjectSummary {
 
 impl From<&Job> for JobEntry {
     fn from(p: &Job) -> Self {
-        JobEntry { id: p.id.clone(), name: p.name.clone(), step: p.step.clone() }
+        JobEntry { id: JobId::new(&p.id), name: p.name.clone(), step: p.step.clone() }
     }
 }
 
@@ -217,7 +218,7 @@ impl JobStatusEntry {
         let last_activity_ms =
             p.step_history.last().map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms)).unwrap_or(0);
         JobStatusEntry {
-            id: p.id.clone(),
+            id: JobId::new(&p.id),
             name: p.name.clone(),
             kind: p.kind.clone(),
             step: p.step.clone(),
@@ -233,7 +234,7 @@ impl JobStatusEntry {
 impl From<&BreadcrumbAgent> for OrphanAgent {
     fn from(a: &BreadcrumbAgent) -> Self {
         OrphanAgent {
-            agent_id: a.agent_id.clone(),
+            agent_id: AgentId::new(&a.agent_id),
             session_name: a.session_name.clone(),
             log_path: a.log_path.clone(),
         }
@@ -243,7 +244,7 @@ impl From<&BreadcrumbAgent> for OrphanAgent {
 impl From<&Breadcrumb> for OrphanSummary {
     fn from(bc: &Breadcrumb) -> Self {
         OrphanSummary {
-            job_id: bc.job_id.clone(),
+            job_id: JobId::new(&bc.job_id),
             project: bc.project.clone(),
             kind: bc.kind.clone(),
             name: bc.name.clone(),

@@ -63,7 +63,7 @@ pub(crate) async fn handle_workspace_drop(
     let dropped: Vec<WorkspaceEntry> = workspaces_to_drop
         .iter()
         .map(|(id, path, branch)| WorkspaceEntry {
-            id: id.clone(),
+            id: WorkspaceId::new(id),
             path: path.clone(),
             branch: branch.clone(),
         })
@@ -201,7 +201,7 @@ pub(crate) async fn workspace_prune_inner(
             }
         }
 
-        to_prune.push(WorkspaceEntry { id, path, branch: None });
+        to_prune.push(WorkspaceEntry { id: WorkspaceId::new(&id), path, branch: None });
     }
 
     // Phase 2: Find orphaned state entries (in daemon state but directory missing)
@@ -263,7 +263,7 @@ pub(crate) async fn workspace_prune_inner(
             }
 
             // Emit WorkspaceDeleted to remove from daemon state
-            emit(event_bus, Event::WorkspaceDeleted { id: WorkspaceId::new(&ws.id) })?;
+            emit(event_bus, Event::WorkspaceDeleted { id: ws.id.clone() })?;
         }
     }
 
