@@ -16,7 +16,7 @@ use oj_core::{AgentId, CrewId, FakeClock, JobId, OwnerId, TimerId, WorkspaceId};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
-type TestExecutor = Executor<FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
+type TestExecutor = Executor<FakeClock>;
 
 struct TestHarness {
     executor: TestExecutor,
@@ -32,8 +32,8 @@ async fn setup() -> TestHarness {
 
     let executor = Executor::new(
         RuntimeDeps {
-            agents: agents.clone(),
-            notifier: notifier.clone(),
+            agents: Arc::new(agents.clone()),
+            notifier: Arc::new(notifier.clone()),
             state: Arc::new(Mutex::new(MaterializedState::default())),
             workspace: workspace_adapter(false),
         },

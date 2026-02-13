@@ -3,7 +3,7 @@
 
 //! Crew lifecycle handling
 
-use crate::adapters::{AgentAdapter, AgentReconnectConfig, NotifyAdapter};
+use crate::adapters::AgentReconnectConfig;
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::Runtime;
 use oj_core::{
@@ -24,12 +24,7 @@ pub(crate) struct SpawnAgentParams<'a> {
     pub resume: bool,
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Terminate a crew with the given status.
     ///
     /// Emits a status change event, cancels the liveness timer, kills the
@@ -80,12 +75,7 @@ where
     }
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Spawn a standalone agent for a command run.
     ///
     /// Builds spawn effects using the agent definition, registers the agent→run

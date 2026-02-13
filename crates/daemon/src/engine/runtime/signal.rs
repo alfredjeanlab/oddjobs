@@ -4,15 +4,9 @@
 //! Agent terminal capture and session transcript archival.
 
 use super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use oj_core::{AgentId, Clock, Crew, Job};
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Capture agent terminal output and save to the agent's log directory.
     ///
     /// Best-effort: failures are logged but do not interrupt signal handling.

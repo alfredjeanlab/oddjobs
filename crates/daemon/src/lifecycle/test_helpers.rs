@@ -19,7 +19,7 @@ pub(crate) use crate::event_bus::{EventBus, EventReader};
 
 use std::path::Path;
 
-use crate::adapters::{workspace_adapter, DesktopNotifyAdapter, RuntimeRouter};
+use crate::adapters::{notify_adapter, workspace_adapter, RuntimeRouter};
 use crate::engine::{Runtime, RuntimeConfig, RuntimeDeps};
 use oj_core::{StepOutcome, StepRecord};
 use oj_runbook::{JobDef, RunDirective, Runbook, StepDef};
@@ -114,12 +114,13 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
 
     // Create real adapters (won't be called for ShellExited -> completion path)
     let agent_adapter = RuntimeRouter::new(dir_path.to_path_buf());
+    let agent_arc: Arc<dyn crate::adapters::AgentAdapter> = Arc::new(agent_adapter);
 
     let (internal_tx, _internal_rx) = mpsc::channel::<Event>(100);
     let runtime = Arc::new(Runtime::new(
         RuntimeDeps {
-            agents: agent_adapter,
-            notifier: DesktopNotifyAdapter::new(),
+            agents: Arc::clone(&agent_arc),
+            notifier: notify_adapter(),
             state: Arc::clone(&state),
             workspace: workspace_adapter(false),
         },
@@ -147,6 +148,7 @@ pub async fn setup_daemon_with_job_and_reader() -> (DaemonState, EventReader, Pa
         state,
         runtime,
         event_bus,
+        agent: agent_arc,
         start_time: std::time::Instant::now(),
         orphans: Arc::new(Mutex::new(Vec::new())),
         metrics_health: Arc::new(Mutex::new(oj_core::MetricsHealth::default())),
@@ -179,8 +181,8 @@ pub fn setup_reconcile_runtime(dir_path: &Path) -> Arc<DaemonRuntime> {
 
     Arc::new(Runtime::new(
         RuntimeDeps {
-            agents: agent_adapter,
-            notifier: DesktopNotifyAdapter::new(),
+            agents: Arc::new(agent_adapter),
+            notifier: notify_adapter(),
             state: Arc::clone(&state),
             workspace: workspace_adapter(false),
         },

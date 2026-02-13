@@ -4,7 +4,6 @@
 //! Cron timer firing, shell job creation, and runbook refresh
 
 use super::{append_cron_log, CronShellJobParams, CronStatus};
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::agent::SpawnAgentParams;
 use crate::engine::runtime::handlers::CreateJobParams;
@@ -14,12 +13,7 @@ use oj_core::{
 };
 use std::collections::HashMap;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Handle a cron timer firing: spawn job/agent and reschedule timer.
     pub(crate) async fn handle_cron_timer_fired(
         &self,

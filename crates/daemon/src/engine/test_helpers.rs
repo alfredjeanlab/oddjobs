@@ -19,7 +19,7 @@ use tempfile::tempdir;
 use tokio::sync::mpsc;
 
 /// Convenience alias for the fully-typed test runtime.
-pub(crate) type TestRuntime = Runtime<FakeAgentAdapter, FakeNotifyAdapter, FakeClock>;
+pub(crate) type TestRuntime = Runtime<FakeClock>;
 
 /// Test context holding the runtime, adapters, and project path.
 pub(crate) struct TestContext {
@@ -46,8 +46,8 @@ pub(crate) async fn setup_with_runbook(runbook_content: &str) -> TestContext {
     let (event_tx, event_rx) = mpsc::channel(100);
     let runtime = Runtime::new(
         RuntimeDeps {
-            agents: agents.clone(),
-            notifier: notifier.clone(),
+            agents: Arc::new(agents.clone()),
+            notifier: Arc::new(notifier.clone()),
             state: Arc::new(Mutex::new(MaterializedState::default())),
             workspace: workspace_adapter(false),
         },

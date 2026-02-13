@@ -4,7 +4,6 @@
 //! Worker start/stop lifecycle handling
 
 use super::{WorkerState, WorkerStatus};
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::Runtime;
 use crate::storage::QueueItemStatus;
@@ -14,12 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Duration;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_worker_started(
         &self,
         worker_name: &str,

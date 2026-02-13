@@ -28,7 +28,7 @@ pub(crate) mod remote;
 mod router;
 
 pub use coop::LocalAdapter;
-pub use router::RuntimeRouter;
+pub use router::{CoopInfo, RuntimeRouter};
 
 /// Configuration for reconnecting to an existing agent session
 #[derive(Debug, Clone)]
@@ -184,7 +184,7 @@ impl AgentHandle {
 
 /// Adapter for managing AI agents
 #[async_trait]
-pub trait AgentAdapter: Clone + Send + Sync + 'static {
+pub trait AgentAdapter: Send + Sync + 'static {
     /// Spawn a new agent
     ///
     /// This method:
@@ -267,6 +267,26 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
     ///
     /// Returns `None` if the agent is unreachable or has no usage data.
     async fn fetch_usage(&self, agent_id: &AgentId) -> Option<UsageData>;
+
+    /// Get coop connection info for agent attach proxying (infrastructure).
+    ///
+    /// Returns connection information (URL, auth token) for proxying attach
+    /// requests to this agent's coop process. Only routers implement this.
+    ///
+    /// Default: None (not a router, attach not supported)
+    fn get_coop_host(&self, _agent_id: &AgentId) -> Option<CoopInfo> {
+        None
+    }
+
+    /// Check if this adapter only supports remote execution (infrastructure).
+    ///
+    /// Used to determine workspace adapter selection at startup.
+    /// Returns `true` for Kubernetes (no local filesystem).
+    ///
+    /// Default: false (supports local execution)
+    fn is_remote_only(&self) -> bool {
+        false
+    }
 }
 
 /// Cumulative token/cost usage data from an agent session.

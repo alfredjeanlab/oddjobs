@@ -4,7 +4,6 @@
 //! Cron event handling: start, stop, and one-shot execution
 
 use super::append_cron_log;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::agent::SpawnAgentParams;
 use crate::engine::runtime::handlers::CreateJobParams;
@@ -15,12 +14,7 @@ use std::collections::HashMap;
 pub(crate) use super::{CronOnceParams, CronStartedParams};
 use super::{CronShellJobParams, CronState, CronStatus};
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_cron_started(
         &self,
         params: CronStartedParams<'_>,

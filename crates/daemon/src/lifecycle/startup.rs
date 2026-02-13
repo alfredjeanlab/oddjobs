@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use parking_lot::Mutex;
 
-use crate::adapters::{workspace_adapter, DesktopNotifyAdapter, RuntimeRouter};
+use crate::adapters::{notify_adapter, workspace_adapter, AgentAdapter, RuntimeRouter};
 use crate::engine::breadcrumb;
 use crate::engine::{AgentLogger, Runtime, RuntimeConfig, RuntimeDeps, UsageMetricsCollector};
 use crate::storage::{load_snapshot, MaterializedState, Wal};
@@ -248,8 +248,8 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     let workspace = workspace_adapter(agent_adapter.is_remote_only());
     let runtime = Arc::new(Runtime::new(
         RuntimeDeps {
-            agents: agent_adapter.clone(),
-            notifier: DesktopNotifyAdapter::new(),
+            agents: Arc::new(agent_adapter.clone()),
+            notifier: notify_adapter(),
             state: Arc::clone(&state),
             workspace,
         },
@@ -261,7 +261,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
     // 10. Spawn usage metrics collector
     let metrics_health = UsageMetricsCollector::spawn_collector(
         Arc::clone(&state),
-        agent_adapter.clone(),
+        Arc::new(agent_adapter.clone()),
         config.state_dir.join("metrics"),
     );
 
@@ -288,6 +288,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
             state,
             runtime: Arc::clone(&runtime),
             event_bus,
+            agent: Arc::new(agent_adapter),
             start_time: Instant::now(),
             orphans,
             metrics_health,

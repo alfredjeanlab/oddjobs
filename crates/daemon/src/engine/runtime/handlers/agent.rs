@@ -4,7 +4,6 @@
 //! Agent state change handling
 
 use super::super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::lifecycle::RunLifecycle;
 use crate::engine::monitor::MonitorState;
@@ -41,12 +40,7 @@ impl OwnerCtx {
     }
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Look up and validate an agent's owner context by agent_id.
     ///
     /// Returns a resolved entity if found and valid for processing,

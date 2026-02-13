@@ -134,7 +134,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_notify = Arc::new(Notify::new());
 
     // Spawn listener task
-    let agent_adapter = daemon.runtime.executor.agents().clone();
     let ctx = Arc::new(listener::ListenCtx {
         event_bus: daemon.event_bus.clone(),
         state: Arc::clone(&daemon.state),
@@ -145,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_time: daemon.start_time,
         shutdown: Arc::clone(&shutdown_notify),
         auth_token: crate::env::auth_token(),
-        agent_adapter: Some(agent_adapter),
+        agent: Arc::clone(&daemon.agent),
     });
     let listener = if let Some(port) = crate::env::tcp_port() {
         let tcp_listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.map_err(|e| {

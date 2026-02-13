@@ -34,7 +34,7 @@ use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::adapters::RuntimeRouter;
+use crate::adapters::AgentAdapter;
 use crate::event_bus::EventBus;
 use oj_core::{Breadcrumb, MetricsHealth};
 
@@ -54,8 +54,8 @@ pub(crate) struct ListenCtx {
     /// Auth token for TCP connections (from `OJ_AUTH_TOKEN`).
     /// When set, TCP clients must provide this token in the Hello handshake.
     pub auth_token: Option<String>,
-    /// Agent adapter for looking up coop connection info.
-    pub agent_adapter: Option<RuntimeRouter>,
+    /// Agent adapter for infrastructure (attach proxying via get_coop_host)
+    pub agent: Arc<dyn AgentAdapter>,
 }
 
 /// Listener task for accepting socket connections.
@@ -530,7 +530,7 @@ fn make_listen_ctx(event_bus: crate::event_bus::EventBus, dir: &std::path::Path)
         start_time: Instant::now(),
         shutdown: Arc::new(Notify::new()),
         auth_token: None,
-        agent_adapter: None,
+        agent: std::sync::Arc::new(crate::adapters::FakeAgentAdapter::new()),
     }
 }
 

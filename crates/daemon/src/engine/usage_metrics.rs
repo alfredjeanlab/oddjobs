@@ -61,9 +61,9 @@ pub struct UsageRecord {
 }
 
 /// Background metrics collector.
-pub struct UsageMetricsCollector<A> {
+pub struct UsageMetricsCollector {
     state: Arc<Mutex<MaterializedState>>,
-    agents: A,
+    agents: Arc<dyn AgentAdapter>,
     metrics_dir: PathBuf,
     /// Metadata enrichment: agent_id -> (agent_kind, job_id, job_kind, job_step, project, status)
     agent_meta: std::collections::HashMap<String, AgentMeta>,
@@ -81,13 +81,13 @@ struct AgentMeta {
     status: String,
 }
 
-impl<A: AgentAdapter> UsageMetricsCollector<A> {
+impl UsageMetricsCollector {
     /// Spawn the background metrics collector task.
     ///
     /// Returns a shared health handle for the listener to query.
     pub fn spawn_collector(
         state: Arc<Mutex<MaterializedState>>,
-        agents: A,
+        agents: Arc<dyn AgentAdapter>,
         metrics_dir: PathBuf,
     ) -> Arc<Mutex<MetricsHealth>> {
         let health = Arc::new(Mutex::new(MetricsHealth::default()));

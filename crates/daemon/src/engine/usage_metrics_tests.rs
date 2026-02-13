@@ -82,7 +82,7 @@ fn write_records_produces_valid_jsonl() {
 
     let collector = UsageMetricsCollector {
         state: Arc::new(Mutex::new(MaterializedState::default())),
-        agents: StubAdapter,
+        agents: Arc::new(StubAdapter),
         metrics_dir: metrics_dir.clone(),
         agent_meta: HashMap::new(),
         cached_usage: HashMap::new(),
@@ -184,7 +184,7 @@ fn rotation_shifts_files_and_writes_baseline() {
 
     let collector = UsageMetricsCollector {
         state: Arc::new(Mutex::new(MaterializedState::default())),
-        agents: StubAdapter,
+        agents: Arc::new(StubAdapter),
         metrics_dir: metrics_dir.clone(),
         agent_meta: HashMap::new(),
         cached_usage,

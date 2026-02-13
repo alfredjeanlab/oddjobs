@@ -4,7 +4,6 @@
 //! Shared job creation logic used by both command and worker handlers.
 
 use super::super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use oj_core::{Clock, Effect, Event, JobId};
 use oj_runbook::{NotifyConfig, Runbook};
@@ -24,12 +23,7 @@ pub(crate) struct CreateJobParams {
     pub cron_name: Option<String>,
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn create_and_start_job(
         &self,
         params: CreateJobParams,

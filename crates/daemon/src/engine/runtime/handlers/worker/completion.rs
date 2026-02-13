@@ -4,19 +4,13 @@
 //! Job completion → queue item status updates
 
 use super::WorkerStatus;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::Runtime;
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, JobId, OwnerId, TimerId};
 use oj_runbook::QueueType;
 use std::time::Duration;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Check if a completed job belongs to a worker and trigger re-poll if so.
     /// For persisted queues, also emits queue:completed or queue:failed events.
     pub(crate) async fn check_worker_job_complete(

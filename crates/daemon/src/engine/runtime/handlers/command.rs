@@ -5,7 +5,6 @@
 
 use super::super::Runtime;
 use super::CreateJobParams;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::agent::SpawnAgentParams;
 use oj_core::{Clock, Effect, Event, OwnerId};
@@ -25,12 +24,7 @@ pub(crate) struct HandleCommandParams<'a> {
     pub args: &'a HashMap<String, String>,
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_command(
         &self,
         params: HandleCommandParams<'_>,

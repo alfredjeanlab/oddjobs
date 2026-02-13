@@ -53,7 +53,7 @@ impl RemoteCoopClient {
     }
 
     /// Get the TCP address and auth token for a registered agent.
-    pub(crate) fn get_coop_info(&self, agent_id: &AgentId) -> Option<(String, String)> {
+    pub(crate) fn get_coop_host(&self, agent_id: &AgentId) -> Option<(String, String)> {
         let agents = self.agents.lock();
         agents.get(agent_id).map(|a| (a.addr.clone(), a.auth_token.clone()))
     }

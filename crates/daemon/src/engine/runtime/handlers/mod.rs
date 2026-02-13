@@ -16,16 +16,10 @@ pub(crate) use job_create::CreateJobParams;
 use self::command::HandleCommandParams;
 use self::cron::{CronOnceParams, CronStartedParams};
 use super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event};
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Handle an incoming event and return any produced events
     pub async fn handle_event(&self, event: Event) -> Result<Vec<Event>, RuntimeError> {
         let mut result_events = Vec::new();

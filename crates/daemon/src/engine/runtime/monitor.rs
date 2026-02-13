@@ -3,7 +3,6 @@
 
 use super::Runtime;
 use crate::adapters::AgentReconnectConfig;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::decision::{EscalationDecisionBuilder, EscalationTrigger};
 use crate::engine::error::RuntimeError;
 use crate::engine::lifecycle::RunLifecycle;
@@ -15,12 +14,7 @@ use oj_core::{
 };
 use std::collections::HashMap;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Reconnect monitoring for an agent that survived a daemon restart.
     ///
     /// Registers the agent→job mapping and calls reconnect on the adapter.

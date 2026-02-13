@@ -54,16 +54,16 @@ struct RunState<'a> {
 }
 
 /// Runtime adapter dependencies
-pub struct RuntimeDeps<A, N> {
-    pub agents: A,
-    pub notifier: N,
+pub struct RuntimeDeps {
+    pub agents: Arc<dyn AgentAdapter>,
+    pub notifier: Arc<dyn NotifyAdapter>,
     pub state: Arc<Mutex<MaterializedState>>,
     pub workspace: Arc<dyn WorkspaceAdapter>,
 }
 
 /// Runtime that coordinates the system
-pub struct Runtime<A, N, C: Clock> {
-    pub executor: Executor<A, N, C>,
+pub struct Runtime<C: Clock> {
+    pub executor: Executor<C>,
     pub(crate) state_dir: PathBuf,
     pub(crate) logger: JobLogger,
     pub(crate) worker_logger: WorkerLogger,
@@ -75,15 +75,10 @@ pub struct Runtime<A, N, C: Clock> {
     pub(crate) cron_states: Mutex<HashMap<String, CronState>>,
 }
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Create a new runtime
     pub fn new(
-        deps: RuntimeDeps<A, N>,
+        deps: RuntimeDeps,
         clock: C,
         config: RuntimeConfig,
         event_tx: mpsc::Sender<oj_core::Event>,
@@ -450,12 +445,7 @@ where
 }
 
 #[cfg(test)]
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub fn jobs(&self) -> HashMap<String, Job> {
         self.lock_state(|state| state.jobs.clone())
     }

@@ -74,8 +74,8 @@ mod adapter {
         }
 
         /// Get the TCP address and auth token for a Kubernetes agent.
-        pub fn get_coop_info(&self, agent_id: &AgentId) -> Option<(String, String)> {
-            self.remote.get_coop_info(agent_id)
+        pub fn get_coop_host(&self, agent_id: &AgentId) -> Option<(String, String)> {
+            self.remote.get_coop_host(agent_id)
         }
 
         /// Kubernetes project for agent pods.

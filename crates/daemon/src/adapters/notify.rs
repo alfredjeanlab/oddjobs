@@ -10,7 +10,7 @@ pub enum NotifyError {}
 
 /// Adapter for sending notifications
 #[async_trait]
-pub trait NotifyAdapter: Clone + Send + Sync + 'static {
+pub trait NotifyAdapter: Send + Sync + 'static {
     /// Send a notification with a title and message body
     async fn notify(&self, title: &str, message: &str) -> Result<(), NotifyError>;
 }
@@ -60,6 +60,11 @@ impl NotifyAdapter for DesktopNotifyAdapter {
         });
         Ok(())
     }
+}
+
+/// Create a desktop notification adapter
+pub fn notify_adapter() -> std::sync::Arc<dyn NotifyAdapter> {
+    std::sync::Arc::new(DesktopNotifyAdapter::new())
 }
 
 #[cfg(test)]

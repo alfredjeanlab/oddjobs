@@ -4,7 +4,6 @@
 //! Job lifecycle management
 
 use super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::steps;
 use oj_core::{Clock, Effect, Event, Job, JobId, TimerId};
@@ -12,12 +11,7 @@ use oj_runbook::{NotifyConfig, RunDirective};
 use std::collections::HashMap;
 use std::path::Path;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn start_step(
         &self,
         job_id: &JobId,

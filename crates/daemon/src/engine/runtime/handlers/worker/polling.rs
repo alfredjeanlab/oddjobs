@@ -4,19 +4,13 @@
 //! Queue polling: wake, poll persisted/external queues, poll timer
 
 use super::WorkerStatus;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::Runtime;
 use crate::storage::{QueueItemStatus, QueuePollMeta};
 use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, TimerId};
 use oj_runbook::QueueType;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_worker_wake(
         &self,
         worker_key: &str,

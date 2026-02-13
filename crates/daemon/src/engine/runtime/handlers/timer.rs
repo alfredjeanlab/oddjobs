@@ -4,7 +4,6 @@
 //! Timer event handling
 
 use super::super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::monitor::MonitorState;
 use crate::engine::ActionContext;
@@ -13,12 +12,7 @@ use oj_core::{
 };
 use std::time::Duration;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     /// Route timer events to the appropriate handler
     pub(crate) async fn handle_timer(&self, id: &TimerId) -> Result<Vec<Event>, RuntimeError> {
         match TimerKind::parse(id.as_str()) {

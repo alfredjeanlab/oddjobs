@@ -4,7 +4,6 @@
 //! Queue item dispatch: take items from queue and create jobs
 
 use super::WorkerStatus;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use crate::engine::runtime::handlers::CreateJobParams;
 use crate::engine::runtime::Runtime;
@@ -16,12 +15,7 @@ use oj_runbook::QueueType;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_worker_poll_complete(
         &self,
         worker_name: &str,

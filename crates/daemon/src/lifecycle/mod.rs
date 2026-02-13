@@ -15,7 +15,6 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use std::time::Instant;
 
-use crate::adapters::{DesktopNotifyAdapter, RuntimeRouter};
 use crate::engine::Runtime;
 use crate::storage::{Checkpointer, MaterializedState};
 use oj_core::{Breadcrumb, Event, MetricsHealth, SystemClock};
@@ -27,7 +26,7 @@ use tracing::{info, warn};
 use crate::event_bus::{EventBus, EventReader};
 
 /// Daemon runtime with concrete adapter types
-pub type DaemonRuntime = Runtime<RuntimeRouter, DesktopNotifyAdapter, SystemClock>;
+pub type DaemonRuntime = Runtime<SystemClock>;
 
 /// Daemon configuration
 #[derive(Debug, Clone)]
@@ -89,6 +88,8 @@ pub struct DaemonState {
     pub runtime: Arc<DaemonRuntime>,
     /// Event bus for crash recovery
     pub event_bus: EventBus,
+    /// Agent adapter for infrastructure (attach proxying, etc.)
+    pub agent: Arc<dyn crate::adapters::AgentAdapter>,
     /// When daemon started
     pub start_time: Instant,
     /// Orphaned jobs detected from breadcrumbs at startup

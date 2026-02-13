@@ -97,29 +97,6 @@ impl RuntimeRouter {
         self
     }
 
-    /// Get coop connection info for an agent (local socket path or remote TCP address).
-    pub fn get_coop_info(&self, agent_id: &AgentId) -> Option<CoopInfo> {
-        match self.route_for(agent_id) {
-            Some(Route::Kubernetes) => {
-                let (addr, token) = self.k8s.as_ref()?.get_coop_info(agent_id)?;
-                Some(CoopInfo { url: format!("http://{}", addr), auth_token: token, remote: true })
-            }
-            Some(Route::Docker) => {
-                let (addr, token) = self.docker.get_coop_info(agent_id)?;
-                Some(CoopInfo { url: format!("http://{}", addr), auth_token: token, remote: true })
-            }
-            Some(Route::Local) => {
-                let socket_path = self.local.get_coop_socket(agent_id)?;
-                Some(CoopInfo {
-                    url: socket_path.to_string_lossy().to_string(),
-                    auth_token: String::new(),
-                    remote: false,
-                })
-            }
-            None => None,
-        }
-    }
-
     fn route_for(&self, agent_id: &AgentId) -> Option<Route> {
         self.routes.lock().get(agent_id).copied()
     }
@@ -130,14 +107,6 @@ impl RuntimeRouter {
 
     fn remove_route(&self, agent_id: &AgentId) {
         self.routes.lock().remove(agent_id);
-    }
-
-    /// Whether the daemon is running in remote-only mode (e.g. inside a k8s pod).
-    ///
-    /// When true, agent pods provision their own code — the daemon should skip
-    /// local filesystem workspace operations (worktree creation, deletion).
-    pub fn is_remote_only(&self) -> bool {
-        self.k8s.is_some()
     }
 }
 
@@ -291,5 +260,36 @@ impl AgentAdapter for RuntimeRouter {
 
     async fn fetch_usage(&self, agent_id: &AgentId) -> Option<crate::adapters::agent::UsageData> {
         dispatch!(self, agent_id, fetch_usage(agent_id) or None)
+    }
+
+    /// Get coop connection info for an agent (local socket path or remote TCP address).
+    fn get_coop_host(&self, agent_id: &AgentId) -> Option<CoopInfo> {
+        match self.route_for(agent_id) {
+            Some(Route::Kubernetes) => {
+                let (addr, token) = self.k8s.as_ref()?.get_coop_host(agent_id)?;
+                Some(CoopInfo { url: format!("http://{}", addr), auth_token: token, remote: true })
+            }
+            Some(Route::Docker) => {
+                let (addr, token) = self.docker.get_coop_host(agent_id)?;
+                Some(CoopInfo { url: format!("http://{}", addr), auth_token: token, remote: true })
+            }
+            Some(Route::Local) => {
+                let socket_path = self.local.get_coop_socket(agent_id)?;
+                Some(CoopInfo {
+                    url: socket_path.to_string_lossy().to_string(),
+                    auth_token: String::new(),
+                    remote: false,
+                })
+            }
+            None => None,
+        }
+    }
+
+    /// Whether the daemon is running in remote-only mode (e.g. inside a k8s pod).
+    ///
+    /// When true, agent pods provision their own code — the daemon should skip
+    /// local filesystem workspace operations (worktree creation, deletion).
+    fn is_remote_only(&self) -> bool {
+        self.k8s.is_some()
     }
 }

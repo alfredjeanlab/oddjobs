@@ -46,7 +46,7 @@ fn handle_query(
         start_time,
         shutdown: Arc::new(tokio::sync::Notify::new()),
         auth_token: None,
-        agent_adapter: None,
+        agent: std::sync::Arc::new(crate::adapters::FakeAgentAdapter::new()),
     };
     real_handle_query(&ctx, query)
 }

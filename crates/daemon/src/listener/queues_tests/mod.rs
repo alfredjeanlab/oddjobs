@@ -29,7 +29,7 @@ fn make_ctx(event_bus: EventBus, state: Arc<Mutex<MaterializedState>>) -> super:
         start_time: std::time::Instant::now(),
         shutdown: Arc::new(tokio::sync::Notify::new()),
         auth_token: None,
-        agent_adapter: None,
+        agent: std::sync::Arc::new(crate::adapters::FakeAgentAdapter::new()),
     }
 }
 

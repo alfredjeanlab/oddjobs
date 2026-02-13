@@ -30,9 +30,9 @@ pub enum ExecuteError {
 }
 
 /// Executes effects using the configured adapters
-pub struct Executor<A, N, C: Clock> {
-    pub(crate) agents: A,
-    notifier: N,
+pub struct Executor<C: Clock> {
+    pub(crate) agents: Arc<dyn AgentAdapter>,
+    notifier: Arc<dyn NotifyAdapter>,
     state: Arc<Mutex<MaterializedState>>,
     scheduler: Arc<Mutex<Scheduler>>,
     clock: C,
@@ -42,15 +42,10 @@ pub struct Executor<A, N, C: Clock> {
     workspace: Arc<dyn WorkspaceAdapter>,
 }
 
-impl<A, N, C> Executor<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Executor<C> {
     /// Create a new executor
     pub fn new(
-        deps: RuntimeDeps<A, N>,
+        deps: RuntimeDeps,
         scheduler: Arc<Mutex<Scheduler>>,
         clock: C,
         event_tx: mpsc::Sender<Event>,
@@ -69,11 +64,6 @@ where
     /// Get a reference to the clock
     pub fn clock(&self) -> &C {
         &self.clock
-    }
-
-    /// Get a reference to the agent adapter.
-    pub fn agents(&self) -> &A {
-        &self.agents
     }
 
     /// Execute a single effect with tracing

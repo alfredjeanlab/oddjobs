@@ -4,7 +4,6 @@
 //! Job lifecycle event handling (resume, cancel, workspace, shell)
 
 use super::super::Runtime;
-use crate::adapters::{AgentAdapter, NotifyAdapter};
 use crate::engine::error::RuntimeError;
 use oj_core::{
     AgentId, Clock, CrewStatus, Effect, Event, JobId, OwnerId, StepOutcome, StepStatus, TimerId,
@@ -12,12 +11,7 @@ use oj_core::{
 };
 use std::collections::HashMap;
 
-impl<A, N, C> Runtime<A, N, C>
-where
-    A: AgentAdapter,
-    N: NotifyAdapter,
-    C: Clock,
-{
+impl<C: Clock> Runtime<C> {
     pub(crate) async fn handle_job_resume(
         &self,
         job_id: &JobId,

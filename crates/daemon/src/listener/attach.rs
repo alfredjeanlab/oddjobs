@@ -50,10 +50,7 @@ where
     };
 
     // Resolve coop connection info — local socket or remote TCP
-    let coop_info = ctx.agent_adapter.as_ref().and_then(|adapter| {
-        let agent_id_key = oj_core::AgentId::new(&full_agent_id);
-        adapter.get_coop_info(&agent_id_key)
-    });
+    let coop_info = ctx.agent.get_coop_host(&full_agent_id);
 
     match coop_info {
         Some(info) if info.remote => {
@@ -65,7 +62,7 @@ where
 
             info!(agent_id = %full_agent_id, addr = %addr, "proxying remote attach");
 
-            let resp = Response::AgentAttachReady { id: full_agent_id.clone() };
+            let resp = Response::AgentAttachReady { id: full_agent_id.as_str().to_string() };
             protocol::write_response(&mut writer, &resp, super::ipc_timeout()).await?;
 
             match crate::adapters::ws_proxy_bridge_tcp(addr, token, &mut reader, &mut writer).await
@@ -82,7 +79,7 @@ where
             // Local agent — return socket path for direct attach
             let socket_path = match coop_info {
                 Some(info) => info.url,
-                None => oj_core::agent_dir(&ctx.state_dir, &full_agent_id)
+                None => oj_core::agent_dir(&ctx.state_dir, full_agent_id.as_str())
                     .join("coop.sock")
                     .to_string_lossy()
                     .to_string(),
@@ -90,7 +87,8 @@ where
 
             info!(agent_id = %full_agent_id, "local attach via {}", socket_path);
 
-            let resp = Response::AgentAttachLocal { id: full_agent_id, socket_path };
+            let resp =
+                Response::AgentAttachLocal { id: full_agent_id.as_str().to_string(), socket_path };
             protocol::write_response(&mut writer, &resp, super::ipc_timeout()).await?;
         }
     }
@@ -101,15 +99,22 @@ where
 /// Resolve an agent ID prefix to a full agent ID.
 ///
 /// Checks the unified agents map first, then falls back to crew.
-fn resolve_agent_id(prefix: &str, state: &crate::storage::MaterializedState) -> Option<String> {
+fn resolve_agent_id(
+    prefix: &str,
+    state: &crate::storage::MaterializedState,
+) -> Option<oj_core::AgentId> {
     // Unified agents map
     state
         .agents
         .values()
         .find(|a| a.agent_id.starts_with(prefix))
-        .map(|a| a.agent_id.clone())
+        .map(|a| oj_core::AgentId::new(&a.agent_id))
         .or_else(|| {
             // Crew fallback — match by crew ID, return agent UUID
-            state.crew.values().find(|r| r.id.starts_with(prefix)).and_then(|r| r.agent_id.clone())
+            state
+                .crew
+                .values()
+                .find(|r| r.id.starts_with(prefix))
+                .and_then(|r| r.agent_id.as_ref().map(|id| oj_core::AgentId::new(id)))
         })
 }
