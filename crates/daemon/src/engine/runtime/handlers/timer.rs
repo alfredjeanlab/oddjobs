@@ -46,7 +46,7 @@ impl<C: Clock> Runtime<C> {
         if is_running {
             self.executor
                 .execute(Effect::SetTimer {
-                    id: TimerId::liveness(&owner),
+                    id: TimerId::liveness(owner),
                     duration: crate::engine::spawn::LIVENESS_INTERVAL,
                 })
                 .await?;
@@ -54,7 +54,7 @@ impl<C: Clock> Runtime<C> {
             tracing::info!(%owner, "agent process dead, scheduling deferred exit");
             self.executor
                 .execute(Effect::SetTimer {
-                    id: TimerId::exit_deferred(&owner),
+                    id: TimerId::exit_deferred(owner),
                     duration: Duration::from_secs(5),
                 })
                 .await?;

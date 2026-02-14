@@ -92,7 +92,7 @@ pub(super) async fn handle_run_command(
 
     // Send event to engine
     let event = oj_core::Event::CommandRun {
-        owner: owner.clone(),
+        owner,
         name: name.clone(),
         project_path: project_path.to_path_buf(),
         invoke_dir: invoke_dir.to_path_buf(),
@@ -104,10 +104,8 @@ pub(super) async fn handle_run_command(
     emit(&ctx.event_bus, event)?;
 
     match &owner {
-        OwnerId::Crew(crew_id) => {
-            Ok(Response::CrewStarted { crew_id: crew_id.clone(), agent_name: name })
-        }
-        OwnerId::Job(job_id) => Ok(Response::JobStarted { job_id: job_id.clone(), job_name: name }),
+        OwnerId::Crew(crew_id) => Ok(Response::CrewStarted { crew_id: *crew_id, agent_name: name }),
+        OwnerId::Job(job_id) => Ok(Response::JobStarted { job_id: *job_id, job_name: name }),
     }
 }
 

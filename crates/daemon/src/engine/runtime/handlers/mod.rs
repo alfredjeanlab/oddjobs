@@ -54,17 +54,14 @@ impl<C: Clock> Runtime<C> {
 
             Event::AgentInput { id: agent_id, input } => {
                 self.executor
-                    .execute(Effect::SendToAgent {
-                        agent_id: agent_id.clone(),
-                        input: input.clone(),
-                    })
+                    .execute(Effect::SendToAgent { agent_id: *agent_id, input: input.clone() })
                     .await?;
             }
 
             Event::AgentRespond { id: agent_id, response } => {
                 self.executor
                     .execute(Effect::RespondToAgent {
-                        agent_id: agent_id.clone(),
+                        agent_id: *agent_id,
                         response: response.clone(),
                     })
                     .await?;

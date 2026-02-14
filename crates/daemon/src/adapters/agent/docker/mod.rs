@@ -257,7 +257,7 @@ mod adapter {
 
             // Register agent and start WS bridge
             let mut handle = self.remote.register(
-                config.agent_id.clone(),
+                config.agent_id,
                 addr,
                 auth_token.clone(),
                 event_tx,
@@ -360,13 +360,8 @@ mod adapter {
                 ))
             })?;
 
-            let handle = self.remote.register(
-                config.agent_id.clone(),
-                addr,
-                auth_token,
-                event_tx,
-                config.owner,
-            );
+            let handle =
+                self.remote.register(config.agent_id, addr, auth_token, event_tx, config.owner);
             self.meta
                 .lock()
                 .insert(config.agent_id, DockerMeta { container_name, volume_name: None });

@@ -71,7 +71,7 @@ impl<C: Clock> Runtime<C> {
             let events = self
                 .executor
                 .execute(Effect::Emit {
-                    event: Event::JobAdvanced { id: job_id.clone(), step: resume_step.clone() },
+                    event: Event::JobAdvanced { id: *job_id, step: resume_step.clone() },
                 })
                 .await?;
             result_events.extend(events);
@@ -149,9 +149,7 @@ impl<C: Clock> Runtime<C> {
         workspace_id: &WorkspaceId,
     ) -> Result<Vec<Event>, RuntimeError> {
         // Delete workspace via the standard effect (handles directory removal + state update)
-        self.executor
-            .execute(Effect::DeleteWorkspace { workspace_id: workspace_id.clone() })
-            .await?;
+        self.executor.execute(Effect::DeleteWorkspace { workspace_id: *workspace_id }).await?;
 
         tracing::info!(workspace_id = %workspace_id, "deleted workspace");
         Ok(vec![])
@@ -270,7 +268,7 @@ impl<C: Clock> Runtime<C> {
                 .execute_all(vec![Effect::CreateWorkspace {
                     workspace_id: WorkspaceId::from_string(ws_id),
                     path: job.cwd.clone(),
-                    owner: OwnerId::Job(job_id.clone()),
+                    owner: (*job_id).into(),
                     workspace_type,
                     repo_root,
                     branch,
@@ -450,7 +448,7 @@ impl<C: Clock> Runtime<C> {
                 tracing::error!(crew_id = %crew_id, error = %reason, "standalone agent spawn failed");
 
                 let fail_event = Event::CrewUpdated {
-                    id: crew_id.clone(),
+                    id: *crew_id,
                     status: CrewStatus::Failed,
                     reason: Some(reason.to_string()),
                 };
@@ -511,14 +509,14 @@ impl<C: Clock> Runtime<C> {
 
         // 4. Kill agents (this also stops their watchers)
         for agent_id in &agent_ids {
-            let _ = self.executor.execute(Effect::KillAgent { agent_id: agent_id.clone() }).await;
+            let _ = self.executor.execute(Effect::KillAgent { agent_id: *agent_id }).await;
         }
 
         // 5. Capture terminal + session log before killing session
         self.capture_before_kill_job(&job).await;
 
         // 6. Delete workspace if one exists
-        let ws_id = job.workspace_id.clone().or_else(|| {
+        let ws_id = job.workspace_id.or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
@@ -532,10 +530,8 @@ impl<C: Clock> Runtime<C> {
         if let Some(ws_id) = ws_id {
             let exists = self.lock_state(|s| s.workspaces.contains_key(ws_id.as_str()));
             if exists {
-                let _ = self
-                    .executor
-                    .execute(Effect::DeleteWorkspace { workspace_id: ws_id.clone() })
-                    .await;
+                let _ =
+                    self.executor.execute(Effect::DeleteWorkspace { workspace_id: ws_id }).await;
             }
         }
 

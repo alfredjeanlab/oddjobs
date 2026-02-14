@@ -278,7 +278,7 @@ impl<C: Clock> Runtime<C> {
                         .jobs
                         .get(pid.as_str())
                         .filter(|p| p.is_terminal())
-                        .map(|p| (pid.clone(), p.step.clone()))
+                        .map(|p| (*pid, p.step.clone()))
                 })
                 .collect()
         });
@@ -370,7 +370,7 @@ impl<C: Clock> Runtime<C> {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_key) {
                 if !state.active.contains(&owner) {
-                    state.active.insert(owner.clone());
+                    state.active.insert(owner);
                 }
                 state.items.insert(owner, item_id);
             }

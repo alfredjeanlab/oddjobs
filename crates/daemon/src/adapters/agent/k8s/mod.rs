@@ -247,7 +247,7 @@ mod adapter {
 
             // Register agent and start WS bridge
             let mut handle = self.remote.register(
-                config.agent_id.clone(),
+                config.agent_id,
                 addr,
                 auth_token.clone(),
                 event_tx,
@@ -308,13 +308,8 @@ mod adapter {
                 AgentAdapterError::NotFound(format!("coop not responding in pod {}", pod_name))
             })?;
 
-            let handle = self.remote.register(
-                config.agent_id.clone(),
-                addr,
-                auth_token,
-                event_tx,
-                config.owner,
-            );
+            let handle =
+                self.remote.register(config.agent_id, addr, auth_token, event_tx, config.owner);
             self.meta.lock().insert(config.agent_id, KubeMeta { pod_name, k8s_namespace });
             Ok(handle)
         }

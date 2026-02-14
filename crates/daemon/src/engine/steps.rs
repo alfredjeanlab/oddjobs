@@ -13,7 +13,7 @@ use oj_core::{AgentId, Effect, Event, Job, JobId, TimerId};
 pub fn step_start_effects(job_id: &JobId, step: &str) -> Vec<Effect> {
     vec![Effect::Emit {
         event: Event::StepStarted {
-            job_id: job_id.clone(),
+            job_id: *job_id,
             step: step.to_string(),
             agent_id: None,
             agent_name: None,
@@ -33,11 +33,7 @@ pub fn failure_transition_effects(job: &Job, on_fail: &str, error: &str) -> Vec<
     let job_id = JobId::from_string(&job.id);
     vec![
         Effect::Emit {
-            event: Event::StepFailed {
-                job_id: job_id.clone(),
-                step: job.step.clone(),
-                error: error.to_string(),
-            },
+            event: Event::StepFailed { job_id, step: job.step.clone(), error: error.to_string() },
         },
         Effect::Emit { event: Event::JobAdvanced { id: job_id, step: on_fail.to_string() } },
     ]
@@ -48,14 +44,10 @@ pub fn failure_transition_effects(job: &Job, on_fail: &str, error: &str) -> Vec<
 pub fn failure_after_cleanup_effects(job: &Job, error: &str) -> Vec<Effect> {
     let job_id = JobId::from_string(&job.id);
     let mut effects = vec![
-        Effect::CancelTimer { id: TimerId::liveness(&job_id) },
-        Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) },
-        Effect::Emit {
-            event: Event::StepCompleted { job_id: job_id.clone(), step: job.step.clone() },
-        },
-        Effect::Emit {
-            event: Event::JobAdvanced { id: job_id.clone(), step: "failed".to_string() },
-        },
+        Effect::CancelTimer { id: TimerId::liveness(job_id) },
+        Effect::CancelTimer { id: TimerId::exit_deferred(job_id) },
+        Effect::Emit { event: Event::StepCompleted { job_id, step: job.step.clone() } },
+        Effect::Emit { event: Event::JobAdvanced { id: job_id, step: "failed".to_string() } },
         Effect::Emit {
             event: Event::StepFailed {
                 job_id,
@@ -101,7 +93,7 @@ pub fn cancellation_transition_effects(job: &Job, on_cancel_step: &str) -> Vec<E
     vec![
         Effect::Emit {
             event: Event::StepFailed {
-                job_id: job_id.clone(),
+                job_id,
                 step: job.step.clone(),
                 error: "cancelled".to_string(),
             },
@@ -167,8 +159,8 @@ fn terminal_job_effects(
 ) -> Vec<Effect> {
     let job_id = JobId::from_string(&job.id);
     let mut effects = vec![
-        Effect::CancelTimer { id: TimerId::liveness(&job_id) },
-        Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) },
+        Effect::CancelTimer { id: TimerId::liveness(job_id) },
+        Effect::CancelTimer { id: TimerId::exit_deferred(job_id) },
     ];
 
     if force_advance || !job.is_terminal() {

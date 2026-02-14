@@ -173,7 +173,7 @@ async fn reconcile_job_dead_session_uses_step_history_agent_id() {
     let dir_path = dir.path().to_owned();
     let runtime = setup_reconcile_runtime(&dir_path);
 
-    let agent_uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+    let agent_uuid = "agt-a1b2c3d4e5f6789ab";
     let mut test_state = MaterializedState::default();
     test_state.jobs.insert("job-1".to_string(), make_job_with_agent("job-1", "build", agent_uuid));
 
@@ -310,7 +310,7 @@ async fn reconcile_crew_dead_session_emits_gone_with_correct_id() {
     let dir_path = dir.path().to_owned();
     let runtime = setup_reconcile_runtime(&dir_path);
 
-    let agent_uuid = "deadbeef-1234-5678-9abc-def012345678";
+    let agent_uuid = "agt-deadbeef123456789";
     let mut test_state = MaterializedState::default();
     test_state.crew.insert(
         "run-1".to_string(),

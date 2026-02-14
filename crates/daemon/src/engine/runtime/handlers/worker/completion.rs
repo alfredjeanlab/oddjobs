@@ -20,7 +20,7 @@ impl<C: Clock> Runtime<C> {
     ) -> Result<Vec<Event>, RuntimeError> {
         // Find which worker (if any) owns this job
         let worker_info = {
-            let owner: OwnerId = job_id.clone().into();
+            let owner: OwnerId = (*job_id).into();
             let mut workers = self.worker_states.lock();
             let mut found = None;
             for (name, state) in workers.iter_mut() {

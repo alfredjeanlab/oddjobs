@@ -243,7 +243,7 @@ impl<C: Clock> Runtime<C> {
                 .decisions
                 .values()
                 .find(|d| d.owner == *owner && !d.is_resolved())
-                .map(|d| (d.id.clone(), d.source.clone()))
+                .map(|d| (d.id, d.source.clone()))
         })
     }
 

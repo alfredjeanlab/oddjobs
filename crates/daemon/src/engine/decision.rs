@@ -99,7 +99,7 @@ impl EscalationDecisionBuilder {
         };
 
         let event = Event::DecisionCreated {
-            id: decision_id.clone(),
+            id: decision_id,
             agent_id: AgentId::from_string(self.agent_id),
             owner: self.owner,
             source: self.trigger.to_source(),

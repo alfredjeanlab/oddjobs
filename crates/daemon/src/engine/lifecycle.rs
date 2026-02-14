@@ -128,7 +128,7 @@ impl RunLifecycle for Job {
         let job_id = JobId::from_string(&self.id);
         let mut effects = vec![Effect::Emit {
             event: Event::StepStarted {
-                job_id: job_id.clone(),
+                job_id,
                 step: self.step.clone(),
                 agent_id: None,
                 agent_name: None,
@@ -155,13 +155,13 @@ impl RunLifecycle for Job {
         vec![
             Effect::Emit {
                 event: Event::StepWaiting {
-                    job_id: job_id.clone(),
+                    job_id,
                     step: self.step.clone(),
                     reason: Some(trigger.to_string()),
                     decision_id: decision_id.map(|s| s.to_string()),
                 },
             },
-            Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) },
+            Effect::CancelTimer { id: TimerId::exit_deferred(job_id) },
         ]
     }
 
@@ -235,7 +235,7 @@ impl RunLifecycle for Crew {
         let crew_id = CrewId::from_string(&self.id);
         let effects = vec![Effect::Emit {
             event: Event::CrewUpdated {
-                id: crew_id.clone(),
+                id: crew_id,
                 status: CrewStatus::Running,
                 reason: Some("agent active".to_string()),
             },
@@ -256,12 +256,12 @@ impl RunLifecycle for Crew {
         vec![
             Effect::Emit {
                 event: Event::CrewUpdated {
-                    id: crew_id.clone(),
+                    id: crew_id,
                     status: CrewStatus::Escalated,
                     reason: Some(trigger.to_string()),
                 },
             },
-            Effect::CancelTimer { id: TimerId::exit_deferred(&crew_id) },
+            Effect::CancelTimer { id: TimerId::exit_deferred(crew_id) },
         ]
     }
 

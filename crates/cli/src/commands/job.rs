@@ -444,7 +444,7 @@ pub async fn handle(
                 .agents
                 .iter()
                 .find(|a| a.status == "running")
-                .map(|a| a.agent_id.clone())
+                .map(|a| a.agent_id)
                 .ok_or_else(|| anyhow::anyhow!("job has no active agent session"))?;
             crate::daemon_process::coop_attach(agent_id.as_str())?;
         }

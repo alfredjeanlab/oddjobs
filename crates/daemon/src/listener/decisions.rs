@@ -104,12 +104,12 @@ pub(super) fn handle_decision_resolve(
         });
     }
 
-    let decision_id = decision.id.clone();
+    let decision_id = decision.id;
     let decision_namespace = decision.project.clone();
     let decision_source = decision.source.clone();
     let decision_options = decision.options.clone();
     let decision_questions = decision.questions.clone();
-    let decision_owner = decision.owner.clone();
+    let decision_owner = decision.owner;
     let decision_agent_id = decision.agent_id.to_string();
 
     // Get the job step for StepCompleted events (for job-owned decisions)
@@ -143,7 +143,7 @@ pub(super) fn handle_decision_resolve(
         resolve_ctx.chosen().map(|c| vec![c]).unwrap_or_default()
     };
     let event = Event::DecisionResolved {
-        id: decision_id.clone(),
+        id: decision_id,
         choices: resolved_choices,
         message: message.clone(),
         resolved_at_ms,
@@ -307,7 +307,7 @@ fn map_decision_to_job_action(
                 let mut events = Vec::new();
                 if let Some(step) = job_step {
                     events.push(Event::StepStarted {
-                        job_id: pid.clone(),
+                        job_id: pid,
                         step: step.to_string(),
                         agent_id: None,
                         agent_name: None,
@@ -400,7 +400,7 @@ fn map_decision_to_crew_action(
     crew_id: &CrewId,
     agent_id: Option<&str>,
 ) -> Vec<Event> {
-    let run_id = crew_id.clone();
+    let run_id = *crew_id;
 
     let send_to_agent = |input: String| -> Option<Event> {
         agent_id.map(|aid| Event::AgentInput { id: oj_core::AgentId::from_string(aid), input })

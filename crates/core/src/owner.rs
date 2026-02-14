@@ -19,7 +19,7 @@ use std::fmt;
 /// Serializes as a string using Display format:
 /// - `"job-V1StGXR8_Zm5M9z3x"`
 /// - `"crw-kL9mP2nQ_Az8Nk4wx"`
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OwnerId {
     /// Agent is owned by a job (job-embedded agent)
     Job(JobId),
@@ -149,7 +149,7 @@ impl From<JobId> for OwnerId {
 
 impl From<&JobId> for OwnerId {
     fn from(id: &JobId) -> Self {
-        OwnerId::Job(id.clone())
+        OwnerId::Job(*id)
     }
 }
 
@@ -161,13 +161,13 @@ impl From<CrewId> for OwnerId {
 
 impl From<&CrewId> for OwnerId {
     fn from(id: &CrewId) -> Self {
-        OwnerId::Crew(id.clone())
+        OwnerId::Crew(*id)
     }
 }
 
 impl From<&OwnerId> for OwnerId {
     fn from(id: &OwnerId) -> Self {
-        id.clone()
+        *id
     }
 }
 

@@ -99,7 +99,7 @@ pub(crate) fn handle_job_resume(
     emit(
         &ctx.event_bus,
         Event::JobCreated {
-            id: job_id.clone(),
+            id: job_id,
             kind: orphan.kind,
             name: orphan.name,
             runbook_hash: orphan.runbook_hash,
@@ -112,7 +112,7 @@ pub(crate) fn handle_job_resume(
         },
     )?;
 
-    emit(&ctx.event_bus, Event::JobAdvanced { id: job_id.clone(), step: "failed".to_string() })?;
+    emit(&ctx.event_bus, Event::JobAdvanced { id: job_id, step: "failed".to_string() })?;
 
     emit(&ctx.event_bus, Event::JobResume { id: job_id, message, vars, kill })?;
 
@@ -276,7 +276,7 @@ pub(crate) fn handle_job_prune(
 
     if !flags.dry_run {
         for entry in &to_prune {
-            emit(&ctx.event_bus, Event::JobDeleted { id: entry.id.clone() })?;
+            emit(&ctx.event_bus, Event::JobDeleted { id: entry.id })?;
             super::prune_helpers::cleanup_job_files(&ctx.logs_path, entry.id.as_str());
         }
     }

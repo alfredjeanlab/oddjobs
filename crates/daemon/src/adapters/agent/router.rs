@@ -102,7 +102,7 @@ impl RuntimeRouter {
     }
 
     fn record_route(&self, agent_id: &AgentId, route: Route) {
-        self.routes.lock().insert(agent_id.clone(), route);
+        self.routes.lock().insert(*agent_id, route);
     }
 
     fn remove_route(&self, agent_id: &AgentId) {
@@ -146,7 +146,7 @@ impl AgentAdapter for RuntimeRouter {
         config: AgentConfig,
         event_tx: mpsc::Sender<Event>,
     ) -> Result<AgentHandle, AgentAdapterError> {
-        let agent_id = config.agent_id.clone();
+        let agent_id = config.agent_id;
         // When running in-cluster, all agents go through K8s.
         if let Some(k8s) = &self.k8s {
             let mut handle = k8s.spawn(config, event_tx).await?;
@@ -170,7 +170,7 @@ impl AgentAdapter for RuntimeRouter {
         config: AgentReconnectConfig,
         event_tx: mpsc::Sender<Event>,
     ) -> Result<AgentHandle, AgentAdapterError> {
-        let agent_id = config.agent_id.clone();
+        let agent_id = config.agent_id;
         // When running in-cluster, only K8s agents exist.
         if let Some(k8s) = &self.k8s {
             let mut handle = k8s.reconnect(config, event_tx).await?;

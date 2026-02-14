@@ -304,7 +304,7 @@ impl<C: Clock> Runtime<C> {
 
         creation_effects.push(Effect::Emit {
             event: Event::JobCreated {
-                id: job_id.clone(),
+                id: job_id,
                 kind: job_kind,
                 name: job_name.clone(),
                 runbook_hash: runbook_hash.clone(),

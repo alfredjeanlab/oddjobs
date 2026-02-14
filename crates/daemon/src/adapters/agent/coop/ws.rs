@@ -32,13 +32,7 @@ pub(super) async fn event_bridge(
         }
         None => {
             tracing::warn!(%agent_id, "ws bridge: connection failed, emitting AgentGone");
-            let _ = event_tx
-                .send(Event::AgentGone {
-                    id: agent_id.clone(),
-                    owner: owner.clone(),
-                    exit_code: None,
-                })
-                .await;
+            let _ = event_tx.send(Event::AgentGone { id: agent_id, owner, exit_code: None }).await;
             return;
         }
     };
@@ -84,7 +78,7 @@ pub(super) async fn event_bridge(
                         if let Some(ref tx) = log_entry_tx {
                             if let Some(entries) = extract_log_entries_from_ws(&text, &mut last_user_timestamp) {
                                 if !entries.is_empty() {
-                                    let _ = tx.send((agent_id.clone(), entries)).await;
+                                    let _ = tx.send((agent_id, entries)).await;
                                 }
                             }
                         }
@@ -92,8 +86,8 @@ pub(super) async fn event_bridge(
                     Some(Ok(Message::Close(frame))) => {
                         tracing::info!(%agent_id, ?frame, "ws bridge: received close frame");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;
@@ -101,8 +95,8 @@ pub(super) async fn event_bridge(
                     None => {
                         tracing::info!(%agent_id, "ws bridge: stream ended");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;
@@ -110,8 +104,8 @@ pub(super) async fn event_bridge(
                     Some(Err(e)) => {
                         tracing::warn!(%agent_id, %e, "ws bridge: error");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;
@@ -203,10 +197,10 @@ pub(crate) fn parse_ws_event(text: &str, agent_id: &AgentId, owner: &OwnerId) ->
                 return WsParseResult::None;
             };
             match next {
-                "idle" => WsParseResult::Event(Box::new(Event::AgentIdle { id: agent_id.clone() })),
+                "idle" => WsParseResult::Event(Box::new(Event::AgentIdle { id: *agent_id })),
                 "working" => WsParseResult::Event(Box::new(Event::AgentWorking {
-                    id: agent_id.clone(),
-                    owner: owner.clone(),
+                    id: *agent_id,
+                    owner: *owner,
                 })),
                 "prompt" => {
                     let prompt_type = json
@@ -225,7 +219,7 @@ pub(crate) fn parse_ws_event(text: &str, agent_id: &AgentId, owner: &OwnerId) ->
                     let last_message = extract_last_message(&json, &prompt_type);
 
                     WsParseResult::Event(Box::new(Event::AgentPrompt {
-                        id: agent_id.clone(),
+                        id: *agent_id,
                         prompt_type,
                         questions,
                         last_message,
@@ -243,14 +237,14 @@ pub(crate) fn parse_ws_event(text: &str, agent_id: &AgentId, owner: &OwnerId) ->
                         _ => oj_core::AgentError::Other(detail.to_string()),
                     };
                     WsParseResult::Event(Box::new(Event::AgentFailed {
-                        id: agent_id.clone(),
+                        id: *agent_id,
                         error,
-                        owner: owner.clone(),
+                        owner: *owner,
                     }))
                 }
                 "exited" => WsParseResult::Event(Box::new(Event::AgentGone {
-                    id: agent_id.clone(),
-                    owner: owner.clone(),
+                    id: *agent_id,
+                    owner: *owner,
                     exit_code: None,
                 })),
                 _ => WsParseResult::None,
@@ -262,8 +256,8 @@ pub(crate) fn parse_ws_event(text: &str, agent_id: &AgentId, owner: &OwnerId) ->
             // session is fully ready (e.g., print-mode agents).
             let code = json.get("code").and_then(|v| v.as_i64()).map(|c| c as i32);
             WsParseResult::Event(Box::new(Event::AgentGone {
-                id: agent_id.clone(),
-                owner: owner.clone(),
+                id: *agent_id,
+                owner: *owner,
                 exit_code: code,
             }))
         }
@@ -271,10 +265,10 @@ pub(crate) fn parse_ws_event(text: &str, agent_id: &AgentId, owner: &OwnerId) ->
             let outcome_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
             match outcome_type {
                 "blocked" => {
-                    WsParseResult::Event(Box::new(Event::AgentStopBlocked { id: agent_id.clone() }))
+                    WsParseResult::Event(Box::new(Event::AgentStopBlocked { id: *agent_id }))
                 }
                 "allowed" => {
-                    WsParseResult::Event(Box::new(Event::AgentStopAllowed { id: agent_id.clone() }))
+                    WsParseResult::Event(Box::new(Event::AgentStopAllowed { id: *agent_id }))
                 }
                 _ => WsParseResult::None,
             }
@@ -381,10 +375,8 @@ pub(crate) fn map_initial_state(
 ) -> Option<Event> {
     let state = json.get("state").and_then(|v| v.as_str())?;
     match state {
-        "idle" => Some(Event::AgentIdle { id: agent_id.clone() }),
-        "exited" => {
-            Some(Event::AgentGone { id: agent_id.clone(), owner: owner.clone(), exit_code: None })
-        }
+        "idle" => Some(Event::AgentIdle { id: *agent_id }),
+        "exited" => Some(Event::AgentGone { id: *agent_id, owner: *owner, exit_code: None }),
         "error" => {
             let category = json.get("error_category").and_then(|v| v.as_str());
             let detail =
@@ -394,7 +386,7 @@ pub(crate) fn map_initial_state(
                 Some("OutOfCredits") => oj_core::AgentError::OutOfCredits,
                 _ => oj_core::AgentError::Other(detail.to_string()),
             };
-            Some(Event::AgentFailed { id: agent_id.clone(), error, owner: owner.clone() })
+            Some(Event::AgentFailed { id: *agent_id, error, owner: *owner })
         }
         "prompt" => {
             let prompt_type = json
@@ -409,7 +401,7 @@ pub(crate) fn map_initial_state(
                 None
             };
             let last_message = extract_last_message(json, &prompt_type);
-            Some(Event::AgentPrompt { id: agent_id.clone(), prompt_type, questions, last_message })
+            Some(Event::AgentPrompt { id: *agent_id, prompt_type, questions, last_message })
         }
         // "starting" | "working" — not actionable, wait for WS events
         _ => None,

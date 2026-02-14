@@ -178,7 +178,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                 let job_id = JobId::from_string(bc.job_id.clone());
                 let mut events = vec![
                     Event::JobCreated {
-                        id: job_id.clone(),
+                        id: job_id,
                         kind: bc.kind.clone(),
                         name: bc.name.clone(),
                         runbook_hash: bc.runbook_hash.clone(),

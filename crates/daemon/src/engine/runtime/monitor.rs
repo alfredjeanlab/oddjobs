@@ -44,12 +44,12 @@ impl<C: Clock> Runtime<C> {
 
         // Register agent -> job mapping
         let job_id = JobId::from_string(&job.id);
-        self.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
+        self.register_agent(agent_id, OwnerId::job(job_id));
 
         // Reconnect monitoring via adapter
         let config = AgentReconnectConfig {
             agent_id,
-            owner: OwnerId::job(job_id.clone()),
+            owner: OwnerId::job(job_id),
             runtime_hint,
             auth_token,
         };
@@ -59,7 +59,7 @@ impl<C: Clock> Runtime<C> {
         let job_id = JobId::from_string(&job.id);
         self.executor
             .execute(Effect::SetTimer {
-                id: TimerId::liveness(&job_id),
+                id: TimerId::liveness(job_id),
                 duration: crate::engine::spawn::LIVENESS_INTERVAL,
             })
             .await?;
@@ -103,7 +103,7 @@ impl<C: Clock> Runtime<C> {
 
         // Extract agent_id from SpawnAgent effect
         let agent_id = effects.iter().find_map(|e| match e {
-            Effect::SpawnAgent { agent_id, .. } => Some(agent_id.clone()),
+            Effect::SpawnAgent { agent_id, .. } => Some(*agent_id),
             _ => None,
         });
 
@@ -121,15 +121,15 @@ impl<C: Clock> Runtime<C> {
         }
 
         // Register agent -> job mapping for AgentStateChanged handling
-        if let Some(ref aid) = agent_id {
-            self.register_agent(aid.clone(), OwnerId::job(job_id.clone()));
+        if let Some(aid) = agent_id {
+            self.register_agent(aid, OwnerId::job(*job_id));
 
             // Persist agent_id to WAL via StepStarted event (for daemon crash recovery)
             effects.push(Effect::Emit {
                 event: Event::StepStarted {
-                    job_id: job_id.clone(),
+                    job_id: *job_id,
                     step: job.step.clone(),
-                    agent_id: Some(aid.clone()),
+                    agent_id: Some(aid),
                     agent_name: Some(agent_name.to_string()),
                 },
             });
@@ -403,7 +403,7 @@ impl<C: Clock> Runtime<C> {
                         cooldown_str, e
                     ))
                 })?;
-                let timer_id = TimerId::cooldown(&owner, ctx.trigger, ctx.chain_pos);
+                let timer_id = TimerId::cooldown(owner, ctx.trigger, ctx.chain_pos);
 
                 tracing::info!(
                     entity_id = %run.log_id(),
@@ -588,7 +588,7 @@ impl<C: Clock> Runtime<C> {
 
                 // Create decision with gate failure context
                 let (decision_id, decision_event) = EscalationDecisionBuilder::new(
-                    owner.clone(),
+                    owner,
                     run.display_name().to_string(),
                     run.decision_agent_ref(),
                     EscalationTrigger::GateFailed { command: command.clone(), exit_code, stderr },

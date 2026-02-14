@@ -90,7 +90,7 @@ impl LocalAdapter {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         tokio::spawn(super::ws::event_bridge(
             socket_path.clone(),
-            agent_id.clone(),
+            agent_id,
             owner,
             event_tx,
             shutdown_rx,
@@ -98,7 +98,7 @@ impl LocalAdapter {
         ));
         self.agents
             .lock()
-            .insert(agent_id.clone(), CoopAgent { socket_path, shutdown_tx: Some(shutdown_tx) });
+            .insert(agent_id, CoopAgent { socket_path, shutdown_tx: Some(shutdown_tx) });
         AgentHandle::new(agent_id)
     }
 }

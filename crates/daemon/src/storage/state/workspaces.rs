@@ -24,7 +24,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             if let OwnerId::Job(job_id) = owner {
                 if let Some(job) = state.jobs.get_mut(job_id.as_str()) {
                     job.workspace_path = Some(path.clone());
-                    job.workspace_id = Some(id.clone());
+                    job.workspace_id = Some(*id);
                 }
             }
 
@@ -34,7 +34,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     id: id.to_string(),
                     path: path.clone(),
                     branch: branch.clone(),
-                    owner: owner.clone(),
+                    owner: *owner,
                     status: WorkspaceStatus::Creating,
                     workspace_type: ws_type,
                     created_at_ms: helpers::epoch_ms_now(),

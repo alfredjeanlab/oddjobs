@@ -36,13 +36,7 @@ pub(crate) async fn event_bridge(
         }
         None => {
             tracing::warn!(%agent_id, %addr, "docker ws bridge: connection failed, emitting AgentGone");
-            let _ = event_tx
-                .send(Event::AgentGone {
-                    id: agent_id.clone(),
-                    owner: owner.clone(),
-                    exit_code: None,
-                })
-                .await;
+            let _ = event_tx.send(Event::AgentGone { id: agent_id, owner, exit_code: None }).await;
             return;
         }
     };
@@ -81,7 +75,7 @@ pub(crate) async fn event_bridge(
                         if let Some(ref tx) = log_entry_tx {
                             if let Some(entries) = coop_ws::extract_log_entries_from_ws(&text, &mut last_user_timestamp) {
                                 if !entries.is_empty() {
-                                    let _ = tx.send((agent_id.clone(), entries)).await;
+                                    let _ = tx.send((agent_id, entries)).await;
                                 }
                             }
                         }
@@ -89,8 +83,8 @@ pub(crate) async fn event_bridge(
                     Some(Ok(Message::Close(frame))) => {
                         tracing::info!(%agent_id, ?frame, "docker ws bridge: received close frame");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;
@@ -98,8 +92,8 @@ pub(crate) async fn event_bridge(
                     None => {
                         tracing::info!(%agent_id, "docker ws bridge: stream ended");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;
@@ -107,8 +101,8 @@ pub(crate) async fn event_bridge(
                     Some(Err(e)) => {
                         tracing::warn!(%agent_id, %e, "docker ws bridge: error");
                         let _ = event_tx.send(Event::AgentGone {
-                            id: agent_id.clone(),
-                            owner: owner.clone(),
+                            id: agent_id,
+                            owner,
                             exit_code: None,
                         }).await;
                         break;

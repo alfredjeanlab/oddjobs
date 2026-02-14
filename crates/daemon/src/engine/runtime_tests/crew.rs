@@ -17,7 +17,7 @@ async fn standalone_on_dead_fail_fails_crew() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -54,7 +54,7 @@ async fn standalone_on_dead_gate_pass_completes_crew() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -78,7 +78,7 @@ async fn standalone_on_dead_gate_fail_escalates_crew() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -119,7 +119,7 @@ on_idle = { action = "gate", run = "true" }
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -144,7 +144,7 @@ async fn standalone_on_error_fail_fails_crew() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -181,7 +181,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -223,7 +223,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -290,7 +290,7 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
     ctx.process_background_events().await;
 
     let crew_id = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         run.id.clone()
     };
 
@@ -333,7 +333,7 @@ async fn standalone_stop_blocked_escalates_crew() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -352,7 +352,7 @@ async fn standalone_stop_blocked_on_terminal_is_noop() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -387,7 +387,7 @@ async fn standalone_nudge_records_timestamp() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -418,7 +418,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
@@ -468,7 +468,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.process_background_events().await;
 
     let (crew_id, agent_id) = {
-        let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+        let run = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
         (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 

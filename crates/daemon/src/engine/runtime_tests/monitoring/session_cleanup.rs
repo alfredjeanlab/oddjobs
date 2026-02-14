@@ -15,7 +15,7 @@ async fn standalone_agent_stop_blocked_completes_and_kills_session() {
     ctx.runtime.handle_event(Event::AgentStopBlocked { id: agent_id.clone() }).await.unwrap();
 
     // Verify the crew status is Completed
-    let crew = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
     assert_eq!(crew.status, oj_core::CrewStatus::Completed);
 
     // Yield to let fire-and-forget KillAgent task complete
@@ -45,7 +45,7 @@ async fn standalone_agent_on_idle_done_kills_session() {
         .unwrap();
 
     // Verify the crew status is Completed
-    let crew = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
     assert_eq!(crew.status, oj_core::CrewStatus::Completed);
 
     // Yield to let fire-and-forget KillAgent task complete

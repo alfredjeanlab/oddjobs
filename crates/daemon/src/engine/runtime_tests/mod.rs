@@ -272,7 +272,7 @@ async fn create_job_for_runbook(ctx: &TestContext, command: &str, args: &[(&str,
         .is_some_and(|cmd| matches!(cmd.run, oj_runbook::RunDirective::Agent { .. }));
 
     let event = if is_agent {
-        crew_command_event("job-1", command, command, all_args, &ctx.project_path)
+        crew_command_event("crw-1", command, command, all_args, &ctx.project_path)
     } else {
         command_event("job-1", command, command, all_args, &ctx.project_path)
     };

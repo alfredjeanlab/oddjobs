@@ -114,8 +114,10 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     record.owners.remove(&job_id_str);
                 }
                 // Clean up unresolved decisions for the completed job
-                let owner = OwnerId::Job(id.clone());
-                helpers::cleanup_unresolved_decisions_for_owner(&mut state.decisions, &owner);
+                helpers::cleanup_unresolved_decisions_for_owner(
+                    &mut state.decisions,
+                    &(*id).into(),
+                );
             }
         }
 
@@ -132,7 +134,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                         helpers::create_agent_record(
                             aid.as_str(),
                             agent_name.clone().unwrap_or_default(),
-                            OwnerId::Job(job_id.clone()),
+                            (*job_id).into(),
                             job.project.clone(),
                             workspace,
                             AgentRecordStatus::Starting,
@@ -201,7 +203,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
         Event::JobDeleted { id } => {
             state.jobs.remove(id.as_str());
             // Clean up all decisions and agents associated with the deleted job
-            let owner = OwnerId::Job(id.clone());
+            let owner = OwnerId::Job(*id);
             state.decisions.retain(|_, d| d.owner != owner);
             state.agents.retain(|_, rec| rec.owner != owner);
         }

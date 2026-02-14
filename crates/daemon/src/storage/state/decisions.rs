@@ -37,16 +37,16 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                 for existing in state.decisions.values_mut() {
                     if existing.owner == *owner && !existing.is_resolved() {
                         existing.resolved_at_ms = Some(*created_at_ms);
-                        existing.superseded_by = Some(id.clone());
+                        existing.superseded_by = Some(*id);
                     }
                 }
 
                 state.decisions.insert(
                     id.to_string(),
                     Decision {
-                        id: id.clone(),
-                        agent_id: agent_id.clone(),
-                        owner: owner.clone(),
+                        id: *id,
+                        agent_id: *agent_id,
+                        owner: *owner,
                         source: source.clone(),
                         context: context.clone(),
                         options: options.clone(),
@@ -126,7 +126,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
                     helpers::create_agent_record(
                         agent_id.as_str(),
                         run.agent_name.clone(),
-                        OwnerId::Crew(id.clone()),
+                        (*id).into(),
                         run.project.clone(),
                         run.cwd.clone(),
                         AgentRecordStatus::Running,
@@ -148,7 +148,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
             if status.is_terminal() {
                 helpers::cleanup_unresolved_decisions_for_owner(
                     &mut state.decisions,
-                    &OwnerId::Crew(id.clone()),
+                    &(*id).into(),
                 );
             }
         }
@@ -156,7 +156,7 @@ pub(crate) fn apply(state: &mut MaterializedState, event: &Event) {
         Event::CrewDeleted { id } => {
             state.crew.remove(id.as_str());
             // Remove agents owned by this crew
-            let owner = OwnerId::Crew(id.clone());
+            let owner = OwnerId::Crew(*id);
             state.agents.retain(|_, rec| rec.owner != owner);
         }
 

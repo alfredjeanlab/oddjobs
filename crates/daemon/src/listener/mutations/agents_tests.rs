@@ -112,7 +112,7 @@ async fn agent_send_finds_agent_in_last_step() {
 #[yare::parameterized(
     by_agent_id = { "job-1",      "review", "work", "agent-xyz",                    "agent-xyz" },
     by_job_id   = { "job-abc123", "review", "work", "agent-inner",                  "job-abc123" },
-    by_prefix   = { "job-1",      "review", "work", "agent-long-uuid-string-12345", "agent-long" },
+    by_prefix   = { "job-1",      "review", "work", "agt-long_uuid_string12", "agt-long" },
 )]
 fn agent_send_lookup(
     job_id: &str,

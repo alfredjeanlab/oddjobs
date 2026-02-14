@@ -129,11 +129,11 @@ fn resume_orphan_by_prefix() {
     let ctx = test_ctx(dir.path());
 
     load_runbook_into_state(&ctx.state, "hash456");
-    *ctx.orphans.lock() = vec![make_breadcrumb("orphan-long-uuid-string-12345")];
+    *ctx.orphans.lock() = vec![make_breadcrumb("job-long_uuid_string12")];
 
     let result = handle_job_resume(
         &ctx,
-        "orphan-long".to_string(),
+        "job-long".to_string(),
         Some("try again".to_string()),
         HashMap::new(),
         false,

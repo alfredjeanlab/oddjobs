@@ -112,7 +112,7 @@ pub(super) async fn execute(
         .map_err(|e| AgentAdapterError::SpawnFailed(format!("failed to spawn coop: {}", e)))?;
 
     // Spawn reaper task to prevent zombie processes
-    let reaper_agent_id = config.agent_id.clone();
+    let reaper_agent_id = config.agent_id;
     tokio::spawn(async move {
         let child = child;
         match child.wait_with_output().await {

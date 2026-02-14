@@ -3,14 +3,14 @@
 
 //! Workspace effect execution (create/delete worktrees and folders).
 
-use crate::adapters::workspace::ProvisionRequest;
+pub(crate) use crate::adapters::workspace::CreateRequest;
+
 use crate::adapters::WorkspaceAdapter;
 use crate::engine::executor::ExecuteError;
 use crate::storage::MaterializedState;
 use oj_core::Event;
 
 use parking_lot::Mutex;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -23,23 +23,16 @@ pub(crate) async fn create(
     state: &Arc<Mutex<MaterializedState>>,
     event_tx: &mpsc::Sender<Event>,
     workspace: &Arc<dyn WorkspaceAdapter>,
-    workspace_id: oj_core::WorkspaceId,
-    path: PathBuf,
-    owner: oj_core::OwnerId,
-    workspace_type: Option<String>,
-    repo_root: Option<PathBuf>,
-    branch: Option<String>,
-    start_point: Option<String>,
+    req: CreateRequest,
 ) -> Result<Option<Event>, ExecuteError> {
-    let is_worktree = workspace_type.as_deref() == Some("worktree");
-
-    // Phase 1: Create workspace record immediately so job.workspace_path is set
+    // Phase 1: Create workspace record immediately so job.workspace_path is set.
+    let provision_req = req.clone();
     let create_event = Event::WorkspaceCreated {
-        id: workspace_id.clone(),
-        path: path.clone(),
-        branch: branch.clone(),
-        owner: owner.clone(),
-        workspace_type,
+        id: req.workspace_id,
+        path: req.path,
+        branch: req.branch,
+        owner: req.owner,
+        workspace_type: req.workspace_type,
     };
     {
         let mut state = state.lock();
@@ -50,9 +43,7 @@ pub(crate) async fn create(
     let event_tx = event_tx.clone();
     let workspace = Arc::clone(workspace);
     tokio::spawn(async move {
-        let req =
-            ProvisionRequest { workspace_id, path, is_worktree, repo_root, branch, start_point };
-        workspace.provision(event_tx, req).await;
+        workspace.provision(event_tx, provision_req).await;
     });
 
     // Return WorkspaceCreated for WAL persistence (background task sends Ready/Failed)

@@ -270,10 +270,7 @@ impl<C: Clock> Runtime<C> {
         if !kill && is_alive {
             if let Some(id) = &agent_id {
                 self.executor
-                    .execute(Effect::SendToAgent {
-                        agent_id: id.clone(),
-                        input: message.to_string(),
-                    })
+                    .execute(Effect::SendToAgent { agent_id: *id, input: message.to_string() })
                     .await?;
 
                 // Update status to Running (preserve agent_id for the nudged agent)
@@ -281,9 +278,9 @@ impl<C: Clock> Runtime<C> {
                 self.executor
                     .execute(Effect::Emit {
                         event: Event::StepStarted {
-                            job_id: job_id.clone(),
+                            job_id,
                             step: step.to_string(),
-                            agent_id: Some(id.clone()),
+                            agent_id: Some(*id),
                             agent_name: None,
                         },
                     })
@@ -292,7 +289,7 @@ impl<C: Clock> Runtime<C> {
                 // Restart liveness monitoring
                 self.executor
                     .execute(Effect::SetTimer {
-                        id: TimerId::liveness(&job_id),
+                        id: TimerId::liveness(job_id),
                         duration: crate::engine::spawn::LIVENESS_INTERVAL,
                     })
                     .await?;

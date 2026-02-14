@@ -39,7 +39,7 @@ async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, AgentId) {
     handle_event_chain(
         ctx,
         crew_command_event(
-            "job-1",
+            "crw-1",
             "worker",
             "agent_cmd",
             vars!("name" => "test"),
@@ -51,8 +51,8 @@ async fn setup_standalone_agent(ctx: &mut TestContext) -> (String, AgentId) {
     // SpawnAgent is now deferred; drain background events to apply AgentSpawned
     ctx.process_background_events().await;
 
-    let crew_id = "job-1".to_string();
-    let crew = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
+    let crew_id = "crw-1".to_string();
+    let crew = ctx.runtime.lock_state(|s| s.crew.get("crw-1").cloned()).unwrap();
     let agent_id = AgentId::from_string(crew.agent_id.as_ref().unwrap());
 
     (crew_id, agent_id)

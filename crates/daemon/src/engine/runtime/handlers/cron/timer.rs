@@ -104,7 +104,7 @@ impl<C: Clock> Runtime<C> {
                 // Create and start job
                 result_events.extend(
                     self.create_and_start_job(CreateJobParams {
-                        job_id: job_id.clone(),
+                        job_id,
                         job_name: display_name,
                         job_kind: job_name.clone(),
                         vars,
@@ -175,7 +175,7 @@ impl<C: Clock> Runtime<C> {
                 // Emit CrewCreated
                 let creation_effects = vec![Effect::Emit {
                     event: Event::CrewCreated {
-                        id: crew_id.clone(),
+                        id: crew_id,
                         agent: agent_name.clone(),
                         command: format!("cron:{}", cron_name),
                         project: project.clone(),
@@ -250,7 +250,7 @@ impl<C: Clock> Runtime<C> {
 
                 result_events.extend(
                     self.create_cron_shell_job(CronShellJobParams {
-                        job_id: job_id.clone(),
+                        job_id,
                         cron: cron_name,
                         job_display: &display_name,
                         cmd,
@@ -292,7 +292,7 @@ impl<C: Clock> Runtime<C> {
 
         let creation_effects = vec![Effect::Emit {
             event: Event::JobCreated {
-                id: job_id.clone(),
+                id: job_id,
                 kind: cron.to_string(),
                 name: job_display.to_string(),
                 runbook_hash: runbook_hash.to_string(),
@@ -314,14 +314,14 @@ impl<C: Clock> Runtime<C> {
         let shell_effects = vec![
             Effect::Emit {
                 event: Event::StepStarted {
-                    job_id: job_id.clone(),
+                    job_id,
                     step: step_name.to_string(),
                     agent_id: None,
                     agent_name: None,
                 },
             },
             Effect::Shell {
-                owner: Some(oj_core::OwnerId::Job(job_id.clone())),
+                owner: Some(job_id.into()),
                 step: step_name.to_string(),
                 command: interpolated,
                 cwd: execution_path,

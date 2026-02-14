@@ -30,7 +30,6 @@ pub mod records;
 pub mod target;
 pub mod time_fmt;
 pub mod timer;
-pub mod worker;
 pub mod workspace;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -55,14 +54,13 @@ pub use job::{
     Job, JobConfig, JobConfigBuilder, JobId, StepOutcome, StepOutcomeKind, StepRecord, StepStatus,
     StepStatusKind,
 };
+pub use metrics::MetricsHealth;
 pub use owner::{InvalidOwnerId, OwnerId, OwnerMismatch};
 pub use project::{namespace_to_option, scoped_name, split_scoped_name, Namespace};
-pub use target::RunTarget;
-pub use time_fmt::{format_elapsed, format_elapsed_ms};
-pub use timer::{TimerId, TimerKind};
-// WorkerId available via worker module if needed
-pub use metrics::MetricsHealth;
 pub use records::{
     CronRecord, QueueItem, QueueItemStatus, QueuePollMeta, WorkerRecord, Workspace, WorkspaceType,
 };
+pub use target::RunTarget;
+pub use time_fmt::{format_elapsed, format_elapsed_ms};
+pub use timer::{TimerId, TimerKind};
 pub use workspace::{WorkspaceId, WorkspaceStatus};

@@ -89,8 +89,8 @@ impl RemoteCoopClient {
         tokio::spawn(crate::adapters::agent::docker::ws::event_bridge(
             agent.addr.clone(),
             agent.auth_token.clone(),
-            agent_id.clone(),
-            agent.owner.clone(),
+            *agent_id,
+            agent.owner,
             agent.event_tx.clone(),
             shutdown_rx,
             self.log_entry_tx.clone(),
@@ -111,13 +111,13 @@ impl RemoteCoopClient {
         tokio::spawn(crate::adapters::agent::docker::ws::event_bridge(
             addr.clone(),
             auth_token.clone(),
-            agent_id.clone(),
-            owner.clone(),
+            agent_id,
+            owner,
             event_tx.clone(),
             shutdown_rx,
             self.log_entry_tx.clone(),
         ));
-        let handle = AgentHandle::new(agent_id.clone());
+        let handle = AgentHandle::new(agent_id);
         self.agents.lock().insert(
             agent_id,
             RemoteAgent { addr, auth_token, bridge_shutdown: Some(shutdown_tx), event_tx, owner },

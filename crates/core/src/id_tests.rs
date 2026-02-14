@@ -30,17 +30,16 @@ fn id_generates_with_correct_length() {
 }
 
 #[test]
-fn id_fits_in_smolstr_inline() {
-    // Max inline: 4-char prefix + 19-char nanoid = 23 bytes
+fn id_fits_in_idbuf() {
+    // 4-char prefix + 19-char nanoid = 23 bytes = ID_MAX_LEN
     let id = TestId::new();
-    assert_eq!(id.as_str().len(), 23);
-    assert!(id.as_str().len() <= 23); // Exactly fits inline capacity
+    assert_eq!(id.as_str().len(), ID_MAX_LEN);
 }
 
 #[test]
-fn id_clones_cheaply() {
+fn id_is_copy() {
     let id1 = TestId::new();
-    let id2 = id1.clone(); // Clones cheaply (24 bytes)
+    let id2 = id1; // Copy, not move
     assert_eq!(id1, id2);
 }
 

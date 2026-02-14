@@ -91,7 +91,7 @@ impl<C: Clock> Runtime<C> {
                 }
 
                 let effects = vec![Effect::Shell {
-                    owner: Some(oj_core::OwnerId::Job(job_id.clone())),
+                    owner: Some((*job_id).into()),
                     step: step_name.to_string(),
                     command,
                     cwd: workspace_path.to_path_buf(),
@@ -140,7 +140,7 @@ impl<C: Clock> Runtime<C> {
         // leave step_status == Failed, causing attempts to carry over.)
         self.executor
             .execute(Effect::Emit {
-                event: Event::StepCompleted { job_id: job_id.clone(), step: job.step.clone() },
+                event: Event::StepCompleted { job_id, step: job.step.clone() },
             })
             .await?;
 
@@ -232,7 +232,7 @@ impl<C: Clock> Runtime<C> {
             // Mark job as failing so advance_job() routes to failed terminal after cleanup
             result_events.extend(
                 self.executor
-                    .execute(Effect::Emit { event: Event::JobFailing { id: job_id.clone() } })
+                    .execute(Effect::Emit { event: Event::JobFailing { id: job_id } })
                     .await?,
             );
             let effects = steps::failure_transition_effects(job, on_fail_step, error);
@@ -252,7 +252,7 @@ impl<C: Clock> Runtime<C> {
                 // Mark job as failing so advance_job() routes to failed terminal after cleanup
                 result_events.extend(
                     self.executor
-                        .execute(Effect::Emit { event: Event::JobFailing { id: job_id.clone() } })
+                        .execute(Effect::Emit { event: Event::JobFailing { id: job_id } })
                         .await?,
                 );
                 let effects = steps::failure_transition_effects(job, on_fail_step, error);
@@ -405,7 +405,7 @@ impl<C: Clock> Runtime<C> {
             let target = on_cancel.step_name();
             result_events.extend(
                 self.executor
-                    .execute(Effect::Emit { event: Event::JobCancelling { id: job_id.clone() } })
+                    .execute(Effect::Emit { event: Event::JobCancelling { id: job_id } })
                     .await?,
             );
             let effects = steps::cancellation_transition_effects(job, target);
@@ -418,9 +418,7 @@ impl<C: Clock> Runtime<C> {
             if job.step != target {
                 result_events.extend(
                     self.executor
-                        .execute(Effect::Emit {
-                            event: Event::JobCancelling { id: job_id.clone() },
-                        })
+                        .execute(Effect::Emit { event: Event::JobCancelling { id: job_id } })
                         .await?,
                 );
                 let effects = steps::cancellation_transition_effects(job, target);
@@ -452,8 +450,8 @@ impl<C: Clock> Runtime<C> {
 
     /// Build workspace cleanup effects for a job (if it has a workspace).
     fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
-        let job_owner: oj_core::OwnerId = oj_core::JobId::from_string(&job.id).into();
-        let ws_id = job.workspace_id.clone().or_else(|| {
+        let job_owner = oj_core::OwnerId::Job(oj_core::JobId::from_string(&job.id));
+        let ws_id = job.workspace_id.or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
@@ -510,8 +508,8 @@ impl<C: Clock> Runtime<C> {
     /// mapping, capture terminal output, and kill the agent process.
     async fn finalize_agent_step(&self, job: &Job) -> Result<(), RuntimeError> {
         let job_id = JobId::from_string(&job.id);
-        self.executor.execute(Effect::CancelTimer { id: TimerId::liveness(&job_id) }).await?;
-        self.executor.execute(Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) }).await?;
+        self.executor.execute(Effect::CancelTimer { id: TimerId::liveness(job_id) }).await?;
+        self.executor.execute(Effect::CancelTimer { id: TimerId::exit_deferred(job_id) }).await?;
 
         if let Some(agent_id) =
             job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())

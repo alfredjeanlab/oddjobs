@@ -317,7 +317,7 @@ impl<C: Clock> Runtime<C> {
 
         result_events.extend(
             self.create_and_start_job(CreateJobParams {
-                job_id: job_id.clone(),
+                job_id,
                 job_name: name,
                 job_kind: job_kind.clone(),
                 vars: input,
@@ -331,12 +331,12 @@ impl<C: Clock> Runtime<C> {
         );
 
         // Track job in worker state and item-job mapping
-        let owner: OwnerId = job_id.clone().into();
+        let owner: OwnerId = job_id.into();
         {
             let mut workers = self.worker_states.lock();
             if let Some(state) = workers.get_mut(worker_key) {
-                state.active.insert(owner.clone());
-                state.items.insert(owner.clone(), item_id.clone());
+                state.active.insert(owner);
+                state.items.insert(owner, item_id.clone());
             }
         }
 
@@ -344,7 +344,7 @@ impl<C: Clock> Runtime<C> {
         let dispatch_event = Event::WorkerDispatched {
             worker: bare_name.to_string(),
             item_id: item_id.clone(),
-            owner: owner.clone(),
+            owner,
             project: worker_namespace.clone(),
         };
         result_events

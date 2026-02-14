@@ -209,7 +209,7 @@ pub(super) async fn handle_cron_once(
         &ctx.event_bus,
         Event::CronOnce {
             cron: cron.to_string(),
-            owner: owner.clone(),
+            owner,
             project_path: v.project_path,
             runbook_hash: v.runbook_hash,
             target: v.target,

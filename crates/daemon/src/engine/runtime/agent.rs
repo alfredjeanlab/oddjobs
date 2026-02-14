@@ -37,8 +37,8 @@ impl<C: Clock> Runtime<C> {
     ) -> Result<Vec<Event>, RuntimeError> {
         let crew_id = CrewId::from_string(&crew.id);
         let events = vec![
-            Effect::Emit { event: Event::CrewUpdated { id: crew_id.clone(), status, reason } },
-            Effect::CancelTimer { id: TimerId::liveness(&crew_id) },
+            Effect::Emit { event: Event::CrewUpdated { id: crew_id, status, reason } },
+            Effect::CancelTimer { id: TimerId::liveness(crew_id) },
         ];
         let result = self.executor.execute_all(events).await?;
         self.cleanup_standalone_agent_session(crew).await?;
@@ -48,7 +48,7 @@ impl<C: Clock> Runtime<C> {
 
     /// Delete workspaces owned by a crew.
     async fn cleanup_crew_workspaces(&self, crew_id: &CrewId) -> Result<(), RuntimeError> {
-        let ar_owner = OwnerId::crew(crew_id.clone());
+        let ar_owner = OwnerId::crew(*crew_id);
         let ws_ids: Vec<WorkspaceId> = self.lock_state(|s| {
             s.workspaces
                 .values()
@@ -81,7 +81,7 @@ impl<C: Clock> Runtime<C> {
 impl<C: Clock> Runtime<C> {
     /// Spawn a standalone agent for a command run.
     ///
-    /// Builds spawn effects using the agent definition, registers the agent→run
+    /// Builds spawn effects using the agent definition, registers the agent->run
     /// mapping, and executes the effects. Returns events produced.
     pub(crate) async fn spawn_standalone_agent(
         &self,
@@ -105,13 +105,13 @@ impl<C: Clock> Runtime<C> {
 
         // Extract agent_id from SpawnAgent effect
         let agent_id = effects.iter().find_map(|e| match e {
-            Effect::SpawnAgent { agent_id, .. } => Some(agent_id.clone()),
+            Effect::SpawnAgent { agent_id, .. } => Some(*agent_id),
             _ => None,
         });
 
-        // Register agent → crew mapping
-        if let Some(ref aid) = agent_id {
-            self.register_agent(aid.clone(), OwnerId::crew(crew_id.clone()));
+        // Register agent -> crew mapping
+        if let Some(aid) = agent_id {
+            self.register_agent(aid, OwnerId::crew(*crew_id));
         }
 
         // Execute spawn effects (SpawnAgent fires a background task and returns immediately)
@@ -119,8 +119,8 @@ impl<C: Clock> Runtime<C> {
 
         // Emit CrewStarted event if we have an agent_id
         // (records the agent_id immediately in state for queries)
-        if let Some(ref aid) = agent_id {
-            let started_event = Event::CrewStarted { id: crew_id.clone(), agent_id: aid.clone() };
+        if let Some(aid) = agent_id {
+            let started_event = Event::CrewStarted { id: *crew_id, agent_id: aid };
             if let Some(ev) = self.executor.execute(Effect::Emit { event: started_event }).await? {
                 result_events.push(ev);
             }
@@ -167,10 +167,7 @@ impl<C: Clock> Runtime<C> {
             if let Some(id) = &agent_id {
                 if let Some(msg) = message {
                     self.executor
-                        .execute(Effect::SendToAgent {
-                            agent_id: id.clone(),
-                            input: msg.to_string(),
-                        })
+                        .execute(Effect::SendToAgent { agent_id: *id, input: msg.to_string() })
                         .await?;
                 }
 
@@ -178,7 +175,7 @@ impl<C: Clock> Runtime<C> {
                 self.executor
                     .execute(Effect::Emit {
                         event: Event::CrewUpdated {
-                            id: crew_id.clone(),
+                            id: *crew_id,
                             status: CrewStatus::Running,
                             reason: Some("resumed".to_string()),
                         },
@@ -188,7 +185,7 @@ impl<C: Clock> Runtime<C> {
                 // Restart liveness timer
                 self.executor
                     .execute(Effect::SetTimer {
-                        id: TimerId::liveness(crew_id),
+                        id: TimerId::liveness(*crew_id),
                         duration: crate::engine::spawn::LIVENESS_INTERVAL,
                     })
                     .await?;
@@ -253,12 +250,12 @@ impl<C: Clock> Runtime<C> {
                 .unwrap_or_default()
         });
 
-        // Register agent → crew mapping
-        self.register_agent(agent_id.clone(), OwnerId::crew(crew_id.clone()));
+        // Register agent -> crew mapping
+        self.register_agent(agent_id, OwnerId::crew(crew_id));
 
         let config = AgentReconnectConfig {
             agent_id,
-            owner: OwnerId::crew(crew_id.clone()),
+            owner: OwnerId::crew(crew_id),
             runtime_hint,
             auth_token,
         };
@@ -267,7 +264,7 @@ impl<C: Clock> Runtime<C> {
         // Restore liveness timer
         self.executor
             .execute(Effect::SetTimer {
-                id: TimerId::liveness(&crew_id),
+                id: TimerId::liveness(crew_id),
                 duration: crate::engine::spawn::LIVENESS_INTERVAL,
             })
             .await?;

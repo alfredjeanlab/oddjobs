@@ -11,17 +11,29 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use oj_core::{Event, WorkspaceId};
+use oj_core::{Event, OwnerId, WorkspaceId};
 use tokio::sync::mpsc;
 
-/// Parameters for provisioning a workspace.
-pub struct ProvisionRequest {
+/// Parameters for creating a workspace, extracted from `Effect::CreateWorkspace`.
+///
+/// Used by both the engine (to emit `WorkspaceCreated`) and the adapter (to
+/// provision the filesystem). The engine consumes `owner` and `workspace_type`
+/// for the event; the adapter uses the remaining fields for provisioning.
+#[derive(Clone)]
+pub struct CreateRequest {
     pub workspace_id: WorkspaceId,
     pub path: PathBuf,
-    pub is_worktree: bool,
+    pub owner: OwnerId,
+    pub workspace_type: Option<String>,
     pub repo_root: Option<PathBuf>,
     pub branch: Option<String>,
     pub start_point: Option<String>,
+}
+
+impl CreateRequest {
+    pub fn is_worktree(&self) -> bool {
+        self.workspace_type.as_deref() == Some("worktree")
+    }
 }
 
 /// Adapter for provisioning and cleaning up workspace filesystem resources.
@@ -35,7 +47,7 @@ pub trait WorkspaceAdapter: Send + Sync {
     ///
     /// Must send exactly one of `WorkspaceReady` or `WorkspaceFailed`
     /// via `event_tx`.
-    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest);
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: CreateRequest);
 
     /// Clean up workspace filesystem resources.
     ///
@@ -54,8 +66,8 @@ pub struct LocalWorkspaceAdapter;
 
 #[async_trait]
 impl WorkspaceAdapter for LocalWorkspaceAdapter {
-    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest) {
-        let result = if req.is_worktree {
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: CreateRequest) {
+        let result = if req.is_worktree() {
             create_worktree(&req.path, req.repo_root, req.branch, req.start_point).await
         } else {
             create_folder(&req.path).await
@@ -95,7 +107,7 @@ pub struct NoopWorkspaceAdapter;
 
 #[async_trait]
 impl WorkspaceAdapter for NoopWorkspaceAdapter {
-    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest) {
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: CreateRequest) {
         tracing::info!(workspace_id = ?req.workspace_id, "skipping local workspace creation (remote-only)");
         let event = Event::WorkspaceReady { id: req.workspace_id };
         if let Err(e) = event_tx.send(event).await {

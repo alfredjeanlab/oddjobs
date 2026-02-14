@@ -106,7 +106,7 @@ impl<C: Clock> Runtime<C> {
                 let display = oj_runbook::job_display_name(cron, job_id.short(8), project);
                 result_events.extend(
                     self.create_cron_shell_job(CronShellJobParams {
-                        job_id: job_id.clone(),
+                        job_id: *job_id,
                         cron,
                         job_display: &display,
                         cmd,
@@ -135,7 +135,7 @@ impl<C: Clock> Runtime<C> {
                 // Emit CrewCreated
                 let creation_effects = vec![Effect::Emit {
                     event: Event::CrewCreated {
-                        id: crew_id.clone(),
+                        id: *crew_id,
                         agent: agent_name.to_string(),
                         command: format!("cron:{}", cron),
                         project: project.to_string(),
@@ -184,7 +184,7 @@ impl<C: Clock> Runtime<C> {
 
                 result_events.extend(
                     self.create_and_start_job(CreateJobParams {
-                        job_id: job_id.clone(),
+                        job_id,
                         job_name: display_name,
                         job_kind: job_name.to_string(),
                         vars,

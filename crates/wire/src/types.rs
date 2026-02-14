@@ -328,7 +328,7 @@ impl DecisionSummary {
             d.context.clone()
         };
         DecisionSummary {
-            id: d.id.clone(),
+            id: d.id,
             owner_id: d.owner.to_string(),
             owner_name,
             source: format!("{:?}", d.source).to_lowercase(),
@@ -394,10 +394,10 @@ impl DecisionDetail {
             .unwrap_or_default();
 
         DecisionDetail {
-            id: d.id.clone(),
+            id: d.id,
             owner_id: d.owner.to_string(),
             owner_name,
-            agent_id: d.agent_id.clone(),
+            agent_id: d.agent_id,
             source: format!("{:?}", d.source).to_lowercase(),
             context: d.context.clone(),
             options,
@@ -406,7 +406,7 @@ impl DecisionDetail {
             message: d.message.clone(),
             created_at_ms: d.created_at_ms,
             resolved_at_ms: d.resolved_at_ms,
-            superseded_by: d.superseded_by.clone(),
+            superseded_by: d.superseded_by,
             project: d.project.clone(),
         }
     }
@@ -421,9 +421,9 @@ impl AgentDetail {
         finished_at_ms: Option<u64>,
     ) -> Self {
         AgentDetail {
-            agent_id: summary.agent_id.clone(),
+            agent_id: summary.agent_id,
             agent_name: summary.agent_name.clone(),
-            owner: summary.owner.clone(),
+            owner: summary.owner,
             job_name: job.name.clone(),
             step_name: summary.step_name.clone(),
             project: summary.project.clone(),

@@ -27,12 +27,12 @@ pub struct SpawnCtx<'a> {
 impl<'a> SpawnCtx<'a> {
     /// Create a SpawnCtx from a Job.
     pub fn from_job(job: &'a Job, job_id: &JobId) -> Self {
-        Self { owner: OwnerId::Job(job_id.clone()), name: &job.name, project: &job.project }
+        Self { owner: (*job_id).into(), name: &job.name, project: &job.project }
     }
 
     /// Create a SpawnCtx for a crew.
     pub fn from_crew(crew_id: &CrewId, name: &'a str, project: &'a str) -> Self {
-        Self { owner: OwnerId::Crew(crew_id.clone()), name, project }
+        Self { owner: (*crew_id).into(), name, project }
     }
 }
 
@@ -230,7 +230,7 @@ pub fn build_spawn_effects(
     Ok(vec![Effect::SpawnAgent {
         agent_id,
         agent_name: agent_name.to_string(),
-        owner: ctx.owner.clone(),
+        owner: ctx.owner,
         workspace_path: workspace_path.to_path_buf(),
         input: vars,
         command,

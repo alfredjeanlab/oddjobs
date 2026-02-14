@@ -114,14 +114,13 @@ impl<C: Clock> Executor<C> {
                     oj_core::OwnerId::Crew(_) => String::new(),
                 };
 
-                let mut config =
-                    AgentConfig::new(agent_id.clone(), command, workspace_path, owner.clone())
-                        .agent_name(agent_name)
-                        .env(env)
-                        .unset_env(unset_env)
-                        .prompt(input.get("prompt").cloned().unwrap_or_default())
-                        .job_name(input.get("name").cloned().unwrap_or_else(|| job_id_str.clone()))
-                        .job_id(job_id_str);
+                let mut config = AgentConfig::new(agent_id, command, workspace_path, owner)
+                    .agent_name(agent_name)
+                    .env(env)
+                    .unset_env(unset_env)
+                    .prompt(input.get("prompt").cloned().unwrap_or_default())
+                    .job_name(input.get("name").cloned().unwrap_or_else(|| job_id_str.clone()))
+                    .job_id(job_id_str);
                 config.resume = resume;
                 config.container = container;
                 if let Some(url) = input.get("source.repo") {
@@ -202,10 +201,7 @@ impl<C: Clock> Executor<C> {
                 branch,
                 start_point,
             } => {
-                crate::engine::workspace::create(
-                    &self.state,
-                    &self.event_tx,
-                    &self.workspace,
+                let req = crate::adapters::workspace::CreateRequest {
                     workspace_id,
                     path,
                     owner,
@@ -213,8 +209,9 @@ impl<C: Clock> Executor<C> {
                     repo_root,
                     branch,
                     start_point,
-                )
-                .await
+                };
+                crate::engine::workspace::create(&self.state, &self.event_tx, &self.workspace, req)
+                    .await
             }
             Effect::DeleteWorkspace { workspace_id } => {
                 crate::engine::workspace::delete(
@@ -272,7 +269,7 @@ impl<C: Clock> Executor<C> {
     ) {
         let event_tx = self.event_tx.clone();
         let job_id = match &owner {
-            Some(oj_core::OwnerId::Job(id)) => id.clone(),
+            Some(oj_core::OwnerId::Job(id)) => *id,
             _ => oj_core::JobId::from_string(""),
         };
 

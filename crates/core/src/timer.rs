@@ -9,12 +9,66 @@
 use crate::owner::OwnerId;
 use crate::project::scoped_name;
 
-crate::define_id! {
-    /// Unique identifier for a timer instance.
-    ///
-    /// Timers are used to schedule delayed actions within the system, such as
-    /// step timeouts or periodic health checks.
-    pub struct TimerId("tmr-");
+/// Unique identifier for a timer instance.
+///
+/// Unlike entity IDs (which are fixed-size random nanoids), timer IDs are
+/// structured keys like `liveness:job-xxx` or `cooldown:job-xxx:on_idle:0`
+/// that can exceed 23 bytes. Backed by `String` instead of `IdBuf`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct TimerId(String);
+
+impl TimerId {
+    pub fn from_string(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TimerId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<&str> for TimerId {
+    fn from(s: &str) -> Self {
+        Self(s.to_string())
+    }
+}
+
+impl From<String> for TimerId {
+    fn from(s: String) -> Self {
+        Self(s)
+    }
+}
+
+impl AsRef<str> for TimerId {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl PartialEq<str> for TimerId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl std::borrow::Borrow<str> for TimerId {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::ops::Deref for TimerId {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
 }
 
 impl TimerId {

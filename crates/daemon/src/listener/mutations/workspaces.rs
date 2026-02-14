@@ -263,7 +263,7 @@ pub(crate) async fn workspace_prune_inner(
             }
 
             // Emit WorkspaceDeleted to remove from daemon state
-            emit(event_bus, Event::WorkspaceDeleted { id: ws.id.clone() })?;
+            emit(event_bus, Event::WorkspaceDeleted { id: ws.id })?;
         }
     }
 
