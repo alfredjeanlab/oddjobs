@@ -6,19 +6,37 @@ All side effects are represented as data, not function calls. The functional cor
 
 ```rust
 pub enum Effect {
-    Emit { event },              // Persist + apply event
-    SpawnAgent { .. },           // Launch agent via coop
-    SendToAgent { .. },          // Send text input to agent
-    RespondToAgent { .. },       // Structured prompt response
-    KillAgent { .. },            // Terminate agent
-    CreateWorkspace { .. },      // Create folder or git worktree
-    DeleteWorkspace { .. },      // Remove workspace
-    SetTimer { id, duration },   // Schedule future event
-    CancelTimer { id },          // Cancel scheduled timer
-    Shell { .. },                // Run shell command
-    Notify { title, message },   // Desktop notification
-    PollQueue { .. },            // List external queue items
-    TakeQueueItem { .. },        // Claim external queue item
+    // Event emission
+    Emit { event },                         // Persist + apply event
+
+    // Agent effects
+    SpawnAgent { agent_id, owner, command,   // Launch agent via coop
+        container?, ... },                   //   (optional container for Docker/K8s)
+    SendToAgent { agent_id, input },         // Send text input to agent
+    RespondToAgent { agent_id, response },   // Structured prompt response
+    KillAgent { agent_id },                  // Terminate agent
+
+    // Workspace effects
+    CreateWorkspace { workspace_id, owner,   // Create folder or git worktree
+        path, workspace_type?, ... },
+    DeleteWorkspace { workspace_id },        // Remove workspace
+
+    // Timer effects
+    SetTimer { id, duration },               // Schedule future event
+    CancelTimer { id },                      // Cancel scheduled timer
+
+    // Shell effects
+    Shell { owner?, step, command, cwd,      // Run shell command
+        env, container? },                   //   (optional container for exec)
+
+    // Worker effects
+    PollQueue { worker_name, project,        // List external queue items
+        list_command, cwd },
+    TakeQueueItem { worker_name, project,    // Claim external queue item
+        take_command, cwd, item_id, item },
+
+    // Notification effects
+    Notify { title, message },               // Desktop notification
 }
 ```
 

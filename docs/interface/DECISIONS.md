@@ -14,7 +14,7 @@ List pending (unresolved) decisions.
 
 ```bash
 oj decision list                     # List pending decisions
-oj decision list --project <name>    # Filter by project project
+oj decision list --project <name>    # Filter by project namespace
 oj decision list -o json             # JSON output
 ```
 
@@ -47,7 +47,7 @@ Interactively walk through all pending decisions.
 
 ```bash
 oj decision review                   # Review all pending decisions
-oj decision review --project <name>  # Filter by project project
+oj decision review --project <name>  # Filter by project namespace
 ```
 
 For each unresolved decision, `review` displays the full context and options, then prompts for input:
@@ -64,10 +64,12 @@ Decisions are created by different escalation triggers, each with its own defaul
 | Source | Trigger | Default Options |
 |--------|---------|-----------------|
 | `idle` | Agent idle (stop hook fired) | Nudge *(rec)*, Done, Cancel, Dismiss |
-| `error` | Agent API/runtime error or unexpected exit | Retry *(rec)*, Skip, Cancel |
+| `dead` | Agent process exited unexpectedly | Retry *(rec)*, Skip, Cancel, Dismiss |
+| `error` | Agent API/runtime error | Retry *(rec)*, Skip, Cancel, Dismiss |
 | `gate` | Gate command exited non-zero | Retry *(rec)*, Skip, Cancel |
-| `approval` | Agent showing a permission prompt | Approve, Deny, Cancel |
-| `question` | Agent called `AskUserQuestion` tool | User-provided options + Cancel |
+| `approval` | Agent showing a permission prompt | Approve, Deny, Cancel, Dismiss |
+| `question` | Agent called `AskUserQuestion` tool | User-provided options + Other, Cancel, Dismiss |
+| `plan` | Agent called `ExitPlanMode` | Accept (clear) *(rec)*, Accept (auto), Accept (manual), Revise, Cancel |
 
 *(rec)* = marked as recommended.
 
@@ -84,7 +86,16 @@ When a decision is resolved, the chosen option maps to a concrete action on the 
 | 3 — Cancel | Cancel the job |
 | 4 — Dismiss | No action (decision acknowledged, job stays waiting) |
 
-### Error / Gate decisions
+### Dead / Error decisions
+
+| Option | Action |
+|--------|--------|
+| 1 — Retry | Resume job, restart agent |
+| 2 — Skip | Complete the current step, advance job |
+| 3 — Cancel | Cancel the job |
+| 4 — Dismiss | No action (decision acknowledged) |
+
+### Gate decisions
 
 | Option | Action |
 |--------|--------|
@@ -99,13 +110,26 @@ When a decision is resolved, the chosen option maps to a concrete action on the 
 | 1 — Approve | Send `y` to agent session |
 | 2 — Deny | Send `n` to agent session |
 | 3 — Cancel | Cancel the job |
+| 4 — Dismiss | No action (decision acknowledged) |
 
 ### Question decisions
 
 | Option | Action |
 |--------|--------|
 | 1–N | Send chosen option number to agent session |
-| N+1 — Cancel | Cancel the job |
+| N+1 — Other | Prompt for custom text response |
+| N+2 — Cancel | Cancel the job |
+| N+3 — Dismiss | No action (decision acknowledged) |
+
+### Plan decisions
+
+| Option | Action |
+|--------|--------|
+| 1 — Accept (clear context) | Approve plan, clear context window |
+| 2 — Accept (auto edits) | Approve plan, auto-apply edits |
+| 3 — Accept (manual edits) | Approve plan, manual edit mode |
+| 4 — Revise | Send revision message to agent |
+| 5 — Cancel | Cancel the job |
 
 A freeform message (`-m`) on any decision type is forwarded to the agent as a resume message.
 

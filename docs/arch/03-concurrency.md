@@ -36,7 +36,7 @@ daemon process
 ├─ checkpoint task ───── snapshot + WAL truncate (60s interval)
 ├─ event forwarder ───── runtime mpsc → EventBus bridge
 │
-├─ agent watcher task ── per-agent file watcher + liveness poll
+├─ agent watcher task ── per-agent WebSocket event bridge
 ├─ agent watcher task
 ├─ ...
 │
@@ -191,7 +191,7 @@ Runtime.agent_owners                Mutex<HashMap<..>>        No
 Runtime.runbook_cache               Mutex<HashMap<..>>        No
 Runtime.worker_states               Mutex<HashMap<..>>        No
 Runtime.cron_states                 Mutex<HashMap<..>>        No
-LocalAdapter.agents             Arc<Mutex<HashMap<..>>>   No
+LocalAdapter.agents                 Arc<Mutex<HashMap<..>>>   No
 Vec<Breadcrumb> (orphans)           Arc<Mutex<Vec<..>>>       No
 ```
 
@@ -217,12 +217,12 @@ ID generation.
 ## Blocking I/O on Worker Threads
 
 `spawn_blocking` is used in two places: checkpoint completion wait
-(`daemon/src/main.rs`) and desktop notifications (`adapters/src/notify/desktop.rs`).
+(`daemon/src/main.rs`) and desktop notifications (`daemon/src/adapters/notify.rs`).
 All other blocking file I/O runs directly on tokio worker threads:
 
 | Location | Operation |
 |----------|-----------|
-| `agent/coop/spawn.rs` `prepare_workspace()` | `fs::create_dir_all`, `fs::write` |
+| `adapters/agent/coop/spawn.rs` `prepare_workspace()` | `fs::create_dir_all`, `fs::write` |
 | `listener/query.rs` (multiple handlers) | `fs::read_to_string` for logs |
 | `storage/snapshot.rs` `save()` | `File::create`, `serde_json::to_writer`, `sync_all` |
 | `storage/wal.rs` `flush()` | `write_all`, `sync_all` |
@@ -231,18 +231,18 @@ All other blocking file I/O runs directly on tokio worker threads:
 ## Agent Watcher Model
 
 Each running agent gets a tokio task that monitors agent state via coop's
-WebSocket event bridge. The `LocalAdapter` subscribes to the agent's Unix
-socket at `/ws?subscribe=state` and translates coop state events into engine
-events (`AgentWorking`, `AgentIdle`, `AgentPrompt`, `AgentFailed`, `AgentGone`).
+WebSocket event bridge. The adapter subscribes to the agent's coop sidecar
+at `/ws?subscribe=state,messages` and translates events into engine events
+(`AgentWorking`, `AgentIdle`, `AgentPrompt`, `AgentFailed`, `AgentGone`).
+Transport is Unix socket (local) or TCP (Docker/K8s).
 
 ```diagram
 agent watcher task (per agent)
 │
-├─ connect to coop WebSocket (Unix socket)
+├─ connect to coop WebSocket (Unix socket or TCP)
 │
 └─ event loop
      ├─ ws_message.recv()            translate coop state → emit Event
-     ├─ liveness poll (periodic)     check agent process health
      └─ shutdown_rx                  oneshot from agent kill
 ```
 

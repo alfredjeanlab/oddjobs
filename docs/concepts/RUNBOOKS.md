@@ -35,6 +35,68 @@ Runbook files placed in `.oj/runbooks/` are auto-discovered. Three formats are s
 
 All formats express the same primitives.
 
+## Imports and Libraries
+
+HCL runbooks can import reusable libraries with `import` statements. Libraries provide pre-built workflows (bug tracking, merge queues, etc.) parameterized with `const` blocks.
+
+### Import Syntax
+
+```hcl
+import "oj/wok" {
+  const "prefix" { value = "oj" }
+  const "check"  { value = "make check" }
+}
+```
+
+An optional `alias` namespaces imported entities to avoid collisions:
+
+```hcl
+import "oj/wok" {
+  alias = "wok"
+  const "prefix" { value = "oj" }
+}
+# Imported entities become: wok:fix, wok:bug, etc.
+```
+
+### Const Parameters
+
+Libraries declare required and optional parameters with `const` blocks:
+
+```hcl
+# In library file:
+const "prefix" {}                    # Required, no default
+const "check" { default = "true" }   # Optional, has default
+```
+
+Const values are interpolated in library content:
+- `${const.name}` — shell-escaped substitution
+- `${raw(const.name)}` — raw substitution (no escaping)
+- `%{ if const.name == "value" }...%{ endif }` — conditional blocks
+
+### Library Resolution
+
+Libraries are resolved in order:
+1. **Project-level**: `.oj/libraries/<namespace>/<name>/`
+2. **User-level**: `~/.local/share/oj/libraries/<namespace>/<name>/`
+3. **Built-in**: Shipped with oddjobs (e.g., `oj/wok`, `oj/git`, `oj/claude`)
+
+Install libraries with `oj runbook add <path>`. Search available libraries with `oj runbook search`.
+
+## Import and Libraries
+
+Runbooks can import reusable libraries using the `import` block. Libraries provide pre-built agents, jobs, commands, queues, and workers that can be customized via `const` overrides.
+
+```hcl
+import "oj/wok" {
+  const "prefix" { value = "oj" }
+  const "check"  { value = "make check" }
+}
+```
+
+Built-in libraries (`oj/claude`, `oj/git`, `oj/wok`, `oj/github`) are embedded in the binary. Libraries define `const` blocks (required or with defaults) whose values are interpolated as `${const.name}` (shell-escaped) or `${raw(const.name)}` (raw). Conditional blocks (`%{ if const.name == "value" }`) let library content vary. An optional `alias` on the import prefixes all imported entity names to avoid collisions.
+
+Resolution order: project `.oj/libraries/` → user `~/.oj/state/libraries/` → built-in. Manage with `oj runbook list`, `oj runbook search`, `oj runbook info`, `oj runbook add`.
+
 ## Templates
 
 All string fields in runbooks support two-step interpolation:
@@ -520,6 +582,7 @@ Agent lifecycle actions handle different states:
 | `resume` | Re-spawn agent with `--resume`, preserving conversation history |
 | `escalate` | Alert for human intervention |
 | `gate` | Run a shell command; advance if exit 0, escalate otherwise |
+| `auto` | Delegate to coop's self-determination (on_idle only) |
 
 ## File Organization
 

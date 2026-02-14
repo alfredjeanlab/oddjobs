@@ -62,7 +62,7 @@ One daemon serves all projects for a user:
 ├── daemon.pid           # Lock file (contains PID)
 ├── daemon.version       # Version file (for mismatch detection)
 ├── daemon.log           # Daemon logs
-├── snapshot.json        # State snapshot
+├── snapshot.json        # State snapshot (zstd compressed)
 ├── wal/
 │   └── events.wal       # Write-ahead log
 ├── logs/                # Per-job and per-agent logs
@@ -70,8 +70,11 @@ One daemon serves all projects for a user:
 │   └── agent/
 │       ├── <agent-id>.log
 │       └── <agent-id>/  # Agent session JSONL
+├── agt-<agent-id>/      # Per-agent coop directories
+│   ├── coop.sock        # Coop Unix socket
+│   └── agent-config.json
 └── workspaces/
-    └── <name>/          # Git worktrees for ephemeral workspaces
+    └── ws-<name>-<nonce>/  # Git worktrees for ephemeral workspaces
 ```
 
 **Why user-level:**
@@ -102,8 +105,8 @@ The daemon solves these by being a single owner of state and the event loop.
 
 Request categories:
 - **Core**: Ping, Hello (version handshake), Status, Event, Query, Shutdown, RunCommand
-- **Agent**: AgentSend, AgentResume, AgentPrune
-- **Job**: JobResume, JobResumeAll, JobCancel, JobPrune
+- **Agent**: AgentSend, AgentResume, AgentKill, AgentAttach, AgentPrune
+- **Job**: JobResume, JobResumeAll, JobCancel, JobSuspend, JobPrune
 - **Workspace**: WorkspaceDrop, WorkspaceDropFailed, WorkspaceDropAll, WorkspacePrune
 - **Worker**: WorkerStart, WorkerStop, WorkerRestart, WorkerResize, WorkerWake, WorkerPrune
 - **Cron**: CronStart, CronStop, CronRestart, CronOnce, CronPrune
@@ -368,7 +371,7 @@ flowchart LR
 
     | Condition | Action |
     |-----------|--------|
-    | Session alive, crewning | Reconnect file watcher |
+    | Session alive, running | Reconnect WebSocket bridge |
     | Session alive, agent dead | Emit `AgentExited` |
     | Session dead | Emit `AgentGone` |
 
@@ -410,24 +413,14 @@ checkpoint (including compression and fsyncs) takes ~200ms in the background.
 ## Daemon Management
 
 ```bash
-# Start daemon (background)
-oj daemon start
-
-# Start in foreground (debugging)
-oj daemon start --foreground
-
-# Check status
-oj daemon status
-
-# Stop gracefully (sessions preserved for restart+reconcile)
-oj daemon stop
-
-# Stop and terminate all sessions
-oj daemon stop --kill
-
-# View logs
-oj daemon logs
-oj daemon logs -f  # watch logs
+oj daemon start                 # Start daemon (background)
+oj daemon start --foreground    # Start in foreground (debugging)
+oj daemon status                # Check status
+oj daemon stop                  # Graceful shutdown (sessions preserved)
+oj daemon stop --kill           # Stop and terminate all sessions
+oj daemon restart               # Stop and restart
+oj daemon logs [-f] [-n 200]    # View logs (default 200 lines)
+oj daemon orphans               # List orphaned jobs from startup
 ```
 
 ### Auto-Start

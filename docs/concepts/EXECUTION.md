@@ -60,7 +60,7 @@ step "init" {
 }
 ```
 
-**Agent config**: Agent configuration (including settings, stop gate config, and SessionStart hooks for prime scripts) is stored in `~/.local/state/oj/agents/<agent-id>/agent-config.json` and passed to the agent via `--agent-config`. Project settings from `<workspace>/.claude/settings.json` are loaded (if they exist) and merged into the agent-specific settings.
+**Agent config**: Agent configuration (including settings, stop gate config, and SessionStart hooks for prime scripts) is stored in `{state_dir}/agents/{agent-id-prefix}/agent-config.json` and passed to the agent via `--agent-config`. The directory uses a 12-character prefix of the agent ID to keep Unix socket paths within macOS limits. Project settings from `<workspace>/.claude/settings.json` are loaded (if they exist) and merged into the agent-specific settings.
 
 ## Session
 

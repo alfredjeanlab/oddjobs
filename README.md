@@ -2,35 +2,27 @@
 
 An automated team for your odd jobs. Orchestrate work from runbooks.
 
-Odd jobs coordinates multiple AI coding agents with runbook-defined workflows, to plan features, decompose work into issues, execute tasks, and merge results. Agents work concurrently with coordination primitives (locks, semaphores, queues) ensuring safe access to shared resources.
+Odd jobs coordinates multiple AI coding agents with runbook-defined workflows, to plan features, decompose work into issues, execute tasks, and merge results. Agents run in coop sidecars with WebSocket-based lifecycle monitoring. Jobs, queues, and workers provide the coordination primitives.
 
 ## Architecture
 
-**Functional Core, Imperative Shell** - Pure state machines generate effects; adapters execute them:
+Everything is defined declaratively in runbooks — commands, jobs, agents, queues, workers, crons. The daemon owns the event loop, persists state to a WAL, and recovers across restarts. Agents run as coop processes with WebSocket lifecycle monitoring, giving users real-time observability and the ability to attach, intervene, or debug running sessions.
 
 ```
-┌────────────────────────────────────────────────┐
-│              Imperative Shell                  │
-│  ┌──────────────────────────────────────────┐  │
-│  │  Engine: Load state, execute effects,    │  │
-│  │          persist new state               │  │
-│  └──────────────────────────────────────────┘  │
-│  ┌─────────┬─────────┬─────────┐                │
-│  │  Agent  │   git   │ Notify  │                │
-│  │ (coop)  │ Adapter │ Adapter │                │
-│  └─────────┴─────────┴─────────┘                │
-└────────────────────────────────────────────────┘
-                       │
-┌──────────────────────┼─────────────────────────┐
-│                      │   Functional Core       │
-│  ┌───────────────────┴────────────────────┐    │
-│  │  Job, Queue, Task, Lock,          │    │
-│  │  Semaphore, Guard state machines       │    │
-│  │                                        │    │
-│  │  transition(state, event) →            │    │
-│  │      (new_state, effects)              │    │
-│  └────────────────────────────────────────┘    │
-└────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│              Daemon (ojd)                       │
+│                                                 │
+│  Runbooks ──→ Engine ──→ Event Loop             │
+│                 │                               │
+│       ┌─────────┼──────────┐                    │
+│       │         │          │                    │
+│    Agent    Workspace   Notify                  │
+│    (coop)    Adapter    Adapter                 │
+│       │                                         │
+│       └──→ WebSocket lifecycle monitoring       │
+│                                                 │
+│  WAL + Snapshots ──→ Crash recovery             │
+└─────────────────────────────────────────────────┘
 ```
 
 ## Design Principles

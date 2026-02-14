@@ -43,7 +43,7 @@ Events fall into three categories:
 
 - **State mutations**: Applied by `apply_event()` to update materialized state (e.g., `job:created`, `agent:spawned`, `step:completed`, `worker:started`, `queue:pushed`, `decision:created`, `crew:created`)
 - **Signals**: Handled by the runtime but do not mutate state (e.g., `command:run`, `timer:start`, `agent:idle`, `agent:prompt`)
-- **Actions**: Emitted externally to trigger runtime operations (e.g., `job:resume`, `job:cancel`, `agent:signal`, `agent:input`)
+- **Actions**: Emitted externally to trigger runtime operations (e.g., `job:resume`, `job:cancel`, `agent:input`, `agent:respond`)
 
 All events (including signals and actions) are persisted to WAL. `CommandRun` persists the project → project_path mapping but is otherwise a signal.
 
@@ -61,10 +61,13 @@ pub struct MaterializedState {
     pub crons: HashMap<String, CronRecord>,
     pub decisions: HashMap<String, Decision>,
     pub crew: HashMap<String, Crew>,
-    pub agents: HashMap<String, AgentRecord>,      // Unified agent index (agent_id → record)
+    pub agents: HashMap<String, AgentRecord>,      // Unified agent index (agent_id → record with runtime/auth info)
+    pub poll_meta: HashMap<String, QueuePollMeta>,  // Transient queue polling metadata (not serialized)
     pub project_paths: HashMap<String, PathBuf>,   // Namespace → project path mapping
 }
 ```
+
+`AgentRecord` provides a unified view of all agents regardless of how they were spawned (job-embedded or standalone). Each record tracks the agent's `OwnerId`, `AgentRuntime` (Local/Docker/Kubernetes), and optional `auth_token` for remote reconnection.
 
 Each event type has logic in `apply_event()` that updates state deterministically.
 

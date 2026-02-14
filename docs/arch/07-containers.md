@@ -34,7 +34,7 @@ route to `DockerAdapter`; agents without route to `LocalAdapter`.
 The route for each agent is tracked in memory after spawn and persisted in the
 WAL for recovery after daemon restart.
 
-Source: `crates/adapters/src/agent/router.rs`
+Source: `crates/daemon/src/adapters/agent/router.rs`
 
 ## Transport
 
@@ -51,13 +51,13 @@ The `RemoteCoopClient` is shared between Docker and Kubernetes adapters — it
 implements the 12 `AgentAdapter` trait methods identically once an agent is
 registered with an address and token.
 
-Source: `crates/adapters/src/agent/remote.rs`
+Source: `crates/daemon/src/adapters/agent/remote.rs`
 
 ## Docker Adapter
 
 Runs coop inside Docker containers on the same machine as the daemon.
 
-Source: `crates/adapters/src/agent/docker/`
+Source: `crates/daemon/src/adapters/agent/docker/`
 
 ### Spawn Flow
 
@@ -101,7 +101,7 @@ lifecycle matches job lifecycle. Cleanup removes both the container and volume.
 Runs coop inside Kubernetes pods. The daemon creates pods via the Kubernetes API
 (`kube-rs`) and communicates with each coop over TCP on the pod's cluster IP.
 
-Source: `crates/adapters/src/agent/k8s/`
+Source: `crates/daemon/src/adapters/agent/k8s/`
 
 ### Spawn Flow
 

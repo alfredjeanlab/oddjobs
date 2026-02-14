@@ -6,7 +6,7 @@ How desktop notifications are sent from runbook lifecycle events.
 
 ```rust
 #[async_trait]
-pub trait NotifyAdapter: Clone + Send + Sync + 'static {
+pub trait NotifyAdapter: Send + Sync + 'static {
     async fn notify(&self, title: &str, message: &str) -> Result<(), NotifyError>;
 }
 ```

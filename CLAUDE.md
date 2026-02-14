@@ -4,13 +4,13 @@ An automated team for your odd jobs. Orchestrate work from runbooks.
 
 ## Architecture Overview
 
-The system is a user-level daemon (`ojd`) that executes jobs defined in HCL (or TOML) runbooks (`.oj/runbooks/*.hcl`). The CLI (`oj`) communicates with the daemon over a Unix socket. Jobs have steps that run either shell commands or agents (Claude Code in coop processes). State is durably stored via a write-ahead log (WAL) with periodic snapshots, allowing recovery across daemon restarts. The architecture follows a functional core / imperative shell pattern: pure state machines in `crates/core`, effects as data, and trait-based adapters in `crates/daemon/src/adapters` for testability.
+The system is a user-level daemon (`ojd`) that executes jobs defined in HCL (or TOML) runbooks (`.oj/runbooks/*.hcl`). The CLI (`oj`) communicates with the daemon over a Unix socket. Jobs have steps that run either shell commands or agents (Claude Code in coop processes). State is durably stored via a write-ahead log (WAL) with periodic snapshots, allowing recovery across daemon restarts — the daemon is designed to be always-on, surviving crashes and picking up where it left off. Agents run as coop processes (not print mode), giving users real-time observability, the ability to attach/intervene, and interactive debugging. Internally, the architecture follows a functional core / imperative shell pattern: pure state machines in `crates/core`, effects as data, and trait-based adapters in `crates/daemon/src/adapters` for testability.
 
 Agents are interactive entities defined in runbooks. Each agent has its own configuration (command, prompt, lifecycle handlers, notifications) and runs in an isolated coop process. Some agents are short-lived, completing a single task and exiting; others are long-lived, persisting across multiple interactions. Jobs are the primary way agents are triggered today, but agent definitions are standalone — an agent's identity, lifecycle, and notify config are independent of the job that spawns it.
 
-Agent lifecycle is managed by per-agent file watchers that monitor Claude's JSONL session log for state changes (working/idle/failed/exited). Agents run in isolated workspaces — either engine-managed git worktrees (`source { git = true }`) or plain directories (`source = "folder"`). Their lifecycle is handled by configurable actions: `on_idle` (when agent is waiting for input) supports `nudge`, `done`, `fail`, `escalate`, and `gate`; `on_dead` (when agent exits) supports `done`, `fail`, `recover`, `escalate`, and `gate`. The `gate` action runs a shell command — exit 0 advances the job, non-zero escalates. Both jobs and agents support `notify {}` blocks with `on_start`, `on_done`, and `on_fail` message templates that emit desktop notifications on lifecycle events.
+Agent lifecycle is monitored via coop's WebSocket event bridge — the daemon subscribes to each agent's coop sidecar at `/ws?subscribe=state,messages` and translates state transitions (working/idle/prompt/error/exited) into engine events. Agents run in isolated workspaces — either engine-managed git worktrees (`source { git = true }`) or plain directories (`source = "folder"`). Four triggers handle lifecycle: `on_idle` (waiting for input), `on_dead` (process exit), `on_prompt` (permission/approval prompt), and `on_error` (API errors like rate limits). Actions include `nudge`, `done`, `fail`, `escalate`, `gate` (shell command: exit 0 advances, non-zero escalates), `resume` (re-spawn with history), and `auto` (agent self-determines). Both jobs and agents support `notify {}` blocks for desktop notifications on lifecycle events.
 
-A single daemon serves all projects for a user. Per-project project isolation prevents resource collisions: jobs, workers, and queues are scoped by a project derived from `.oj/config.toml [project].name` (falling back to the directory basename). Namespaces propagate through events, IPC requests, and the `OJ_PROJECT` environment variable so that nested `oj` calls from agents inherit the parent project's context. Queues support dead letter semantics with configurable retry — failed items are automatically retried with cooldown, and items that exhaust retries move to `Dead` status. Dead items can be resurrected with `oj queue retry`.
+A single daemon serves all projects for a user. Per-project namespace isolation prevents resource collisions: jobs, workers, and queues are scoped by a namespace derived from `.oj/config.toml [project].name` (falling back to the directory basename). Namespaces propagate through events, IPC requests, and the `OJ_PROJECT` environment variable so that nested `oj` calls from agents inherit the parent project's context. Queues support dead letter semantics with configurable retry — failed items are automatically retried with cooldown, and items that exhaust retries move to `Dead` status. Dead items can be resurrected with `oj queue retry`.
 
 ### Why Agents Run as Coop Processes (Not Print Mode)
 
@@ -35,12 +35,13 @@ oddjobs/
 │   ├── cli/          # Command-line interface (oj)
 │   ├── core/         # Core library (state machines, effects)
 │   ├── daemon/       # User-level daemon (ojd)
-│   │   ├── adapters/ #   Trait implementations (AgentAdapter, RepoAdapter, etc.)
+│   │   ├── adapters/ #   Trait implementations (AgentAdapter, WorkspaceAdapter, NotifyAdapter)
 │   │   ├── engine/   #   Job execution engine
 │   │   └── storage/  #   WAL and snapshot persistence
-│   ├── runbook/      # HCL/TOML runbook parsing
+│   ├── runbook/      # HCL/TOML runbook parsing + import system
 │   ├── shell/        # Shell command execution
 │   └── wire/         # CLI↔daemon IPC protocol types
+├── library/          # Built-in runbook libraries (oj/wok, oj/git, oj/claude, oj/github)
 ├── docs/             # Architecture documentation
 ├── plans/            # Epic implementation plans
 ├── scripts/          # Build and utility scripts

@@ -8,7 +8,7 @@ Manages agent lifecycle. The engine calls this trait; it never interacts with ag
 
 ```rust
 #[async_trait]
-pub trait AgentAdapter: Clone + Send + Sync + 'static {
+pub trait AgentAdapter: Send + Sync + 'static {
     async fn spawn(&self, config: AgentConfig, event_tx: mpsc::Sender<Event>) -> Result<AgentHandle, AgentAdapterError>;
     async fn send(&self, agent_id: &AgentId, input: &str) -> Result<(), AgentAdapterError>;
     async fn respond(&self, agent_id: &AgentId, response: &PromptResponse) -> Result<(), AgentAdapterError>;
@@ -21,11 +21,15 @@ pub trait AgentAdapter: Clone + Send + Sync + 'static {
     async fn capture_output(&self, agent_id: &AgentId, lines: u32) -> Result<String, AgentAdapterError>;
     async fn fetch_transcript(&self, agent_id: &AgentId) -> Result<String, AgentAdapterError>;
     async fn fetch_usage(&self, agent_id: &AgentId) -> Option<UsageData>;
+    fn get_coop_host(&self, agent_id: &AgentId) -> Option<CoopInfo> { None }
+    fn is_remote_only(&self) -> bool { false }
 }
 ```
 
+The engine holds the adapter as `Arc<dyn AgentAdapter>` (dynamic dispatch) rather than a generic type parameter.
+
 **Production**: `RuntimeRouter` — delegates to the appropriate adapter based on
-environment and agent config:
+environment and agent config. Uses a `dispatch!` macro to route operations:
 
 | Adapter | When | Transport |
 |---------|------|-----------|
@@ -37,9 +41,13 @@ When the daemon runs inside a Kubernetes cluster, the router auto-detects via
 in-cluster config and routes all agents to `KubernetesAdapter`. Otherwise, it
 routes based on whether the agent has a `container` field.
 
+The route for each agent is tracked in memory after spawn. `AgentHandle` returns the `AgentRuntime` (Local/Docker/Kubernetes) and optional `auth_token`, which are persisted in `AgentRecord` for reconnection after daemon restart.
+
 **Test**: `FakeAgentAdapter` — in-memory state, configurable responses, records all calls. Enables deterministic tests, call verification, error injection (`set_spawn_fails(true)`), and state simulation.
 
 Integration tests use [claudeless](https://github.com/anthropics/claudeless) — a CLI simulator that emulates Claude's interface without API costs. The `LocalAdapter` works identically with both real Claude and claudeless.
+
+Source: `crates/daemon/src/adapters/agent/`
 
 ## Coop Architecture
 
@@ -75,12 +83,12 @@ Agents are long-lived and interactive by design. The coop architecture enables:
 
 When the engine processes `Effect::SpawnAgent`:
 
-1. **Create agent directory**: `{state_dir}/agents/{agent_id}/`
+1. **Create agent directory**: `{state_dir}/agt-{agent_id}/`
 2. **Write agent-config.json**: Settings, stop gate config, and prime scripts (see below)
 3. **Launch coop**: `coop --agent claude --socket {coop.sock} --agent-config {path} -- {command}`
 4. **Poll for readiness**: HTTP GET `/api/v1/health` until responsive (~10s timeout)
 5. **Start event bridge**: WebSocket subscription for state change events
-6. **Emit `AgentSpawned`**: Signal to engine that monitoring is active
+6. **Emit `AgentSpawned`**: Signal to engine that monitoring is active (includes `AgentRuntime` and optional `auth_token`)
 
 Coop injects `--session-id` and `--agent-config` into the wrapped command automatically based on the agent config.
 

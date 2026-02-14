@@ -17,7 +17,7 @@ All events are serialized as flat JSON objects with a `type` field using `projec
 Event origin distinguishes categories:
 - **Signals** (bare verb/noun): Emitted **internally by the engine** to notify about things that happened. Examples: `command:run`, `timer:start`, `system:shutdown`, `agent:waiting`
 - **State mutations** (past participle/adjective): `job:created`, `agent:spawned`, `agent:working`, `step:started`
-- **Actions** (imperative): Emitted **externally by the CLI or agents** to trigger runtime operations. Examples: `agent:input`, `job:resume`, `job:cancel`, `agent:signal`
+- **Actions** (imperative): Emitted **externally by the CLI or agents** to trigger runtime operations. Examples: `agent:input`, `agent:respond`, `job:resume`, `job:cancel`
 
 ## Signal Events
 
@@ -25,9 +25,11 @@ Emitted **internally by the engine** to notify about things that happened. These
 
 - `command:run` — CLI command dispatched (creates job)
 - `timer:start` — Scheduled timer fired
+- `runbook:loaded` — Runbook parsed and loaded
 - `agent:waiting` — Agent idle but still running (no-op in state)
 - `agent:idle` — Agent idle detected by coop (triggers idle grace timer)
 - `agent:stop:blocked` — Agent tried to exit but stop gate blocked it
+- `agent:stop:allowed` — Agent stop gate allowed exit
 - `agent:prompt` — Agent showing a prompt (permission, plan, question)
 - `system:shutdown` — Daemon shutting down
 
@@ -37,9 +39,9 @@ Applied via `MaterializedState::apply_event()` to update in-memory state. All ev
 
 ### Job lifecycle
 
-`job:created`, `job:advanced`, `job:updated`, `job:failing`, `job:cancelling`, `job:suspending`, `job:deleted`
+`job:created`, `job:advanced`, `job:updated`, `job:failing`, `job:cancelling`, `job:cancel`, `job:suspending`, `job:suspend`, `job:deleted`
 
-`job:failing`, `job:cancelling`, and `job:suspending` are transitional states that mark the job as entering a terminal or suspended flow (e.g., triggering `on_fail`/`on_cancel` steps before the job reaches its final state).
+`job:failing`, `job:cancelling`, and `job:suspending` are transitional states that mark the job as entering a terminal or suspended flow (e.g., triggering `on_fail`/`on_cancel` steps before the job reaches its final state). `job:cancel` and `job:suspend` are action events that trigger the transitions.
 
 ### Step lifecycle
 
@@ -53,7 +55,7 @@ All agent lifecycle events include an `owner` field (`OwnerId` — either a job 
 
 ### Spawn and workspace lifecycle
 
-`agent:spawned`, `agent:spawn:failed`, `workspace:created`, `workspace:ready`, `workspace:failed`, `workspace:deleted`
+`agent:spawned`, `agent:spawn:failed`, `workspace:created`, `workspace:ready`, `workspace:failed`, `workspace:deleted`, `workspace:drop`
 
 ### Cron lifecycle
 
@@ -83,7 +85,7 @@ Queue events track the lifecycle of items in persisted queues. `queue:pushed` tr
 
 `crew:created`, `crew:started`, `crew:updated`, `crew:deleted`
 
-crew are standalone agent executions (not tied to a job). They share the same lifecycle and monitoring as job-owned agents but are created directly via `command.run = { agent = "name" }`.
+Crew are standalone agent executions (not tied to a job). They share the same lifecycle and monitoring as job-owned agents but are created directly via `command.run = { agent = "name" }`.
 
 ## Action Events
 
@@ -98,3 +100,7 @@ Action events trigger runtime operations. They are emitted **externally by the C
 - `crew:resume` — Resume a waiting/suspended crew
 
 These events do not mutate `MaterializedState` directly — the runtime handles them by emitting further state mutation events.
+
+## Event Count
+
+The system defines approximately 58 event types across all categories, plus a `Custom` catch-all for forward compatibility during deserialization.
