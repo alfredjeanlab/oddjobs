@@ -63,8 +63,7 @@ fn extract_decision_id(output: &str) -> Option<String> {
         }
         // First non-header line should have the ID as the first field
         if let Some(id) = line.split_whitespace().next() {
-            // Decision IDs are hex strings
-            if !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()) {
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                 return Some(id.to_string());
             }
         }

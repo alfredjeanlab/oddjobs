@@ -15,12 +15,16 @@ pub(crate) fn epoch_ms_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
-/// Get a value by exact ID or unique prefix (like git commit hashes).
+/// Get a value by exact ID or unique prefix.
+///
+/// Matches against both the full key and the suffix after the type prefix
+/// (e.g. "job-", "agt-"). This allows short IDs displayed without their
+/// type prefix to resolve back to the full entry.
 pub(crate) fn find_by_prefix<'a, V>(map: &'a HashMap<String, V>, id: &str) -> Option<&'a V> {
     if let Some(val) = map.get(id) {
         return Some(val);
     }
-    let matches: Vec<_> = map.iter().filter(|(k, _)| k.starts_with(id)).collect();
+    let matches: Vec<_> = map.iter().filter(|(k, _)| oj_core::id::prefix_matches(k, id)).collect();
     if matches.len() == 1 {
         Some(matches[0].1)
     } else {

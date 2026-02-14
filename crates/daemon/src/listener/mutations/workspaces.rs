@@ -28,8 +28,11 @@ pub(crate) async fn handle_workspace_drop(
 
         if let Some(id) = id {
             // Find workspace by exact match or prefix
-            let matches: Vec<_> =
-                state.workspaces.iter().filter(|(k, _)| *k == id || k.starts_with(id)).collect();
+            let matches: Vec<_> = state
+                .workspaces
+                .iter()
+                .filter(|(k, _)| *k == id || oj_core::id::prefix_matches(k, id))
+                .collect();
 
             if matches.len() == 1 {
                 vec![(matches[0].0.clone(), matches[0].1.path.clone(), matches[0].1.branch.clone())]

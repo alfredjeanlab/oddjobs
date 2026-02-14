@@ -34,7 +34,8 @@ pub(super) fn handle_get_agent_logs(
     if job.is_none() {
         // Check unified agents map
         let agent = state.agents.get(&id).or_else(|| {
-            let matches: Vec<_> = state.agents.iter().filter(|(k, _)| k.starts_with(&id)).collect();
+            let matches: Vec<_> =
+                state.agents.iter().filter(|(k, _)| oj_core::id::prefix_matches(k, &id)).collect();
             if matches.len() == 1 {
                 Some(matches[0].1)
             } else {
@@ -57,7 +58,7 @@ pub(super) fn handle_get_agent_logs(
         for p in state.jobs.values() {
             for r in &p.step_history {
                 if let Some(ref aid) = r.agent_id {
-                    if *aid == id || aid.starts_with(&id) {
+                    if *aid == id || oj_core::id::prefix_matches(aid, &id) {
                         let path = agent_log_path(logs_path, aid);
                         let (content, new_offset) = read_log_file_with_offset(&path, lines, offset);
                         return Response::AgentLogs {

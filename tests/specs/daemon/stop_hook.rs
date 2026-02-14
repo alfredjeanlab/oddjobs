@@ -647,7 +647,7 @@ fn extract_decision_id(output: &str) -> Option<String> {
             continue;
         }
         if let Some(id) = line.split_whitespace().next() {
-            if !id.is_empty() && id.chars().all(|c| c.is_ascii_hexdigit()) {
+            if !id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                 return Some(id.to_string());
             }
         }

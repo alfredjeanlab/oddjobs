@@ -52,7 +52,10 @@ pub(crate) fn handle_job_resume(
     // Not in state — check orphan registry
     let orphan = {
         let orphans_guard = ctx.orphans.lock();
-        orphans_guard.iter().find(|bc| bc.job_id == id || bc.job_id.starts_with(&id)).cloned()
+        orphans_guard
+            .iter()
+            .find(|bc| bc.job_id == id || oj_core::id::prefix_matches(&bc.job_id, &id))
+            .cloned()
     };
 
     let Some(orphan) = orphan else {

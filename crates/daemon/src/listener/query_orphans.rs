@@ -31,7 +31,9 @@ pub(super) fn handle_dismiss_orphan(
     let mut orphans = orphans.lock();
 
     // Find by exact match or prefix
-    let idx = orphans.iter().position(|bc| bc.job_id == id || bc.job_id.starts_with(id));
+    let idx = orphans
+        .iter()
+        .position(|bc| bc.job_id == id || oj_core::id::prefix_matches(&bc.job_id, id));
 
     match idx {
         Some(i) => {
@@ -82,37 +84,39 @@ pub(super) fn find_orphan_detail(
     id: &str,
 ) -> Option<Box<JobDetail>> {
     let orphans = orphans.lock();
-    orphans.iter().find(|bc| bc.job_id == id || bc.job_id.starts_with(id)).map(|bc| {
-        Box::new(JobDetail {
-            id: oj_core::JobId::from_string(&bc.job_id),
-            name: bc.name.clone(),
-            kind: bc.kind.clone(),
-            step: bc.current_step.clone(),
-            step_status: StepStatusKind::Orphaned,
-            vars: bc.vars.clone(),
-            workspace_path: bc.workspace_root.clone(),
-            error: Some("Job was not recovered from WAL/snapshot".to_string()),
-            steps: Vec::new(),
-            agents: bc
-                .agents
-                .iter()
-                .map(|a| AgentSummary {
-                    owner: oj_core::JobId::from_string(&bc.job_id).into(),
-                    step_name: bc.current_step.clone(),
-                    agent_id: oj_core::AgentId::from_string(&a.agent_id),
-                    agent_name: None,
-                    project: bc.project.clone(),
-                    status: "orphaned".to_string(),
-                    files_read: 0,
-                    files_written: 0,
-                    commands_run: 0,
-                    exit_reason: None,
-                    updated_at_ms: 0,
-                })
-                .collect(),
-            project: bc.project.clone(),
-        })
-    })
+    orphans.iter().find(|bc| bc.job_id == id || oj_core::id::prefix_matches(&bc.job_id, id)).map(
+        |bc| {
+            Box::new(JobDetail {
+                id: oj_core::JobId::from_string(&bc.job_id),
+                name: bc.name.clone(),
+                kind: bc.kind.clone(),
+                step: bc.current_step.clone(),
+                step_status: StepStatusKind::Orphaned,
+                vars: bc.vars.clone(),
+                workspace_path: bc.workspace_root.clone(),
+                error: Some("Job was not recovered from WAL/snapshot".to_string()),
+                steps: Vec::new(),
+                agents: bc
+                    .agents
+                    .iter()
+                    .map(|a| AgentSummary {
+                        owner: oj_core::JobId::from_string(&bc.job_id).into(),
+                        step_name: bc.current_step.clone(),
+                        agent_id: oj_core::AgentId::from_string(&a.agent_id),
+                        agent_name: None,
+                        project: bc.project.clone(),
+                        status: "orphaned".to_string(),
+                        files_read: 0,
+                        files_written: 0,
+                        commands_run: 0,
+                        exit_reason: None,
+                        updated_at_ms: 0,
+                    })
+                    .collect(),
+                project: bc.project.clone(),
+            })
+        },
+    )
 }
 
 /// Resolve an orphan job ID by exact match or prefix, returning the full ID.
@@ -120,7 +124,7 @@ pub(super) fn find_orphan_id(orphans: &Arc<Mutex<Vec<Breadcrumb>>>, id: &str) ->
     let orphans = orphans.lock();
     orphans
         .iter()
-        .find(|bc| bc.job_id == id || bc.job_id.starts_with(id))
+        .find(|bc| bc.job_id == id || oj_core::id::prefix_matches(&bc.job_id, id))
         .map(|bc| bc.job_id.clone())
 }
 

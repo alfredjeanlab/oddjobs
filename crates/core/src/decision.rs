@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 crate::define_id! {
     /// Unique identifier for a decision.
-    pub struct DecisionId("dsc-");
+    pub struct DecisionId("dcn-");
 }
 
 /// Where the decision originated.

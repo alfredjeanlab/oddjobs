@@ -237,7 +237,7 @@ pub(crate) fn format_decision_detail(
     };
     let _ = writeln!(out, "{} {}", color::context("Source:  "), source_display);
     let _ = writeln!(out, "{} {}", color::context("Age:    "), age);
-    if !d.agent_id.is_empty() {
+    if !d.agent_id.as_str().is_empty() {
         let _ =
             writeln!(out, "{} {}", color::context("Agent:  "), color::muted(d.agent_id.short(8)));
     }

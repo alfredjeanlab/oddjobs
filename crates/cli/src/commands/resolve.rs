@@ -58,7 +58,7 @@ pub fn resolve_from_lists(
     let mut check = |kind: EntityKind, id: &str, label: Option<String>| {
         if id == query {
             exact.push(EntityMatch { kind: kind.clone(), id: id.to_string(), label });
-        } else if id.starts_with(query) {
+        } else if oj_core::id::prefix_matches(id, query) {
             prefix.push(EntityMatch { kind, id: id.to_string(), label });
         }
     };

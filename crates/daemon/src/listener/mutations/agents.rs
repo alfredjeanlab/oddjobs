@@ -54,7 +54,7 @@ fn resolve_agent(state: &MaterializedState, query: &str) -> Option<ResolvedAgent
     for job in state.jobs.values() {
         for record in job.step_history.iter().rev() {
             if let Some(aid) = &record.agent_id {
-                if aid.starts_with(query) {
+                if oj_core::id::prefix_matches(aid, query) {
                     return Some(ResolvedAgent {
                         agent_id: aid.clone(),
                         job_id: Some(job.id.clone()),
@@ -69,8 +69,8 @@ fn resolve_agent(state: &MaterializedState, query: &str) -> Option<ResolvedAgent
         let ar_agent_id = run.agent_id.as_deref().unwrap_or(&run.id);
         if ar_agent_id == query
             || run.id == query
-            || ar_agent_id.starts_with(query)
-            || run.id.starts_with(query)
+            || oj_core::id::prefix_matches(ar_agent_id, query)
+            || oj_core::id::prefix_matches(&run.id, query)
         {
             return Some(ResolvedAgent { agent_id: ar_agent_id.to_string(), job_id: None });
         }
