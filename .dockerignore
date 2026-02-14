@@ -1,0 +1,47 @@
+# Build artifacts
+target/
+
+# Cargo config (sccache wrapper not available in container)
+.cargo/
+
+# Git / CI
+.git/
+.github/
+.gitignore
+.gitmessage
+
+# Documentation
+README.md
+CLAUDE.md
+CONTRIBUTING.md
+LICENSE
+docs/
+
+# Build/lint config (unused by cargo build)
+Makefile
+deny.toml
+rustfmt.toml
+quench.toml
+
+# Project tooling
+.oj/
+.claude/
+scripts/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Caches
+.quench/
+.wok/
+
+# Coverage / debug
+*.profraw
+*.profdata
+coverage/
+tests/debug/
