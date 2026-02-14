@@ -150,11 +150,10 @@ mod adapter {
                 clone_args.push(&image);
 
                 // Build git clone command
-                let mut git_cmd =
-                    format!("git clone --single-branch --depth 1 {} /workspace", repo);
+                let mut git_cmd = format!("git clone --single-branch {} /workspace", repo);
                 if let Some(ref branch) = branch {
                     git_cmd = format!(
-                        "git clone --branch {} --single-branch --depth 1 {} /workspace",
+                        "git clone --branch {} --single-branch {} /workspace",
                         branch, repo
                     );
                 }

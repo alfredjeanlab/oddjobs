@@ -306,6 +306,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Drain remaining WAL events with timeout (5s).
+    // A second SIGTERM/SIGINT during drain exits immediately.
+    info!("draining in-flight events...");
+    let drain_deadline = tokio::time::Instant::now() + crate::env::drain_timeout();
+    loop {
+        tokio::select! {
+            result = tokio::time::timeout_at(drain_deadline, event_reader.recv()) => {
+                match result {
+                    Ok(Ok(Some(entry))) => {
+                        let seq = entry.seq;
+                        match entry.event {
+                            Event::Shutdown => {
+                                event_reader.wal.lock().mark_processed(seq);
+                            }
+                            event => {
+                                if let Err(e) = daemon.process_event(event).await {
+                                    error!("drain: error processing event (seq={}): {}", seq, e);
+                                }
+                                event_reader.wal.lock().mark_processed(seq);
+                            }
+                        }
+                    }
+                    _ => break, // timeout, channel closed, or no more events
+                }
+            }
+            _ = sigterm.recv() => {
+                info!("second signal received, exiting immediately");
+                break;
+            }
+            _ = sigint.recv() => {
+                info!("second signal received, exiting immediately");
+                break;
+            }
+        }
+    }
+
     // Graceful shutdown (session kills already handled in listener for --kill)
     daemon.shutdown()?;
     info!("Daemon stopped");

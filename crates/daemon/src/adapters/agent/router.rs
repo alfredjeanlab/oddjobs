@@ -30,7 +30,7 @@ pub struct CoopInfo {
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentState, Event};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -162,6 +162,12 @@ impl AgentAdapter for RuntimeRouter {
             let handle = self.local.spawn(config, event_tx).await?;
             self.record_route(&agent_id, Route::Local);
             Ok(handle)
+        }
+    }
+
+    async fn cleanup_stale_resources(&self, known_agents: &HashSet<AgentId>) {
+        if let Some(k8s) = &self.k8s {
+            k8s.cleanup_stale_resources(known_agents).await;
         }
     }
 

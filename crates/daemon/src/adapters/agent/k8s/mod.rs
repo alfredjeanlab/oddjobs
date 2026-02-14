@@ -33,7 +33,7 @@ mod adapter {
     use kube::Client;
     use oj_core::{AgentId, AgentState, Event};
     use parking_lot::Mutex;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::sync::mpsc;
@@ -223,39 +223,58 @@ mod adapter {
                 AgentAdapterError::SpawnFailed(format!("pod creation failed: {}", e))
             })?;
 
-            // Wait for pod to get an IP
-            let pod_ip = wait_for_pod_ip(&pods, &pod_name).await?;
-            let addr = format!("{}:{}", pod_ip, container_port);
+            // After pod creation succeeds, any failure must clean up the pod.
+            let result = async {
+                // Wait for pod to get an IP
+                let pod_ip = wait_for_pod_ip(&pods, &pod_name).await?;
+                let addr = format!("{}:{}", pod_ip, container_port);
 
-            // Wait for coop to be ready
-            let poll_ms: u64 = std::env::var("OJ_K8S_READY_POLL_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(500);
-            let max_attempts: usize = std::env::var("OJ_K8S_COOP_READY_ATTEMPTS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(120); // 120 * 500ms = 60s
-            crate::adapters::agent::poll_until_ready(
-                &addr,
-                &auth_token,
-                poll_ms,
-                max_attempts,
-                "k8s",
-            )
-            .await?;
+                // Wait for coop to be ready
+                let poll_ms: u64 = std::env::var("OJ_K8S_READY_POLL_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(500);
+                let max_attempts: usize = std::env::var("OJ_K8S_COOP_READY_ATTEMPTS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(120); // 120 * 500ms = 60s
+                crate::adapters::agent::poll_until_ready(
+                    &addr,
+                    &auth_token,
+                    poll_ms,
+                    max_attempts,
+                    "k8s",
+                )
+                .await?;
 
-            // Register agent and start WS bridge
-            let mut handle = self.remote.register(
-                config.agent_id,
-                addr,
-                auth_token.clone(),
-                event_tx,
-                config.owner,
-            );
-            handle.auth_token = Some(auth_token);
-            self.meta.lock().insert(config.agent_id, KubeMeta { pod_name, k8s_namespace });
-            Ok(handle)
+                // Register agent and start WS bridge
+                let mut handle = self.remote.register(
+                    config.agent_id,
+                    addr,
+                    auth_token.clone(),
+                    event_tx,
+                    config.owner,
+                );
+                handle.auth_token = Some(auth_token);
+                self.meta.lock().insert(
+                    config.agent_id,
+                    KubeMeta { pod_name: pod_name.clone(), k8s_namespace },
+                );
+                Ok(handle)
+            }
+            .await;
+
+            if result.is_err() {
+                let dp = kube::api::DeleteParams::default();
+                if let Err(del_err) = pods.delete(&pod_name, &dp).await {
+                    tracing::warn!(
+                        %pod_name,
+                        error = %del_err,
+                        "failed to clean up pod after spawn failure"
+                    );
+                }
+            }
+            result
         }
     }
 
@@ -274,6 +293,39 @@ mod adapter {
                 Err(e) => tracing::error!(elapsed_ms, error = %e, "k8s spawn failed"),
             }
             result
+        }
+
+        async fn cleanup_stale_resources(&self, known_agents: &HashSet<AgentId>) {
+            let k8s_namespace = Self::k8s_namespace();
+            let pods: Api<Pod> = Api::namespaced(self.client.clone(), &k8s_namespace);
+            let lp = kube::api::ListParams::default().labels("app=oj-agent");
+            let pod_list = match pods.list(&lp).await {
+                Ok(list) => list,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to list pods for stale resource cleanup");
+                    return;
+                }
+            };
+
+            for pod in pod_list {
+                let pod_name = match pod.metadata.name {
+                    Some(ref name) => name.clone(),
+                    None => continue,
+                };
+                // Pod names are "oj-<agent_id>" — extract agent ID
+                let agent_id_str = match pod_name.strip_prefix("oj-") {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let agent_id = AgentId::from_string(agent_id_str);
+                if !known_agents.contains(&agent_id) {
+                    tracing::info!(%pod_name, "deleting orphaned pod");
+                    let dp = kube::api::DeleteParams::default();
+                    if let Err(e) = pods.delete(&pod_name, &dp).await {
+                        tracing::warn!(%pod_name, error = %e, "failed to delete orphaned pod");
+                    }
+                }
+            }
         }
 
         async fn reconnect(

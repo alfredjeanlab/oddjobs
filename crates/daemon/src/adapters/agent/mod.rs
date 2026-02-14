@@ -56,6 +56,7 @@ pub use fake::{AgentCall, FakeAgentAdapter};
 
 use async_trait::async_trait;
 use oj_core::{AgentId, AgentRuntime, AgentState, Event, OwnerId};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -277,6 +278,12 @@ pub trait AgentAdapter: Send + Sync + 'static {
     fn get_coop_host(&self, _agent_id: &AgentId) -> Option<CoopInfo> {
         None
     }
+
+    /// Delete agent resources (pods, containers) not owned by any known agent.
+    ///
+    /// Called during startup reconciliation to clean up orphaned resources
+    /// (e.g., pods left behind after a daemon crash). No-op for local agents.
+    async fn cleanup_stale_resources(&self, _known_agents: &HashSet<AgentId>) {}
 
     /// Check if this adapter only supports remote execution (infrastructure).
     ///

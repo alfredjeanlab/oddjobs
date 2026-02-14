@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use oj_core::{AgentId, CrewId, CrewStatus, Event, JobId, OwnerId};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::ReconcileCtx;
 
@@ -227,4 +227,9 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
             }
         }
     }
+
+    // Clean up orphaned resources (e.g., K8s pods) not owned by any known agent.
+    let known_agents: HashSet<AgentId> = state.agents.keys().map(AgentId::from_string).collect();
+    debug!(count = known_agents.len(), "cleaning up stale agent resources");
+    ctx.runtime.executor.agents.cleanup_stale_resources(&known_agents).await;
 }

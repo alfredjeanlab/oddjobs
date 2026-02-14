@@ -236,8 +236,6 @@ pub(super) fn git_clone_command(repo: &str, branch: Option<&str>) -> Vec<String>
     }
     cmd.extend_from_slice(&[
         "--single-branch".to_string(),
-        "--depth".to_string(),
-        "1".to_string(),
         repo.to_string(),
         "/workspace".to_string(),
     ]);

@@ -44,6 +44,15 @@ pub fn auth_token() -> Option<String> {
     std::env::var("OJ_AUTH_TOKEN").ok().filter(|s| !s.is_empty())
 }
 
+/// Shutdown drain timeout (default 5s, configurable via `OJ_DRAIN_TIMEOUT_MS`).
+pub fn drain_timeout() -> Duration {
+    std::env::var("OJ_DRAIN_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_secs(5))
+}
+
 /// Timer check interval override
 pub fn timer_check_ms() -> Option<Duration> {
     std::env::var("OJ_TIMER_CHECK_MS")
