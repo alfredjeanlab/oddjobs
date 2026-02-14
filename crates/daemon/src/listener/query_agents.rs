@@ -135,7 +135,7 @@ pub(super) fn handle_list_agents(
         agents.push(AgentSummary {
             owner: record.owner.clone(),
             step_name,
-            agent_id: oj_core::AgentId::new(&record.agent_id),
+            agent_id: oj_core::AgentId::from_string(&record.agent_id),
             agent_name: Some(record.agent_name.clone()),
             project,
             status: status_str.to_string(),
@@ -277,7 +277,7 @@ pub(super) fn compute_agent_summaries(
             let updated_at_ms = step.finished_at_ms.unwrap_or(step.started_at_ms);
 
             Some(AgentSummary {
-                owner: JobId::new(job_id).into(),
+                owner: JobId::from_string(job_id).into(),
                 step_name: step.name.clone(),
                 agent_id: agent_id.clone(),
                 agent_name: step.agent_name.clone(),

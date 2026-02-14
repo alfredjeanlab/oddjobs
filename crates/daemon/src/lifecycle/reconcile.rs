@@ -113,7 +113,7 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
             let _ = ctx
                 .event_tx
                 .send(Event::CrewUpdated {
-                    id: CrewId::new(&run.id),
+                    id: CrewId::from_string(&run.id),
                     status: CrewStatus::Failed,
                     reason: Some("no agent_id at recovery".to_string()),
                 })
@@ -143,8 +143,8 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
                     error = %e,
                     "recovering: standalone agent gone while daemon was down"
                 );
-                let agent_id = AgentId::new(agent_id_str);
-                let crew_id = CrewId::new(&run.id);
+                let agent_id = AgentId::from_string(agent_id_str);
+                let crew_id = CrewId::from_string(&run.id);
                 let _ = ctx
                     .event_tx
                     .send(Event::AgentGone {
@@ -194,7 +194,7 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
             let _ = ctx
                 .event_tx
                 .send(Event::JobAdvanced {
-                    id: JobId::new(job.id.clone()),
+                    id: JobId::from_string(job.id.clone()),
                     step: "failed".to_string(),
                 })
                 .await;
@@ -214,8 +214,8 @@ pub(crate) async fn reconcile_state(ctx: &ReconcileCtx) {
                 // recover_agent already registered the agent→job mapping,
                 // so AgentGone handlers can find the owner.
                 info!(job_id = %job.id, agent_id = aid, error = %e, "recovering: agent gone while daemon was down");
-                let agent_id = AgentId::new(aid);
-                let job_id = JobId::new(job.id.clone());
+                let agent_id = AgentId::from_string(aid);
+                let job_id = JobId::from_string(job.id.clone());
                 let _ = ctx
                     .event_tx
                     .send(Event::AgentGone {

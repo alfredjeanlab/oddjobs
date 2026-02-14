@@ -34,7 +34,7 @@ impl<C: Clock> Runtime<C> {
         let Some(agent_id) = super::monitor::step_agent_id(job) else {
             return;
         };
-        let agent_id = AgentId::new(agent_id);
+        let agent_id = AgentId::from_string(agent_id);
         self.capture_agent_terminal(&agent_id).await;
         self.archive_session_transcript(&agent_id).await;
     }
@@ -44,7 +44,7 @@ impl<C: Clock> Runtime<C> {
         let Some(ref agent_id) = crew.agent_id else {
             return;
         };
-        let agent_id = AgentId::new(agent_id);
+        let agent_id = AgentId::from_string(agent_id);
         self.capture_agent_terminal(&agent_id).await;
         self.archive_session_transcript(&agent_id).await;
     }

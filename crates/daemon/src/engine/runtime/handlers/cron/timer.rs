@@ -8,9 +8,7 @@ use crate::engine::error::RuntimeError;
 use crate::engine::runtime::agent::SpawnAgentParams;
 use crate::engine::runtime::handlers::CreateJobParams;
 use crate::engine::runtime::Runtime;
-use oj_core::{
-    split_scoped_name, Clock, Effect, Event, IdGen, JobId, RunTarget, TimerId, UuidIdGen,
-};
+use oj_core::{split_scoped_name, Clock, Effect, Event, JobId, RunTarget, TimerId};
 use std::collections::HashMap;
 
 impl<C: Clock> Runtime<C> {
@@ -95,7 +93,7 @@ impl<C: Clock> Runtime<C> {
                 }
 
                 // Generate job ID
-                let job_id = JobId::new(UuidIdGen.next());
+                let job_id = JobId::new();
                 let display_name =
                     oj_runbook::job_display_name(job_name, job_id.short(8), &project);
 
@@ -172,7 +170,7 @@ impl<C: Clock> Runtime<C> {
                     }
                 }
 
-                let crew_id = oj_core::CrewId::new(UuidIdGen.next());
+                let crew_id = oj_core::CrewId::new();
 
                 // Emit CrewCreated
                 let creation_effects = vec![Effect::Emit {
@@ -246,7 +244,7 @@ impl<C: Clock> Runtime<C> {
                     return Ok(result_events);
                 }
 
-                let job_id = JobId::new(UuidIdGen.next());
+                let job_id = JobId::new();
                 let display_name =
                     oj_runbook::job_display_name(cron_name, job_id.short(8), &project);
 

@@ -234,7 +234,7 @@ async fn advance_job_cancels_exit_deferred_timer() {
         let scheduler = ctx.runtime.executor.scheduler();
         let mut sched = scheduler.lock();
         sched.set_timer(
-            TimerId::exit_deferred(&JobId::new(job_id.clone())).to_string(),
+            TimerId::exit_deferred(&JobId::from_string(job_id.clone())).to_string(),
             Duration::from_secs(5),
             ctx.clock.now(),
         );
@@ -258,7 +258,7 @@ async fn advance_job_cancels_exit_deferred_timer() {
         .collect();
 
     assert!(
-        !timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
+        !timer_ids.contains(&TimerId::exit_deferred(&JobId::from_string(job_id.clone())).as_str()),
         "advance_job must cancel exit-deferred timer"
     );
 }
@@ -279,7 +279,7 @@ async fn fail_job_cancels_exit_deferred_timer() {
         let scheduler = ctx.runtime.executor.scheduler();
         let mut sched = scheduler.lock();
         sched.set_timer(
-            TimerId::exit_deferred(&JobId::new(job_id.clone())).to_string(),
+            TimerId::exit_deferred(&JobId::from_string(job_id.clone())).to_string(),
             Duration::from_secs(5),
             ctx.clock.now(),
         );
@@ -302,11 +302,11 @@ async fn fail_job_cancels_exit_deferred_timer() {
         .collect();
 
     assert!(
-        !timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()),
+        !timer_ids.contains(&TimerId::exit_deferred(&JobId::from_string(job_id.clone())).as_str()),
         "fail_job must cancel exit-deferred timer"
     );
     assert!(
-        !timer_ids.contains(&TimerId::liveness(&JobId::new(job_id.clone())).as_str()),
+        !timer_ids.contains(&TimerId::liveness(&JobId::from_string(job_id.clone())).as_str()),
         "fail_job must cancel liveness timer"
     );
 }

@@ -30,7 +30,7 @@ async fn cron_job_concurrency_skip() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("existing-job-1"),
+                id: JobId::from_string("existing-job-1"),
                 kind: "deploy".to_string(),
                 name: "deploy/existing".to_string(),
                 runbook_hash: runbook_hash.clone(),
@@ -111,7 +111,7 @@ async fn cron_job_concurrency_respawns_after_complete() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("completed-job-1"),
+                id: JobId::from_string("completed-job-1"),
                 kind: "deploy".to_string(),
                 name: "deploy/completed".to_string(),
                 runbook_hash: runbook_hash.clone(),
@@ -131,7 +131,7 @@ async fn cron_job_concurrency_respawns_after_complete() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::JobAdvanced {
-                id: JobId::new("completed-job-1"),
+                id: JobId::from_string("completed-job-1"),
                 step: "done".to_string(),
             },
         })
@@ -198,7 +198,7 @@ async fn cron_job_concurrency_default_singleton() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("active-job-1"),
+                id: JobId::from_string("active-job-1"),
                 kind: "deploy".to_string(),
                 name: "deploy/active".to_string(),
                 runbook_hash: runbook_hash.clone(),
@@ -263,7 +263,7 @@ async fn cron_job_concurrency_allows_multiple() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("active-job-1"),
+                id: JobId::from_string("active-job-1"),
                 kind: "deploy".to_string(),
                 name: "deploy/active".to_string(),
                 runbook_hash: runbook_hash.clone(),

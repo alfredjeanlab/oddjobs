@@ -90,7 +90,7 @@ async fn shell_with_env_vars() {
     harness
         .executor
         .execute(Effect::Shell {
-            owner: Some(JobId::new("test").into()),
+            owner: Some(JobId::from_string("test").into()),
             step: "init".to_string(),
             command: "echo $MY_TEST_VAR".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -144,7 +144,7 @@ async fn shell_with_crew_owner() {
     harness
         .executor
         .execute(Effect::Shell {
-            owner: Some(CrewId::new("run-1").into()),
+            owner: Some(CrewId::from_string("run-1").into()),
             step: "run".to_string(),
             command: "echo crew_shell".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -187,7 +187,7 @@ async fn execute_all_shell_effects_are_async() {
 
     let effects = vec![
         Effect::Shell {
-            owner: Some(JobId::new("job-1").into()),
+            owner: Some(JobId::from_string("job-1").into()),
             step: "init".to_string(),
             command: "echo first".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -195,7 +195,7 @@ async fn execute_all_shell_effects_are_async() {
             container: None,
         },
         Effect::Shell {
-            owner: Some(JobId::new("job-1").into()),
+            owner: Some(JobId::from_string("job-1").into()),
             step: "build".to_string(),
             command: "echo second".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),

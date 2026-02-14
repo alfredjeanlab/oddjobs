@@ -132,7 +132,7 @@ impl<C: Clock> Runtime<C> {
         let runbook = self.cached_runbook(&job.runbook_hash)?;
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
 
         // Mark current step as completed so that JobAdvanced sees
         // step_status == Completed and correctly resets attempts.
@@ -221,7 +221,7 @@ impl<C: Clock> Runtime<C> {
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_fail = current_step_def.and_then(|p| p.on_fail.as_ref());
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
 
         self.logger.append(&job.id, &job.step, &format!("job failed: {}", error));
 
@@ -299,7 +299,7 @@ impl<C: Clock> Runtime<C> {
         let mut result_events = self.executor.execute_all(effects).await?;
 
         // Update queue item status immediately (don't rely on event loop)
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         result_events.extend(self.check_worker_job_complete(&job_id, "done").await?);
 
         // Emit on_done notification if configured
@@ -396,7 +396,7 @@ impl<C: Clock> Runtime<C> {
         let job_def = runbook.get_job(&job.kind);
         let current_step_def = job_def.as_ref().and_then(|p| p.get_step(&job.step));
         let on_cancel = current_step_def.and_then(|s| s.on_cancel.as_ref());
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
 
         let mut result_events = Vec::new();
 
@@ -452,13 +452,13 @@ impl<C: Clock> Runtime<C> {
 
     /// Build workspace cleanup effects for a job (if it has a workspace).
     fn workspace_cleanup_effects(&self, job: &Job) -> Vec<Effect> {
-        let job_owner: oj_core::OwnerId = oj_core::JobId::new(&job.id).into();
+        let job_owner: oj_core::OwnerId = oj_core::JobId::from_string(&job.id).into();
         let ws_id = job.workspace_id.clone().or_else(|| {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
                     .find(|ws| ws.owner == job_owner)
-                    .map(|ws| oj_core::WorkspaceId::new(&ws.id))
+                    .map(|ws| oj_core::WorkspaceId::from_string(&ws.id))
             })
         });
         if let Some(ws_id) = ws_id {
@@ -480,7 +480,7 @@ impl<C: Clock> Runtime<C> {
         let effects = steps::failure_after_cleanup_effects(job, error);
         let mut result_events = self.executor.execute_all(effects).await?;
         self.breadcrumb.delete(&job.id);
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         result_events.extend(self.check_worker_job_complete(&job_id, "failed").await?);
 
         // Emit on_fail notification on terminal failure
@@ -501,7 +501,7 @@ impl<C: Clock> Runtime<C> {
         effects.extend(self.workspace_cleanup_effects(job));
         let mut result_events = self.executor.execute_all(effects).await?;
         self.breadcrumb.delete(&job.id);
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         result_events.extend(self.check_worker_job_complete(&job_id, "cancelled").await?);
         Ok(result_events)
     }
@@ -509,14 +509,14 @@ impl<C: Clock> Runtime<C> {
     /// Clean up when leaving an agent step: cancel timers, deregister agent
     /// mapping, capture terminal output, and kill the agent process.
     async fn finalize_agent_step(&self, job: &Job) -> Result<(), RuntimeError> {
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         self.executor.execute(Effect::CancelTimer { id: TimerId::liveness(&job_id) }).await?;
         self.executor.execute(Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) }).await?;
 
         if let Some(agent_id) =
             job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
         {
-            self.agent_owners.lock().remove(&oj_core::AgentId::new(agent_id));
+            self.agent_owners.lock().remove(&oj_core::AgentId::from_string(agent_id));
         }
 
         self.capture_before_kill_job(job).await;
@@ -526,7 +526,7 @@ impl<C: Clock> Runtime<C> {
             job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
         {
             self.executor
-                .execute(Effect::KillAgent { agent_id: oj_core::AgentId::new(agent_id) })
+                .execute(Effect::KillAgent { agent_id: oj_core::AgentId::from_string(agent_id) })
                 .await?;
         }
         Ok(())

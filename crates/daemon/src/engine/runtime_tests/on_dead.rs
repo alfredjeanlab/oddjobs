@@ -23,7 +23,7 @@ async fn setup_and_fire_on_dead(on_dead: &str) -> (TestContext, String) {
     ctx.process_background_events().await;
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
     ctx.runtime
-        .handle_event(agent_exited(agent_id, Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id, Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
     (ctx, job_id)
@@ -38,12 +38,16 @@ async fn agent_death_triggers_on_dead_action() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
     ctx.agents.set_agent_alive(&agent_id, false);
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::Exited { exit_code: Some(0) });
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
     let job = ctx.runtime.get_job(&job_id).unwrap();
@@ -56,7 +60,7 @@ async fn session_death_timer_for_nonexistent_job_is_noop() {
     let ctx = setup().await;
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::new("liveness:nonexistent") })
+        .handle_event(Event::TimerStart { id: TimerId::from_string("liveness:nonexistent") })
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -69,7 +73,9 @@ async fn session_death_timer_on_terminal_job_is_noop() {
     ctx.runtime.handle_event(shell_fail(&job_id, "init")).await.unwrap();
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -86,7 +92,7 @@ async fn agent_exited_on_terminal_job_is_noop() {
     assert!(ctx.runtime.get_job(&job_id).unwrap().is_terminal());
     let result = ctx
         .runtime
-        .handle_event(agent_exited(agent_id, Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id, Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
     assert!(result.is_empty());
@@ -98,7 +104,7 @@ async fn agent_exited_for_unknown_agent_is_noop() {
     let result = ctx
         .runtime
         .handle_event(agent_exited(
-            AgentId::new("nonexistent-plan"),
+            AgentId::from_string("nonexistent-plan"),
             Some(0),
             OwnerId::Job(JobId::default()),
         ))
@@ -156,7 +162,7 @@ async fn gate_dead_result_events_advance_past_shell_step() {
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "work");
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
     ctx.runtime
-        .handle_event(agent_exited(agent_id, Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id, Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "plan-check");
@@ -173,13 +179,13 @@ async fn agent_exited_ignores_non_agent_step() {
     ctx.process_background_events().await;
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
     assert_eq!(ctx.runtime.get_job(&job_id).unwrap().step, "plan-check");
     let result = ctx
         .runtime
-        .handle_event(agent_exited(agent_id, Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id, Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
     assert!(result.is_empty());

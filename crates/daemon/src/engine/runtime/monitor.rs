@@ -32,7 +32,7 @@ impl<C: Clock> Runtime<C> {
                     job.id, job.step
                 ))
             })?;
-        let agent_id = AgentId::new(&agent_id_str);
+        let agent_id = AgentId::from_string(&agent_id_str);
 
         // Look up persisted runtime and auth token from agent records
         let (runtime_hint, auth_token) = self.lock_state(|s| {
@@ -43,7 +43,7 @@ impl<C: Clock> Runtime<C> {
         });
 
         // Register agent -> job mapping
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         self.register_agent(agent_id.clone(), OwnerId::job(job_id.clone()));
 
         // Reconnect monitoring via adapter
@@ -56,7 +56,7 @@ impl<C: Clock> Runtime<C> {
         self.executor.reconnect_agent(config).await?;
 
         // Restore liveness timer
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         self.executor
             .execute(Effect::SetTimer {
                 id: TimerId::liveness(&job_id),
@@ -161,7 +161,7 @@ impl<C: Clock> Runtime<C> {
             MonitorState::Prompting { last_message, .. } => last_message.clone(),
             MonitorState::Working => None,
             _ => match run.agent_id() {
-                Some(id) => self.executor.agents.last_message(&AgentId::new(id)).await,
+                Some(id) => self.executor.agents.last_message(&AgentId::from_string(id)).await,
                 None => None,
             },
         };
@@ -203,7 +203,7 @@ impl<C: Clock> Runtime<C> {
                         if let Some((decision_id, project)) = pending {
                             effects.push(Effect::Emit {
                                 event: Event::DecisionResolved {
-                                    id: DecisionId::new(decision_id),
+                                    id: DecisionId::from_string(decision_id),
                                     choices: vec![],
                                     message: Some(
                                         "auto-dismissed: agent became active".to_string(),
@@ -288,7 +288,7 @@ impl<C: Clock> Runtime<C> {
                 self.log_entity_activity(run, &msg);
                 if let Some(agent_id) = run.agent_id() {
                     self.logger.append_agent_error(agent_id, &msg);
-                    let aid = AgentId::new(agent_id);
+                    let aid = AgentId::from_string(agent_id);
                     self.capture_agent_terminal(&aid).await;
                     self.archive_session_transcript(&aid).await;
                 }
@@ -298,7 +298,7 @@ impl<C: Clock> Runtime<C> {
                 tracing::info!(entity_id = %run.log_id(), "agent session ended");
                 self.log_entity_activity(run, "agent session ended");
                 if let Some(agent_id) = run.agent_id() {
-                    let aid = AgentId::new(agent_id);
+                    let aid = AgentId::from_string(agent_id);
                     self.capture_agent_terminal(&aid).await;
                     self.archive_session_transcript(&aid).await;
                 }
@@ -512,7 +512,7 @@ impl<C: Clock> Runtime<C> {
         match run.owner_id() {
             OwnerId::Job(job_id) => {
                 let job = self.require_job(job_id.as_str())?;
-                let agent_id = kill_agent.map(AgentId::new);
+                let agent_id = kill_agent.map(AgentId::from_string);
                 self.kill_and_resume(&job, agent_id, agent_name, input, resume).await
             }
             OwnerId::Crew(run_id) => {
@@ -523,10 +523,10 @@ impl<C: Clock> Runtime<C> {
                 if let Some(aid) = kill_agent {
                     let _ = self
                         .executor
-                        .execute(Effect::KillAgent { agent_id: AgentId::new(aid) })
+                        .execute(Effect::KillAgent { agent_id: AgentId::from_string(aid) })
                         .await;
                 }
-                let crew_id = CrewId::new(&run.id);
+                let crew_id = CrewId::from_string(&run.id);
                 self.spawn_standalone_agent(super::agent::SpawnAgentParams {
                     crew_id: &crew_id,
                     agent_def,
@@ -618,7 +618,7 @@ impl<C: Clock> Runtime<C> {
             self.capture_before_kill_job(job).await;
             self.executor.execute(Effect::KillAgent { agent_id: aid }).await?;
         }
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         self.spawn_agent_with_resume(&job_id, agent_name, input, resume).await
     }
 

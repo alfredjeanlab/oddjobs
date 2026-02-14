@@ -14,6 +14,16 @@ use async_trait::async_trait;
 use oj_core::{Event, WorkspaceId};
 use tokio::sync::mpsc;
 
+/// Parameters for provisioning a workspace.
+pub struct ProvisionRequest {
+    pub workspace_id: WorkspaceId,
+    pub path: PathBuf,
+    pub is_worktree: bool,
+    pub repo_root: Option<PathBuf>,
+    pub branch: Option<String>,
+    pub start_point: Option<String>,
+}
+
 /// Adapter for provisioning and cleaning up workspace filesystem resources.
 ///
 /// The executor handles state bookkeeping (WorkspaceCreated/Ready/Failed
@@ -25,17 +35,7 @@ pub trait WorkspaceAdapter: Send + Sync {
     ///
     /// Must send exactly one of `WorkspaceReady` or `WorkspaceFailed`
     /// via `event_tx`.
-    #[allow(clippy::too_many_arguments)]
-    async fn provision(
-        &self,
-        event_tx: mpsc::Sender<Event>,
-        workspace_id: WorkspaceId,
-        path: PathBuf,
-        is_worktree: bool,
-        repo_root: Option<PathBuf>,
-        branch: Option<String>,
-        start_point: Option<String>,
-    );
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest);
 
     /// Clean up workspace filesystem resources.
     ///
@@ -54,25 +54,16 @@ pub struct LocalWorkspaceAdapter;
 
 #[async_trait]
 impl WorkspaceAdapter for LocalWorkspaceAdapter {
-    async fn provision(
-        &self,
-        event_tx: mpsc::Sender<Event>,
-        workspace_id: WorkspaceId,
-        path: PathBuf,
-        is_worktree: bool,
-        repo_root: Option<PathBuf>,
-        branch: Option<String>,
-        start_point: Option<String>,
-    ) {
-        let result = if is_worktree {
-            create_worktree(&path, repo_root, branch, start_point).await
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest) {
+        let result = if req.is_worktree {
+            create_worktree(&req.path, req.repo_root, req.branch, req.start_point).await
         } else {
-            create_folder(&path).await
+            create_folder(&req.path).await
         };
 
         let event = match result {
-            Ok(()) => Event::WorkspaceReady { id: workspace_id },
-            Err(reason) => Event::WorkspaceFailed { id: workspace_id, reason },
+            Ok(()) => Event::WorkspaceReady { id: req.workspace_id },
+            Err(reason) => Event::WorkspaceFailed { id: req.workspace_id, reason },
         };
 
         if let Err(e) = event_tx.send(event).await {
@@ -104,18 +95,9 @@ pub struct NoopWorkspaceAdapter;
 
 #[async_trait]
 impl WorkspaceAdapter for NoopWorkspaceAdapter {
-    async fn provision(
-        &self,
-        event_tx: mpsc::Sender<Event>,
-        workspace_id: WorkspaceId,
-        _path: PathBuf,
-        _is_worktree: bool,
-        _repo_root: Option<PathBuf>,
-        _branch: Option<String>,
-        _start_point: Option<String>,
-    ) {
-        tracing::info!(?workspace_id, "skipping local workspace creation (remote-only)");
-        let event = Event::WorkspaceReady { id: workspace_id };
+    async fn provision(&self, event_tx: mpsc::Sender<Event>, req: ProvisionRequest) {
+        tracing::info!(workspace_id = ?req.workspace_id, "skipping local workspace creation (remote-only)");
+        let event = Event::WorkspaceReady { id: req.workspace_id };
         if let Err(e) = event_tx.send(event).await {
             tracing::error!("failed to send workspace event: {}", e);
         }

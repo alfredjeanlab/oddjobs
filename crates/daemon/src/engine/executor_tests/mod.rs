@@ -48,9 +48,9 @@ async fn setup() -> TestHarness {
 /// Build a default `Effect::SpawnAgent` for executor tests.
 fn spawn_agent(id: &str) -> Effect {
     Effect::SpawnAgent {
-        agent_id: AgentId::new(id),
+        agent_id: AgentId::from_string(id),
         agent_name: "builder".to_string(),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         workspace_path: std::path::PathBuf::from("/tmp/ws"),
         input: HashMap::new(),
         command: "claude".to_string(),
@@ -65,7 +65,7 @@ fn spawn_agent(id: &str) -> Effect {
 /// Build a default `Effect::Shell` for executor tests.
 fn shell(command: &str) -> Effect {
     Effect::Shell {
-        owner: Some(JobId::new("test").into()),
+        owner: Some(JobId::from_string("test").into()),
         step: "init".to_string(),
         command: command.to_string(),
         cwd: std::path::PathBuf::from("/tmp"),

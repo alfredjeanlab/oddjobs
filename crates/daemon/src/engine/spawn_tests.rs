@@ -56,7 +56,7 @@ fn build_spawn_effects_creates_agent_and_timer() {
     let input: HashMap<String, String> =
         [("prompt".to_string(), "Build feature".to_string())].into_iter().collect();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
@@ -124,7 +124,7 @@ fn prompt_interpolation(
     let input: HashMap<String, String> =
         input_pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
@@ -162,7 +162,7 @@ fn build_spawn_effects_cwd_handling(cwd_input: &str, is_relative: bool) {
     agent.cwd = Some(cwd_input.to_string());
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
@@ -181,7 +181,7 @@ fn build_spawn_effects_fails_on_missing_prompt_file() {
     agent.prompt_file = Some(PathBuf::from("/nonexistent/prompt.txt"));
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let result = spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path());
 
@@ -198,7 +198,7 @@ fn build_spawn_effects_carries_full_config() {
     let input: HashMap<String, String> =
         [("prompt".to_string(), "Build feature".to_string())].into_iter().collect();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects = build_spawn_effects(
         &agent,
@@ -213,14 +213,14 @@ fn build_spawn_effects_carries_full_config() {
 
     // SpawnAgent should carry command, env, and cwd
     let sa = unwrap_spawn_agent(&effects);
-    // agent_id is now a UUID
+    // agent_id should be a valid AgentId with agt- prefix
     assert!(
-        uuid::Uuid::parse_str(sa.agent_id.as_str()).is_ok(),
-        "agent_id should be a valid UUID: {}",
+        sa.agent_id.as_str().starts_with("agt-") && sa.agent_id.as_str().len() == 23,
+        "agent_id should be a valid AgentId: {}",
         sa.agent_id
     );
     assert_eq!(sa.agent_name, "worker");
-    assert_eq!(sa.owner, &OwnerId::Job(JobId::new("job-1")));
+    assert_eq!(sa.owner, &OwnerId::Job(JobId::from_string("job-1")));
     assert!(!sa.command.is_empty());
     assert!(sa.cwd.is_some());
     // System vars are not namespaced
@@ -239,7 +239,7 @@ fn build_spawn_effects_returns_only_spawn_agent() {
     let agent = test_agent_def();
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
@@ -261,7 +261,7 @@ fn build_spawn_effects_escapes_backticks_in_prompt() {
     };
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
@@ -285,7 +285,7 @@ fn build_spawn_effects_with_prime_succeeds(prime: PrimeDef) {
     agent.prime = Some(prime);
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();
@@ -306,7 +306,7 @@ fn build_spawn_effects_standalone_agent_carries_crew_id() {
     let input: HashMap<String, String> =
         [("description".to_string(), "broken button".to_string())].into_iter().collect();
 
-    let crew_id = oj_core::CrewId::new("run-test-1");
+    let crew_id = oj_core::CrewId::from_string("run-test-1");
     let ctx = SpawnCtx::from_crew(&crew_id, "fixer", "");
     let effects = build_spawn_effects(
         &agent,
@@ -321,7 +321,7 @@ fn build_spawn_effects_standalone_agent_carries_crew_id() {
 
     // SpawnAgent should carry the crew_id as owner
     let sa = unwrap_spawn_agent(&effects);
-    assert_eq!(sa.owner, &OwnerId::Crew(oj_core::CrewId::new("run-test-1")));
+    assert_eq!(sa.owner, &OwnerId::Crew(oj_core::CrewId::from_string("run-test-1")));
     // Command args should be accessible via var. project
     assert_eq!(sa.input.get("var.description"), Some(&"broken button".to_string()));
     // Prompt should be interpolated with the var
@@ -343,7 +343,7 @@ fn build_spawn_effects_always_passes_oj_state_dir() {
     // (simulates daemon that resolved state_dir via XDG_STATE_HOME or $HOME fallback)
     std::env::remove_var("OJ_STATE_DIR");
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), state_dir.path()).unwrap();
@@ -372,7 +372,7 @@ fn build_spawn_effects_trims_trailing_newlines_from_command() {
     };
     let job = test_job();
 
-    let pid = JobId::new("job-1");
+    let pid = JobId::from_string("job-1");
     let ctx = SpawnCtx::from_job(&job, &pid);
     let effects =
         spawn_effects(&agent, &ctx, "worker", workspace.path(), workspace.path()).unwrap();

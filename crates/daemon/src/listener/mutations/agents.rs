@@ -118,14 +118,20 @@ pub(crate) async fn handle_agent_send(
     };
 
     if let Some(r) = resolved {
-        emit(&ctx.event_bus, Event::AgentInput { id: AgentId::new(r.agent_id), input: message })?;
+        emit(
+            &ctx.event_bus,
+            Event::AgentInput { id: AgentId::from_string(r.agent_id), input: message },
+        )?;
         return Ok(Response::Ok);
     }
 
     // Liveness check: before returning 'not found', verify the agent isn't
     // still alive (recovery scenario where state is stale)
     if LocalAdapter::check_alive(&ctx.state_dir, &agent_id).await {
-        emit(&ctx.event_bus, Event::AgentInput { id: AgentId::new(&agent_id), input: message })?;
+        emit(
+            &ctx.event_bus,
+            Event::AgentInput { id: AgentId::from_string(&agent_id), input: message },
+        )?;
         return Ok(Response::Ok);
     }
 
@@ -224,7 +230,7 @@ pub(crate) async fn handle_agent_resume(
         emit(
             &ctx.event_bus,
             Event::JobResume {
-                id: JobId::new(&job_id),
+                id: JobId::from_string(&job_id),
                 message: None,
                 vars: std::collections::HashMap::new(),
                 kill,
@@ -272,8 +278,8 @@ pub(crate) fn handle_agent_prune(
             for record in &job.step_history {
                 if let Some(agent_id) = &record.agent_id {
                     to_prune.push(AgentEntry {
-                        agent_id: oj_core::AgentId::new(agent_id),
-                        owner: oj_core::JobId::new(&job.id).into(),
+                        agent_id: oj_core::AgentId::from_string(agent_id),
+                        owner: oj_core::JobId::from_string(&job.id).into(),
                         step_name: record.name.clone(),
                     });
                 }
@@ -302,8 +308,8 @@ pub(crate) fn handle_agent_prune(
             let agent_id = run.agent_id.clone().unwrap_or_else(|| run.id.clone());
 
             to_prune.push(AgentEntry {
-                agent_id: oj_core::AgentId::new(&agent_id),
-                owner: oj_core::CrewId::new(&run.id).into(),
+                agent_id: oj_core::AgentId::from_string(&agent_id),
+                owner: oj_core::CrewId::from_string(&run.id).into(),
                 step_name: run.agent_name.clone(),
             });
 
@@ -314,13 +320,13 @@ pub(crate) fn handle_agent_prune(
     if !flags.dry_run {
         // Delete the terminal jobs from state so agents no longer appear in `agent list`
         for job_id in &job_ids_to_delete {
-            emit(&ctx.event_bus, Event::JobDeleted { id: JobId::new(job_id.clone()) })?;
+            emit(&ctx.event_bus, Event::JobDeleted { id: JobId::from_string(job_id.clone()) })?;
             super::prune_helpers::cleanup_job_files(&ctx.logs_path, job_id);
         }
 
         // Delete crew from state
         for crew_id in &crew_ids_to_delete {
-            emit(&ctx.event_bus, Event::CrewDeleted { id: CrewId::new(crew_id) })?;
+            emit(&ctx.event_bus, Event::CrewDeleted { id: CrewId::from_string(crew_id) })?;
         }
 
         for entry in &to_prune {

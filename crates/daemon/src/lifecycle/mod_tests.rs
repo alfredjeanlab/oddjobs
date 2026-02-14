@@ -11,7 +11,7 @@ async fn process_event_persists_result_events_to_wal() {
     // This produces JobAdvanced + StepUpdated result events
     daemon
         .process_event(Event::ShellExited {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -55,7 +55,7 @@ async fn process_event_cancel_persists_to_wal() {
     let (mut daemon, wal_path) = setup_daemon_with_job().await;
 
     // Cancel the job via a typed event
-    daemon.process_event(Event::JobCancel { id: JobId::new("job-1") }).await.unwrap();
+    daemon.process_event(Event::JobCancel { id: JobId::from_string("job-1") }).await.unwrap();
 
     // Flush the event bus to ensure events are written to disk
     daemon.event_bus.wal.lock().flush().unwrap();
@@ -89,7 +89,7 @@ async fn cancelled_job_survives_restart_as_terminal() {
     let (mut daemon, wal_path) = setup_daemon_with_job().await;
 
     // Cancel the job
-    daemon.process_event(Event::JobCancel { id: JobId::new("job-1") }).await.unwrap();
+    daemon.process_event(Event::JobCancel { id: JobId::from_string("job-1") }).await.unwrap();
 
     daemon.event_bus.wal.lock().flush().unwrap();
 
@@ -98,7 +98,7 @@ async fn cancelled_job_survives_restart_as_terminal() {
     // Here we recreate it manually to simulate the snapshot baseline.
     let mut recovered_state = MaterializedState::default();
     recovered_state.apply_event(&Event::JobCreated {
-        id: JobId::new("job-1"),
+        id: JobId::from_string("job-1"),
         kind: "test".to_string(),
         name: "test-job".to_string(),
         runbook_hash: "testhash".to_string(),
@@ -133,7 +133,7 @@ async fn process_event_materializes_state() {
     // ShellExited should update job step_status in MaterializedState
     daemon
         .process_event(Event::ShellExited {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -167,7 +167,7 @@ async fn result_events_delivered_once_through_engine_loop() {
     // Process ShellExited -- produces StepCompleted + JobAdvanced result events
     daemon
         .process_event(Event::ShellExited {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,
@@ -250,7 +250,7 @@ async fn shutdown_saves_final_snapshot() {
     // Process an event so the WAL has entries
     daemon
         .process_event(Event::ShellExited {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "only-step".to_string(),
             exit_code: 0,
             stdout: None,

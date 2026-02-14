@@ -139,7 +139,7 @@ async fn job_namespace_is_propagated() {
 
     // Use a command event with a non-empty project
     let event = Event::CommandRun {
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         name: "build".to_string(),
         project_path: ctx.project_path.clone(),
         invoke_dir: ctx.project_path.clone(),

@@ -24,7 +24,7 @@ async fn cron_once_agent() {
         .runtime
         .handle_event(Event::CronOnce {
             cron: "health_check".to_string(),
-            owner: oj_core::CrewId::new("run-once-1").into(),
+            owner: oj_core::CrewId::from_string("run-once-1").into(),
             project_path: ctx.project_path.clone(),
             runbook_hash: runbook_hash.clone(),
             target: RunTarget::agent("doctor"),
@@ -155,7 +155,7 @@ async fn cron_agent_concurrency_skip() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewCreated {
-                id: oj_core::CrewId::new("existing-run-1"),
+                id: oj_core::CrewId::from_string("existing-run-1"),
                 agent: "doctor".to_string(),
                 command: "cron:health_check".to_string(),
                 project: String::new(),
@@ -221,7 +221,7 @@ async fn cron_agent_concurrency_respawns_after_complete() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewCreated {
-                id: oj_core::CrewId::new("completed-run-1"),
+                id: oj_core::CrewId::from_string("completed-run-1"),
                 agent: "doctor".to_string(),
                 command: "cron:health_check".to_string(),
                 project: String::new(),
@@ -239,7 +239,7 @@ async fn cron_agent_concurrency_respawns_after_complete() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewUpdated {
-                id: oj_core::CrewId::new("completed-run-1"),
+                id: oj_core::CrewId::from_string("completed-run-1"),
                 status: CrewStatus::Completed,
                 reason: None,
             },
@@ -303,7 +303,7 @@ async fn count_running_agents_standalone() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewCreated {
-                id: oj_core::CrewId::new("run-1"),
+                id: oj_core::CrewId::from_string("run-1"),
                 agent: "doctor".to_string(),
                 command: "test".to_string(),
                 project: String::new(),
@@ -323,7 +323,7 @@ async fn count_running_agents_standalone() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewCreated {
-                id: oj_core::CrewId::new("run-2"),
+                id: oj_core::CrewId::from_string("run-2"),
                 agent: "doctor".to_string(),
                 command: "test".to_string(),
                 project: String::new(),
@@ -343,7 +343,7 @@ async fn count_running_agents_standalone() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewUpdated {
-                id: oj_core::CrewId::new("run-1"),
+                id: oj_core::CrewId::from_string("run-1"),
                 status: CrewStatus::Completed,
                 reason: None,
             },
@@ -362,7 +362,7 @@ async fn count_running_agents_standalone() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewUpdated {
-                id: oj_core::CrewId::new("run-2"),
+                id: oj_core::CrewId::from_string("run-2"),
                 status: CrewStatus::Failed,
                 reason: Some("crashed".to_string()),
             },
@@ -388,7 +388,7 @@ async fn count_running_agents_namespace_isolation() {
         .executor
         .execute(oj_core::Effect::Emit {
             event: Event::CrewCreated {
-                id: oj_core::CrewId::new("run-ns-a"),
+                id: oj_core::CrewId::from_string("run-ns-a"),
                 agent: "doctor".to_string(),
                 command: "test".to_string(),
                 project: "ns-a".to_string(),

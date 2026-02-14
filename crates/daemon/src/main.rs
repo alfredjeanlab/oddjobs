@@ -249,7 +249,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         // for resume errors which shouldn't kill healthy jobs.
                                         if let Some(pid) = job_id.filter(|_| !is_failure && !is_resume) {
                                             let fail_event = Event::JobAdvanced {
-                                                id: JobId::new(pid),
+                                                id: JobId::from_string(pid),
                                                 step: "failed".to_string(),
                                             };
                                             if let Err(send_err) = daemon.event_bus.send(fail_event) {

@@ -35,7 +35,7 @@ impl<C: Clock> Runtime<C> {
         status: CrewStatus,
         reason: Option<String>,
     ) -> Result<Vec<Event>, RuntimeError> {
-        let crew_id = CrewId::new(&crew.id);
+        let crew_id = CrewId::from_string(&crew.id);
         let events = vec![
             Effect::Emit { event: Event::CrewUpdated { id: crew_id.clone(), status, reason } },
             Effect::CancelTimer { id: TimerId::liveness(&crew_id) },
@@ -53,7 +53,7 @@ impl<C: Clock> Runtime<C> {
             s.workspaces
                 .values()
                 .filter(|ws| ws.owner == ar_owner)
-                .map(|ws| WorkspaceId::new(&ws.id))
+                .map(|ws| WorkspaceId::from_string(&ws.id))
                 .collect()
         });
         for ws_id in ws_ids {
@@ -68,8 +68,11 @@ impl<C: Clock> Runtime<C> {
         self.capture_before_kill_crew(crew).await;
 
         if let Some(ref aid) = crew.agent_id {
-            self.agent_owners.lock().remove(&AgentId::new(aid));
-            let _ = self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(aid) }).await;
+            self.agent_owners.lock().remove(&AgentId::from_string(aid));
+            let _ = self
+                .executor
+                .execute(Effect::KillAgent { agent_id: AgentId::from_string(aid) })
+                .await;
         }
         Ok(())
     }
@@ -149,7 +152,7 @@ impl<C: Clock> Runtime<C> {
             .clone();
 
         // Check if agent is alive
-        let agent_id = crew.agent_id.as_ref().map(AgentId::new);
+        let agent_id = crew.agent_id.as_ref().map(AgentId::from_string);
         let agent_state = match &agent_id {
             Some(id) => self.executor.get_agent_state(id).await.ok(),
             None => None,
@@ -206,7 +209,10 @@ impl<C: Clock> Runtime<C> {
         // Agent dead OR --kill requested: recover using --resume
         let resume = crew.agent_id.is_some();
         if let Some(ref aid) = crew.agent_id {
-            let _ = self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(aid) }).await;
+            let _ = self
+                .executor
+                .execute(Effect::KillAgent { agent_id: AgentId::from_string(aid) })
+                .await;
         }
 
         // Respawn agent with resume (coop handles session discovery)
@@ -236,8 +242,8 @@ impl<C: Clock> Runtime<C> {
         let agent_id_str = crew.agent_id.as_ref().ok_or_else(|| {
             RuntimeError::InvalidRequest(format!("crew {} has no agent_id", crew.id))
         })?;
-        let agent_id = AgentId::new(agent_id_str);
-        let crew_id = CrewId::new(&crew.id);
+        let agent_id = AgentId::from_string(agent_id_str);
+        let crew_id = CrewId::from_string(&crew.id);
 
         // Look up persisted runtime and auth token from agent records
         let (runtime_hint, auth_token) = self.lock_state(|s| {

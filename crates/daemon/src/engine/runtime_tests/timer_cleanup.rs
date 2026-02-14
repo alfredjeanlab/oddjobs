@@ -37,7 +37,7 @@ async fn liveness_timer_cancelled_when_job_advances_past_agent_step() {
     // Agent goes idle → on_idle = done → job advances to "finish"
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -73,14 +73,16 @@ async fn assert_timer_cancelled_on_termination(
         let agent_id = get_agent_id(&ctx, &job_id).unwrap();
         ctx.agents.set_agent_alive(&agent_id, false);
         ctx.runtime
-            .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+            .handle_event(Event::TimerStart {
+                id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+            })
             .await
             .unwrap();
     }
 
     if terminate_via_cancel {
         ctx.runtime
-            .handle_event(Event::JobCancel { id: JobId::new(job_id.clone()) })
+            .handle_event(Event::JobCancel { id: JobId::from_string(job_id.clone()) })
             .await
             .unwrap();
     } else {
@@ -123,7 +125,9 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
     // Mark agent dead → liveness detects death → schedules exit-deferred
     ctx.agents.set_agent_alive(&agent_id, false);
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -136,7 +140,7 @@ async fn exit_deferred_timer_cancelled_when_job_advances() {
     // Agent goes idle → on_idle = done → job advances (before exit-deferred fires)
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -173,13 +177,13 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     // First idle → on_idle nudge (attempt 1, no cooldown yet)
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
     // Second idle → attempt 2 → cooldown timer scheduled
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -200,7 +204,7 @@ async fn cooldown_timer_noop_when_job_becomes_terminal() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::cooldown(&JobId::new(job_id.clone()), "idle", 0),
+            id: TimerId::cooldown(&JobId::from_string(job_id.clone()), "idle", 0),
         })
         .await
         .unwrap();
@@ -216,7 +220,7 @@ async fn cooldown_timer_noop_when_job_missing() {
     let result = ctx
         .runtime
         .handle_event(Event::TimerStart {
-            id: TimerId::cooldown(&JobId::new("nonexistent"), "idle", 0),
+            id: TimerId::cooldown(&JobId::from_string("nonexistent"), "idle", 0),
         })
         .await
         .unwrap();
@@ -242,7 +246,9 @@ async fn all_job_timers_cancelled_after_on_dead_done_completes() {
     // Step 1: Mark agent as dead, fire liveness → exit-deferred scheduled
     ctx.agents.set_agent_alive(&agent_id, false);
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -251,7 +257,9 @@ async fn all_job_timers_cancelled_after_on_dead_done_completes() {
 
     // Step 3: Exit-deferred fires → on_dead=done → job advances to "finish"
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -281,7 +289,9 @@ async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     // Agent dead → liveness → exit-deferred (both timers now exist)
     ctx.agents.set_agent_alive(&agent_id, false);
     ctx.runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -289,7 +299,7 @@ async fn all_job_timers_cancelled_after_on_idle_done_completes() {
     // This should cancel BOTH liveness and exit-deferred timers
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 

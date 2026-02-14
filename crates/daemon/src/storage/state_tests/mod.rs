@@ -68,7 +68,7 @@ fn apply_event_step_waiting_with_reason_sets_job_error() {
     assert!(state.jobs["job-1"].error.is_none());
 
     state.apply_event(&Event::StepWaiting {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
         reason: Some("gate `make test` failed (exit 1): tests failed".to_string()),
         decision_id: None,
@@ -87,7 +87,7 @@ fn apply_event_step_started_preserves_existing_error() {
     state.apply_event(&job_create_event("job-1", "build", "test", "init"));
 
     state.apply_event(&Event::StepWaiting {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
         reason: Some("previous error".to_string()),
         decision_id: None,
@@ -121,23 +121,23 @@ fn cancelled_job_is_terminal_after_event_replay() {
 fn apply_event_workspace_lifecycle() {
     let mut state = MaterializedState::default();
     state.apply_event(&Event::WorkspaceCreated {
-        id: WorkspaceId::new("ws-1"),
+        id: WorkspaceId::from_string("ws-1"),
         path: PathBuf::from("/tmp/test"),
         branch: Some("feature/test".to_string()),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         workspace_type: None,
     });
 
     assert!(state.workspaces.contains_key("ws-1"));
     assert_eq!(state.workspaces["ws-1"].path, PathBuf::from("/tmp/test"));
     assert_eq!(state.workspaces["ws-1"].branch, Some("feature/test".to_string()));
-    assert_eq!(state.workspaces["ws-1"].owner, JobId::new("job-1"));
+    assert_eq!(state.workspaces["ws-1"].owner, JobId::from_string("job-1"));
     assert_eq!(state.workspaces["ws-1"].status, oj_core::WorkspaceStatus::Creating);
 
-    state.apply_event(&Event::WorkspaceReady { id: WorkspaceId::new("ws-1") });
+    state.apply_event(&Event::WorkspaceReady { id: WorkspaceId::from_string("ws-1") });
     assert_eq!(state.workspaces["ws-1"].status, oj_core::WorkspaceStatus::Ready);
 
-    state.apply_event(&Event::WorkspaceDeleted { id: WorkspaceId::new("ws-1") });
+    state.apply_event(&Event::WorkspaceDeleted { id: WorkspaceId::from_string("ws-1") });
     assert!(!state.workspaces.contains_key("ws-1"));
 }
 
@@ -149,10 +149,10 @@ fn apply_event_workspace_lifecycle() {
 fn workspace_type(ws_type: Option<&str>, expected: WorkspaceType) {
     let mut state = MaterializedState::default();
     state.apply_event(&Event::WorkspaceCreated {
-        id: WorkspaceId::new("ws-1"),
+        id: WorkspaceId::from_string("ws-1"),
         path: PathBuf::from("/tmp/ws"),
         branch: None,
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         workspace_type: ws_type.map(String::from),
     });
 

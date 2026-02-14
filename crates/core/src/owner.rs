@@ -17,8 +17,8 @@ use std::fmt;
 /// to the correct entity during WAL replay.
 ///
 /// Serializes as a string using Display format:
-/// - `"job:job-123"`
-/// - `"crew:run-456"`
+/// - `"job-V1StGXR8_Zm5M9z3x"`
+/// - `"crw-kL9mP2nQ_Az8Nk4wx"`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum OwnerId {
     /// Agent is owned by a job (job-embedded agent)
@@ -42,7 +42,7 @@ impl<'de> serde::Deserialize<'de> for OwnerId {
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(OwnerId::parse(&s))
+        OwnerId::parse(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -89,16 +89,14 @@ impl OwnerId {
         }
     }
 
-    /// Parse from Display format (`"job:xxx"` / `"crew:xxx"`).
-    /// Bare strings without a prefix are treated as job IDs for backward compat.
-    pub fn parse(s: &str) -> Self {
-        if let Some(rest) = s.strip_prefix("job:") {
-            OwnerId::Job(JobId::new(rest))
-        } else if let Some(rest) = s.strip_prefix("crew:") {
-            OwnerId::Crew(CrewId::new(rest))
+    /// Parse from Display format (`"job-xxx"` / `"crw-xxx"`).
+    pub fn parse(s: &str) -> Result<Self, InvalidOwnerId> {
+        if s.starts_with("job-") {
+            Ok(OwnerId::Job(JobId::from_string(s)))
+        } else if s.starts_with("crw-") {
+            Ok(OwnerId::Crew(CrewId::from_string(s)))
         } else {
-            // Legacy: bare ID assumed to be a job
-            OwnerId::Job(JobId::new(s))
+            Err(InvalidOwnerId(s.to_string()))
         }
     }
 
@@ -109,6 +107,18 @@ impl OwnerId {
         }
     }
 }
+
+/// Invalid owner ID format (expected `job-xxx` or `crw-xxx`).
+#[derive(Debug, Clone)]
+pub struct InvalidOwnerId(pub String);
+
+impl fmt::Display for InvalidOwnerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid owner id format: {}", self.0)
+    }
+}
+
+impl std::error::Error for InvalidOwnerId {}
 
 /// Expected a specific [`OwnerId`] variant.
 #[derive(Debug, Clone)]
@@ -125,8 +135,8 @@ impl std::error::Error for OwnerMismatch {}
 impl fmt::Display for OwnerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OwnerId::Job(id) => write!(f, "job:{}", id),
-            OwnerId::Crew(id) => write!(f, "crew:{}", id),
+            OwnerId::Job(id) => write!(f, "{}", id),
+            OwnerId::Crew(id) => write!(f, "{}", id),
         }
     }
 }

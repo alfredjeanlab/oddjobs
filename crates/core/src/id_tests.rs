@@ -6,31 +6,66 @@ use std::collections::HashMap;
 
 crate::define_id! {
     /// Test ID type for macro verification.
-    pub struct TestId;
+    pub struct TestId("tst-");
+}
+
+#[test]
+fn id_has_prefix() {
+    let id = TestId::from_string("tst-abc123");
+    assert_eq!(id.as_str(), "tst-abc123");
+    assert_eq!(id.suffix(), "abc123");
+}
+
+#[test]
+fn id_short_uses_suffix() {
+    let id = TestId::from_string("tst-abcdefgh");
+    assert_eq!(id.short(3), "abc");
+}
+
+#[test]
+fn id_generates_with_correct_length() {
+    let id = TestId::new();
+    assert_eq!(id.as_str().len(), 23);
+    assert!(id.as_str().starts_with("tst-"));
+}
+
+#[test]
+fn id_fits_in_smolstr_inline() {
+    // Max inline: 4-char prefix + 19-char nanoid = 23 bytes
+    let id = TestId::new();
+    assert_eq!(id.as_str().len(), 23);
+    assert!(id.as_str().len() <= 23); // Exactly fits inline capacity
+}
+
+#[test]
+fn id_clones_cheaply() {
+    let id1 = TestId::new();
+    let id2 = id1.clone(); // Clones cheaply (24 bytes)
+    assert_eq!(id1, id2);
 }
 
 #[test]
 fn define_id_hash_map_lookup() {
     let mut map = HashMap::new();
-    map.insert(TestId::new("k"), 42);
-    assert_eq!(map.get("k"), Some(&42));
+    map.insert(TestId::from_string("tst-k"), 42);
+    assert_eq!(map.get("tst-k"), Some(&42));
 }
 
 #[test]
 fn define_id_short_truncates() {
-    let id = TestId::new("abcdefghijklmnop");
+    let id = TestId::from_string("tst-abcdefghijklmnop");
     assert_eq!(id.short(8), "abcdefgh");
 }
 
 #[test]
 fn define_id_short_returns_full_when_shorter() {
-    let id = TestId::new("abc");
+    let id = TestId::from_string("tst-abc");
     assert_eq!(id.short(8), "abc");
 }
 
 #[test]
 fn define_id_short_returns_full_when_exact() {
-    let id = TestId::new("abcdefgh");
+    let id = TestId::from_string("tst-abcdefgh");
     assert_eq!(id.short(8), "abcdefgh");
 }
 
@@ -46,9 +81,9 @@ fn short_fn_on_str() {
 
 #[test]
 fn id_serializes_as_bare_string() {
-    let id = TestId::new("abc-123");
+    let id = TestId::from_string("tst-abc123");
     let json = serde_json::to_string(&id).unwrap();
-    assert_eq!(json, r#""abc-123""#);
+    assert_eq!(json, r#""tst-abc123""#);
 
     let decoded: TestId = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded, id);
@@ -58,44 +93,16 @@ fn id_serializes_as_bare_string() {
 
 #[test]
 fn id_derefs_to_str() {
-    let id = TestId::new("test-id");
+    let id = TestId::from_string("tst-test-id");
     let s: &str = &id; // Deref coercion
-    assert_eq!(s, "test-id");
+    assert_eq!(s, "tst-test-id");
 }
 
 #[test]
 fn option_id_as_deref() {
-    let id = Some(TestId::new("test-id"));
-    assert_eq!(id.as_deref(), Some("test-id"));
+    let id = Some(TestId::from_string("tst-test-id"));
+    assert_eq!(id.as_deref(), Some("tst-test-id"));
 
     let empty: Option<TestId> = None;
     assert_eq!(empty.as_deref(), None);
-}
-
-// --- IdGen tests ---
-
-#[test]
-fn uuid_gen_creates_unique_ids() {
-    let id_gen = UuidIdGen;
-    let id1 = id_gen.next();
-    let id2 = id_gen.next();
-    assert_ne!(id1, id2);
-    assert_eq!(id1.len(), 36); // UUID format
-}
-
-#[test]
-fn sequential_gen_creates_predictable_ids() {
-    let id_gen = SequentialIdGen::new("test");
-    assert_eq!(id_gen.next(), "test-1");
-    assert_eq!(id_gen.next(), "test-2");
-    assert_eq!(id_gen.next(), "test-3");
-}
-
-#[test]
-fn sequential_gen_is_cloneable_and_shared() {
-    let id_gen1 = SequentialIdGen::new("shared");
-    let id_gen2 = id_gen1.clone();
-    assert_eq!(id_gen1.next(), "shared-1");
-    assert_eq!(id_gen2.next(), "shared-2");
-    assert_eq!(id_gen1.next(), "shared-3");
 }

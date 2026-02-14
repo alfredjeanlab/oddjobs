@@ -8,9 +8,7 @@ use crate::engine::error::RuntimeError;
 use crate::engine::runtime::handlers::CreateJobParams;
 use crate::engine::runtime::Runtime;
 use crate::storage::{QueueItemStatus, QueuePollMeta};
-use oj_core::{
-    scoped_name, split_scoped_name, Clock, Effect, Event, IdGen, JobId, OwnerId, UuidIdGen,
-};
+use oj_core::{scoped_name, split_scoped_name, Clock, Effect, Event, JobId, OwnerId};
 use oj_runbook::QueueType;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -289,7 +287,7 @@ impl<C: Clock> Runtime<C> {
         };
 
         // Create job for this item
-        let job_id = JobId::new(UuidIdGen.next());
+        let job_id = JobId::new();
 
         // Look up job definition to build input
         // Runbook refreshed at top of caller, no need to emit RunbookLoaded

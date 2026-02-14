@@ -48,7 +48,7 @@ async fn cron_once_creates_job() {
     load_runbook(&ctx, &runbook_json, &runbook_hash).await;
 
     // Emit CronOnce event
-    let job_id = JobId::new("cron-job-1");
+    let job_id = JobId::from_string("cron-job-1");
     let events = ctx
         .runtime
         .handle_event(Event::CronOnce {
@@ -285,7 +285,7 @@ async fn cron_once_job_steps_execute() {
     load_runbook(&ctx, &runbook_json, &runbook_hash).await;
 
     // Emit CronOnce
-    let job_id = JobId::new("cron-exec-1");
+    let job_id = JobId::from_string("cron-exec-1");
     ctx.runtime
         .handle_event(Event::CronOnce {
             cron: "janitor".to_string(),

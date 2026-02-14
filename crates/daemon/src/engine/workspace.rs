@@ -3,6 +3,7 @@
 
 //! Workspace effect execution (create/delete worktrees and folders).
 
+use crate::adapters::workspace::ProvisionRequest;
 use crate::adapters::WorkspaceAdapter;
 use crate::engine::executor::ExecuteError;
 use crate::storage::MaterializedState;
@@ -18,8 +19,6 @@ use tokio::sync::mpsc;
 /// Immediately records the workspace in state and spawns a background task
 /// for the filesystem work (worktree add or mkdir). Returns the
 /// `WorkspaceCreated` event for WAL persistence.
-// TODO(refactor): group workspace creation params into a context struct
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create(
     state: &Arc<Mutex<MaterializedState>>,
     event_tx: &mpsc::Sender<Event>,
@@ -51,9 +50,9 @@ pub(crate) async fn create(
     let event_tx = event_tx.clone();
     let workspace = Arc::clone(workspace);
     tokio::spawn(async move {
-        workspace
-            .provision(event_tx, workspace_id, path, is_worktree, repo_root, branch, start_point)
-            .await;
+        let req =
+            ProvisionRequest { workspace_id, path, is_worktree, repo_root, branch, start_point };
+        workspace.provision(event_tx, req).await;
     });
 
     // Return WorkspaceCreated for WAL persistence (background task sends Ready/Failed)

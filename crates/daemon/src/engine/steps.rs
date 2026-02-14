@@ -24,13 +24,13 @@ pub fn step_start_effects(job_id: &JobId, step: &str) -> Vec<Effect> {
 /// Build effects to transition to the next step
 pub fn step_transition_effects(job: &Job, next_step: &str) -> Vec<Effect> {
     vec![Effect::Emit {
-        event: Event::JobAdvanced { id: JobId::new(&job.id), step: next_step.to_string() },
+        event: Event::JobAdvanced { id: JobId::from_string(&job.id), step: next_step.to_string() },
     }]
 }
 
 /// Build effects to transition to failure step with error
 pub fn failure_transition_effects(job: &Job, on_fail: &str, error: &str) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     vec![
         Effect::Emit {
             event: Event::StepFailed {
@@ -46,7 +46,7 @@ pub fn failure_transition_effects(job: &Job, on_fail: &str, error: &str) -> Vec<
 /// Build effects after on_fail cleanup step completes: mark the cleanup step
 /// as completed, then transition to the "failed" terminal state.
 pub fn failure_after_cleanup_effects(job: &Job, error: &str) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     let mut effects = vec![
         Effect::CancelTimer { id: TimerId::liveness(&job_id) },
         Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) },
@@ -69,7 +69,7 @@ pub fn failure_after_cleanup_effects(job: &Job, error: &str) -> Vec<Effect> {
     if let Some(agent_id) =
         job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
     {
-        effects.push(Effect::KillAgent { agent_id: AgentId::new(agent_id) });
+        effects.push(Effect::KillAgent { agent_id: AgentId::from_string(agent_id) });
     }
 
     effects
@@ -80,7 +80,7 @@ pub fn failure_after_cleanup_effects(job: &Job, error: &str) -> Vec<Effect> {
 /// Always emits JobAdvanced (even if already terminal) because failure_effects
 /// is called from circuit breaker paths that need the advance unconditionally.
 pub fn failure_effects(job: &Job, error: &str) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     terminal_job_effects(
         job,
         "failed",
@@ -97,7 +97,7 @@ pub fn failure_effects(job: &Job, error: &str) -> Vec<Effect> {
 /// on_cancel target. The job remains non-terminal so the cleanup
 /// step can execute.
 pub fn cancellation_transition_effects(job: &Job, on_cancel_step: &str) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     vec![
         Effect::Emit {
             event: Event::StepFailed {
@@ -112,7 +112,7 @@ pub fn cancellation_transition_effects(job: &Job, on_cancel_step: &str) -> Vec<E
 
 /// Build effects to cancel a running job (terminal).
 pub fn cancellation_effects(job: &Job) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     terminal_job_effects(
         job,
         "cancelled",
@@ -131,7 +131,7 @@ pub fn cancellation_effects(job: &Job) -> Vec<Effect> {
 ///
 /// Unlike cancellation, does NOT delete the workspace — preserves everything for resume.
 pub fn suspension_effects(job: &Job) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     terminal_job_effects(
         job,
         "suspended",
@@ -148,7 +148,7 @@ pub fn suspension_effects(job: &Job) -> Vec<Effect> {
 
 /// Build effects to complete a job (terminal).
 pub fn completion_effects(job: &Job) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     terminal_job_effects(
         job,
         "done",
@@ -165,7 +165,7 @@ fn terminal_job_effects(
     force_advance: bool,
     outcome: Effect,
 ) -> Vec<Effect> {
-    let job_id = JobId::new(&job.id);
+    let job_id = JobId::from_string(&job.id);
     let mut effects = vec![
         Effect::CancelTimer { id: TimerId::liveness(&job_id) },
         Effect::CancelTimer { id: TimerId::exit_deferred(&job_id) },
@@ -182,7 +182,7 @@ fn terminal_job_effects(
     if let Some(agent_id) =
         job.step_history.iter().rfind(|r| r.name == job.step).and_then(|r| r.agent_id.as_ref())
     {
-        effects.push(Effect::KillAgent { agent_id: AgentId::new(agent_id) });
+        effects.push(Effect::KillAgent { agent_id: AgentId::from_string(agent_id) });
     }
 
     effects

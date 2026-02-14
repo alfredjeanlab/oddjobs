@@ -5,9 +5,9 @@ use super::*;
 
 fn step_started_with_agent(job_id: &str, agent_id: &str) -> Event {
     Event::StepStarted {
-        job_id: JobId::new(job_id),
+        job_id: JobId::from_string(job_id),
         step: "init".to_string(),
-        agent_id: Some(oj_core::AgentId::new(agent_id)),
+        agent_id: Some(oj_core::AgentId::from_string(agent_id)),
         agent_name: Some("worker".to_string()),
     }
 }
@@ -27,7 +27,7 @@ fn populated_from_step_started_with_agent() {
     let record = &state.agents["agent-abc"];
     assert_eq!(record.agent_id, "agent-abc");
     assert_eq!(record.agent_name, "worker");
-    assert_eq!(record.owner, OwnerId::Job(JobId::new("job-1")));
+    assert_eq!(record.owner, OwnerId::Job(JobId::from_string("job-1")));
     assert_eq!(record.status, oj_core::AgentRecordStatus::Starting);
 }
 
@@ -43,7 +43,7 @@ fn not_populated_from_step_started_without_agent() {
 #[test]
 fn populated_from_crew_started() {
     let mut state = MaterializedState::default();
-    let run_id = CrewId::new("run-1");
+    let run_id = CrewId::from_string("run-1");
 
     state.apply_event(&Event::CrewCreated {
         id: run_id.clone(),
@@ -58,7 +58,7 @@ fn populated_from_crew_started() {
 
     state.apply_event(&Event::CrewStarted {
         id: run_id.clone(),
-        agent_id: oj_core::AgentId::new("agent-xyz"),
+        agent_id: oj_core::AgentId::from_string("agent-xyz"),
     });
 
     assert!(state.agents.contains_key("agent-xyz"));
@@ -78,21 +78,21 @@ fn status_updates_from_lifecycle_events() {
     // Working → Idle → Exited
     let mut state = state;
     state.apply_event(&Event::AgentWorking {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
     });
     assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Running);
 
     state.apply_event(&Event::AgentWaiting {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
     });
     assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Idle);
 
     state.apply_event(&Event::AgentExited {
-        id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::from_string("agent-1"),
         exit_code: Some(0),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
     });
     assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Exited);
 }
@@ -102,8 +102,8 @@ fn gone_status() {
     let mut state = state_with_job_agent("job-1", "agent-1");
 
     state.apply_event(&Event::AgentGone {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         exit_code: None,
     });
     assert_eq!(state.agents["agent-1"].status, oj_core::AgentRecordStatus::Gone);
@@ -122,7 +122,7 @@ fn removed_on_job_deleted() {
 #[test]
 fn removed_on_crew_deleted() {
     let mut state = MaterializedState::default();
-    let run_id = CrewId::new("run-1");
+    let run_id = CrewId::from_string("run-1");
 
     state.apply_event(&Event::CrewCreated {
         id: run_id.clone(),
@@ -137,7 +137,7 @@ fn removed_on_crew_deleted() {
 
     state.apply_event(&Event::CrewStarted {
         id: run_id.clone(),
-        agent_id: oj_core::AgentId::new("agent-1"),
+        agent_id: oj_core::AgentId::from_string("agent-1"),
     });
 
     assert!(state.agents.contains_key("agent-1"));
@@ -161,8 +161,8 @@ fn agent_gone_does_not_overwrite_terminal_job() {
 
     // Session closes after job already completed
     state.apply_event(&Event::AgentGone {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         exit_code: None,
     });
 
@@ -179,9 +179,9 @@ fn agent_exited_does_not_overwrite_terminal_job() {
     state.apply_event(&job_transition_event("job-1", "done"));
 
     state.apply_event(&Event::AgentExited {
-        id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::from_string("agent-1"),
         exit_code: Some(1),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
     });
 
     assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
@@ -195,9 +195,9 @@ fn agent_failed_does_not_overwrite_terminal_job() {
     state.apply_event(&job_transition_event("job-1", "done"));
 
     state.apply_event(&Event::AgentFailed {
-        id: oj_core::AgentId::new("agent-1"),
+        id: oj_core::AgentId::from_string("agent-1"),
         error: oj_core::AgentError::Other("api error".to_string()),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
     });
 
     assert_eq!(state.jobs["job-1"].step_status, oj_core::StepStatus::Completed);
@@ -219,8 +219,8 @@ fn runtime_set_from_agent_spawned() {
     assert_eq!(state.agents["agent-1"].runtime, oj_core::AgentRuntime::Local);
 
     state.apply_event(&Event::AgentSpawned {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         runtime: oj_core::AgentRuntime::Kubernetes,
         auth_token: None,
     });
@@ -233,8 +233,8 @@ fn runtime_set_docker_from_agent_spawned() {
     let mut state = state_with_job_agent("job-1", "agent-1");
 
     state.apply_event(&Event::AgentSpawned {
-        id: oj_core::AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: oj_core::AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         runtime: oj_core::AgentRuntime::Docker,
         auth_token: Some("test-token".to_string()),
     });

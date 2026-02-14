@@ -355,7 +355,7 @@ pub(crate) fn augment_command_for_skip_permissions(command: &str) -> String {
 
 /// Generate a random bearer token for per-agent auth.
 pub(crate) fn generate_auth_token() -> String {
-    uuid::Uuid::new_v4().simple().to_string()
+    nanoid::nanoid!(32)
 }
 
 /// Detect the git remote URL from a project directory.

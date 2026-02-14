@@ -110,7 +110,7 @@ async fn gate_failure_does_not_produce_automatic_notification() {
     // Agent goes idle -> on_idle gate runs "false" -> gate fails -> decision created
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -145,7 +145,7 @@ async fn gate_dead_failure_does_not_produce_automatic_notification() {
 
     // Agent exits -> on_dead gate runs "false" -> gate fails -> decision created
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 

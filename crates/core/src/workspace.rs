@@ -15,7 +15,7 @@ crate::define_id! {
     ///
     /// Workspaces are managed directories that can outlive jobs (for debugging
     /// failed runs) or be shared across related job invocations.
-    pub struct WorkspaceId;
+    pub struct WorkspaceId("wks-");
 }
 
 /// Status of a workspace in its lifecycle.

@@ -43,7 +43,7 @@ fn unwrap_decision((id, event): (DecisionId, Event)) -> Decision {
 fn build_job_decision(trigger: EscalationTrigger) -> Decision {
     unwrap_decision(
         EscalationDecisionBuilder::new(
-            JobId::new("job-1").into(),
+            JobId::from_string("job-1").into(),
             "test-job".to_string(),
             "agent-1".to_string(),
             trigger,
@@ -154,7 +154,7 @@ fn trigger_context_fragments(
 fn test_builder_with_agent_id_and_project() {
     let d = unwrap_decision(
         EscalationDecisionBuilder::new(
-            JobId::new("job-1").into(),
+            JobId::from_string("job-1").into(),
             "test-job".to_string(),
             "agent-123".to_string(),
             EscalationTrigger::Idle { last_message: None },
@@ -162,7 +162,7 @@ fn test_builder_with_agent_id_and_project() {
         .project("my-project")
         .build(),
     );
-    assert_eq!(d.agent_id, AgentId::new("agent-123"));
+    assert_eq!(d.agent_id, AgentId::from_string("agent-123"));
     assert_eq!(d.project, "my-project");
 }
 
@@ -170,7 +170,7 @@ fn test_builder_with_agent_id_and_project() {
 fn test_builder_with_agent_log_tail() {
     let d = unwrap_decision(
         EscalationDecisionBuilder::new(
-            JobId::new("job-1").into(),
+            JobId::from_string("job-1").into(),
             "test-job".to_string(),
             "agent-1".to_string(),
             EscalationTrigger::Idle { last_message: None },
@@ -317,7 +317,7 @@ fn for_crew_properties(
 ) {
     let aid = agent_id.unwrap_or("agent-1");
     let mut builder = EscalationDecisionBuilder::new(
-        CrewId::new(run_id_str).into(),
+        CrewId::from_string(run_id_str).into(),
         agent_name.to_string(),
         aid.to_string(),
         trigger,
@@ -326,14 +326,14 @@ fn for_crew_properties(
         builder = builder.project(ns);
     }
     let d = unwrap_decision(builder.build());
-    assert_eq!(d.owner, OwnerId::Crew(CrewId::new(run_id_str)));
+    assert_eq!(d.owner, OwnerId::Crew(CrewId::from_string(run_id_str)));
     assert_eq!(d.source, expected_source);
     assert_eq!(d.options.len(), expected_option_count);
     assert_eq!(d.options[0].label, expected_first_label);
     if let Some(ns) = project {
         assert_eq!(d.project, ns);
     }
-    assert_eq!(d.agent_id, AgentId::new(aid));
+    assert_eq!(d.agent_id, AgentId::from_string(aid));
     assert!(d.context.contains(agent_name));
     for frag in context_fragments {
         assert!(d.context.contains(frag), "context should contain '{}': {}", frag, d.context);
@@ -344,14 +344,14 @@ fn for_crew_properties(
 fn test_for_job_creates_job_owner() {
     let d = unwrap_decision(
         EscalationDecisionBuilder::new(
-            JobId::new("job-789").into(),
+            JobId::from_string("job-789").into(),
             "test-job".to_string(),
             "agent-1".to_string(),
             EscalationTrigger::Idle { last_message: None },
         )
         .build(),
     );
-    assert_eq!(d.owner, OwnerId::Job(JobId::new("job-789")));
+    assert_eq!(d.owner, OwnerId::Job(JobId::from_string("job-789")));
 }
 
 fn arb_escalation_trigger() -> impl Strategy<Value = EscalationTrigger> {
@@ -423,13 +423,13 @@ proptest! {
     fn for_crew_owner_is_crew(trigger in arb_escalation_trigger()) {
         let d = unwrap_decision(
             EscalationDecisionBuilder::new(
-                CrewId::new("run-prop").into(),
+                CrewId::from_string("run-prop").into(),
                 "test-cmd".to_string(),
                 "agent-1".to_string(),
                 trigger,
             )
             .build(),
         );
-        prop_assert_eq!(d.owner, OwnerId::Crew(CrewId::new("run-prop")));
+        prop_assert_eq!(d.owner, OwnerId::Crew(CrewId::from_string("run-prop")));
     }
 }

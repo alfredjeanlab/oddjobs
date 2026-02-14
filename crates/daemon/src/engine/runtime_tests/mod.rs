@@ -45,7 +45,7 @@ fn command_event(
     project_path: &Path,
 ) -> Event {
     Event::CommandRun {
-        owner: JobId::new(job_id).into(),
+        owner: JobId::from_string(job_id).into(),
         name: job_name.to_string(),
         project_path: project_path.to_path_buf(),
         invoke_dir: project_path.to_path_buf(),
@@ -63,7 +63,7 @@ fn crew_command_event(
     project_path: &Path,
 ) -> Event {
     Event::CommandRun {
-        owner: CrewId::new(crew_id).into(),
+        owner: CrewId::from_string(crew_id).into(),
         name: agent_name.to_string(),
         project_path: project_path.to_path_buf(),
         invoke_dir: project_path.to_path_buf(),
@@ -239,7 +239,7 @@ fn get_agent_id(ctx: &TestContext, job_id: &str) -> Option<AgentId> {
         .iter()
         .rfind(|r| r.name == job.step)
         .and_then(|r| r.agent_id.clone())
-        .map(AgentId::new)
+        .map(AgentId::from_string)
 }
 
 async fn create_job_with_id(ctx: &TestContext, job_id: &str) -> String {

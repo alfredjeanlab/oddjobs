@@ -103,9 +103,6 @@ Runs coop inside Kubernetes pods. The daemon creates pods via the Kubernetes API
 
 Source: `crates/adapters/src/agent/k8s/`
 
-See [K8s Roadmap](../roadmap/k8s.md) for outstanding items before production
-deployment.
-
 ### Spawn Flow
 
 1. Build pod spec with init container, main container, and volumes

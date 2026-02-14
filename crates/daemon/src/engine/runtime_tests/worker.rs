@@ -153,7 +153,7 @@ async fn worker_restart_restores_active_jobs_from_persisted_state() {
         state.apply_event(&Event::WorkerDispatched {
             worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            owner: oj_core::JobId::new("job-running").into(),
+            owner: oj_core::JobId::from_string("job-running").into(),
             project: String::new(),
         });
     });
@@ -179,7 +179,7 @@ async fn worker_restart_restores_active_jobs_from_persisted_state() {
     let state = workers.get("fixer").expect("worker state should exist");
     assert_eq!(state.active.len(), 1, "active_jobs should be restored from persisted state");
     assert!(
-        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::new("job-running"))),
+        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::from_string("job-running"))),
         "should contain the job that was running before restart"
     );
 }
@@ -210,7 +210,7 @@ async fn worker_restart_restores_active_jobs_with_namespace() {
         state.apply_event(&Event::WorkerDispatched {
             worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            owner: oj_core::JobId::new("job-running").into(),
+            owner: oj_core::JobId::from_string("job-running").into(),
             project: project.to_string(),
         });
     });
@@ -241,7 +241,7 @@ async fn worker_restart_restores_active_jobs_with_namespace() {
         "active_jobs should be restored from persisted state with project"
     );
     assert!(
-        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::new("job-running"))),
+        state.active.contains(&oj_core::OwnerId::Job(oj_core::JobId::from_string("job-running"))),
         "should contain the job that was running before restart"
     );
 }
@@ -334,13 +334,13 @@ async fn worker_restart_restores_multiple_active_jobs() {
         state.apply_event(&Event::WorkerDispatched {
             worker: "fixer".to_string(),
             item_id: "item-1".to_string(),
-            owner: JobId::new("job-a").into(),
+            owner: JobId::from_string("job-a").into(),
             project: String::new(),
         });
         state.apply_event(&Event::WorkerDispatched {
             worker: "fixer".to_string(),
             item_id: "item-2".to_string(),
-            owner: JobId::new("job-b").into(),
+            owner: JobId::from_string("job-b").into(),
             project: String::new(),
         });
     });
@@ -357,8 +357,8 @@ async fn worker_restart_restores_multiple_active_jobs() {
         let workers = ctx.runtime.worker_states.lock();
         let state = workers.get("fixer").unwrap();
         assert_eq!(state.active.len(), 2, "should restore 2 active jobs from persisted state");
-        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::new("job-a"))));
-        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::new("job-b"))));
+        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::from_string("job-a"))));
+        assert!(state.active.contains(&oj_core::OwnerId::Job(JobId::from_string("job-b"))));
     }
 
     let mut all_events = Vec::new();

@@ -154,7 +154,7 @@ impl UsageMetricsCollector {
             );
 
             // Query agent's usage via adapter
-            let agent_id = oj_core::AgentId::new(&record.agent_id);
+            let agent_id = oj_core::AgentId::from_string(&record.agent_id);
             if let Some(usage) = self.agents.fetch_usage(&agent_id).await {
                 self.cached_usage.insert(record.agent_id.clone(), usage);
             }

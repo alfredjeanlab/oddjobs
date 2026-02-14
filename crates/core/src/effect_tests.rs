@@ -7,11 +7,11 @@ use crate::{JobId, OwnerId};
 #[test]
 fn effect_serialization_roundtrip() {
     let effects = vec![
-        Effect::Emit { event: Event::JobDeleted { id: JobId::new("job-1") } },
+        Effect::Emit { event: Event::JobDeleted { id: JobId::from_string("job-1") } },
         Effect::SpawnAgent {
-            agent_id: AgentId::new("agent-1"),
+            agent_id: AgentId::from_string("agent-1"),
             agent_name: "claude".to_string(),
-            owner: JobId::new("job-1").into(),
+            owner: JobId::from_string("job-1").into(),
             workspace_path: PathBuf::from("/work"),
             input: HashMap::new(),
             command: "claude".to_string(),
@@ -21,22 +21,25 @@ fn effect_serialization_roundtrip() {
             resume: false,
             container: None,
         },
-        Effect::SendToAgent { agent_id: AgentId::new("agent-1"), input: "hello".to_string() },
-        Effect::KillAgent { agent_id: AgentId::new("agent-1") },
+        Effect::SendToAgent {
+            agent_id: AgentId::from_string("agent-1"),
+            input: "hello".to_string(),
+        },
+        Effect::KillAgent { agent_id: AgentId::from_string("agent-1") },
         Effect::CreateWorkspace {
-            workspace_id: crate::WorkspaceId::new("ws-1"),
+            workspace_id: crate::WorkspaceId::from_string("ws-1"),
             path: PathBuf::from("/work/tree"),
-            owner: OwnerId::Job(crate::JobId::new("job-1")),
+            owner: OwnerId::Job(crate::JobId::from_string("job-1")),
             workspace_type: Some("folder".to_string()),
             repo_root: None,
             branch: None,
             start_point: None,
         },
-        Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::new("ws-1") },
-        Effect::SetTimer { id: TimerId::new("timer-1"), duration: Duration::from_secs(60) },
-        Effect::CancelTimer { id: TimerId::new("timer-1") },
+        Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::from_string("ws-1") },
+        Effect::SetTimer { id: TimerId::from_string("timer-1"), duration: Duration::from_secs(60) },
+        Effect::CancelTimer { id: TimerId::from_string("timer-1") },
         Effect::Shell {
-            owner: Some(JobId::new("job-1").into()),
+            owner: Some(JobId::from_string("job-1").into()),
             step: "init".to_string(),
             command: "echo hello".to_string(),
             cwd: PathBuf::from("/tmp"),
@@ -73,9 +76,9 @@ fn traced_effect_names() {
         (Effect::Emit { event: Event::Shutdown }, "emit"),
         (
             Effect::SpawnAgent {
-                agent_id: AgentId::new("a"),
+                agent_id: AgentId::from_string("a"),
                 agent_name: "claude".to_string(),
-                owner: JobId::new("p").into(),
+                owner: JobId::from_string("p").into(),
                 workspace_path: PathBuf::from("/w"),
                 input: HashMap::new(),
                 command: "claude".to_string(),
@@ -88,15 +91,15 @@ fn traced_effect_names() {
             "spawn_agent",
         ),
         (
-            Effect::SendToAgent { agent_id: AgentId::new("a"), input: "i".to_string() },
+            Effect::SendToAgent { agent_id: AgentId::from_string("a"), input: "i".to_string() },
             "send_to_agent",
         ),
-        (Effect::KillAgent { agent_id: AgentId::new("a") }, "kill_agent"),
+        (Effect::KillAgent { agent_id: AgentId::from_string("a") }, "kill_agent"),
         (
             Effect::CreateWorkspace {
-                workspace_id: crate::WorkspaceId::new("ws"),
+                workspace_id: crate::WorkspaceId::from_string("ws"),
                 path: PathBuf::from("/p"),
-                owner: OwnerId::Job(crate::JobId::new("test")),
+                owner: OwnerId::Job(crate::JobId::from_string("test")),
                 workspace_type: None,
                 repo_root: None,
                 branch: None,
@@ -105,14 +108,17 @@ fn traced_effect_names() {
             "create_workspace",
         ),
         (
-            Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::new("ws") },
+            Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::from_string("ws") },
             "delete_workspace",
         ),
-        (Effect::SetTimer { id: TimerId::new("t"), duration: Duration::from_secs(1) }, "set_timer"),
-        (Effect::CancelTimer { id: TimerId::new("t") }, "cancel_timer"),
+        (
+            Effect::SetTimer { id: TimerId::from_string("t"), duration: Duration::from_secs(1) },
+            "set_timer",
+        ),
+        (Effect::CancelTimer { id: TimerId::from_string("t") }, "cancel_timer"),
         (
             Effect::Shell {
-                owner: Some(JobId::new("p").into()),
+                owner: Some(JobId::from_string("p").into()),
                 step: "init".to_string(),
                 command: "cmd".to_string(),
                 cwd: PathBuf::from("/"),
@@ -152,16 +158,16 @@ fn traced_effect_names() {
 #[test]
 fn traced_effect_fields() {
     // Test Emit fields
-    let effect = Effect::Emit { event: Event::JobDeleted { id: JobId::new("job-1") } };
+    let effect = Effect::Emit { event: Event::JobDeleted { id: JobId::from_string("job-1") } };
     let fields = effect.fields();
     assert_eq!(fields.len(), 1);
     assert_eq!(fields[0].0, "event");
 
     // Test SpawnAgent fields
     let effect = Effect::SpawnAgent {
-        agent_id: AgentId::new("agent-1"),
+        agent_id: AgentId::from_string("agent-1"),
         agent_name: "claude".to_string(),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         workspace_path: PathBuf::from("/work"),
         input: HashMap::new(),
         command: "claude".to_string(),
@@ -175,27 +181,29 @@ fn traced_effect_fields() {
     assert_eq!(fields.len(), 6);
     assert_eq!(fields[0], ("agent_id", "agent-1".to_string()));
     assert_eq!(fields[1], ("agent_name", "claude".to_string()));
-    assert_eq!(fields[2], ("owner", "job:job-1".to_string()));
+    assert_eq!(fields[2], ("owner", "job-1".to_string()));
     assert_eq!(fields[3], ("workspace_path", "/work".to_string()));
     assert_eq!(fields[4], ("command", "claude".to_string()));
     assert_eq!(fields[5], ("cwd", "/work".to_string()));
 
     // Test SendToAgent fields
-    let effect =
-        Effect::SendToAgent { agent_id: AgentId::new("agent-1"), input: "hello".to_string() };
+    let effect = Effect::SendToAgent {
+        agent_id: AgentId::from_string("agent-1"),
+        input: "hello".to_string(),
+    };
     let fields = effect.fields();
     assert_eq!(fields, vec![("agent_id", "agent-1".to_string())]);
 
     // Test KillAgent fields
-    let effect = Effect::KillAgent { agent_id: AgentId::new("agent-1") };
+    let effect = Effect::KillAgent { agent_id: AgentId::from_string("agent-1") };
     let fields = effect.fields();
     assert_eq!(fields, vec![("agent_id", "agent-1".to_string())]);
 
     // Test CreateWorkspace fields
     let effect = Effect::CreateWorkspace {
-        workspace_id: crate::WorkspaceId::new("ws-1"),
+        workspace_id: crate::WorkspaceId::from_string("ws-1"),
         path: PathBuf::from("/work"),
-        owner: OwnerId::Job(crate::JobId::new("job-1")),
+        owner: OwnerId::Job(crate::JobId::from_string("job-1")),
         workspace_type: Some("folder".to_string()),
         repo_root: None,
         branch: None,
@@ -205,13 +213,15 @@ fn traced_effect_fields() {
     assert_eq!(fields, vec![("workspace_id", "ws-1".to_string()), ("path", "/work".to_string()),]);
 
     // Test DeleteWorkspace fields
-    let effect = Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::new("ws-1") };
+    let effect = Effect::DeleteWorkspace { workspace_id: crate::WorkspaceId::from_string("ws-1") };
     let fields = effect.fields();
     assert_eq!(fields, vec![("workspace_id", "ws-1".to_string())]);
 
     // Test SetTimer fields
-    let effect =
-        Effect::SetTimer { id: TimerId::new("timer-1"), duration: Duration::from_millis(5000) };
+    let effect = Effect::SetTimer {
+        id: TimerId::from_string("timer-1"),
+        duration: Duration::from_millis(5000),
+    };
     let fields = effect.fields();
     assert_eq!(
         fields,
@@ -219,13 +229,13 @@ fn traced_effect_fields() {
     );
 
     // Test CancelTimer fields
-    let effect = Effect::CancelTimer { id: TimerId::new("timer-1") };
+    let effect = Effect::CancelTimer { id: TimerId::from_string("timer-1") };
     let fields = effect.fields();
     assert_eq!(fields, vec![("timer_id", "timer-1".to_string())]);
 
     // Test Shell fields
     let effect = Effect::Shell {
-        owner: Some(JobId::new("job-1").into()),
+        owner: Some(JobId::from_string("job-1").into()),
         step: "build".to_string(),
         command: "make".to_string(),
         cwd: PathBuf::from("/src"),
@@ -236,7 +246,7 @@ fn traced_effect_fields() {
     assert_eq!(
         fields,
         vec![
-            ("owner", "job:job-1".to_string()),
+            ("owner", "job-1".to_string()),
             ("step", "build".to_string()),
             ("cwd", "/src".to_string())
         ]

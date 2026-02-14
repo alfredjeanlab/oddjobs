@@ -151,7 +151,7 @@ async fn reconcile_recovers_item_mapping_from_persisted_record() {
         });
         state.apply_event(&worker_started("fixer", &ctx.project_path, &hash, "bugs", 2, ""));
         state.apply_event(&Event::JobCreated {
-            id: JobId::new("job-orphan"),
+            id: JobId::from_string("job-orphan"),
             kind: "build".to_string(),
             name: "test".to_string(),
             runbook_hash: hash.clone(),
@@ -165,7 +165,7 @@ async fn reconcile_recovers_item_mapping_from_persisted_record() {
         state.apply_event(&Event::WorkerDispatched {
             worker: "fixer".to_string(),
             item_id: "item-orphan".to_string(),
-            owner: JobId::new("job-orphan").into(),
+            owner: JobId::from_string("job-orphan").into(),
             project: String::new(),
         });
     });
@@ -174,7 +174,7 @@ async fn reconcile_recovers_item_mapping_from_persisted_record() {
 
     let workers = ctx.runtime.worker_states.lock();
     let state = workers.get("fixer").unwrap();
-    let owner: OwnerId = JobId::new("job-orphan").into();
+    let owner: OwnerId = JobId::from_string("job-orphan").into();
     assert!(
         state.active.contains(&owner),
         "reconcile should add untracked job to worker active list"

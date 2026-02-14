@@ -18,7 +18,7 @@ fn on_done_transition_resets_attempts() {
     assert_eq!(state.jobs["job-1"].actions.get_action_attempt("exit", 0), 2);
 
     state.apply_event(&Event::StepCompleted {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
     });
     state.apply_event(&job_transition_event("job-1", "plan"));

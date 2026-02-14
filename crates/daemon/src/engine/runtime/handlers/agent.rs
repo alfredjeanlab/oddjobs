@@ -256,7 +256,7 @@ impl<C: Clock> Runtime<C> {
             .collect();
 
         // The most recent agent_id is used to check if agent is alive
-        let agent_id = all_agent_ids.first().map(AgentId::new);
+        let agent_id = all_agent_ids.first().map(AgentId::from_string);
 
         // Check if agent is alive (None means no agent_id, treat as dead)
         let agent_state = match &agent_id {
@@ -277,7 +277,7 @@ impl<C: Clock> Runtime<C> {
                     .await?;
 
                 // Update status to Running (preserve agent_id for the nudged agent)
-                let job_id = JobId::new(&job.id);
+                let job_id = JobId::from_string(&job.id);
                 self.executor
                     .execute(Effect::Emit {
                         event: Event::StepStarted {
@@ -311,7 +311,9 @@ impl<C: Clock> Runtime<C> {
         // the job can be detected as suspending and resumed later.
         if kill && is_alive {
             self.executor
-                .execute(Effect::Emit { event: Event::JobSuspending { id: JobId::new(&job.id) } })
+                .execute(Effect::Emit {
+                    event: Event::JobSuspending { id: JobId::from_string(&job.id) },
+                })
                 .await?;
         }
 
@@ -320,12 +322,15 @@ impl<C: Clock> Runtime<C> {
 
         // Kill old agent if it exists (cleanup - Claude conversation persists in JSONL)
         if let Some(id) = all_agent_ids.first() {
-            let _ = self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(id) }).await;
+            let _ = self
+                .executor
+                .execute(Effect::KillAgent { agent_id: AgentId::from_string(id) })
+                .await;
         }
 
         // Resume with coop's --resume flag (coop discovers session ID from JSONL)
         let resume = !all_agent_ids.is_empty();
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         let result = self.spawn_agent_with_resume(&job_id, agent_name, &new_inputs, resume).await?;
 
         tracing::info!(job_id = %job.id, kill, resume, "resumed agent with --resume");

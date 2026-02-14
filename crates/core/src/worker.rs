@@ -5,5 +5,5 @@
 
 crate::define_id! {
     /// Unique identifier for a worker instance.
-    pub struct WorkerId;
+    pub struct WorkerId("wrk-");
 }

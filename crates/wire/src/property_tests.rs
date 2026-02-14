@@ -24,11 +24,11 @@ fn p() -> PathBuf {
 }
 
 fn jid() -> oj_core::JobId {
-    oj_core::JobId::new("")
+    oj_core::JobId::from_string("")
 }
 
 fn did() -> oj_core::DecisionId {
-    oj_core::DecisionId::new("")
+    oj_core::DecisionId::from_string("")
 }
 
 fn all_requests() -> Vec<Request> {
@@ -129,7 +129,7 @@ fn all_responses() -> Vec<Response> {
         Response::Status { uptime_secs: 0, jobs_active: 0, orphan_count: 0 },
         Response::Error { message: s() },
         Response::JobStarted { job_id: jid(), job_name: s() },
-        Response::CrewStarted { crew_id: oj_core::CrewId::new(""), agent_name: s() },
+        Response::CrewStarted { crew_id: oj_core::CrewId::from_string(""), agent_name: s() },
         Response::WorkspacesDropped { dropped: vec![] },
         Response::JobLogs { log_path: p(), content: s(), offset: 0 },
         Response::AgentLogs { log_path: p(), content: s(), steps: vec![], offset: 0 },

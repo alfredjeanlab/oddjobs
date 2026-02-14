@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 fn test_spawn_config(agent_id: &str) -> AgentConfig {
     AgentConfig::new(
-        AgentId::new(agent_id),
+        AgentId::from_string(agent_id),
         "claude",
         PathBuf::from("/workspace"),
         OwnerId::Job(JobId::default()),
@@ -27,11 +27,11 @@ async fn spawn_and_kill() {
     let config = test_spawn_config("test-agent").prompt("Test prompt");
 
     let handle = adapter.spawn(config, tx).await.unwrap();
-    assert_eq!(handle.agent_id, AgentId::new("test-agent"));
-    assert!(adapter.has_agent(&AgentId::new("test-agent")));
+    assert_eq!(handle.agent_id, AgentId::from_string("test-agent"));
+    assert!(adapter.has_agent(&AgentId::from_string("test-agent")));
 
-    adapter.kill(&AgentId::new("test-agent")).await.unwrap();
-    assert!(!adapter.has_agent(&AgentId::new("test-agent")));
+    adapter.kill(&AgentId::from_string("test-agent")).await.unwrap();
+    assert!(!adapter.has_agent(&AgentId::from_string("test-agent")));
 }
 
 #[tokio::test]
@@ -44,23 +44,26 @@ async fn state_changes() {
     adapter.spawn(config, tx).await.unwrap();
 
     // Initial state should be Working
-    let state = adapter.get_state(&AgentId::new("agent-1")).await.unwrap();
+    let state = adapter.get_state(&AgentId::from_string("agent-1")).await.unwrap();
     assert_eq!(state, AgentState::Working);
 
     // Set state to WaitingForInput
-    adapter.set_agent_state(&AgentId::new("agent-1"), AgentState::WaitingForInput);
-    let state = adapter.get_state(&AgentId::new("agent-1")).await.unwrap();
+    adapter.set_agent_state(&AgentId::from_string("agent-1"), AgentState::WaitingForInput);
+    let state = adapter.get_state(&AgentId::from_string("agent-1")).await.unwrap();
     assert_eq!(state, AgentState::WaitingForInput);
 
     // Emit a state change event
     adapter
-        .emit_state_change(&AgentId::new("agent-1"), AgentState::Exited { exit_code: Some(0) })
+        .emit_state_change(
+            &AgentId::from_string("agent-1"),
+            AgentState::Exited { exit_code: Some(0) },
+        )
         .await;
 
     let event = rx.recv().await.unwrap();
     match event {
         Event::AgentExited { id, exit_code, .. } => {
-            assert_eq!(id, AgentId::new("agent-1"));
+            assert_eq!(id, AgentId::from_string("agent-1"));
             assert_eq!(exit_code, Some(0));
         }
         _ => panic!("unexpected event: {:?}", event),
@@ -86,7 +89,7 @@ async fn call_recording() {
     let (tx, _rx) = mpsc::channel(10);
 
     let config = AgentConfig::new(
-        AgentId::new("agent-1"),
+        AgentId::from_string("agent-1"),
         "claude code",
         PathBuf::from("/workspace"),
         OwnerId::Job(JobId::default()),
@@ -98,15 +101,15 @@ async fn call_recording() {
     .project_path(PathBuf::from("/project"));
 
     adapter.spawn(config, tx).await.unwrap();
-    adapter.send(&AgentId::new("agent-1"), "hello").await.unwrap();
-    adapter.get_state(&AgentId::new("agent-1")).await.unwrap();
-    adapter.kill(&AgentId::new("agent-1")).await.unwrap();
+    adapter.send(&AgentId::from_string("agent-1"), "hello").await.unwrap();
+    adapter.get_state(&AgentId::from_string("agent-1")).await.unwrap();
+    adapter.kill(&AgentId::from_string("agent-1")).await.unwrap();
 
     let calls = adapter.calls();
     assert_eq!(calls.len(), 4);
 
-    matches!(&calls[0], AgentCall::Spawn { agent_id, .. } if agent_id == &AgentId::new("agent-1"));
-    matches!(&calls[1], AgentCall::Send { agent_id, input } if agent_id == &AgentId::new("agent-1") && input == "hello");
-    matches!(&calls[2], AgentCall::GetState { agent_id } if agent_id == &AgentId::new("agent-1"));
-    matches!(&calls[3], AgentCall::Kill { agent_id } if agent_id == &AgentId::new("agent-1"));
+    matches!(&calls[0], AgentCall::Spawn { agent_id, .. } if agent_id == &AgentId::from_string("agent-1"));
+    matches!(&calls[1], AgentCall::Send { agent_id, input } if agent_id == &AgentId::from_string("agent-1") && input == "hello");
+    matches!(&calls[2], AgentCall::GetState { agent_id } if agent_id == &AgentId::from_string("agent-1"));
+    matches!(&calls[3], AgentCall::Kill { agent_id } if agent_id == &AgentId::from_string("agent-1"));
 }

@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn agent_handle_accessors() {
-    let handle = AgentHandle::new(AgentId::new("test-agent"));
+    let handle = AgentHandle::new(AgentId::from_string("test-agent"));
 
-    assert_eq!(handle.agent_id, AgentId::new("test-agent"));
+    assert_eq!(handle.agent_id, AgentId::from_string("test-agent"));
 }

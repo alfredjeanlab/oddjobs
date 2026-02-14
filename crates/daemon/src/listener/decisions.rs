@@ -277,10 +277,10 @@ fn map_decision_to_job_action(
     job_step: Option<&str>,
     agent_id: Option<&str>,
 ) -> Vec<Event> {
-    let pid = JobId::new(job_id);
+    let pid = JobId::from_string(job_id);
 
     let respond_to_agent = |response: oj_core::PromptResponse| -> Option<Event> {
-        agent_id.map(|aid| Event::AgentRespond { id: oj_core::AgentId::new(aid), response })
+        agent_id.map(|aid| Event::AgentRespond { id: oj_core::AgentId::from_string(aid), response })
     };
 
     // Multi-question path
@@ -403,10 +403,10 @@ fn map_decision_to_crew_action(
     let run_id = crew_id.clone();
 
     let send_to_agent = |input: String| -> Option<Event> {
-        agent_id.map(|aid| Event::AgentInput { id: oj_core::AgentId::new(aid), input })
+        agent_id.map(|aid| Event::AgentInput { id: oj_core::AgentId::from_string(aid), input })
     };
     let respond_to_agent = |response: oj_core::PromptResponse| -> Option<Event> {
-        agent_id.map(|aid| Event::AgentRespond { id: oj_core::AgentId::new(aid), response })
+        agent_id.map(|aid| Event::AgentRespond { id: oj_core::AgentId::from_string(aid), response })
     };
 
     // Multi-question path: send concatenated per-question digits

@@ -6,8 +6,6 @@
 //! TimerId uniquely identifies a timer instance used for scheduling delayed
 //! actions such as timeouts, heartbeats, or periodic checks.
 
-use crate::crew::CrewId;
-use crate::job::JobId;
 use crate::owner::OwnerId;
 use crate::project::scoped_name;
 
@@ -16,7 +14,7 @@ crate::define_id! {
     ///
     /// Timers are used to schedule delayed actions within the system, such as
     /// step timeouts or periodic health checks.
-    pub struct TimerId;
+    pub struct TimerId("tmr-");
 }
 
 impl TimerId {
@@ -37,11 +35,11 @@ impl TimerId {
     }
 
     pub fn cron(cron_name: &str, project: &str) -> Self {
-        Self::new(format!("cron:{}", scoped_name(project, cron_name)))
+        Self::from_string(format!("cron:{}", scoped_name(project, cron_name)))
     }
 
     pub fn queue_poll(worker_name: &str, project: &str) -> Self {
-        Self::new(format!("queue-poll:{}", scoped_name(project, worker_name)))
+        Self::from_string(format!("queue-poll:{}", scoped_name(project, worker_name)))
     }
 
     /// Parse this timer ID into a typed `TimerKind`.
@@ -109,19 +107,17 @@ impl<'a> TimerKind<'a> {
     /// Format this `TimerKind` back into a canonical `TimerId`.
     pub fn to_timer_id(&self) -> TimerId {
         match self {
-            TimerKind::Cron { scoped_name } => TimerId::new(format!("cron:{scoped_name}")),
-            TimerKind::Liveness(o) => TimerId::new(format!("liveness:{}", owner_segment(o))),
-            TimerKind::ExitDeferred(o) => {
-                TimerId::new(format!("exit-deferred:{}", owner_segment(o)))
-            }
+            TimerKind::Cron { scoped_name } => TimerId::from_string(format!("cron:{scoped_name}")),
+            TimerKind::Liveness(o) => TimerId::from_string(format!("liveness:{o}")),
+            TimerKind::ExitDeferred(o) => TimerId::from_string(format!("exit-deferred:{o}")),
             TimerKind::Cooldown { owner, trigger, chain_pos } => {
-                TimerId::new(format!("cooldown:{}:{}:{}", owner_segment(owner), trigger, chain_pos))
+                TimerId::from_string(format!("cooldown:{owner}:{trigger}:{chain_pos}"))
             }
             TimerKind::QueueRetry { scoped_queue, item_id } => {
-                TimerId::new(format!("queue-retry:{scoped_queue}:{item_id}"))
+                TimerId::from_string(format!("queue-retry:{scoped_queue}:{item_id}"))
             }
             TimerKind::QueuePoll { scoped_name } => {
-                TimerId::new(format!("queue-poll:{scoped_name}"))
+                TimerId::from_string(format!("queue-poll:{scoped_name}"))
             }
         }
     }
@@ -132,28 +128,19 @@ impl<'a> TimerKind<'a> {
 /// Returns `(owner, remaining)` where remaining is text after the owner's id
 /// (separated by `:`), or empty if the owner consumes the full string.
 ///
-/// Format: `job:<id>` or `agent:<id>`.
+/// Format: `job-<id>` or `crw-<id>`.
 fn parse_owner(s: &str) -> Option<(OwnerId, &str)> {
-    let (prefix, rest) = if let Some(r) = s.strip_prefix("job:") {
-        ("job", r)
-    } else if let Some(r) = s.strip_prefix("agent:") {
-        ("agent", r)
+    // Split on the first ':' to get the owner ID and remaining
+    let (owner_str, remaining) = s.split_once(':').unwrap_or((s, ""));
+
+    // Parse the owner ID
+    let owner = if owner_str.starts_with("job-") || owner_str.starts_with("crw-") {
+        OwnerId::parse(owner_str).ok()?
     } else {
         return None;
     };
-    let (id, remaining) = rest.split_once(':').unwrap_or((rest, ""));
-    let owner = match prefix {
-        "agent" => CrewId::new(id).into(),
-        _ => JobId::new(id).into(),
-    };
-    Some((owner, remaining))
-}
 
-fn owner_segment(owner: &OwnerId) -> String {
-    match owner {
-        OwnerId::Job(id) => format!("job:{id}"),
-        OwnerId::Crew(id) => format!("agent:{id}"),
-    }
+    Some((owner, remaining))
 }
 
 #[cfg(test)]

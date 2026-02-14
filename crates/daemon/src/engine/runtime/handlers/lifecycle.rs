@@ -81,7 +81,10 @@ impl<C: Clock> Runtime<C> {
         if !vars.is_empty() {
             self.executor
                 .execute(Effect::Emit {
-                    event: Event::JobUpdated { id: JobId::new(&job.id), vars: vars.clone() },
+                    event: Event::JobUpdated {
+                        id: JobId::from_string(&job.id),
+                        vars: vars.clone(),
+                    },
                 })
                 .await?;
         }
@@ -165,13 +168,15 @@ impl<C: Clock> Runtime<C> {
         if let Some(agent_id) =
             job.step_history.iter().rfind(|r| r.name == step).and_then(|r| r.agent_id.as_ref())
         {
-            let _ =
-                self.executor.execute(Effect::KillAgent { agent_id: AgentId::new(agent_id) }).await;
+            let _ = self
+                .executor
+                .execute(Effect::KillAgent { agent_id: AgentId::from_string(agent_id) })
+                .await;
         }
 
         // Re-run the shell command
         let execution_dir = job.execution_dir().to_path_buf();
-        let job_id = JobId::new(&job.id);
+        let job_id = JobId::from_string(&job.id);
         let result = self.start_step(&job_id, step, &job.vars, &execution_dir).await?;
 
         tracing::info!(job_id = %job.id, "re-running shell step");
@@ -263,7 +268,7 @@ impl<C: Clock> Runtime<C> {
             let ws_events = self
                 .executor
                 .execute_all(vec![Effect::CreateWorkspace {
-                    workspace_id: WorkspaceId::new(ws_id),
+                    workspace_id: WorkspaceId::from_string(ws_id),
                     path: job.cwd.clone(),
                     owner: OwnerId::Job(job_id.clone()),
                     workspace_type,
@@ -379,7 +384,7 @@ impl<C: Clock> Runtime<C> {
                         );
                         let _ = self
                             .executor
-                            .execute(Effect::KillAgent { agent_id: AgentId::new(agent_id) })
+                            .execute(Effect::KillAgent { agent_id: AgentId::from_string(agent_id) })
                             .await;
                     }
                 }
@@ -493,8 +498,11 @@ impl<C: Clock> Runtime<C> {
         };
 
         // 2. Collect agent IDs from step history to deregister
-        let agent_ids: Vec<AgentId> =
-            job.step_history.iter().filter_map(|r| r.agent_id.as_ref().map(AgentId::new)).collect();
+        let agent_ids: Vec<AgentId> = job
+            .step_history
+            .iter()
+            .filter_map(|r| r.agent_id.as_ref().map(AgentId::from_string))
+            .collect();
 
         // 3. Deregister agent→job mappings (prevents stale watcher events)
         for agent_id in &agent_ids {
@@ -514,8 +522,10 @@ impl<C: Clock> Runtime<C> {
             self.lock_state(|s| {
                 s.workspaces
                     .values()
-                    .find(|ws| ws.owner == oj_core::OwnerId::Job(oj_core::JobId::new(&job.id)))
-                    .map(|ws| oj_core::WorkspaceId::new(&ws.id))
+                    .find(|ws| {
+                        ws.owner == oj_core::OwnerId::Job(oj_core::JobId::from_string(&job.id))
+                    })
+                    .map(|ws| oj_core::WorkspaceId::from_string(&ws.id))
             })
         });
 

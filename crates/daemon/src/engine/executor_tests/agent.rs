@@ -16,9 +16,9 @@ async fn spawn_agent_returns_none_and_sends_session_created() {
     let result = harness
         .executor
         .execute(Effect::SpawnAgent {
-            agent_id: AgentId::new("agent-1"),
+            agent_id: AgentId::from_string("agent-1"),
             agent_name: "builder".to_string(),
-            owner: JobId::new("job-1").into(),
+            owner: JobId::from_string("job-1").into(),
             workspace_path: std::path::PathBuf::from("/tmp/ws"),
             input,
             command: "claude".to_string(),
@@ -53,9 +53,9 @@ async fn spawn_agent_with_crew_owner() {
     let result = harness
         .executor
         .execute(Effect::SpawnAgent {
-            agent_id: AgentId::new("agent-2"),
+            agent_id: AgentId::from_string("agent-2"),
             agent_name: "runner".to_string(),
-            owner: CrewId::new("run-1").into(),
+            owner: CrewId::from_string("run-1").into(),
             workspace_path: std::path::PathBuf::from("/tmp/ws2"),
             input: HashMap::new(),
             command: "claude".to_string(),
@@ -124,7 +124,7 @@ async fn send_to_agent_delegates_to_adapter() {
     let result = harness
         .executor
         .execute(Effect::SendToAgent {
-            agent_id: AgentId::new("agent-send"),
+            agent_id: AgentId::from_string("agent-send"),
             input: "continue working".to_string(),
         })
         .await;
@@ -142,7 +142,7 @@ async fn send_to_agent_error_is_fire_and_forget() {
     let result = harness
         .executor
         .execute(Effect::SendToAgent {
-            agent_id: AgentId::new("agent-missing"),
+            agent_id: AgentId::from_string("agent-missing"),
             input: "hello".to_string(),
         })
         .await;
@@ -162,8 +162,10 @@ async fn kill_agent_delegates_to_adapter() {
     // Drain the AgentSpawned event from spawn
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
-    let result =
-        harness.executor.execute(Effect::KillAgent { agent_id: AgentId::new("agent-kill") }).await;
+    let result = harness
+        .executor
+        .execute(Effect::KillAgent { agent_id: AgentId::from_string("agent-kill") })
+        .await;
 
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
@@ -175,8 +177,10 @@ async fn kill_agent_error_is_fire_and_forget() {
 
     harness.agents.set_kill_error(AgentAdapterError::NotFound("agent-gone".to_string()));
 
-    let result =
-        harness.executor.execute(Effect::KillAgent { agent_id: AgentId::new("agent-gone") }).await;
+    let result = harness
+        .executor
+        .execute(Effect::KillAgent { agent_id: AgentId::from_string("agent-gone") })
+        .await;
 
     // Deferred fire-and-forget: returns Ok(None) even on adapter failure
     assert!(result.is_ok());

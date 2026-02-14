@@ -39,7 +39,7 @@ fn setup_waiting_job_with_decision(
 ) {
     let events: Vec<Event> = vec![
         Event::JobCreated {
-            id: JobId::new("job-1"),
+            id: JobId::from_string("job-1"),
             kind: "build".to_string(),
             name: "test".to_string(),
             runbook_hash: hash.to_string(),
@@ -51,17 +51,17 @@ fn setup_waiting_job_with_decision(
             cron: None,
         },
         Event::StepStarted {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "work".to_string(),
-            agent_id: Some(AgentId::new("agent-1")),
+            agent_id: Some(AgentId::from_string("agent-1")),
             agent_name: Some("worker".to_string()),
         },
         Event::DecisionCreated {
-            id: DecisionId::new("dec-1"),
-            owner: OwnerId::Job(JobId::new("job-1")),
+            id: DecisionId::from_string("dec-1"),
+            owner: OwnerId::Job(JobId::from_string("job-1")),
             project: "test".to_string(),
             created_at_ms: 2_000_000,
-            agent_id: AgentId::new("agent-1"),
+            agent_id: AgentId::from_string("agent-1"),
             source,
             context: "test decision".to_string(),
             options: vec![DecisionOption::new("Option A")],
@@ -73,7 +73,7 @@ fn setup_waiting_job_with_decision(
             state.apply_event(event);
         }
     });
-    ctx.runtime.register_agent(AgentId::new("agent-1"), JobId::new("job-1").into());
+    ctx.runtime.register_agent(AgentId::from_string("agent-1"), JobId::from_string("job-1").into());
 }
 
 #[tokio::test]
@@ -85,7 +85,11 @@ async fn pending_dead_decision_suppresses_on_dead() {
     // AgentExited while a Dead decision is pending → suppressed (don't double-fire)
     let result = ctx
         .runtime
-        .handle_event(agent_exited(AgentId::new("agent-1"), Some(0), JobId::new("job-1").into()))
+        .handle_event(agent_exited(
+            AgentId::from_string("agent-1"),
+            Some(0),
+            JobId::from_string("job-1").into(),
+        ))
         .await
         .unwrap();
     assert!(
@@ -105,7 +109,11 @@ async fn pending_alive_decision_auto_dismissed_on_agent_exit() {
     // auto-dismiss the stale decision and fire on_dead
     let result = ctx
         .runtime
-        .handle_event(agent_exited(AgentId::new("agent-1"), Some(1), JobId::new("job-1").into()))
+        .handle_event(agent_exited(
+            AgentId::from_string("agent-1"),
+            Some(1),
+            JobId::from_string("job-1").into(),
+        ))
         .await
         .unwrap();
 
@@ -129,7 +137,7 @@ async fn agent_exited_fires_on_dead_when_job_running() {
     let hash = load_runbook_hash(&ctx, RESUME_ON_DEAD_RUNBOOK);
     let events = vec![
         Event::JobCreated {
-            id: JobId::new("job-1"),
+            id: JobId::from_string("job-1"),
             kind: "build".to_string(),
             name: "test".to_string(),
             runbook_hash: hash,
@@ -141,9 +149,9 @@ async fn agent_exited_fires_on_dead_when_job_running() {
             cron: None,
         },
         Event::StepStarted {
-            job_id: JobId::new("job-1"),
+            job_id: JobId::from_string("job-1"),
             step: "work".to_string(),
-            agent_id: Some(AgentId::new("agent-1")),
+            agent_id: Some(AgentId::from_string("agent-1")),
             agent_name: Some("worker".to_string()),
         },
     ];
@@ -152,10 +160,14 @@ async fn agent_exited_fires_on_dead_when_job_running() {
             state.apply_event(event);
         }
     });
-    ctx.runtime.register_agent(AgentId::new("agent-1"), JobId::new("job-1").into());
+    ctx.runtime.register_agent(AgentId::from_string("agent-1"), JobId::from_string("job-1").into());
     let result = ctx
         .runtime
-        .handle_event(agent_exited(AgentId::new("agent-1"), Some(1), JobId::new("job-1").into()))
+        .handle_event(agent_exited(
+            AgentId::from_string("agent-1"),
+            Some(1),
+            JobId::from_string("job-1").into(),
+        ))
         .await
         .unwrap();
     let has_step_started = result.iter().any(|e| matches!(e, Event::StepStarted { .. }));

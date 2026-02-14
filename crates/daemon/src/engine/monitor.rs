@@ -163,7 +163,7 @@ pub fn build_action_effects_for(
             let nudge_message = message.unwrap_or("Please continue with the task.");
             Ok(ActionEffects::Nudge {
                 effects: vec![Effect::SendToAgent {
-                    agent_id: AgentId::new(agent_id),
+                    agent_id: AgentId::from_string(agent_id),
                     input: format!("{}\n", nudge_message),
                 }],
             })

@@ -68,7 +68,7 @@ impl From<&StepRecord> for StepRecordDetail {
                 StepOutcome::Waiting(r) => Some(r.clone()),
                 _ => None,
             },
-            agent_id: r.agent_id.as_ref().map(AgentId::new),
+            agent_id: r.agent_id.as_ref().map(AgentId::from_string),
             agent_name: r.agent_name.clone(),
         }
     }
@@ -253,7 +253,7 @@ impl From<&Job> for JobSummary {
         let updated_at_ms =
             p.step_history.last().map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms)).unwrap_or(0);
         JobSummary {
-            id: JobId::new(&p.id),
+            id: JobId::from_string(&p.id),
             name: p.name.clone(),
             kind: p.kind.clone(),
             step: p.step.clone(),
@@ -282,7 +282,7 @@ impl From<&QueueItem> for QueueItemSummary {
 impl From<&Workspace> for WorkspaceEntry {
     fn from(w: &Workspace) -> Self {
         WorkspaceEntry {
-            id: WorkspaceId::new(&w.id),
+            id: WorkspaceId::from_string(&w.id),
             path: w.path.clone(),
             branch: w.branch.clone(),
         }
@@ -296,7 +296,7 @@ impl From<&Workspace> for WorkspaceDetail {
             OwnerId::Crew(run_id) => run_id.to_string(),
         };
         WorkspaceDetail {
-            id: WorkspaceId::new(&w.id),
+            id: WorkspaceId::from_string(&w.id),
             path: w.path.clone(),
             branch: w.branch.clone(),
             owner,
@@ -444,9 +444,9 @@ impl AgentDetail {
 impl From<&Crew> for AgentDetail {
     fn from(crew: &Crew) -> Self {
         AgentDetail {
-            agent_id: crew.agent_id.as_ref().map(AgentId::new).unwrap_or_default(),
+            agent_id: crew.agent_id.as_ref().map(AgentId::from_string).unwrap_or_default(),
             agent_name: Some(crew.agent_name.clone()),
-            owner: CrewId::new(&crew.id).into(),
+            owner: CrewId::from_string(&crew.id).into(),
             job_name: crew.command_name.clone(),
             step_name: String::new(),
             project: crew.project.clone(),
@@ -467,9 +467,9 @@ impl From<&Crew> for AgentDetail {
 impl From<&Crew> for AgentSummary {
     fn from(crew: &Crew) -> Self {
         AgentSummary {
-            owner: CrewId::new(&crew.id).into(),
+            owner: CrewId::from_string(&crew.id).into(),
             step_name: String::new(),
-            agent_id: crew.agent_id.as_ref().map(AgentId::new).unwrap_or_default(),
+            agent_id: crew.agent_id.as_ref().map(AgentId::from_string).unwrap_or_default(),
             agent_name: Some(crew.agent_name.clone()),
             project: crew.project.clone(),
             status: crew.status.to_string(),

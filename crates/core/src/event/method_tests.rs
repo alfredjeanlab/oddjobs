@@ -14,7 +14,7 @@ fn event_job_id_returns_id_for_job_events() {
     let cases: Vec<(Event, JobId)> = vec![
         (
             Event::CommandRun {
-                owner: OwnerId::Job(JobId::new("p1")),
+                owner: OwnerId::Job(JobId::from_string("p1")),
                 name: "b".to_string(),
                 project_path: PathBuf::from("/"),
                 invoke_dir: PathBuf::from("/"),
@@ -22,11 +22,11 @@ fn event_job_id_returns_id_for_job_events() {
                 args: HashMap::new(),
                 project: String::new(),
             },
-            JobId::new("p1"),
+            JobId::from_string("p1"),
         ),
         (
             Event::JobCreated {
-                id: JobId::new("p6"),
+                id: JobId::from_string("p6"),
                 kind: "build".to_string(),
                 name: "test".to_string(),
                 runbook_hash: "abc".to_string(),
@@ -37,7 +37,7 @@ fn event_job_id_returns_id_for_job_events() {
                 project: String::new(),
                 cron: None,
             },
-            JobId::new("p6"),
+            JobId::from_string("p6"),
         ),
     ];
 
@@ -49,10 +49,10 @@ fn event_job_id_returns_id_for_job_events() {
 #[test]
 fn event_job_id_returns_none_for_non_job_events() {
     let events = vec![
-        Event::TimerStart { id: TimerId::new("t") },
+        Event::TimerStart { id: TimerId::from_string("t") },
         Event::AgentSpawned {
-            id: AgentId::new("a1"),
-            owner: CrewId::new("r1").into(),
+            id: AgentId::from_string("a1"),
+            owner: CrewId::from_string("r1").into(),
             runtime: Default::default(),
             auth_token: None,
         },
@@ -67,7 +67,7 @@ fn event_job_id_returns_none_for_non_job_events() {
 
 #[test]
 fn event_from_agent_state() {
-    let agent_id = AgentId::new("test");
+    let agent_id = AgentId::from_string("test");
 
     assert!(matches!(
         Event::from_agent_state(
@@ -97,7 +97,7 @@ fn event_from_agent_state() {
 
 #[test]
 fn event_as_agent_state() {
-    let agent_id = AgentId::new("test");
+    let agent_id = AgentId::from_string("test");
 
     let event = Event::AgentWorking { id: agent_id.clone(), owner: OwnerId::Job(JobId::default()) };
     let (id, state, _owner) = event.as_agent_state().unwrap();
@@ -188,14 +188,14 @@ fn event_worker_take_name() {
 
 #[test]
 fn event_agent_idle_name() {
-    let event = Event::AgentIdle { id: AgentId::new("a1") };
+    let event = Event::AgentIdle { id: AgentId::from_string("a1") };
     assert_eq!(event.name(), "agent:idle");
 }
 
 #[test]
 fn event_agent_prompt_name() {
     let event = Event::AgentPrompt {
-        id: AgentId::new("a1"),
+        id: AgentId::from_string("a1"),
         prompt_type: PromptType::Permission,
         questions: None,
         last_message: None,
@@ -207,9 +207,9 @@ fn event_agent_prompt_name() {
 fn event_decision_name() {
     assert_eq!(
         Event::DecisionCreated {
-            id: DecisionId::new("d"),
-            agent_id: AgentId::new("a"),
-            owner: JobId::new("p").into(),
+            id: DecisionId::from_string("d"),
+            agent_id: AgentId::from_string("a"),
+            owner: JobId::from_string("p").into(),
             source: DecisionSource::Question,
             context: "ctx".to_string(),
             options: vec![],
@@ -222,7 +222,7 @@ fn event_decision_name() {
     );
     assert_eq!(
         Event::DecisionResolved {
-            id: DecisionId::new("d"),
+            id: DecisionId::from_string("d"),
             choices: vec![],
             message: None,
             resolved_at_ms: 0,
@@ -236,7 +236,7 @@ fn event_decision_name() {
 #[test]
 fn event_crew_resume_name() {
     assert_eq!(
-        Event::CrewResume { id: CrewId::new("run-1"), message: None, kill: false }.name(),
+        Event::CrewResume { id: CrewId::from_string("run-1"), message: None, kill: false }.name(),
         "crew:resume"
     );
 }

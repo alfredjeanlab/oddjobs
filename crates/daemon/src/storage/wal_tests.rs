@@ -7,7 +7,7 @@ use std::io::Write;
 use tempfile::tempdir;
 
 fn test_event(cmd: &str) -> Event {
-    Event::TimerStart { id: TimerId::new(format!("test:{}", cmd)) }
+    Event::TimerStart { id: TimerId::from_string(format!("test:{}", cmd)) }
 }
 
 #[test]

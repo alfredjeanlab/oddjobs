@@ -55,8 +55,12 @@ async fn workspace_prune_emits_deleted_events_for_fs_workspaces() {
 
     {
         let mut s = ctx.state.lock();
-        s.apply_event(&Event::WorkspaceDeleted { id: oj_core::WorkspaceId::new("ws-test-1") });
-        s.apply_event(&Event::WorkspaceDeleted { id: oj_core::WorkspaceId::new("ws-test-2") });
+        s.apply_event(&Event::WorkspaceDeleted {
+            id: oj_core::WorkspaceId::from_string("ws-test-1"),
+        });
+        s.apply_event(&Event::WorkspaceDeleted {
+            id: oj_core::WorkspaceId::from_string("ws-test-2"),
+        });
         assert!(!s.workspaces.contains_key("ws-test-1"));
         assert!(!s.workspaces.contains_key("ws-test-2"));
     }

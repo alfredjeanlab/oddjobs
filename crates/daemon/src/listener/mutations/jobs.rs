@@ -42,7 +42,10 @@ pub(crate) fn handle_job_resume(
         // Auto-dismiss any pending decisions for this job
         auto_dismiss_decisions_for_job(ctx, &job_id)?;
 
-        emit(&ctx.event_bus, Event::JobResume { id: JobId::new(job_id), message, vars, kill })?;
+        emit(
+            &ctx.event_bus,
+            Event::JobResume { id: JobId::from_string(job_id), message, vars, kill },
+        )?;
         return Ok(Response::Ok);
     }
 
@@ -90,7 +93,7 @@ pub(crate) fn handle_job_resume(
     // 2. JobAdvanced to "failed" (so resume resets to the right step)
     // 3. JobResume (the actual resume request)
     let orphan_id = orphan.job_id.clone();
-    let job_id = JobId::new(&orphan_id);
+    let job_id = JobId::from_string(&orphan_id);
     let cwd = orphan.cwd.or(orphan.workspace_root).unwrap_or_default();
 
     emit(
@@ -165,7 +168,7 @@ pub(crate) fn handle_job_resume_all(
         emit(
             &ctx.event_bus,
             Event::JobResume {
-                id: JobId::new(&job_id),
+                id: JobId::from_string(&job_id),
                 message: None,
                 vars: std::collections::HashMap::new(),
                 kill,
@@ -210,7 +213,7 @@ fn job_action(
     for id in ids {
         match ctx.state.lock().get_job(&id).map(|p| !p.is_terminal()) {
             Some(true) => {
-                emit(&ctx.event_bus, make_event(JobId::new(id.clone())))?;
+                emit(&ctx.event_bus, make_event(JobId::from_string(id.clone())))?;
                 acted.push(id);
             }
             Some(false) => already_terminal.push(id),
@@ -285,7 +288,7 @@ pub(crate) fn handle_job_prune(
         for &i in drain_indices.iter().rev() {
             let bc = &orphan_guard[i];
             to_prune.push(JobEntry {
-                id: JobId::new(&bc.job_id),
+                id: JobId::from_string(&bc.job_id),
                 name: bc.name.clone(),
                 step: "orphaned".to_string(),
             });
@@ -305,7 +308,7 @@ pub(crate) fn handle_job_prune(
 /// are no longer relevant. Emits `DecisionResolved` with `chosen: None`
 /// for each unresolved decision.
 fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), ConnectionError> {
-    let owner: OwnerId = JobId::new(job_id).into();
+    let owner: OwnerId = JobId::from_string(job_id).into();
     let unresolved: Vec<(String, String)> = {
         let state_guard = ctx.state.lock();
         state_guard
@@ -325,7 +328,7 @@ fn auto_dismiss_decisions_for_job(ctx: &ListenCtx, job_id: &str) -> Result<(), C
         emit(
             &ctx.event_bus,
             Event::DecisionResolved {
-                id: oj_core::DecisionId::new(dec_id),
+                id: oj_core::DecisionId::from_string(dec_id),
                 choices: vec![],
                 message: Some("auto-dismissed by job resume".to_string()),
                 resolved_at_ms,

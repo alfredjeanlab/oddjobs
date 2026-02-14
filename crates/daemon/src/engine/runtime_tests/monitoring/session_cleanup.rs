@@ -40,7 +40,7 @@ async fn standalone_agent_on_idle_done_kills_session() {
     // Agent goes idle — on_idle = "done" should complete the crew
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string("job-1").into()))
         .await
         .unwrap();
 

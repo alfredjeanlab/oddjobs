@@ -14,7 +14,7 @@ async fn executor_emit_event_effect() {
         .executor
         .execute(Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("job-1"),
+                id: JobId::from_string("job-1"),
                 kind: "build".to_string(),
                 name: "test".to_string(),
                 runbook_hash: "testhash".to_string(),
@@ -46,7 +46,7 @@ async fn executor_timer_effect() {
     harness
         .executor
         .execute(Effect::SetTimer {
-            id: TimerId::new("test-timer"),
+            id: TimerId::from_string("test-timer"),
             duration: std::time::Duration::from_secs(60),
         })
         .await
@@ -65,7 +65,7 @@ async fn cancel_timer_effect() {
     harness
         .executor
         .execute(Effect::SetTimer {
-            id: TimerId::new("timer-to-cancel"),
+            id: TimerId::from_string("timer-to-cancel"),
             duration: std::time::Duration::from_secs(60),
         })
         .await
@@ -81,7 +81,7 @@ async fn cancel_timer_effect() {
     // Cancel the timer
     harness
         .executor
-        .execute(Effect::CancelTimer { id: TimerId::new("timer-to-cancel") })
+        .execute(Effect::CancelTimer { id: TimerId::from_string("timer-to-cancel") })
         .await
         .unwrap();
 
@@ -142,7 +142,7 @@ async fn execute_all_collects_emitted_events() {
     let effects = vec![
         Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("j-1"),
+                id: JobId::from_string("j-1"),
                 kind: "build".to_string(),
                 name: "first".to_string(),
                 runbook_hash: "hash1".to_string(),
@@ -156,7 +156,7 @@ async fn execute_all_collects_emitted_events() {
         },
         Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("j-2"),
+                id: JobId::from_string("j-2"),
                 kind: "build".to_string(),
                 name: "second".to_string(),
                 runbook_hash: "hash2".to_string(),
@@ -184,7 +184,7 @@ async fn execute_all_mixed_effects() {
     let effects = vec![
         Effect::Emit {
             event: Event::JobCreated {
-                id: JobId::new("j-mix"),
+                id: JobId::from_string("j-mix"),
                 kind: "build".to_string(),
                 name: "mixed".to_string(),
                 runbook_hash: "hash".to_string(),
@@ -197,7 +197,7 @@ async fn execute_all_mixed_effects() {
             },
         },
         Effect::Shell {
-            owner: Some(JobId::new("j-mix").into()),
+            owner: Some(JobId::from_string("j-mix").into()),
             step: "init".to_string(),
             command: "echo mixed".to_string(),
             cwd: std::path::PathBuf::from("/tmp"),
@@ -223,7 +223,7 @@ async fn execute_all_mixed_effects() {
 async fn check_agent_alive_returns_false_for_unknown() {
     let harness = setup().await;
 
-    let alive = harness.executor.agents.is_alive(&AgentId::new("no-such-agent")).await;
+    let alive = harness.executor.agents.is_alive(&AgentId::from_string("no-such-agent")).await;
     assert!(!alive);
 }
 
@@ -236,7 +236,7 @@ async fn check_agent_alive_returns_true_after_spawn() {
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
-    let alive = harness.executor.agents.is_alive(&AgentId::new("agent-alive")).await;
+    let alive = harness.executor.agents.is_alive(&AgentId::from_string("agent-alive")).await;
     assert!(alive);
 }
 
@@ -244,7 +244,7 @@ async fn check_agent_alive_returns_true_after_spawn() {
 async fn check_agent_alive_returns_false_when_marked_dead() {
     let mut harness = setup().await;
 
-    let agent_id = AgentId::new("agent-dead");
+    let agent_id = AgentId::from_string("agent-dead");
     harness.executor.execute(spawn_agent("agent-dead")).await.unwrap();
 
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
@@ -264,7 +264,7 @@ async fn get_agent_state_returns_state() {
     // Wait for the background spawn task to complete
     let _ = tokio::time::timeout(std::time::Duration::from_secs(2), harness.event_rx.recv()).await;
 
-    let state = harness.executor.get_agent_state(&AgentId::new("agent-state")).await;
+    let state = harness.executor.get_agent_state(&AgentId::from_string("agent-state")).await;
     assert!(state.is_ok());
 }
 
@@ -273,7 +273,7 @@ async fn reconnect_agent_delegates_to_adapter() {
     let harness = setup().await;
 
     let config = AgentReconnectConfig {
-        agent_id: AgentId::new("agent-recon"),
+        agent_id: AgentId::from_string("agent-recon"),
         owner: OwnerId::Job(JobId::default()),
         runtime_hint: oj_core::AgentRuntime::Local,
         auth_token: None,

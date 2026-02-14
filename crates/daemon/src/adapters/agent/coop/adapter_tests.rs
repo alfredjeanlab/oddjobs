@@ -17,7 +17,7 @@ async fn spawn_rejects_nonexistent_cwd() {
     let workspace_dir = TempDir::new().unwrap();
 
     let config = AgentConfig::new(
-        AgentId::new("test-agent-1"),
+        AgentId::from_string("test-agent-1"),
         "claude code",
         workspace_dir.path().to_path_buf(),
         OwnerId::Job(JobId::default()),

@@ -27,7 +27,7 @@ pub(super) fn make_ns(name: &str) -> ProjectStatus {
 /// `name` defaults to `id`; override fields as needed.
 pub(super) fn job_entry(id: &str, kind: &str, step: &str) -> oj_wire::JobStatusEntry {
     oj_wire::JobStatusEntry {
-        id: oj_core::JobId::new(id),
+        id: oj_core::JobId::from_string(id),
         name: id.to_string(),
         kind: kind.to_string(),
         step: step.to_string(),

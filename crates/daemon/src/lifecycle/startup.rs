@@ -175,7 +175,7 @@ async fn startup_inner(config: &Config) -> Result<StartupResult, LifecycleError>
                     .unwrap_or_default()
                     .as_millis() as u64;
 
-                let job_id = JobId(bc.job_id.clone());
+                let job_id = JobId::from_string(bc.job_id.clone());
                 let mut events = vec![
                     Event::JobCreated {
                         id: job_id.clone(),

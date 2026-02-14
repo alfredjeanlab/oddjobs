@@ -273,7 +273,7 @@ impl<C: Clock> Executor<C> {
         let event_tx = self.event_tx.clone();
         let job_id = match &owner {
             Some(oj_core::OwnerId::Job(id)) => id.clone(),
-            _ => oj_core::JobId::new(""),
+            _ => oj_core::JobId::from_string(""),
         };
 
         tokio::spawn(async move {

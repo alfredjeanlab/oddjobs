@@ -16,7 +16,7 @@ crate::define_id! {
     ///
     /// Each job run gets a unique ID that can be used to track its state,
     /// query its status, and reference it in logs and events.
-    pub struct JobId;
+    pub struct JobId("job-");
 }
 
 /// Status of the current step.

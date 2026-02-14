@@ -6,9 +6,9 @@ use oj_core::test_support::crew_created_event;
 
 fn decision_created_event(id: &str, job_id: &str) -> Event {
     Event::DecisionCreated {
-        id: DecisionId::new(id),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new(job_id).into(),
+        id: DecisionId::from_string(id),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string(job_id).into(),
         source: oj_core::DecisionSource::Gate,
         context: "Gate check failed".to_string(),
         options: vec![
@@ -23,9 +23,9 @@ fn decision_created_event(id: &str, job_id: &str) -> Event {
 
 fn decision_for_crew(id: &str, run_id: &str, created_at_ms: u64) -> Event {
     Event::DecisionCreated {
-        id: DecisionId::new(id),
-        agent_id: AgentId::new("agent-1"),
-        owner: CrewId::new(run_id).into(),
+        id: DecisionId::from_string(id),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: CrewId::from_string(run_id).into(),
         source: oj_core::DecisionSource::Idle,
         context: "Agent idle".to_string(),
         options: vec![
@@ -40,9 +40,9 @@ fn decision_for_crew(id: &str, run_id: &str, created_at_ms: u64) -> Event {
 
 fn decision_for_job_at(id: &str, job_id: &str, created_at_ms: u64) -> Event {
     Event::DecisionCreated {
-        id: DecisionId::new(id),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new(job_id).into(),
+        id: DecisionId::from_string(id),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string(job_id).into(),
         source: oj_core::DecisionSource::Idle,
         context: "Agent idle".to_string(),
         options: vec![
@@ -67,8 +67,8 @@ fn decision_created() {
     let state = state_with_job_and_decision("job-1", "dec-abc123");
 
     let dec = &state.decisions["dec-abc123"];
-    assert_eq!(dec.owner, OwnerId::Job(JobId::new("job-1")));
-    assert_eq!(dec.agent_id, AgentId::new("agent-1"));
+    assert_eq!(dec.owner, OwnerId::Job(JobId::from_string("job-1")));
+    assert_eq!(dec.agent_id, AgentId::from_string("agent-1"));
     assert_eq!(dec.source, oj_core::DecisionSource::Gate);
     assert_eq!(dec.context, "Gate check failed");
     assert_eq!(dec.options.len(), 2);
@@ -93,7 +93,7 @@ fn decision_resolved() {
     let mut state = state_with_job_and_decision("job-1", "dec-abc123");
 
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-abc123"),
+        id: DecisionId::from_string("dec-abc123"),
         choices: vec![1],
         message: Some("Looks good".to_string()),
         resolved_at_ms: 3_000_000,
@@ -138,7 +138,7 @@ fn job_terminal_preserves_resolved_decisions() {
     let mut state = state_with_job_and_decision("job-1", "dec-1");
 
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-1"),
+        id: DecisionId::from_string("dec-1"),
         choices: vec![1],
         message: None,
         resolved_at_ms: 3_000_000,
@@ -156,7 +156,7 @@ fn job_deleted_removes_all_decisions() {
     let mut state = state_with_job_and_decision("job-1", "dec-1");
     state.apply_event(&decision_created_event("dec-2", "job-1"));
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-2"),
+        id: DecisionId::from_string("dec-2"),
         choices: vec![1],
         message: None,
         resolved_at_ms: 3_000_000,
@@ -270,7 +270,7 @@ fn new_decision_does_not_affect_already_resolved() {
 
     // Manually resolve dec-1
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-1"),
+        id: DecisionId::from_string("dec-1"),
         choices: vec![1],
         message: Some("approved".to_string()),
         resolved_at_ms: 2_500_000,
@@ -298,9 +298,9 @@ fn approval_cannot_supersede_question_decision() {
 
     // Create a Question decision first
     state.apply_event(&Event::DecisionCreated {
-        id: DecisionId::new("dec-question"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-question"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: oj_core::DecisionSource::Question,
         context: "Which framework?".to_string(),
         options: vec![oj_core::DecisionOption::new("React"), oj_core::DecisionOption::new("Vue")],
@@ -312,9 +312,9 @@ fn approval_cannot_supersede_question_decision() {
 
     // Try to create an Approval decision for the same owner
     state.apply_event(&Event::DecisionCreated {
-        id: DecisionId::new("dec-approval"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-approval"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: oj_core::DecisionSource::Approval,
         context: "Permission prompt".to_string(),
         options: vec![
@@ -342,9 +342,9 @@ fn question_can_supersede_approval_decision() {
 
     // Create an Approval decision first
     state.apply_event(&Event::DecisionCreated {
-        id: DecisionId::new("dec-approval"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-approval"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: oj_core::DecisionSource::Approval,
         context: "Permission prompt".to_string(),
         options: vec![
@@ -359,9 +359,9 @@ fn question_can_supersede_approval_decision() {
 
     // Create a Question decision for the same owner
     state.apply_event(&Event::DecisionCreated {
-        id: DecisionId::new("dec-question"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-question"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: oj_core::DecisionSource::Question,
         context: "Which framework?".to_string(),
         options: vec![oj_core::DecisionOption::new("React")],
@@ -393,7 +393,7 @@ fn superseded_decision_cannot_be_resolved() {
     // Attempting to resolve it just overwrites the fields (the is_resolved()
     // guard in the daemon prevents this from happening in practice)
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-1"),
+        id: DecisionId::from_string("dec-1"),
         choices: vec![2],
         message: None,
         resolved_at_ms: 4_000_000,
@@ -413,7 +413,7 @@ fn decision_resolved_with_no_chosen_auto_dismiss() {
 
     // Simulate auto-dismiss pattern: choices=[], message="auto-dismissed by job resume"
     state.apply_event(&Event::DecisionResolved {
-        id: DecisionId::new("dec-1"),
+        id: DecisionId::from_string("dec-1"),
         choices: vec![],
         message: Some("auto-dismissed by job resume".to_string()),
         resolved_at_ms: 3_000_000,

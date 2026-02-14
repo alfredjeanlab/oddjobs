@@ -41,7 +41,7 @@ async fn resume_agent_without_message_uses_default() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: None,
             vars: HashMap::new(),
             kill: false,
@@ -69,7 +69,7 @@ async fn resume_agent_alive_sends_nudge() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("I fixed the import, try again".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -100,7 +100,7 @@ async fn resume_agent_dead_attempts_recovery() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("I fixed the issue, try again".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -138,7 +138,7 @@ async fn resume_shell_reruns_command() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: None,
             vars: HashMap::new(),
             kill: false,
@@ -165,7 +165,7 @@ async fn resume_shell_with_message_succeeds_with_warning() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("This message will be ignored".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -189,7 +189,7 @@ async fn resume_persists_input_updates() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: None,
             vars: vars!("new_key" => "new_value", "another_key" => "another_value"),
             kill: false,
@@ -220,7 +220,7 @@ async fn resume_agent_session_gone_recovers() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("Session died, recovering".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -250,7 +250,7 @@ async fn resume_agent_waiting_nudges() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("Continue with the work".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -286,7 +286,7 @@ async fn resume_from_terminal_failure_shell_step() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: None,
             vars: HashMap::new(),
             kill: false,
@@ -324,7 +324,7 @@ async fn resume_from_terminal_failure_agent_step() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("Try again with the fix".to_string()),
             vars: HashMap::new(),
             kill: false,
@@ -402,7 +402,7 @@ async fn resume_collects_all_agent_ids_from_step_history() {
     let result = ctx
         .runtime
         .handle_event(Event::JobResume {
-            id: JobId::new(job_id.clone()),
+            id: JobId::from_string(job_id.clone()),
             message: Some("Continue".to_string()),
             vars: HashMap::new(),
             kill: false,

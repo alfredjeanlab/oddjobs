@@ -6,10 +6,7 @@
 //! Creates DecisionCreated events with system-generated options
 //! when escalation paths are triggered.
 
-use oj_core::{
-    AgentId, DecisionId, DecisionOption, DecisionSource, Event, IdGen, OwnerId, QuestionData,
-    UuidIdGen,
-};
+use oj_core::{AgentId, DecisionId, DecisionOption, DecisionSource, Event, OwnerId, QuestionData};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Trigger that caused the escalation.
@@ -89,7 +86,7 @@ impl EscalationDecisionBuilder {
 
     /// Build the DecisionCreated event and generated decision ID.
     pub fn build(self) -> (DecisionId, Event) {
-        let decision_id = DecisionId::new(UuidIdGen.next());
+        let decision_id = DecisionId::new();
         let context = self.build_context();
         let options = self.build_options();
         let created_at_ms =
@@ -103,7 +100,7 @@ impl EscalationDecisionBuilder {
 
         let event = Event::DecisionCreated {
             id: decision_id.clone(),
-            agent_id: AgentId::new(self.agent_id),
+            agent_id: AgentId::from_string(self.agent_id),
             owner: self.owner,
             source: self.trigger.to_source(),
             context,

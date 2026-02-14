@@ -8,15 +8,15 @@ use proptest::prelude::*;
 
 #[test]
 fn job_id_display() {
-    let id = JobId::new("test-job");
+    let id = JobId::from_string("test-job");
     assert_eq!(id.to_string(), "test-job");
 }
 
 #[test]
 fn job_id_equality() {
-    let id1 = JobId::new("job-1");
-    let id2 = JobId::new("job-1");
-    let id3 = JobId::new("job-2");
+    let id1 = JobId::from_string("job-1");
+    let id2 = JobId::from_string("job-1");
+    let id3 = JobId::from_string("job-2");
 
     assert_eq!(id1, id2);
     assert_ne!(id1, id3);
@@ -30,7 +30,7 @@ fn job_id_from_str() {
 
 #[test]
 fn job_id_serde() {
-    let id = JobId::new("my-job");
+    let id = JobId::from_string("my-job");
     let json = serde_json::to_string(&id).unwrap();
     assert_eq!(json, "\"my-job\"");
 

@@ -41,14 +41,14 @@ fn crew_status_display() {
 
 #[test]
 fn crew_id_display() {
-    let id = CrewId::new("abc-123");
+    let id = CrewId::from_string("abc-123");
     assert_eq!(id.to_string(), "abc-123");
     assert_eq!(id.as_str(), "abc-123");
 }
 
 #[test]
 fn crew_id_equality() {
-    let id = CrewId::new("test-id");
+    let id = CrewId::from_string("test-id");
     assert_eq!(id, "test-id");
     assert_eq!(id, *"test-id");
 }

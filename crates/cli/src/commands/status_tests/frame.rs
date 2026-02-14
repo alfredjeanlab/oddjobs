@@ -205,7 +205,7 @@ fn non_tty_frame_with_full_status_has_no_ansi_escapes() {
     ns.active_agents.push(oj_wire::AgentStatusEntry {
         agent_name: "coder".to_string(),
         command_name: "build".to_string(),
-        agent_id: oj_core::AgentId::new("agent-01"),
+        agent_id: oj_core::AgentId::from_string("agent-01"),
         status: "running".to_string(),
     });
 

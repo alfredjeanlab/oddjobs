@@ -48,7 +48,7 @@ impl Scheduler {
 
         for (id, timer) in &self.timers {
             if timer.fires_at <= now {
-                events.push(Event::TimerStart { id: TimerId::new(id) });
+                events.push(Event::TimerStart { id: TimerId::from_string(id) });
                 to_remove.push(id.clone());
             }
         }

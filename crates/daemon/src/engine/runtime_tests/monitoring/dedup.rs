@@ -97,7 +97,7 @@ async fn standalone_duplicate_idle_creates_only_one_escalation() {
 
     let (_crew_id, agent_id) = ctx.runtime.lock_state(|state| {
         let run = state.crew.values().next().unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.clone().unwrap()))
     });
 
     // First stop:blocked → escalated
@@ -135,7 +135,7 @@ async fn standalone_prompt_noop_when_agent_escalated() {
 
     let (_crew_id, agent_id) = ctx.runtime.lock_state(|state| {
         let run = state.crew.values().next().unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.clone().unwrap()))
     });
 
     // First stop:blocked → escalated
@@ -242,7 +242,7 @@ async fn stale_agent_event_dropped_after_job_advances() {
     // Send a stale AgentWaiting event from the OLD agent — should be a no-op
     let result = ctx
         .runtime
-        .handle_event(agent_waiting(old_agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(old_agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 

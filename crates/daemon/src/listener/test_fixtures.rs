@@ -169,7 +169,7 @@ pub fn make_workspace(id: &str, path: std::path::PathBuf, owner: Option<&str>) -
         id: id.to_string(),
         path,
         branch: None,
-        owner: JobId::new(owner_id).into(),
+        owner: JobId::from_string(owner_id).into(),
         status: WorkspaceStatus::Ready,
         workspace_type: WorkspaceType::default(),
         created_at_ms: 0,
@@ -270,9 +270,9 @@ pub fn make_cron(name: &str, project: &str, project_path: &str) -> CronRecord {
 
 pub fn make_decision(id: &str, job_id: &str, created_at_ms: u64) -> Decision {
     Decision {
-        id: DecisionId::new(id),
-        agent_id: AgentId::new("test-agent"),
-        owner: JobId::new(job_id).into(),
+        id: DecisionId::from_string(id),
+        agent_id: AgentId::from_string("test-agent"),
+        owner: JobId::from_string(job_id).into(),
         source: DecisionSource::Idle,
         context: "test context".to_string(),
         options: vec![],

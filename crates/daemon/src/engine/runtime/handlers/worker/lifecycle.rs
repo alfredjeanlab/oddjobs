@@ -77,7 +77,7 @@ impl<C: Clock> Runtime<C> {
             let record = state.workers.get(&scoped);
 
             let active: HashSet<OwnerId> = record
-                .map(|w| w.active.iter().map(|s| OwnerId::parse(s)).collect())
+                .map(|w| w.active.iter().filter_map(|s| OwnerId::parse(s).ok()).collect())
                 .unwrap_or_default();
 
             // Restore owner→item map from persisted WorkerRecord
@@ -85,7 +85,9 @@ impl<C: Clock> Runtime<C> {
                 .map(|w| {
                     w.owners
                         .iter()
-                        .map(|(owner_str, item_id)| (OwnerId::parse(owner_str), item_id.clone()))
+                        .filter_map(|(owner_str, item_id)| {
+                            Some((OwnerId::parse(owner_str).ok()?, item_id.clone()))
+                        })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -349,7 +351,9 @@ impl<C: Clock> Runtime<C> {
                                     .get(owner_str.strip_prefix("job:").unwrap_or(owner_str))
                                     .is_some_and(|j| !j.is_terminal())
                         })
-                        .map(|(owner_str, item_id)| (item_id.clone(), OwnerId::parse(owner_str)))
+                        .filter_map(|(owner_str, item_id)| {
+                            Some((item_id.clone(), OwnerId::parse(owner_str).ok()?))
+                        })
                         .collect()
                 })
                 .unwrap_or_default()

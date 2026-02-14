@@ -104,9 +104,9 @@ fn decision_option_minimal_serde() {
 #[test]
 fn decision_serde_roundtrip() {
     let decision = Decision {
-        id: DecisionId::new("dec-123"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-123"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: DecisionSource::Gate,
         context: "Gate failed with exit code 1".to_string(),
         options: vec![
@@ -123,8 +123,8 @@ fn decision_serde_roundtrip() {
     };
     let json = serde_json::to_string(&decision).unwrap();
     let parsed: Decision = serde_json::from_str(&json).unwrap();
-    assert_eq!(parsed.id, DecisionId::new("dec-123"));
-    assert_eq!(parsed.owner, OwnerId::Job(JobId::new("job-1")));
+    assert_eq!(parsed.id, DecisionId::from_string("dec-123"));
+    assert_eq!(parsed.owner, OwnerId::Job(JobId::from_string("job-1")));
     assert_eq!(parsed.source, DecisionSource::Gate);
     assert_eq!(parsed.options.len(), 2);
     assert!(!parsed.is_resolved());
@@ -133,9 +133,9 @@ fn decision_serde_roundtrip() {
 #[test]
 fn decision_is_resolved() {
     let mut decision = Decision {
-        id: DecisionId::new("dec-1"),
-        agent_id: AgentId::new("agent-1"),
-        owner: JobId::new("job-1").into(),
+        id: DecisionId::from_string("dec-1"),
+        agent_id: AgentId::from_string("agent-1"),
+        owner: JobId::from_string("job-1").into(),
         source: DecisionSource::Question,
         context: "What should we do?".to_string(),
         options: vec![],
@@ -155,7 +155,7 @@ fn decision_is_resolved() {
 
 #[test]
 fn decision_id_display() {
-    let id = DecisionId::new("abc-123");
+    let id = DecisionId::from_string("abc-123");
     assert_eq!(format!("{}", id), "abc-123");
     assert_eq!(id.as_str(), "abc-123");
 }

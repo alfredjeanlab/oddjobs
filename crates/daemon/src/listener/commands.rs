@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use oj_core::{CrewId, IdGen, JobId, OwnerId, UuidIdGen};
+use oj_core::{CrewId, JobId, OwnerId};
 
 use crate::protocol::Response;
 
@@ -77,12 +77,12 @@ pub(super) async fn handle_run_command(
     // Generate the correct ID type upfront
     let (owner, name): (OwnerId, String) = match &cmd_def.run {
         oj_runbook::RunDirective::Job { .. } | oj_runbook::RunDirective::Shell(_) => {
-            let id = JobId::new(UuidIdGen.next());
+            let id = JobId::new();
             let name = cmd_def.run.job_name().unwrap_or(command).to_string();
             (id.into(), name)
         }
         oj_runbook::RunDirective::Agent { agent, .. } => {
-            let id = CrewId::new(UuidIdGen.next());
+            let id = CrewId::new();
             (id.into(), agent.clone())
         }
     };

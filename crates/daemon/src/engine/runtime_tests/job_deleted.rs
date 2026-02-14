@@ -36,7 +36,7 @@ async fn job_deleted_cancels_timers() {
     assert!(scheduler.lock().has_timers(), "should have timers before delete");
 
     // Now delete the job
-    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await.unwrap();
 
     // All job-scoped timers should be cancelled
     let timer_ids = ctx.pending_timer_ids();
@@ -67,7 +67,7 @@ async fn job_deleted_deregisters_agent_mapping() {
     }
 
     // Delete the job
-    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await.unwrap();
 
     // Agent→job mapping should be removed
     {
@@ -94,7 +94,7 @@ async fn job_deleted_kills_agent() {
     let agent_id = get_agent_id(&ctx, &job_id).expect("should have agent_id in step history");
 
     // Delete the job
-    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await.unwrap();
 
     // Yield to let fire-and-forget KillAgent task complete
     tokio::task::yield_now().await;
@@ -118,8 +118,10 @@ async fn job_deleted_idempotent_for_missing_job() {
     .await;
 
     // Delete a job that doesn't exist
-    let result =
-        ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new("nonexistent-job") }).await;
+    let result = ctx
+        .runtime
+        .handle_event(Event::JobDeleted { id: JobId::from_string("nonexistent-job") })
+        .await;
 
     // Should not error
     assert!(result.is_ok(), "deleting nonexistent job should not error");
@@ -138,10 +140,11 @@ async fn job_deleted_idempotent_when_resources_already_gone() {
     ctx.process_background_events().await;
 
     // First delete
-    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await.unwrap();
+    ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await.unwrap();
 
     // Second delete (resources already cleaned up)
-    let result = ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await;
+    let result =
+        ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await;
 
     // Should not error
     assert!(result.is_ok(), "duplicate job delete should not error (idempotent)");
@@ -163,7 +166,7 @@ async fn job_deleted_handles_terminal_job() {
     let agent_id = get_agent_id(&ctx, &job_id).unwrap();
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -179,7 +182,8 @@ async fn job_deleted_handles_terminal_job() {
     assert!(job.is_terminal(), "job should be terminal");
 
     // Delete the terminal job
-    let result = ctx.runtime.handle_event(Event::JobDeleted { id: JobId::new(&job_id) }).await;
+    let result =
+        ctx.runtime.handle_event(Event::JobDeleted { id: JobId::from_string(&job_id) }).await;
 
     assert!(result.is_ok(), "deleting terminal job should succeed");
 }

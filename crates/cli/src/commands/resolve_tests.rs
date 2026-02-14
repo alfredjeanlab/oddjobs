@@ -7,7 +7,7 @@ use oj_wire::{AgentSummary, JobSummary};
 
 fn job(id: &str, name: &str) -> JobSummary {
     JobSummary {
-        id: oj_core::JobId::new(id),
+        id: oj_core::JobId::from_string(id),
         name: name.to_string(),
         kind: String::new(),
         step: String::new(),
@@ -21,9 +21,9 @@ fn job(id: &str, name: &str) -> JobSummary {
 
 fn agent(id: &str, name: Option<&str>) -> AgentSummary {
     AgentSummary {
-        owner: oj_core::JobId::new("").into(),
+        owner: oj_core::JobId::from_string("").into(),
         step_name: String::new(),
-        agent_id: oj_core::AgentId::new(id),
+        agent_id: oj_core::AgentId::from_string(id),
         agent_name: name.map(String::from),
         project: String::new(),
         status: String::new(),

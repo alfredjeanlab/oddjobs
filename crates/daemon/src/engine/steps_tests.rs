@@ -25,10 +25,10 @@ fn completion_effects_for(_job: &Job, _err: &str) -> Vec<Effect> {
 }
 
 #[yare::parameterized(
-    completion_cancels_liveness       = { completion_effects_for, "liveness:job:job-1" },
-    completion_cancels_exit_deferred  = { completion_effects_for, "exit-deferred:job:job-1" },
-    failure_cancels_liveness          = { failure_effects,        "liveness:job:job-1" },
-    failure_cancels_exit_deferred     = { failure_effects,        "exit-deferred:job:job-1" },
+    completion_cancels_liveness       = { completion_effects_for, "liveness:job-1" },
+    completion_cancels_exit_deferred  = { completion_effects_for, "exit-deferred:job-1" },
+    failure_cancels_liveness          = { failure_effects,        "liveness:job-1" },
+    failure_cancels_exit_deferred     = { failure_effects,        "exit-deferred:job-1" },
 )]
 fn cancels_timer(build_effects: fn(&Job, &str) -> Vec<Effect>, timer_id: &str) {
     let job = test_job();

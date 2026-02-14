@@ -18,12 +18,12 @@ async fn standalone_on_dead_fail_fails_crew() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // Agent exits → on_dead = fail
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::new(&crew_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -55,12 +55,12 @@ async fn standalone_on_dead_gate_pass_completes_crew() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // Agent exits → on_dead = gate (true) → pass → complete
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::new(&crew_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -79,12 +79,12 @@ async fn standalone_on_dead_gate_fail_escalates_crew() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // Agent exits → on_dead = gate (false) → fail → escalate
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::new(&crew_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -120,14 +120,14 @@ on_idle = { action = "gate", run = "true" }
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // Agent goes idle → on_idle = gate (true) → pass → complete
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -145,7 +145,7 @@ async fn standalone_on_error_fail_fails_crew() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // Set agent to Failed state
@@ -159,7 +159,7 @@ async fn standalone_on_error_fail_fails_crew() {
         .handle_event(Event::AgentFailed {
             id: agent_id.clone(),
             error: oj_core::AgentError::Other("API error".to_string()),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();
@@ -182,14 +182,14 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // First idle → attempt 1 (nudge)
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string("job-1").into()))
         .await
         .unwrap();
 
@@ -198,7 +198,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
 
     // Second idle → attempt 2 (nudge)
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string("job-1").into()))
         .await
         .unwrap();
 
@@ -207,7 +207,7 @@ async fn standalone_on_idle_exhausts_attempts_then_escalates() {
 
     // Third idle → attempts exhausted (2), should escalate
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string("job-1").into()))
         .await
         .unwrap();
 
@@ -222,22 +222,22 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
     create_job_for_runbook(&ctx, "agent_cmd", &[]).await;
     ctx.process_background_events().await;
 
-    let agent_id = {
+    let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        AgentId::new(run.agent_id.as_ref().unwrap())
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // First idle → attempt 1 (immediate, no cooldown)
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
     // Second idle → attempt 2, but cooldown required
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new("job-1").into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -255,7 +255,7 @@ async fn standalone_on_idle_cooldown_schedules_timer() {
         .collect();
 
     assert!(
-        timer_ids.iter().any(|id| id.starts_with("cooldown:agent:")),
+        timer_ids.iter().any(|id| id.starts_with("cooldown:crw-")),
         "cooldown timer should be scheduled, found: {:?}",
         timer_ids
     );
@@ -269,8 +269,8 @@ async fn register_agent_adds_mapping() {
         setup_with_runbook(&test_runbook_agent("on_idle = \"escalate\"\non_dead = \"escalate\""))
             .await;
 
-    let agent_id = AgentId::new("test-agent");
-    let crew_id = CrewId::new("test-run");
+    let agent_id = AgentId::from_string("test-agent");
+    let crew_id = CrewId::from_string("test-run");
 
     // Register mapping
     ctx.runtime.register_agent(agent_id.clone(), crew_id.clone().into());
@@ -299,7 +299,7 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
     // Fire liveness timer
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&CrewId::new(&crew_id)) })
+        .handle_event(Event::TimerStart { id: TimerId::liveness(CrewId::from_string(&crew_id)) })
         .await
         .unwrap();
 
@@ -318,7 +318,7 @@ async fn standalone_liveness_timer_reschedules_when_alive() {
         })
         .collect();
 
-    assert!(timer_ids.iter().any(|id| id.starts_with("liveness:agent:")));
+    assert!(timer_ids.iter().any(|id| id.starts_with("liveness:crw-")));
 }
 
 // ── Signals ───────────────────────────────────────────────────────────
@@ -334,7 +334,7 @@ async fn standalone_stop_blocked_escalates_crew() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // Agent stop blocked → resolve stop + dispatch on_idle (escalate)
@@ -353,12 +353,12 @@ async fn standalone_stop_blocked_on_terminal_is_noop() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     // First, fail the agent via exit
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::new(&crew_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(0), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -388,7 +388,7 @@ async fn standalone_nudge_records_timestamp() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
@@ -399,7 +399,7 @@ async fn standalone_nudge_records_timestamp() {
 
     // Agent goes idle → nudge is sent
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -419,14 +419,14 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // Agent goes idle → escalates (on_idle = escalate)
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -446,7 +446,7 @@ async fn standalone_auto_resume_suppressed_after_nudge() {
         .runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();
@@ -469,14 +469,14 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
 
     let (crew_id, agent_id) = {
         let run = ctx.runtime.lock_state(|s| s.crew.get("job-1").cloned()).unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.as_ref().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.as_ref().unwrap()))
     };
 
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
 
     // Agent goes idle → escalates
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -495,7 +495,7 @@ async fn standalone_auto_resume_allowed_after_cooldown() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();

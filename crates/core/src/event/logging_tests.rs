@@ -11,16 +11,22 @@ use crate::owner::OwnerId;
 fn log_summary_agent_state_events() {
     let cases = vec![
         (
-            Event::AgentWorking { id: AgentId::new("a1"), owner: OwnerId::Job(JobId::default()) },
+            Event::AgentWorking {
+                id: AgentId::from_string("a1"),
+                owner: OwnerId::Job(JobId::default()),
+            },
             "agent:working agent=a1",
         ),
         (
-            Event::AgentWaiting { id: AgentId::new("a2"), owner: OwnerId::Job(JobId::default()) },
+            Event::AgentWaiting {
+                id: AgentId::from_string("a2"),
+                owner: OwnerId::Job(JobId::default()),
+            },
             "agent:waiting agent=a2",
         ),
         (
             Event::AgentFailed {
-                id: AgentId::new("a3"),
+                id: AgentId::from_string("a3"),
                 error: AgentError::RateLimited,
                 owner: OwnerId::Job(JobId::default()),
             },
@@ -28,7 +34,7 @@ fn log_summary_agent_state_events() {
         ),
         (
             Event::AgentExited {
-                id: AgentId::new("a4"),
+                id: AgentId::from_string("a4"),
                 exit_code: Some(0),
                 owner: OwnerId::Job(JobId::default()),
             },
@@ -36,7 +42,7 @@ fn log_summary_agent_state_events() {
         ),
         (
             Event::AgentGone {
-                id: AgentId::new("a5"),
+                id: AgentId::from_string("a5"),
                 owner: OwnerId::Job(JobId::default()),
                 exit_code: None,
             },
@@ -50,20 +56,20 @@ fn log_summary_agent_state_events() {
 
 #[test]
 fn log_summary_agent_input() {
-    let event = Event::AgentInput { id: AgentId::new("a1"), input: "hello".to_string() };
+    let event = Event::AgentInput { id: AgentId::from_string("a1"), input: "hello".to_string() };
     assert_eq!(event.log_summary(), "agent:input agent=a1");
 }
 
 #[test]
 fn log_summary_agent_idle() {
-    let event = Event::AgentIdle { id: AgentId::new("a1") };
+    let event = Event::AgentIdle { id: AgentId::from_string("a1") };
     assert_eq!(event.log_summary(), "agent:idle agent=a1");
 }
 
 #[test]
 fn log_summary_agent_prompt() {
     let event = Event::AgentPrompt {
-        id: AgentId::new("a1"),
+        id: AgentId::from_string("a1"),
         prompt_type: PromptType::Permission,
         questions: None,
         last_message: None,
@@ -74,7 +80,7 @@ fn log_summary_agent_prompt() {
 #[test]
 fn log_summary_command_run_no_namespace() {
     let event = Event::CommandRun {
-        owner: OwnerId::Job(JobId::new("j1")),
+        owner: OwnerId::Job(JobId::from_string("j1")),
         name: "build".to_string(),
         project_path: PathBuf::from("/proj"),
         invoke_dir: PathBuf::from("/proj"),
@@ -88,7 +94,7 @@ fn log_summary_command_run_no_namespace() {
 #[test]
 fn log_summary_command_run_with_namespace() {
     let event = Event::CommandRun {
-        owner: OwnerId::Job(JobId::new("j1")),
+        owner: OwnerId::Job(JobId::from_string("j1")),
         name: "build".to_string(),
         project_path: PathBuf::from("/proj"),
         invoke_dir: PathBuf::from("/proj"),
@@ -102,7 +108,7 @@ fn log_summary_command_run_with_namespace() {
 #[test]
 fn log_summary_job_created_no_namespace() {
     let event = Event::JobCreated {
-        id: JobId::new("j1"),
+        id: JobId::from_string("j1"),
         kind: "build".to_string(),
         name: "test".to_string(),
         runbook_hash: "abc".to_string(),
@@ -119,7 +125,7 @@ fn log_summary_job_created_no_namespace() {
 #[test]
 fn log_summary_job_created_with_namespace() {
     let event = Event::JobCreated {
-        id: JobId::new("j1"),
+        id: JobId::from_string("j1"),
         kind: "build".to_string(),
         name: "test".to_string(),
         runbook_hash: "abc".to_string(),
@@ -135,28 +141,38 @@ fn log_summary_job_created_with_namespace() {
 
 #[test]
 fn log_summary_job_advanced() {
-    let event = Event::JobAdvanced { id: JobId::new("j1"), step: "deploy".to_string() };
+    let event = Event::JobAdvanced { id: JobId::from_string("j1"), step: "deploy".to_string() };
     assert_eq!(event.log_summary(), "job:advanced id=j1 step=deploy");
 }
 
 #[test]
 fn log_summary_job_updated() {
-    let event = Event::JobUpdated { id: JobId::new("j1"), vars: HashMap::new() };
+    let event = Event::JobUpdated { id: JobId::from_string("j1"), vars: HashMap::new() };
     assert_eq!(event.log_summary(), "job:updated id=j1");
 }
 
 #[test]
 fn log_summary_job_resume() {
-    let event =
-        Event::JobResume { id: JobId::new("j1"), message: None, vars: HashMap::new(), kill: false };
+    let event = Event::JobResume {
+        id: JobId::from_string("j1"),
+        message: None,
+        vars: HashMap::new(),
+        kill: false,
+    };
     assert_eq!(event.log_summary(), "job:resume id=j1");
 }
 
 #[test]
 fn log_summary_job_cancelling_cancel_deleted() {
-    assert_eq!(Event::JobCancelling { id: JobId::new("j1") }.log_summary(), "job:cancelling id=j1");
-    assert_eq!(Event::JobCancel { id: JobId::new("j2") }.log_summary(), "job:cancel id=j2");
-    assert_eq!(Event::JobDeleted { id: JobId::new("j3") }.log_summary(), "job:deleted id=j3");
+    assert_eq!(
+        Event::JobCancelling { id: JobId::from_string("j1") }.log_summary(),
+        "job:cancelling id=j1"
+    );
+    assert_eq!(Event::JobCancel { id: JobId::from_string("j2") }.log_summary(), "job:cancel id=j2");
+    assert_eq!(
+        Event::JobDeleted { id: JobId::from_string("j3") }.log_summary(),
+        "job:deleted id=j3"
+    );
 }
 
 #[test]
@@ -179,29 +195,29 @@ fn log_summary_runbook_loaded_empty() {
 #[test]
 fn log_summary_agent_spawned_job_owner() {
     let event = Event::AgentSpawned {
-        id: AgentId::new("a1"),
-        owner: JobId::new("j1").into(),
+        id: AgentId::from_string("a1"),
+        owner: JobId::from_string("j1").into(),
         runtime: Default::default(),
         auth_token: None,
     };
-    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=job:j1 runtime=Local");
+    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=j1 runtime=Local");
 }
 
 #[test]
 fn log_summary_agent_spawned_crew_owner() {
     let event = Event::AgentSpawned {
-        id: AgentId::new("a1"),
-        owner: CrewId::new("ar1").into(),
+        id: AgentId::from_string("a1"),
+        owner: CrewId::from_string("ar1").into(),
         runtime: Default::default(),
         auth_token: None,
     };
-    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=crew:ar1 runtime=Local");
+    assert_eq!(event.log_summary(), "agent:spawned agent=a1 owner=ar1 runtime=Local");
 }
 
 #[test]
 fn log_summary_shell_exited() {
     let event = Event::ShellExited {
-        job_id: JobId::new("j1"),
+        job_id: JobId::from_string("j1"),
         step: "init".to_string(),
         exit_code: 42,
         stdout: None,
@@ -214,7 +230,7 @@ fn log_summary_shell_exited() {
 fn log_summary_step_events() {
     assert_eq!(
         Event::StepStarted {
-            job_id: JobId::new("j1"),
+            job_id: JobId::from_string("j1"),
             step: "build".to_string(),
             agent_id: None,
             agent_name: None,
@@ -224,7 +240,7 @@ fn log_summary_step_events() {
     );
     assert_eq!(
         Event::StepWaiting {
-            job_id: JobId::new("j1"),
+            job_id: JobId::from_string("j1"),
             step: "review".to_string(),
             reason: Some("gate failed".to_string()),
             decision_id: None,
@@ -233,12 +249,13 @@ fn log_summary_step_events() {
         "step:waiting job=j1 step=review"
     );
     assert_eq!(
-        Event::StepCompleted { job_id: JobId::new("j1"), step: "deploy".to_string() }.log_summary(),
+        Event::StepCompleted { job_id: JobId::from_string("j1"), step: "deploy".to_string() }
+            .log_summary(),
         "step:completed job=j1 step=deploy"
     );
     assert_eq!(
         Event::StepFailed {
-            job_id: JobId::new("j1"),
+            job_id: JobId::from_string("j1"),
             step: "test".to_string(),
             error: "oops".to_string(),
         }
@@ -255,7 +272,7 @@ fn log_summary_shutdown_and_custom() {
 
 #[test]
 fn log_summary_timer_start() {
-    let event = Event::TimerStart { id: TimerId::new("t1") };
+    let event = Event::TimerStart { id: TimerId::from_string("t1") };
     assert_eq!(event.log_summary(), "timer:start id=t1");
 }
 
@@ -263,30 +280,33 @@ fn log_summary_timer_start() {
 fn log_summary_workspace_events() {
     assert_eq!(
         Event::WorkspaceCreated {
-            id: WorkspaceId::new("ws1"),
+            id: WorkspaceId::from_string("ws1"),
             path: PathBuf::from("/tmp/ws"),
             branch: Some("main".to_string()),
-            owner: OwnerId::Job(JobId::new("job-1")),
+            owner: OwnerId::Job(JobId::from_string("job-1")),
             workspace_type: None,
         }
         .log_summary(),
         "workspace:created id=ws1"
     );
     assert_eq!(
-        Event::WorkspaceReady { id: WorkspaceId::new("ws1") }.log_summary(),
+        Event::WorkspaceReady { id: WorkspaceId::from_string("ws1") }.log_summary(),
         "workspace:ready id=ws1"
     );
     assert_eq!(
-        Event::WorkspaceFailed { id: WorkspaceId::new("ws1"), reason: "disk full".to_string() }
-            .log_summary(),
+        Event::WorkspaceFailed {
+            id: WorkspaceId::from_string("ws1"),
+            reason: "disk full".to_string()
+        }
+        .log_summary(),
         "workspace:failed id=ws1"
     );
     assert_eq!(
-        Event::WorkspaceDeleted { id: WorkspaceId::new("ws1") }.log_summary(),
+        Event::WorkspaceDeleted { id: WorkspaceId::from_string("ws1") }.log_summary(),
         "workspace:deleted id=ws1"
     );
     assert_eq!(
-        Event::WorkspaceDrop { id: WorkspaceId::new("ws1") }.log_summary(),
+        Event::WorkspaceDrop { id: WorkspaceId::from_string("ws1") }.log_summary(),
         "workspace:drop id=ws1"
     );
 }
@@ -315,7 +335,7 @@ fn log_summary_cron_started_stopped() {
 fn log_summary_cron_once_job_target() {
     let event = Event::CronOnce {
         cron: "nightly".to_string(),
-        owner: JobId::new("j1").into(),
+        owner: JobId::from_string("j1").into(),
         project_path: PathBuf::from("/proj"),
         runbook_hash: "abc".to_string(),
         target: crate::RunTarget::job("build"),
@@ -328,7 +348,7 @@ fn log_summary_cron_once_job_target() {
 fn log_summary_cron_once_agent_target() {
     let event = Event::CronOnce {
         cron: "nightly".to_string(),
-        owner: CrewId::new("ar1").into(),
+        owner: CrewId::from_string("ar1").into(),
         project_path: PathBuf::from("/proj"),
         runbook_hash: "abc".to_string(),
         target: crate::RunTarget::agent("builder"),
@@ -341,7 +361,7 @@ fn log_summary_cron_once_agent_target() {
 fn log_summary_cron_fired_job() {
     let event = Event::CronFired {
         cron: "nightly".to_string(),
-        owner: JobId::new("j1").into(),
+        owner: JobId::from_string("j1").into(),
         project: String::new(),
     };
     assert_eq!(event.log_summary(), "cron:fired cron=nightly job=j1");
@@ -351,7 +371,7 @@ fn log_summary_cron_fired_job() {
 fn log_summary_cron_fired_crew() {
     let event = Event::CronFired {
         cron: "nightly".to_string(),
-        owner: CrewId::new("ar1").into(),
+        owner: CrewId::from_string("ar1").into(),
         project: String::new(),
     };
     assert_eq!(event.log_summary(), "cron:fired cron=nightly crew=ar1");
@@ -421,10 +441,10 @@ fn log_summary_worker_item_dispatched() {
     let event = Event::WorkerDispatched {
         worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        owner: JobId::new("j1").into(),
+        owner: JobId::from_string("j1").into(),
         project: String::new(),
     };
-    assert_eq!(event.log_summary(), "worker:dispatched worker=fixer item=item-1 owner=job:j1");
+    assert_eq!(event.log_summary(), "worker:dispatched worker=fixer item=item-1 owner=j1");
 }
 
 #[test]
@@ -533,9 +553,9 @@ fn log_summary_queue_events() {
 #[test]
 fn log_summary_decision_created_job_owner() {
     let event = Event::DecisionCreated {
-        id: DecisionId::new("d1"),
-        agent_id: AgentId::new("a1"),
-        owner: JobId::new("j1").into(),
+        id: DecisionId::from_string("d1"),
+        agent_id: AgentId::from_string("a1"),
+        owner: JobId::from_string("j1").into(),
         source: DecisionSource::Gate,
         context: "ctx".to_string(),
         options: vec![],
@@ -549,9 +569,9 @@ fn log_summary_decision_created_job_owner() {
 #[test]
 fn log_summary_decision_created_crew_owner() {
     let event = Event::DecisionCreated {
-        id: DecisionId::new("d1"),
-        agent_id: AgentId::new("a1"),
-        owner: CrewId::new("ar1").into(),
+        id: DecisionId::from_string("d1"),
+        agent_id: AgentId::from_string("a1"),
+        owner: CrewId::from_string("ar1").into(),
         source: DecisionSource::Question,
         context: "ctx".to_string(),
         options: vec![],
@@ -565,7 +585,7 @@ fn log_summary_decision_created_crew_owner() {
 #[test]
 fn log_summary_decision_resolved_with_chosen() {
     let event = Event::DecisionResolved {
-        id: DecisionId::new("d1"),
+        id: DecisionId::from_string("d1"),
         choices: vec![2],
         message: None,
         resolved_at_ms: 0,
@@ -577,7 +597,7 @@ fn log_summary_decision_resolved_with_chosen() {
 #[test]
 fn log_summary_decision_resolved_no_chosen() {
     let event = Event::DecisionResolved {
-        id: DecisionId::new("d1"),
+        id: DecisionId::from_string("d1"),
         choices: vec![],
         message: Some("custom".to_string()),
         resolved_at_ms: 0,
@@ -589,7 +609,7 @@ fn log_summary_decision_resolved_no_chosen() {
 #[test]
 fn log_summary_crew_created_no_namespace() {
     let event = Event::CrewCreated {
-        id: CrewId::new("ar1"),
+        id: CrewId::from_string("ar1"),
         agent: "builder".to_string(),
         command: "build".to_string(),
         project: String::new(),
@@ -604,7 +624,7 @@ fn log_summary_crew_created_no_namespace() {
 #[test]
 fn log_summary_crew_created_with_namespace() {
     let event = Event::CrewCreated {
-        id: CrewId::new("ar1"),
+        id: CrewId::from_string("ar1"),
         agent: "builder".to_string(),
         command: "build".to_string(),
         project: "prod".to_string(),
@@ -618,14 +638,15 @@ fn log_summary_crew_created_with_namespace() {
 
 #[test]
 fn log_summary_crew_started() {
-    let event = Event::CrewStarted { id: CrewId::new("ar1"), agent_id: AgentId::new("a1") };
+    let event =
+        Event::CrewStarted { id: CrewId::from_string("ar1"), agent_id: AgentId::from_string("a1") };
     assert_eq!(event.log_summary(), "crew:started id=ar1 agent_id=a1");
 }
 
 #[test]
 fn log_summary_crew_status_changed_with_reason() {
     let event = Event::CrewUpdated {
-        id: CrewId::new("ar1"),
+        id: CrewId::from_string("ar1"),
         status: CrewStatus::Failed,
         reason: Some("timeout".to_string()),
     };
@@ -634,21 +655,24 @@ fn log_summary_crew_status_changed_with_reason() {
 
 #[test]
 fn log_summary_crew_status_changed_no_reason() {
-    let event =
-        Event::CrewUpdated { id: CrewId::new("ar1"), status: CrewStatus::Running, reason: None };
+    let event = Event::CrewUpdated {
+        id: CrewId::from_string("ar1"),
+        status: CrewStatus::Running,
+        reason: None,
+    };
     assert_eq!(event.log_summary(), "crew:updated id=ar1 status=running");
 }
 
 #[test]
 fn log_summary_crew_deleted() {
-    let event = Event::CrewDeleted { id: CrewId::new("ar1") };
+    let event = Event::CrewDeleted { id: CrewId::from_string("ar1") };
     assert_eq!(event.log_summary(), "crew:deleted id=ar1");
 }
 
 #[test]
 fn log_summary_crew_resume_with_kill() {
     let event = Event::CrewResume {
-        id: CrewId::new("ar1"),
+        id: CrewId::from_string("ar1"),
         message: Some("retry".to_string()),
         kill: true,
     };
@@ -658,7 +682,7 @@ fn log_summary_crew_resume_with_kill() {
 #[test]
 fn log_summary_crew_resume_with_message() {
     let event = Event::CrewResume {
-        id: CrewId::new("ar1"),
+        id: CrewId::from_string("ar1"),
         message: Some("nudge".to_string()),
         kill: false,
     };
@@ -667,6 +691,6 @@ fn log_summary_crew_resume_with_message() {
 
 #[test]
 fn log_summary_crew_resume_bare() {
-    let event = Event::CrewResume { id: CrewId::new("ar1"), message: None, kill: false };
+    let event = Event::CrewResume { id: CrewId::from_string("ar1"), message: None, kill: false };
     assert_eq!(event.log_summary(), "crew:resume id=ar1");
 }

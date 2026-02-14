@@ -15,7 +15,7 @@ crate::define_id! {
     ///
     /// Typically formatted as `{job_id}-{step}` but the format is opaque
     /// to consumers. Session IDs are hidden inside the AgentAdapter implementation.
-    pub struct AgentId;
+    pub struct AgentId("agt-");
 }
 
 /// State of an agent as detected from monitoring.

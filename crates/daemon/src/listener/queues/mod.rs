@@ -67,7 +67,7 @@ pub(super) fn handle_queue_push(
     }
 
     // Generate item ID and timestamp
-    let item_id = uuid::Uuid::new_v4().to_string();
+    let item_id = nanoid::nanoid!();
     let pushed_at_ms =
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
 

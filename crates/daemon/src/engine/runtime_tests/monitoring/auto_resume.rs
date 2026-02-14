@@ -21,7 +21,7 @@ async fn working_auto_resumes_job_from_waiting() {
     // Agent goes idle -> on_idle gate "false" fails -> job escalated to Waiting
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -33,7 +33,7 @@ async fn working_auto_resumes_job_from_waiting() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: JobId::new(&job_id).into(),
+            owner: JobId::from_string(&job_id).into(),
         })
         .await
         .unwrap();
@@ -63,7 +63,7 @@ async fn working_noop_when_job_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: JobId::new(&job_id).into(),
+            owner: JobId::from_string(&job_id).into(),
         })
         .await
         .unwrap();
@@ -92,7 +92,7 @@ async fn working_auto_resume_resets_attempts() {
     // Agent goes idle -> gate fails -> escalate -> Waiting
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -105,7 +105,7 @@ async fn working_auto_resume_resets_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: JobId::new(&job_id).into(),
+            owner: JobId::from_string(&job_id).into(),
         })
         .await
         .unwrap();
@@ -140,7 +140,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     // Find the crew and its agent_id
     let (crew_id, agent_id) = ctx.runtime.lock_state(|state| {
         let run = state.crew.values().next().unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.clone().unwrap()))
     });
 
     // Verify crew is Running
@@ -149,7 +149,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
 
     // Agent goes idle -> on_idle = escalate -> Escalated
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -160,7 +160,7 @@ async fn working_auto_resumes_standalone_agent_from_escalated() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();
@@ -188,7 +188,7 @@ async fn working_noop_when_standalone_agent_already_running() {
 
     let (crew_id, agent_id) = ctx.runtime.lock_state(|state| {
         let run = state.crew.values().next().unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.clone().unwrap()))
     });
 
     // Verify already Running
@@ -200,7 +200,7 @@ async fn working_noop_when_standalone_agent_already_running() {
         .runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();
@@ -231,12 +231,12 @@ async fn working_auto_resume_resets_standalone_attempts() {
 
     let (crew_id, agent_id) = ctx.runtime.lock_state(|state| {
         let run = state.crew.values().next().unwrap();
-        (run.id.clone(), AgentId::new(run.agent_id.clone().unwrap()))
+        (run.id.clone(), AgentId::from_string(run.agent_id.clone().unwrap()))
     });
 
     // Agent goes idle -> escalated
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), CrewId::new(&crew_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), CrewId::from_string(&crew_id).into()))
         .await
         .unwrap();
 
@@ -249,7 +249,7 @@ async fn working_auto_resume_resets_standalone_attempts() {
     ctx.runtime
         .handle_event(Event::AgentWorking {
             id: agent_id.clone(),
-            owner: CrewId::new(&crew_id).into(),
+            owner: CrewId::from_string(&crew_id).into(),
         })
         .await
         .unwrap();

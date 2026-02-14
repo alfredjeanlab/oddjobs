@@ -77,7 +77,7 @@ pub(crate) trait RunLifecycle {
 
 impl RunLifecycle for Job {
     fn owner_id(&self) -> OwnerId {
-        JobId::new(&self.id).into()
+        JobId::from_string(&self.id).into()
     }
 
     fn display_name(&self) -> &str {
@@ -125,7 +125,7 @@ impl RunLifecycle for Job {
     }
 
     fn auto_resume_effects(&self, resolved_at_ms: u64) -> Vec<Effect> {
-        let job_id = JobId::new(&self.id);
+        let job_id = JobId::from_string(&self.id);
         let mut effects = vec![Effect::Emit {
             event: Event::StepStarted {
                 job_id: job_id.clone(),
@@ -138,7 +138,7 @@ impl RunLifecycle for Job {
         if let oj_core::StepStatus::Waiting(Some(ref decision_id)) = self.step_status {
             effects.push(Effect::Emit {
                 event: Event::DecisionResolved {
-                    id: DecisionId::new(decision_id.clone()),
+                    id: DecisionId::from_string(decision_id.clone()),
                     choices: vec![],
                     message: Some("auto-dismissed: agent became active".to_string()),
                     resolved_at_ms,
@@ -151,7 +151,7 @@ impl RunLifecycle for Job {
     }
 
     fn escalation_effects(&self, trigger: &str, decision_id: Option<&str>) -> Vec<Effect> {
-        let job_id = JobId::new(&self.id);
+        let job_id = JobId::from_string(&self.id);
         vec![
             Effect::Emit {
                 event: Event::StepWaiting {
@@ -188,7 +188,7 @@ impl RunLifecycle for Job {
 
 impl RunLifecycle for Crew {
     fn owner_id(&self) -> OwnerId {
-        CrewId::new(&self.id).into()
+        CrewId::from_string(&self.id).into()
     }
 
     fn display_name(&self) -> &str {
@@ -232,7 +232,7 @@ impl RunLifecycle for Crew {
     }
 
     fn auto_resume_effects(&self, resolved_at_ms: u64) -> Vec<Effect> {
-        let crew_id = CrewId::new(&self.id);
+        let crew_id = CrewId::from_string(&self.id);
         let effects = vec![Effect::Emit {
             event: Event::CrewUpdated {
                 id: crew_id.clone(),
@@ -252,7 +252,7 @@ impl RunLifecycle for Crew {
     }
 
     fn escalation_effects(&self, trigger: &str, _decision_id: Option<&str>) -> Vec<Effect> {
-        let crew_id = CrewId::new(&self.id);
+        let crew_id = CrewId::from_string(&self.id);
         vec![
             Effect::Emit {
                 event: Event::CrewUpdated {

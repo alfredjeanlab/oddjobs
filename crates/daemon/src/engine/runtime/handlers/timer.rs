@@ -68,7 +68,7 @@ impl<C: Clock> Runtime<C> {
         let Some(run) = self.get_active_run(&owner) else {
             return Ok(vec![]);
         };
-        let agent_id = run.agent_id().map(AgentId::new);
+        let agent_id = run.agent_id().map(AgentId::from_string);
 
         if agent_id.is_none() {
             tracing::warn!(run_id = %run.log_id(), "no agent_id for exit deferred timer");
@@ -121,7 +121,7 @@ impl<C: Clock> Runtime<C> {
 
         tracing::info!(%owner, trigger, chain_pos, "cooldown expired, executing action");
 
-        let agent_id = run.agent_id().map(AgentId::new);
+        let agent_id = run.agent_id().map(AgentId::from_string);
         let last_message = match agent_id {
             Some(aid) => self.executor.agents.last_message(&aid).await,
             None => None,
@@ -142,7 +142,7 @@ impl<C: Clock> Runtime<C> {
     /// Get agent_id for a non-terminal owner. Returns None if owner is missing,
     /// terminal, or has no agent.
     fn get_owner_active_agent(&self, owner: &OwnerId) -> Option<AgentId> {
-        self.get_active_run(owner)?.agent_id().map(AgentId::new)
+        self.get_active_run(owner)?.agent_id().map(AgentId::from_string)
     }
 
     /// Handle queue retry timer expiry — move item back to Pending and wake workers.

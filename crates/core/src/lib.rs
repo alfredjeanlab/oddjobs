@@ -48,14 +48,14 @@ pub use crew::{Crew, CrewId, CrewStatus};
 pub use decision::{Decision, DecisionId, DecisionOption, DecisionSource};
 pub use effect::Effect;
 pub use event::{Event, PromptType, QuestionData, QuestionEntry, QuestionOption};
-pub use id::{short, IdGen, UuidIdGen};
+pub use id::short;
 #[cfg(any(test, feature = "test-support"))]
 pub use job::JobBuilder;
 pub use job::{
     Job, JobConfig, JobConfigBuilder, JobId, StepOutcome, StepOutcomeKind, StepRecord, StepStatus,
     StepStatusKind,
 };
-pub use owner::{OwnerId, OwnerMismatch};
+pub use owner::{InvalidOwnerId, OwnerId, OwnerMismatch};
 pub use project::{namespace_to_option, scoped_name, split_scoped_name, Namespace};
 pub use target::RunTarget;
 pub use time_fmt::{format_elapsed, format_elapsed_ms};

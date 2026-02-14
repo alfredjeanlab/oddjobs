@@ -15,7 +15,9 @@ async fn liveness_timer_reschedules_when_agent_alive() {
     // Fire the liveness timer
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -35,7 +37,7 @@ async fn liveness_timer_reschedules_when_agent_alive() {
             _ => None,
         })
         .collect();
-    assert!(timer_ids.contains(&TimerId::liveness(&JobId::new(job_id.clone())).as_str()));
+    assert!(timer_ids.contains(&TimerId::liveness(&JobId::from_string(job_id.clone())).as_str()));
     assert!(!timer_ids.iter().any(|id| id.starts_with("exit-deferred:")));
 }
 
@@ -50,7 +52,9 @@ async fn liveness_timer_schedules_deferred_exit_when_agent_dead() {
     // Fire the liveness timer
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::liveness(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::liveness(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -70,7 +74,9 @@ async fn liveness_timer_schedules_deferred_exit_when_agent_dead() {
             _ => None,
         })
         .collect();
-    assert!(timer_ids.contains(&TimerId::exit_deferred(&JobId::new(job_id.clone())).as_str()));
+    assert!(
+        timer_ids.contains(&TimerId::exit_deferred(&JobId::from_string(job_id.clone())).as_str())
+    );
 }
 
 #[tokio::test]
@@ -87,7 +93,9 @@ async fn exit_deferred_timer_noop_when_job_terminal() {
     // Deferred exit on a terminal job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -114,7 +122,9 @@ async fn exit_deferred_timer_on_idle_when_waiting_for_input() {
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -146,7 +156,9 @@ async fn exit_deferred_timer_on_error_when_agent_failed() {
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 
@@ -175,7 +187,9 @@ async fn exit_deferred_timer_on_dead_for_exited_state() {
     // Fire the deferred exit timer
     let _result = ctx
         .runtime
-        .handle_event(Event::TimerStart { id: TimerId::exit_deferred(&JobId::new(job_id.clone())) })
+        .handle_event(Event::TimerStart {
+            id: TimerId::exit_deferred(&JobId::from_string(job_id.clone())),
+        })
         .await
         .unwrap();
 

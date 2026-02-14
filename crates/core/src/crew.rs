@@ -14,7 +14,7 @@ use std::path::PathBuf;
 
 crate::define_id! {
     /// Unique identifier for a crew.
-    pub struct CrewId;
+    pub struct CrewId("crw-");
 }
 
 /// Status of a crew.

@@ -43,7 +43,7 @@ async fn dead_event_auto_dismisses_pending_idle_decision() {
     // Agent goes idle → on_idle = escalate → creates Idle decision, step Waiting
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -56,7 +56,7 @@ async fn dead_event_auto_dismisses_pending_idle_decision() {
 
     // Agent dies → should auto-dismiss the stale Idle decision and fire on_dead = done
     ctx.runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(1), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(1), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -93,7 +93,7 @@ async fn dead_event_blocked_by_pending_dead_decision() {
     // Agent dies → on_dead = escalate → creates Dead decision
     ctx_mut
         .runtime
-        .handle_event(agent_exited(agent_id.clone(), Some(1), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id.clone(), Some(1), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -109,7 +109,7 @@ async fn dead_event_blocked_by_pending_dead_decision() {
         .runtime
         .handle_event(Event::AgentGone {
             id: agent_id.clone(),
-            owner: JobId::new(&job_id).into(),
+            owner: JobId::from_string(&job_id).into(),
             exit_code: None,
         })
         .await
@@ -172,7 +172,7 @@ async fn dead_event_proceeds_without_pending_decision() {
 
     // Agent dies → on_dead = done should fire normally
     ctx.runtime
-        .handle_event(agent_exited(agent_id, Some(0), JobId::new(&job_id).into()))
+        .handle_event(agent_exited(agent_id, Some(0), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 

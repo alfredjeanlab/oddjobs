@@ -8,7 +8,7 @@ use crate::engine::error::RuntimeError;
 use crate::engine::runtime::agent::SpawnAgentParams;
 use crate::engine::runtime::handlers::CreateJobParams;
 use crate::engine::runtime::Runtime;
-use oj_core::{scoped_name, Clock, Effect, Event, IdGen, JobId, TimerId, UuidIdGen};
+use oj_core::{scoped_name, Clock, Effect, Event, JobId, TimerId};
 use std::collections::HashMap;
 
 pub(crate) use super::{CronOnceParams, CronStartedParams};
@@ -174,8 +174,7 @@ impl<C: Clock> Runtime<C> {
                 );
             }
             oj_core::RunTarget::Job(job_name) => {
-                let job_id =
-                    owner.as_job().cloned().unwrap_or_else(|| JobId::new(UuidIdGen.next()));
+                let job_id = owner.as_job().cloned().unwrap_or_else(JobId::new);
 
                 let display_name = oj_runbook::job_display_name(job_name, job_id.short(8), project);
 

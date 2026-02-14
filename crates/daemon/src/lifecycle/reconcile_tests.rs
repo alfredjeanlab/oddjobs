@@ -225,7 +225,7 @@ async fn reconcile_job_no_agent_id_in_step_history_emits_job_failed() {
     );
     match &advanced_events[0] {
         Event::JobAdvanced { id, step } => {
-            assert_eq!(id, &JobId::new("job-2"));
+            assert_eq!(id, &JobId::from_string("job-2"));
             assert_eq!(step, "failed");
         }
         _ => unreachable!(),
@@ -264,7 +264,7 @@ async fn reconcile_job_no_agent_id_emits_job_failed() {
     assert_eq!(advanced_events.len(), 1, "should emit exactly one JobAdvanced event");
     match &advanced_events[0] {
         Event::JobAdvanced { id, step } => {
-            assert_eq!(id, &JobId::new("job-nosess"));
+            assert_eq!(id, &JobId::from_string("job-nosess"));
             assert_eq!(step, "failed");
         }
         _ => unreachable!(),
@@ -385,7 +385,7 @@ async fn reconcile_crew_no_agent_id_marks_failed_directly() {
     assert_eq!(status_events.len(), 1, "should emit exactly one CrewUpdated event");
     match &status_events[0] {
         Event::CrewUpdated { id, status, reason } => {
-            assert_eq!(id, &CrewId::new("run-2"));
+            assert_eq!(id, &CrewId::from_string("run-2"));
             assert_eq!(*status, CrewStatus::Failed);
             assert!(
                 reason.as_ref().unwrap().contains("no agent_id"),

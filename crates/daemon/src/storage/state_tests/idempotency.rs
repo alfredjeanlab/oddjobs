@@ -24,14 +24,14 @@ fn step_completed_idempotent() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("job-1", "build", "test", "init"));
     state.apply_event(&Event::StepCompleted {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
     });
 
     let finished_at = state.jobs["job-1"].step_history[0].finished_at_ms;
 
     state.apply_event(&Event::StepCompleted {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
     });
 
@@ -58,7 +58,7 @@ fn worker_item_dispatched_idempotent() {
     state.apply_event(&Event::WorkerDispatched {
         worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         project: String::new(),
     });
 
@@ -68,7 +68,7 @@ fn worker_item_dispatched_idempotent() {
     state.apply_event(&Event::WorkerDispatched {
         worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         project: String::new(),
     });
 

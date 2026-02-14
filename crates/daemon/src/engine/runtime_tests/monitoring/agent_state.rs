@@ -12,7 +12,7 @@ async fn agent_state_changed_unknown_agent_is_noop() {
     let result = ctx
         .runtime
         .handle_event(agent_waiting(
-            AgentId::new("unknown-agent".to_string()),
+            AgentId::from_string("unknown-agent".to_string()),
             OwnerId::Job(JobId::default()),
         ))
         .await
@@ -35,7 +35,7 @@ async fn agent_state_changed_terminal_job_is_noop() {
     // AgentWaiting for terminal job should be a no-op
     let result = ctx
         .runtime
-        .handle_event(agent_waiting(agent_id, JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id, JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -58,7 +58,7 @@ async fn agent_state_changed_routes_through_agent_jobs() {
     // Emit AgentWaiting (on_idle = done -> advance)
     let _result = ctx
         .runtime
-        .handle_event(agent_waiting(agent_id, JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id, JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 
@@ -86,7 +86,7 @@ async fn gate_idle_escalates_when_command_fails() {
     // Agent goes idle, on_idle gate runs "false" which fails -> escalate
     ctx.agents.set_agent_state(&agent_id, oj_core::AgentState::WaitingForInput);
     ctx.runtime
-        .handle_event(agent_waiting(agent_id.clone(), JobId::new(&job_id).into()))
+        .handle_event(agent_waiting(agent_id.clone(), JobId::from_string(&job_id).into()))
         .await
         .unwrap();
 

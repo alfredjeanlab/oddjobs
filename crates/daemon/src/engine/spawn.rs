@@ -10,7 +10,6 @@ use oj_runbook::AgentDef;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use uuid::Uuid;
 
 /// Liveness check interval (30 seconds)
 pub const LIVENESS_INTERVAL: Duration = Duration::from_secs(30);
@@ -56,10 +55,10 @@ pub fn build_spawn_effects(
 
     // Add system variables (not namespaced - these are always available)
     // These overwrite any bare input keys with the same name.
-    // Always generate a fresh UUID for agent_id (oddjobs tracking concept,
+    // Always generate a fresh agent_id (oddjobs tracking concept,
     // decoupled from Claude's internal session/conversation ID).
-    let agent_id = Uuid::new_v4().to_string();
-    prompt_vars.insert("agent_id".to_string(), agent_id.clone());
+    let agent_id = AgentId::new();
+    prompt_vars.insert("agent_id".to_string(), agent_id.to_string());
     // Insert owner-specific ID: job_id for jobs, crew_id for standalone runs
     match &ctx.owner {
         OwnerId::Job(job_id) => {
@@ -105,7 +104,7 @@ pub fn build_spawn_effects(
     };
     let on_idle_message = agent_def.on_idle.as_ref().and_then(|c| c.message());
     crate::engine::agent_setup::write_agent_config_file(
-        &agent_id,
+        agent_id.as_str(),
         workspace_path,
         agent_def.prime.as_ref(),
         &prompt_vars,
@@ -229,7 +228,7 @@ pub fn build_spawn_effects(
     let container = agent_def.container.as_ref().map(|c| oj_core::ContainerConfig::new(&c.image));
 
     Ok(vec![Effect::SpawnAgent {
-        agent_id: AgentId::new(agent_id),
+        agent_id,
         agent_name: agent_name.to_string(),
         owner: ctx.owner.clone(),
         workspace_path: workspace_path.to_path_buf(),

@@ -142,7 +142,7 @@ fn crew_action(
     message: Option<&str>,
     expected: ExpectedAgentAction,
 ) {
-    let run_id = CrewId::new("run-test");
+    let run_id = CrewId::from_string("run-test");
     let c = DecisionResolveCtx { choices, message, ..ctx(&source, "dec-test") };
     let events = map_decision_to_crew_action(&c, &run_id, Some("agent-test"));
 
@@ -183,7 +183,7 @@ fn crew_action(
     deny    = { &[2], "n\n" },
 )]
 fn crew_approval(choices: &[usize], expected_input: &str) {
-    let run_id = CrewId::new("run-approval");
+    let run_id = CrewId::from_string("run-approval");
     let c = DecisionResolveCtx { choices, ..ctx(&DecisionSource::Approval, "dec-approval") };
     let events = map_decision_to_crew_action(&c, &run_id, Some("agent-approval"));
 
@@ -199,7 +199,7 @@ fn crew_approval(choices: &[usize], expected_input: &str) {
 
 #[test]
 fn crew_question_sends_option_number() {
-    let run_id = CrewId::new("run-q1");
+    let run_id = CrewId::from_string("run-q1");
     let options = make_question_options();
     let c = DecisionResolveCtx {
         choices: &[2], // Option B
@@ -220,7 +220,7 @@ fn crew_question_sends_option_number() {
 
 #[test]
 fn crew_question_other_sends_custom_text() {
-    let run_id = CrewId::new("run-qother");
+    let run_id = CrewId::from_string("run-qother");
     let options = make_question_options(); // 5 options, Other is third-to-last
     let c = DecisionResolveCtx {
         choices: &[3], // Other (third-to-last option)
@@ -242,7 +242,7 @@ fn crew_question_other_sends_custom_text() {
 
 #[test]
 fn crew_question_cancel_marks_failed() {
-    let run_id = CrewId::new("run-qcancel");
+    let run_id = CrewId::from_string("run-qcancel");
     let options = make_question_options(); // 5 options, Cancel is second-to-last
     let c = DecisionResolveCtx {
         choices: &[4], // Cancel (second-to-last option)
@@ -263,7 +263,7 @@ fn crew_question_cancel_marks_failed() {
 
 #[test]
 fn crew_question_dismiss_returns_empty() {
-    let run_id = CrewId::new("run-qdismiss");
+    let run_id = CrewId::from_string("run-qdismiss");
     let options = make_question_options(); // 5 options, Dismiss is last
     let c = DecisionResolveCtx {
         choices: &[5], // Dismiss (last option)
@@ -276,7 +276,7 @@ fn crew_question_dismiss_returns_empty() {
 
 #[test]
 fn crew_no_session_nudge_still_emits_resume() {
-    let run_id = CrewId::new("run-nosession");
+    let run_id = CrewId::from_string("run-nosession");
     let c = DecisionResolveCtx {
         choices: &[1], // Nudge
         message: Some("continue"),
@@ -418,7 +418,7 @@ fn make_multi_questions() -> QuestionData {
 
 #[test]
 fn multi_question_crew_sends_concatenated_digits() {
-    let run_id = CrewId::new("run-multi");
+    let run_id = CrewId::from_string("run-multi");
     let qd = make_multi_questions();
     let choices = [1, 2]; // Q1: React, Q2: MySQL
     let c = DecisionResolveCtx {
@@ -503,7 +503,7 @@ fn resolve_plan_choices(choice: Option<usize>, expected: ResolvedAction) {
     option3 = { &[3], 3 },
 )]
 fn crew_plan_accept(choices: &[usize], expected_option: u32) {
-    let run_id = CrewId::new("run-plan");
+    let run_id = CrewId::from_string("run-plan");
     let c = DecisionResolveCtx { choices, ..ctx(&DecisionSource::Plan, "dec-plan") };
     let events = map_decision_to_crew_action(&c, &run_id, Some("agent-plan"));
 
@@ -519,7 +519,7 @@ fn crew_plan_accept(choices: &[usize], expected_option: u32) {
 
 #[test]
 fn crew_plan_revise_sends_respond_then_resume() {
-    let run_id = CrewId::new("run-plan-rev");
+    let run_id = CrewId::from_string("run-plan-rev");
     let c = DecisionResolveCtx {
         choices: &[4], // Revise
         message: Some("Please also add rate limiting"),
@@ -549,7 +549,7 @@ fn crew_plan_revise_sends_respond_then_resume() {
 
 #[test]
 fn crew_plan_cancel_sends_reject_then_fail() {
-    let run_id = CrewId::new("run-plan-cancel");
+    let run_id = CrewId::from_string("run-plan-cancel");
     let c = DecisionResolveCtx {
         choices: &[5], // Cancel
         ..ctx(&DecisionSource::Plan, "dec-plan-cancel")

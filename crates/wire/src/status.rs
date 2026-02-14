@@ -166,7 +166,7 @@ pub struct ProjectSummary {
 
 impl From<&Job> for JobEntry {
     fn from(p: &Job) -> Self {
-        JobEntry { id: JobId::new(&p.id), name: p.name.clone(), step: p.step.clone() }
+        JobEntry { id: JobId::from_string(&p.id), name: p.name.clone(), step: p.step.clone() }
     }
 }
 
@@ -218,7 +218,7 @@ impl JobStatusEntry {
         let last_activity_ms =
             p.step_history.last().map(|r| r.finished_at_ms.unwrap_or(r.started_at_ms)).unwrap_or(0);
         JobStatusEntry {
-            id: JobId::new(&p.id),
+            id: JobId::from_string(&p.id),
             name: p.name.clone(),
             kind: p.kind.clone(),
             step: p.step.clone(),
@@ -234,7 +234,7 @@ impl JobStatusEntry {
 impl From<&BreadcrumbAgent> for OrphanAgent {
     fn from(a: &BreadcrumbAgent) -> Self {
         OrphanAgent {
-            agent_id: AgentId::new(&a.agent_id),
+            agent_id: AgentId::from_string(&a.agent_id),
             session_name: a.session_name.clone(),
             log_path: a.log_path.clone(),
         }
@@ -244,7 +244,7 @@ impl From<&BreadcrumbAgent> for OrphanAgent {
 impl From<&Breadcrumb> for OrphanSummary {
     fn from(bc: &Breadcrumb) -> Self {
         OrphanSummary {
-            job_id: JobId::new(&bc.job_id),
+            job_id: JobId::from_string(&bc.job_id),
             project: bc.project.clone(),
             kind: bc.kind.clone(),
             name: bc.name.clone(),

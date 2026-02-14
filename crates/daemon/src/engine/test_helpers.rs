@@ -129,7 +129,7 @@ pub(crate) fn spawn_effects(
 
 pub(crate) fn shell_exited(job_id: &str, step: &str, exit_code: i32) -> Event {
     Event::ShellExited {
-        job_id: JobId::new(job_id),
+        job_id: JobId::from_string(job_id),
         step: step.to_string(),
         exit_code,
         stdout: None,

@@ -32,7 +32,7 @@ pub mod strategies {
 
 pub fn job_create_event(id: &str, kind: &str, name: &str, initial_step: &str) -> Event {
     Event::JobCreated {
-        id: JobId::new(id),
+        id: JobId::from_string(id),
         kind: kind.to_string(),
         name: name.to_string(),
         runbook_hash: "testhash".to_string(),
@@ -46,16 +46,16 @@ pub fn job_create_event(id: &str, kind: &str, name: &str, initial_step: &str) ->
 }
 
 pub fn job_delete_event(id: &str) -> Event {
-    Event::JobDeleted { id: JobId::new(id) }
+    Event::JobDeleted { id: JobId::from_string(id) }
 }
 
 pub fn job_transition_event(id: &str, step: &str) -> Event {
-    Event::JobAdvanced { id: JobId::new(id), step: step.to_string() }
+    Event::JobAdvanced { id: JobId::from_string(id), step: step.to_string() }
 }
 
 pub fn step_started_event(job_id: &str) -> Event {
     Event::StepStarted {
-        job_id: JobId::new(job_id),
+        job_id: JobId::from_string(job_id),
         step: "init".to_string(),
         agent_id: None,
         agent_name: None,
@@ -64,7 +64,7 @@ pub fn step_started_event(job_id: &str) -> Event {
 
 pub fn step_failed_event(job_id: &str, step: &str, error: &str) -> Event {
     Event::StepFailed {
-        job_id: JobId::new(job_id),
+        job_id: JobId::from_string(job_id),
         step: step.to_string(),
         error: error.to_string(),
     }
@@ -72,8 +72,8 @@ pub fn step_failed_event(job_id: &str, step: &str, error: &str) -> Event {
 
 pub fn agent_spawned_event(agent_id: &str, job_id: &str) -> Event {
     Event::AgentSpawned {
-        id: AgentId::new(agent_id),
-        owner: JobId::new(job_id).into(),
+        id: AgentId::from_string(agent_id),
+        owner: JobId::from_string(job_id).into(),
         runtime: Default::default(),
         auth_token: None,
     }
@@ -122,7 +122,7 @@ pub fn queue_failed_event(queue: &str, item_id: &str, error: &str) -> Event {
 
 pub fn crew_created_event(id: &str, agent_name: &str, command_name: &str) -> Event {
     Event::CrewCreated {
-        id: CrewId::new(id),
+        id: CrewId::from_string(id),
         agent: agent_name.to_string(),
         command: command_name.to_string(),
         project: String::new(),

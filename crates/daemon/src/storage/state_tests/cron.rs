@@ -134,7 +134,7 @@ fn cron_fired_is_noop_for_state() {
     let mut state = MaterializedState::default();
     state.apply_event(&Event::CronFired {
         cron: "janitor".to_string(),
-        owner: JobId::new("job-123").into(),
+        owner: JobId::from_string("job-123").into(),
         project: String::new(),
     });
     // CronFired should not create a record if the cron doesn't exist
@@ -157,7 +157,7 @@ fn cron_fired_updates_last_fired_at() {
 
     state.apply_event(&Event::CronFired {
         cron: "janitor".to_string(),
-        owner: JobId::new("job-123").into(),
+        owner: JobId::from_string("job-123").into(),
         project: String::new(),
     });
 
@@ -193,7 +193,7 @@ fn cron_restart_preserves_last_fired_at() {
 
     state.apply_event(&Event::CronFired {
         cron: "janitor".to_string(),
-        owner: JobId::new("job-123").into(),
+        owner: JobId::from_string("job-123").into(),
         project: String::new(),
     });
 

@@ -108,13 +108,13 @@ fn resolve_agent_id(
         .agents
         .values()
         .find(|a| a.agent_id.starts_with(prefix))
-        .map(|a| oj_core::AgentId::new(&a.agent_id))
+        .map(|a| oj_core::AgentId::from_string(&a.agent_id))
         .or_else(|| {
             // Crew fallback — match by crew ID, return agent UUID
             state
                 .crew
                 .values()
                 .find(|r| r.id.starts_with(prefix))
-                .and_then(|r| r.agent_id.as_ref().map(oj_core::AgentId::new))
+                .and_then(|r| r.agent_id.as_ref().map(oj_core::AgentId::from_string))
         })
 }

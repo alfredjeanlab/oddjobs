@@ -38,7 +38,7 @@ fn waiting_sets_outcome() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("job-1", "build", "test", "init"));
     state.apply_event(&Event::StepWaiting {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
         reason: Some("gate failed: exit 2".to_string()),
         decision_id: None,
@@ -82,7 +82,7 @@ fn shell_completed_success() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("job-1", "build", "test", "init"));
     state.apply_event(&Event::ShellExited {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
         exit_code: 0,
         stdout: None,
@@ -99,7 +99,7 @@ fn shell_completed_failure() {
     let mut state = MaterializedState::default();
     state.apply_event(&job_create_event("job-1", "build", "test", "init"));
     state.apply_event(&Event::ShellExited {
-        job_id: JobId::new("job-1"),
+        job_id: JobId::from_string("job-1"),
         step: "init".to_string(),
         exit_code: 42,
         stdout: None,

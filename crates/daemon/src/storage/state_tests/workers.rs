@@ -43,13 +43,13 @@ fn worker_started_preserves_active_job_ids(ns: &str, worker_key: &str) {
     state.apply_event(&Event::WorkerDispatched {
         worker: "fixer".to_string(),
         item_id: "item-1".to_string(),
-        owner: JobId::new("job-1").into(),
+        owner: JobId::from_string("job-1").into(),
         project: ns.to_string(),
     });
     state.apply_event(&Event::WorkerDispatched {
         worker: "fixer".to_string(),
         item_id: "item-2".to_string(),
-        owner: JobId::new("job-2").into(),
+        owner: JobId::from_string("job-2").into(),
         project: ns.to_string(),
     });
 
@@ -60,8 +60,8 @@ fn worker_started_preserves_active_job_ids(ns: &str, worker_key: &str) {
 
     let worker = &state.workers[worker_key];
     assert_eq!(worker.active.len(), 2);
-    assert!(worker.active.contains(&"job:job-1".to_string()));
-    assert!(worker.active.contains(&"job:job-2".to_string()));
+    assert!(worker.active.contains(&"job-1".to_string()));
+    assert!(worker.active.contains(&"job-2".to_string()));
 }
 
 #[test]

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::storage::MaterializedState;
-use oj_core::{Event, IdGen, JobId, OwnerId, RunTarget, UuidIdGen};
+use oj_core::{Event, JobId, OwnerId, RunTarget};
 use parking_lot::Mutex;
 
 use super::lifecycle::{self, Stoppable};
@@ -186,19 +186,19 @@ pub(super) async fn handle_cron_once(
 
     let (owner, resp_name) = match &v.target {
         RunTarget::Agent(name) => {
-            let run_id = UuidIdGen.next();
+            let crew_id = oj_core::CrewId::new();
             let resp_name = format!("agent:{}", name);
-            let owner: OwnerId = oj_core::CrewId::new(&run_id).into();
+            let owner: OwnerId = crew_id.into();
             (owner, resp_name)
         }
         RunTarget::Job(job_kind) => {
-            let jid = JobId::new(UuidIdGen.next());
+            let jid = JobId::new();
             let jname = oj_runbook::job_display_name(job_kind, jid.short(8), project);
             let owner: OwnerId = jid.into();
             (owner, jname)
         }
         RunTarget::Shell(_) => {
-            let jid = JobId::new(UuidIdGen.next());
+            let jid = JobId::new();
             let jname = oj_runbook::job_display_name(cron, jid.short(8), project);
             let owner: OwnerId = jid.into();
             (owner, jname)
